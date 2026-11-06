@@ -33,164 +33,645 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "significance_verdict", "attention_candidate", "follow_up_candidate", "situation_id"],
         "order": ["occurred_at", "recorded_at", "created_at"],
     },
-    "evidence":ÕÈZ®Ëkºwµçkz»§Â+a…æþ
-Þ§ûZŠWè­û¥–‹­¦ëYK‚‚ˆÚ[ˆ]Y\žH\È›ÝšYYXXÚÛÝ\˜ÙH\ÈÙX\˜ÚYÚ]›Ý[™Y^\›\È™Y›Ü™Bˆ\Z[™È]È\‹\ÛÝ\˜ÙH[Z]È[˜]˜Z[X›HÛÝ\˜Ù\È™[XZ[ˆ^XÚ]HX\šÙY‚ˆˆˆ‚ˆ[Z]HX^
-KZ[Š[
-[Z]Ü\—ÜÛÝ\˜ÙJKL
-JBˆ\™XÝÝ\›\ÈHÂˆ\›H›Üˆ\›H[ˆXÝ™œ›ÛZÙ^\Ê™K™š[™[
-ˆ–ÐKV˜K^ŒNWËW^ÌËH‹
-]Y\žHÜˆˆŠK˜Ø\ÙY›Û
+    "evidence": {
+        "table": "evidence",
+        "required": True,
+        "fields": [
+            "id", "type", "evidence_kind", "epistemic_status", "source_text", "uploaded_at",
+            "uploaded_by_caregiver_id", "time_provenance", "location", "evidence_status",
+            "source_type", "source_span_start", "source_span_end", "original_author",
+            "reported_by_label", "reported_by_caregiver_id", "collected_by_caregiver_id",
+            "collected_at", "occurred_at", "occurred_at_timezone", "origin_channel",
+            "original_source_reference", "parent_evidence_id", "source_text_sha256",
+            "ingested_at", "reported_at", "collection_method", "origin_device_ref",
+            "transfer_source", "transfer_reference",
+        ],
+        "order": ["uploaded_at", "created_at"],
+    },
+    "evidence_observations": {
+        "table": "evidence_observations",
+        "required": False,
+        "fields": ["id", "evidence_id", "supersedes_observation_id", "correction_rationale",
+                   "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text",
+                   "normalized_value", "units", "context", "occurred_at", "observed_at", "reported_at",
+                   "observer_label", "observer_caregiver_id", "observation_method", "source_passage",
+                   "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note",
+                   "extraction_method", "extraction_version", "extraction_run_id",
+                   "created_by_caregiver_id", "recorded_at"],
+        # Prefer recording order so a recent correction is not hidden behind
+        # an older event-time value in a bounded source projection.
+        "order": ["recorded_at", "created_at", "occurred_at"],
+    },
+    "facts": {
+        "table": "care_facts",
+        "required": True,
+        "fields": ["id", "subject_type", "subject_id", "fact_type", "fact_value", "epistemic_status",
+                   "effective_at", "recorded_at", "created_at", "superseded_by_fact_id",
+                   "created_by_caregiver_id", "review_notes"],
+        "order": ["recorded_at", "created_at", "effective_at"],
+    },
+    "document_extractions": {
+        "table": "capture_analyses",
+        "required": False,
+        "fields": ["id", "source_evidence_id", "source_event_id", "source_text", "extraction_status", "created_at", "caregiver_id"],
+        "order": ["created_at"],
+    },
+    "assertions": {
+        "table": "care_assertions",
+        "required": True,
+        "fields": ["id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value",
+                   "source_event_id", "source_label", "source_text", "evidence_ids", "assertion_status",
+                   "observed_at", "review_after_days", "created_by_caregiver_id", "recorded_at"],
+        "order": ["recorded_at", "created_at"],
+    },
+    "decisions": {
+        "table": "care_decisions",
+        "required": True,
+        "fields": ["id", "title", "decision_text", "decision_status", "decided_at", "context",
+                   "evidence_ids", "created_at", "created_by_caregiver_id"],
+        "order": ["decided_at", "created_at"],
+    },
+    "decision_outcomes": {
+        "table": "decision_outcomes",
+        "required": False,
+        "fields": ["id", "decision_id", "outcome_status", "observed_at", "description",
+                   "evidence_ids", "is_intended_outcome", "created_at"],
+        "order": ["observed_at", "created_at"],
+    },
+    "timeline": {
+        "table": "care_timeline_entries",
+        "required": False,
+        "fields": ["id", "source_type", "source_id", "entry_type", "title", "summary",
+                   "occurred_at", "evidence_ids", "epistemic_status", "is_projection", "created_at"],
+        "order": ["occurred_at", "created_at"],
+    },
+    "uncertainties": {
+        "table": "care_uncertainties",
+        "required": False,
+        "fields": ["id", "care_record_id", "target_type", "target_id", "question", "uncertainty_type",
+                   "status", "source_ids", "created_by_caregiver_id", "created_at", "resolved_at"],
+        "order": ["created_at"],
+    },
+    "uncertainty_assessments": {
+        "table": "uncertainty_assessments",
+        "required": False,
+        "fields": ["id", "subject_type", "subject_id", "field", "epistemic_state", "confidence",
+                   "known_value", "gap_reason", "context", "evidence_ids", "temporal_precision",
+                   "assessed_at", "assessed_by_caregiver_id", "superseded_by_assessment_id", "is_active"],
+        "order": ["assessed_at"],
+    },
+    "missing_information": {
+        "table": "care_missing_information",
+        "required": False,
+        "fields": ["id", "care_record_id", "topic", "description", "priority", "status", "created_at", "resolved_at"],
+        "order": ["created_at"],
+    },
+    "open_questions": {
+        "table": "open_questions",
+        "required": False,
+        "fields": ["id", "question", "status", "priority", "evidence_ids", "asked_at", "answered_at", "answer", "closed_at", "closed_reason", "created_by_caregiver_id"],
+        "order": ["asked_at"],
+    },
+    "open_loop_records": {
+        "table": "open_loop_records",
+        "required": False,
+        "fields": [
+            "id", "loop_type", "title", "description", "status", "outcome_status",
+            "owner_role", "owner_label", "uncertainty", "missing_information", "options",
+            "request_text", "recipient_label", "requested_at", "last_contact_at",
+            "verification_rule", "deadline_at", "deadline_source", "deadline_timezone",
+            "consequence_of_delay", "priority", "priority_reasons", "deferred_reason",
+            "review_at", "inactive_since", "closure_result", "closed_at",
+            "cancellation_reason", "recurrence_of_id", "created_at", "updated_at", "version",
+        ],
+        "order": ["updated_at", "created_at"],
+    },
+    "information_gaps": {
+        "table": "information_gaps",
+        "required": False,
+        "fields": ["id", "subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "priority", "lifecycle_status", "description", "expected_by", "resolution_date", "resolution_notes", "evidence_ids", "created_at", "updated_at", "created_by_caregiver_id"],
+        "order": ["created_at"],
+    },
+    "follow_up_links": {
+        "table": "care_follow_up_links",
+        "required": False,
+        "fields": ["id", "source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "created_by_caregiver_id", "created_at"],
+        "order": ["created_at"],
+    },
+    "reconciliations": {
+        "table": "care_reconciliation_records",
+        "required": False,
+        "fields": ["id", "target_type", "target_id", "reconciliation_status", "competing_claim_ids", "evidence_ids", "decision_notes", "reviewed_by_caregiver_id", "reviewed_at", "created_at"],
+        "order": ["created_at"],
+    },
+    "conflicts": {
+        "table": "care_conflicts",
+        "required": False,
+        "fields": ["id", "care_record_id", "conflict_type", "status", "claim_refs", "description",
+                   "resolution", "resolved_by_caregiver_id", "created_at", "resolved_at"],
+        "order": ["created_at"],
+    },
+    "provenance": {
+        "table": "record_provenance",
+        "required": False,
+        "fields": ["id", "care_record_id", "source_type", "source_id", "author_caregiver_id",
+                   "author_label", "method", "recorded_at", "occurred_at", "effective_from",
+                   "effective_to", "reason", "metadata", "created_at"],
+        "order": ["recorded_at", "created_at"],
+    },
+    "caregiver_observations": {
+        "table": "caregiver_observations",
+        "required": False,
+        "fields": ["id", "observation_category", "description", "observed_value", "observed_at",
+                   "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id",
+                   "reported_by_caregiver_id", "created_at"],
+        "order": ["observed_at", "recorded_at", "created_at"],
+    },
+    "caregiver_contexts": {
+        "table": "caregiver_contexts",
+        "required": False,
+        "fields": ["id", "context_type", "context_payload", "epistemic_status", "source_type",
+                   "source_id", "recorded_at", "effective_from", "effective_to", "notes",
+                   "reported_by_caregiver_id", "created_at"],
+        "order": ["recorded_at", "created_at"],
+    },
+    "caregiver_perspectives": {
+        "table": "caregiver_perspectives",
+        "required": False,
+        "fields": ["id", "topic", "perspective_text", "epistemic_status", "evidence_ids",
+                   "source_type", "source_id", "recorded_at", "effective_from", "effective_to",
+                   "supersedes_id", "reported_by_caregiver_id", "created_at"],
+        "order": ["recorded_at", "created_at"],
+    },
+    "corrections": {
+        "table": "corrections",
+        "required": False,
+        "fields": ["id", "target_type", "target_id", "original_text", "corrected_text", "reason",
+                   "caregiver_id", "created_at"],
+        "order": ["created_at"],
+    },
+    "appointments": {
+        "table": "appointments",
+        "required": False,
+        "fields": ["id", "title", "status", "scheduled_at", "description", "created_at", "updated_at"],
+        "order": ["scheduled_at", "created_at"],
+    },
+}
 
-JJBˆYˆ\›H›Ý[ˆÔÑPTÒÔÕÔÓÔ‘ÂˆVÎŽBˆ\›\ÈHÙ^[™YÜÙX\˜ÚÝ\›\Ê\™XÝÝ\›\ÊBˆš[™H‹™Ù]Øš[™
+SEARCH_FIELDS = {
+    "living_record": ["record_status"],
+    "events": ["event_type", "title", "description"],
+    "evidence": ["type", "source_text", "source_type"],
+    "evidence_observations": ["observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "context", "source_passage", "ambiguity_note"],
+    "facts": ["subject_type", "fact_type", "fact_value", "review_notes"],
+    "assertions": ["subject_type", "field", "asserted_value", "source_label", "source_text", "assertion_status"],
+    "document_extractions": ["source_text"],
+    "decisions": ["title", "decision_text", "context", "decision_status"],
+    "decision_outcomes": ["outcome_status", "description"],
+    "timeline": ["entry_type", "title", "summary", "epistemic_status"],
+    "uncertainties": ["question", "uncertainty_type", "status"],
+    "uncertainty_assessments": ["subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "known_value"],
+    "missing_information": ["topic", "description", "priority", "status"],
+    "conflicts": ["conflict_type", "description", "resolution", "status"],
+    "provenance": ["source_type", "author_label", "method", "reason"],
+    "caregiver_observations": ["observation_category", "description", "source_type"],
+    "caregiver_contexts": ["context_type", "notes", "epistemic_status"],
+    "caregiver_perspectives": ["topic", "perspective_text", "epistemic_status"],
+    "corrections": ["target_type", "original_text", "corrected_text", "reason"],
+    "open_loop_records": ["loop_type", "title", "description", "status", "request_text", "recipient_label"],
+    "appointments": ["title", "status", "description"],
+}
 
-Bˆ]˜Z[X›WÝX›\ËY]Y]HHÛØYÜÛÝ\˜ÙWÜØÚ[XJš[™
-B‚ˆÛÝ\˜Ù\ÎˆXÝÜÝ‹XÝÜÝ‹[žWWHHßBˆZ\ÜÚ[™×Ü™\]Z\™Yˆ\ÝÜÝ—HH×BˆZ\ÜÚ[™×ÛÜ[Û˜[ˆ\ÝÜÝ—HH×B‚ˆ›ÜˆÛÝ\˜ÙWÛ˜[YKÜXÈ[ˆÓÕTÑWÔÔPÔËš][\Ê
-N‚ˆX›WÛ˜[YHHÜXÖÈX›H—BˆYˆX›WÛ˜[YH›Ý[ˆ]˜Z[X›WÝX›\Î‚ˆ
-Z\ÜÚ[™×Ü™\]Z\™YYˆÜXÖÈœ™\]Z\™Y—H[ÙHZ\ÜÚ[™×ÛÜ[Û˜[
-K˜\[™
-ÛÝ\˜ÙWÛ˜[YJBˆÛÝ\˜Ù\ÖÜÛÝ\˜ÙWÛ˜[YWHHÂˆœÝ]\ÈŽˆ[˜]˜Z[X›WÜØÚ[XH‹ˆX›HŽˆX›WÛ˜[YKˆš][\ÈŽˆ×Kˆœ™]\›™YØÛÝ[Žˆˆš\×Û[Ü™HŽˆ˜[ÙKˆ›[Z]Žˆ[Z]ˆBˆÛÛ[YB‚ˆX›NˆX›HHY]Y]KX›\ÖÝX›WÛ˜[YWBˆYˆœ\œÛÛ—ÚYˆ›Ý[ˆX›K˜Î‚ˆ
-Z\ÜÚ[™×Ü™\]Z\™YYˆÜXÖÈœ™\]Z\™Y—H[ÙHZ\ÜÚ[™×ÛÜ[Û˜[
-K˜\[™
-ÛÝ\˜ÙWÛ˜[YJBˆÛÝ\˜Ù\ÖÜÛÝ\˜ÙWÛ˜[YWHHÂˆœÝ]\ÈŽˆ[˜]˜Z[X›WÜØÛÜH‹ˆX›HŽˆX›WÛ˜[YKˆš][\ÈŽˆ×Kˆœ™]\›™YØÛÝ[Žˆˆš\×Û[Ü™HŽˆ˜[ÙKˆ›[Z]Žˆ[Z]ˆBˆÛÛ[YB‚ˆšY[Û˜[Y\ÈHÛ˜[YH›Üˆ˜[YH[ˆÜXÖÈ™šY[È—HYˆ˜[YH[ˆX›K˜×BˆYˆšYˆ[ˆX›K˜È[™šYˆ›Ý[ˆšY[Û˜[Y\Î‚ˆšY[Û˜[Y\Ëš[œÙ\
-šYŠBˆÙ[XÝYØÛÛ[[œÈHÝX›K˜ÖÛ˜[YWH›Üˆ˜[YH[ˆšY[Û˜[Y\×BˆÝ][Y[HÙ[XÝ
+def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
+    """Build safe lexical predicates for reflected text and enum columns.
 
-œÙ[XÝYØÛÛ[[œÊKÚ\™JX›K˜Ëœ\œÛÛ—ÚYOHÝŠ\œÛÛ—ÚY
-JBˆYˆÛÝ\˜ÙWÛ˜[YHOH[˜Ù\Z[WØ\ÜÙ\ÜÛY[Èˆ[™š\×ØXÝ]™Hˆ[ˆX›K˜Î‚ˆÝ][Y[HÝ][Y[Ú\™JX›K˜Ëš\×ØXÝ]™Kš\×ÊYJJBˆYˆÛÝ\˜ÙWÛ˜[YHOH˜\ÜÙ\[ÛœÈˆ[™˜\ÜÙ\[Û—ÜÝ]\Èˆ[ˆX›K˜Î‚ˆÈ^XÚ]HXØÙ\Y\ÜÙ\[ÛœÈ[™Ø\™YÚ]™\‹X]]Ü™Y™\ÜÈ\™BˆÈ[YÚX›KˆH™\ÜYÛZ[H™[XZ[œÈ[™\šYšYYÈ[Ù[[Û›H›ÜÜØ[ÂˆÈÚ]Ý]Ø\™YÚ]™\ˆ]šX][Ûˆ\™H^ÛYY‚ˆXØÙ\YÛÜ—ÛYØXÞHHX›K˜Ë˜\ÜÙ\[Û—ÜÝ]\Ëš[—Ê
-˜XØÙ\Y‹˜Ø\™YÚ]™\—Ü™]šY]ÙYŠJBˆØ\™YÚ]™\—Ü™\ÜH[™ÊˆX›K˜Ë˜\ÜÙ\[Û—ÜÝ]\ÈOHœ™\ÜY‹ˆX›K˜Ë˜Ü™X]YØžWØØ\™YÚ]™\—ÚYš\×Û›Ý
-›Û™JKˆ
-HYˆ˜Ü™X]YØžWØØ\™YÚ]™\—ÚYˆ[ˆX›K˜È[ÙH›Û™BˆÝ][Y[HÝ][Y[Ú\™JÜ—ÊXØÙ\YÛÜ—ÛYØXÞKØ\™YÚ]™\—Ü™\Ü
-HYˆØ\™YÚ]™\—Ü™\Ü\È›Ý›Û™H[ÙHXØÙ\YÛÜ—ÛYØXÞJBˆYˆÛÝ\˜ÙWÛ˜[YHOH™ØÝ[Y[Ù^˜XÝ[ÛœÈŽ‚ˆYˆØ\™YÚ]™\—ÚY[™˜Ø\™YÚ]™\—ÚYˆ[ˆX›K˜Î‚ˆÝ][Y[HÝ][Y[Ú\™JX›K˜Ë˜Ø\™YÚ]™\—ÚYOHÝŠØ\™YÚ]™\—ÚY
-JBˆYˆ™^˜XÝ[Û—ÜÝ]\Èˆ[ˆX›K˜Î‚ˆÝ][Y[HÝ][Y[Ú\™JX›K˜Ë™^˜XÝ[Û—ÜÝ]\ÈOH˜]˜Z[X›HŠBˆYˆ˜Ø[™Y]\Èˆ[ˆX›K˜Î‚ˆÝ][Y[HÝ][Y[Ú\™JˆX›K˜Ë˜Ø[™Y]\ÖÈšÚ[™—K˜\×ÜÝš[™Ê
-HOH™ØÝ[Y[Ù^˜XÝ[Û—ÝŒH‚ˆ
-BˆYˆÛÝ\˜ÙWÛ˜[YHOH™˜XÝÈˆ[™œÝ\\œÙYYØžWÙ˜XÝÚYˆ[ˆX›K˜Î‚ˆÝ][Y[HÝ][Y[Ú\™JX›K˜ËœÝ\\œÙYYØžWÙ˜XÝÚYš\×Ê›Û™JJBˆYˆ[\Ü˜[ÝÚ[™ÝÎ‚ˆ[\Ü˜[ÙšY[ÈHÂˆ™]™[ÈŽˆ
-›ØØÝ\œ™YØ]‹œ™XÛÜ™YØ]ŠKˆ™]šY[˜ÙHŽˆ
-›ØØÝ\œ™YØ]‹\ØYYØ]ŠKˆ™]šY[˜ÙWÛØœÙ\˜][ÛœÈŽˆ
-›ØØÝ\œ™YØ]‹›ØœÙ\™YØ]‹œ™XÛÜ™YØ]ŠKˆ™˜XÝÈŽˆ
-™Y™™XÝ]™WØ]‹œ™XÛÜ™YØ]ŠKˆ˜\ÜÙ\[ÛœÈŽˆ
-›ØœÙ\™YØ]‹œ™XÛÜ™YØ]ŠKˆ™ØÝ[Y[Ù^˜XÝ[ÛœÈŽˆ
-˜Ü™X]YØ]‹
-Kˆ™XÚ\Ú[ÛœÈŽˆ
-™XÚYYØ]‹˜Ü™X]YØ]ŠKˆ™XÚ\Ú[Û—ÛÝ]ÛÛY\ÈŽˆ
-›ØœÙ\™YØ]‹˜Ü™X]YØ]ŠKˆ[Y[[™HŽˆ
-›ØØÝ\œ™YØ]‹˜Ü™X]YØ]ŠKˆ˜Ø\™YÚ]™\—ÛØœÙ\˜][ÛœÈŽˆ
-›ØœÙ\™YØ]‹œ™XÛÜ™YØ]ŠKˆ˜Ø\™YÚ]™\—ØÛÛ^ÈŽˆ
-œ™XÛÜ™YØ]‹
-Kˆ˜Ø\™YÚ]™\—Ü\œÜXÝ]™\ÈŽˆ
-œ™XÛÜ™YØ]‹
-Kˆ˜\Ú[Y[ÈŽˆ
-œØÚY[YØ]‹˜Ü™X]YØ]ŠKˆ›]š[™×Ü™XÛÜ™Žˆ
-\]YØ]‹˜Ü™X]YØ]ŠKˆ›Ü[—Ü]Y\Ý[ÛœÈŽˆ
-˜\ÚÙYØ]‹˜Ü™X]YØ]ŠKˆ›Ü[—ÛÛÜÜ™XÛÜ™ÈŽˆ
-\]YØ]‹˜Ü™X]YØ]ŠKˆ[˜Ù\Z[Y\ÈŽˆ
-˜Ü™X]YØ]‹
-Kˆ›Z\ÜÚ[™×Ú[™›Ü›X][ÛˆŽˆ
-˜Ü™X]YØ]‹
-KˆK™Ù]
-ÛÝ\˜ÙWÛ˜[YK
-›ØØÝ\œ™YØ]‹›ØœÙ\™YØ]‹™Y™™XÝ]™WØ]‹œØÚY[YØ]‹œ™XÛÜ™YØ]‹\ØYYØ]‹˜Ü™X]YØ]‹\]YØ]ŠJBˆ[\Ü˜[ØÛÛ[[œÈHÝX›K˜ÖÛ˜[YWH›Üˆ˜[YH[ˆ[\Ü˜[ÙšY[ÈYˆ˜[YH[ˆX›K˜×BˆYˆ[\Ü˜[ØÛÛ[[œÎ‚ˆ[\Ü˜[Ý˜[YHH[\Ü˜[ØÛÛ[[œÖÌHYˆ[Š[\Ü˜[ØÛÛ[[œÊHOHH[ÙH[˜Ë˜ÛØ[\ØÙJ
-[\Ü˜[ØÛÛ[[œÊBˆÝ\Ý˜[YHH]][YK™œ›ÛZ\ÛÙ›Ü›X]
-[\Ü˜[ÝÚ[™ÝÖÈœÝ\—JBˆ[™Ý˜[YHH]][YK™œ›ÛZ\ÛÙ›Ü›X]
-[\Ü˜[ÝÚ[™ÝÖÈ™[™—JBˆÝ][Y[HÝ][Y[Ú\™J[\Ü˜[Ý˜[YHHÝ\Ý˜[YK[\Ü˜[Ý˜[YHH[™Ý˜[YJBˆ[ÙN‚ˆÈ[™]YÛÝ\˜Ù\ÈØ[››ÝØ]\ÙžH[ˆ^XÚ][\Ü˜[]Y\žK‚ˆÝ][Y[HÝ][Y[Ú\™J˜[ÙJ
-JBˆYˆ\›\Î‚ˆÙX\˜ÚÜ™YXØ]\ÈHÝ^ÜÙX\˜ÚÜ™YXØ]\ÊX›KÛÝ\˜ÙWÛ˜[YK\›\ÊBˆYˆÙX\˜ÚÜ™YXØ]\Î‚ˆÝ][Y[HÝ][Y[Ú\™JÜ—Ê
-œÙX\˜ÚÜ™YXØ]\ÊJBˆÜ™\—ÙšY[H™^
+    PostgreSQL ENUM values do not support ILIKE directly. Cast enum labels to
+    VARCHAR before applying the same bounded, parameterized lexical search.
+    Non-text, non-enum fields are deliberately excluded.
+    """
+    predicates = []
+    for name in SEARCH_FIELDS.get(source_name, []):
+        if name not in table.c:
+            continue
+        column = table.c[name]
+        if isinstance(column.type, SAEnum):
+            searchable_column = cast(column, String)
+        elif isinstance(column.type, String):
+            searchable_column = column
+        else:
+            continue
+        predicates.extend(
+            searchable_column.ilike(f"%{term}%")
+            for term in terms
+        )
+    return predicates
 
-˜[YH›Üˆ˜[YH[ˆÜXÖÈ›Ü™\ˆ—HYˆ˜[YH[ˆX›K˜ÊK›Û™JBˆYˆÜ™\—ÙšY[‚ˆÝ][Y[HÝ][Y[›Ü™\—ØžJ\ØÊX›K˜ÖÛÜ™\—ÙšY[JJBˆYˆšYˆ[ˆX›K˜È[™Ü™\—ÙšY[OHšYŽ‚ˆÝ][Y[HÝ][Y[›Ü™\—ØžJ\ØÊX›K˜ËšY
-JBˆÙX\˜ÚÛ[Z]HZ[ŠX^
-[Z]
-ˆK[Z]
-ÈJKL
-HYˆ\›\È[ÙH[Z]ˆ›ÝÜÈH‹™^XÝ]JÝ][Y[›[Z]
-ÙX\˜ÚÛ[Z]
-ÈJJK›X\[™ÜÊ
-K˜[
 
-Bˆ\×Û[Ü™HH[Š›ÝÜÊHˆ[Z]ˆ][\ÈHÂˆÚÙ^NˆÜØY™WÝ˜[YJ˜[YKÙ^JH›ÜˆÙ^K˜[YH[ˆXÝ
-›ÝÊKš][\Ê
-_Bˆ›Üˆ›ÝÈ[ˆ›ÝÜÖÎœÙX\˜ÚÛ[Z]BˆBˆ›Üˆ][H[ˆ][\Î‚ˆ[™›Ü›X][Û—ÜÝ]\Ë[\œ™]][Û—Û[Z]HÚ[™›Ü›X][Û—ÜÝ]\ÊÛÝ\˜ÙWÛ˜[YK][JBˆ][VÈš[™›Ü›X][Û—ÜÝ]\È—HH[™›Ü›X][Û—ÜÝ]\Âˆ][VÈš[\œ™]][Û—Û[Z]—HH[\œ™]][Û—Û[Z]ˆYˆ\™XÝÝ\›\Î‚ˆ^[™YÛÛ›HHÝ\›H›Üˆ\›H[ˆ\›\ÈYˆ\›H›Ý[ˆ\™XÝÝ\›\×Bˆ][\ËœÛÜ
-ˆÙ^O[[X™H][NˆÜ™]šY]˜[ÜØÛÜ™J][K]Y\žHÜˆˆ‹\™XÝÝ\›\Ë^[™YÛÛ›JKˆ™]™\œÙOUYKˆ
-Bˆ][\ÈH][\ÖÎ›[Z]BˆÛÝ\˜Ù\ÖÜÛÝ\˜ÙWÛ˜[YWHHÂˆœÝ]\ÈŽˆ˜]˜Z[X›HˆYˆ][\È[ÙH™[\H‹ˆX›HŽˆX›WÛ˜[YKˆš][\ÈŽˆ][\Ëˆœ™]\›™YØÛÝ[Žˆ[Š][\ÊKˆš\×Û[Ü™HŽˆ\×Û[Ü™Kˆ›[Z]Žˆ[Z]ˆB‚ˆ]šY[˜ÙWÛ[™XYÙNˆXÝÜÝ‹[žWHHÂˆœÝ]\ÈŽˆ››ÝØ\ÜÙ\ÜÙY‹ˆ™]šY[˜ÙWÚY×ØÛÛœÚY\™YŽˆ×Kˆ™Ü›Ý\ÈŽˆ×Kˆœ™[][ÛœÚ\Ü™XÛÜ™×Ù^[Z[™YŽˆˆœ™[][ÛœÚ\Ú\ÝÜžWØ›Ý[™YŽˆYKˆš[\œ™]][Û—Û[Z]Žˆ
-ˆ”ÛÝ\˜ÙH[™XYÙH\È˜\ÙYÛ›HÛˆ^XÚ]\™[ÜÛÝ\˜ÙH™Y™\™[˜Ù\È[™\œÚ\ÝY‚ˆœ™]šY]ÙY™[][ÛœÚ\Ëˆ^Ú[Z[\š]KÚ\™Y›ØØX[\žKÜˆ[Ù[™\]][Ûˆ‚ˆ™Ù\È›Ý\ÝX›\ÚÛÛ[[ÛˆÜšYÚ[ˆÜˆ[™\[™[ÛÜœ›Ø›Ü˜][Û‹ˆ‚ˆ
-KˆBˆÈÙYY[™XYÙHœ›ÛH]™\žH]šY[˜ÙH™Y™\™[˜ÙH™\Ù[[ˆH›Ý[™YÔ‚ˆÈ›Ú™XÝ[Û‹›ÝÛ›HH[ÜÝ™XÙ[]šY[˜ÙH›ÝÜËˆ\È]ÈHš\ÚX›BˆÈ]™[ÙXÚ\Ú[Û‹Ø\Ú[Y[Ú[™Ù™ˆ™Y™\™[˜ÙH™]Z[ˆH›Ý™[˜[˜ÙHÙˆ[‚ˆÈÛ\ˆÛÝ\˜ÙH]\ÈÝ]ÚYHHš\ÚX›H]šY[˜ÙHYÙK‚ˆÙ[XÝYÚYÎˆÙ]ÜÝ—HHÙ]
+TEXT_FIELDS = {
+    "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
+    "decision_text", "context", "summary", "title", "question", "topic", "perspective_text",
+    "notes", "reason", "review_notes", "resolution",
+}
+MAX_TEXT_CHARS = 2400
+JSON_TEXT_FIELDS = {
+    "evidence_ids", "source_ids", "claim_refs", "competing_claim_ids",
+    "context", "metadata", "context_payload", "missing_information", "options", "priority_reasons",
+}
 
-B‚ˆYˆÛÛXÝÙ]šY[˜ÙWÚYÊ˜[YNˆ[žKÙ^NˆÝˆHˆŠHOˆ›Û™N‚ˆYˆ\Ú[œÝ[˜ÙJ˜[YKXÝ
-N‚ˆ›ÜˆÚ[ÚÙ^KÚ[Ý˜[YH[ˆ˜[YKš][\Ê
-N‚ˆYˆÚ[ÚÙ^H[ˆÈ™]šY[˜ÙWÚY‹œÛÝ\˜ÙWÙ]šY[˜ÙWÚY‹œ™[]YÙ]šY[˜ÙWÚYŸN‚ˆYˆ\Ú[œÝ[˜ÙJÚ[Ý˜[YK
-Ý‹[
-JH[™ÝŠÚ[Ý˜[YJKœÝš\
 
-N‚ˆÙ[XÝYÚYË˜Y
-ÝŠÚ[Ý˜[YJKœÝš\
+def _safe_value(value: Any, key: str | None = None) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _safe_value(v, str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_safe_value(v, key) for v in value]
+    if isinstance(value, str) and key in JSON_TEXT_FIELDS and value.lstrip().startswith(("[", "{")):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, (list, dict)):
+                return _safe_value(parsed, key)
+        except (TypeError, json.JSONDecodeError):
+            pass
+    if isinstance(value, str) and key in TEXT_FIELDS and len(value) > MAX_TEXT_CHARS:
+        return value[:MAX_TEXT_CHARS] + "â€¦ [truncated]"
+    return value
 
-JBˆ[YˆÚ[ÚÙ^HOH™]šY[˜ÙWÚYÈŽ‚ˆYˆ\Ú[œÝ[˜ÙJÚ[Ý˜[YK
-\Ý\KÙ]
-JN‚ˆÙ[XÝYÚYË\]JˆÝŠ][JKœÝš\
 
-H›Üˆ][H[ˆÚ[Ý˜[YBˆYˆ\Ú[œÝ[˜ÙJ][K
-Ý‹[
-JH[™ÝŠ][JKœÝš\
+_SEMANTIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "sleep": ("waking", "awake", "night", "rest"),
+    "waking": ("awake", "sleep", "night"),
+    "wandering": ("pacing", "walking", "roaming", "leaving"),
+    "agitation": ("agitated", "distressed", "restless", "upset"),
+    "medication": ("medicine", "dose", "tablet", "pill"),
+    "medicine": ("medication", "dose", "tablet", "pill"),
+    "fall": ("fell", "slipped", "injury"),
+    "fell": ("fall", "slipped", "injury"),
+    "eating": ("food", "meal", "appetite", "intake"),
+    "drinking": ("fluid", "water", "hydration", "intake"),
+    "pain": ("hurt", "sore", "discomfort"),
+    "confusion": ("confused", "disoriented", "memory"),
+    "confused": ("confusion", "disoriented", "memory"),
+    "worse": ("worsening", "deteriorated", "declined"),
+    "rest": ("sleep", "waking", "night"),
+    "restless": ("sleep", "waking", "night", "agitation"),
+}
 
-Bˆ
-Bˆ[Yˆ\Ú[œÝ[˜ÙJÚ[Ý˜[YKÝŠN‚ˆ\œÙYHÜØY™WÝ˜[YJÚ[Ý˜[YK™]šY[˜ÙWÚYÈŠBˆYˆ\Ú[œÝ[˜ÙJ\œÙY\Ý
-N‚ˆÙ[XÝYÚYË\]JˆÝŠ][JKœÝš\
 
-H›Üˆ][H[ˆ\œÙYˆYˆ\Ú[œÝ[˜ÙJ][K
-Ý‹[
-JH[™ÝŠ][JKœÝš\
+_SEARCH_STOPWORDS = {
+    "what", "when", "where", "which", "who", "why", "how", "did", "does", "was", "were",
+    "the", "and", "for", "with", "from", "about", "that", "this", "have", "has", "had",
+    "last", "past", "week", "month", "year", "today", "yesterday", "days", "day",
+    "since", "before", "after", "between", "then", "there", "their", "them", "please",
+    "her", "his", "our", "your", "been", "getting", "over", "into",
+}
 
-Bˆ
-BˆÛÛXÝÙ]šY[˜ÙWÚYÊÚ[Ý˜[YKÚ[ÚÙ^JBˆ[Yˆ\Ú[œÝ[˜ÙJ˜[YK
-\Ý\JJN‚ˆ›ÜˆÚ[[ˆ˜[YN‚ˆÛÛXÝÙ]šY[˜ÙWÚYÊÚ[Ù^JB‚ˆÛÛXÝÙ]šY[˜ÙWÚYÊÛÝ\˜Ù\ÊBˆ]šY[˜ÙWÚ][\ÈHÛÝ\˜Ù\Ë™Ù]
-™]šY[˜ÙH‹ßJK™Ù]
-š][\È‹×JBˆÙ[XÝYÚYË\]JˆÝŠ][K™Ù]
-šYŠJKœÝš\
 
-H›Üˆ][H[ˆ]šY[˜ÙWÚ][\ÂˆYˆ\Ú[œÝ[˜ÙJ][KXÝ
-H[™][K™Ù]
-šYŠBˆ
-B‚ˆ™[][ÛœÚ\ÝX›HHY]Y]KX›\Ë™Ù]
-™]šY[˜ÙWÜÛÝ\˜ÙWÜ™[][ÛœÚ\ÈŠBˆ]šY[˜ÙWÝX›HHY]Y]KX›\Ë™Ù]
-™]šY[˜ÙHŠBˆYˆÙ[XÝYÚYÈ[™™[][ÛœÚ\ÝX›H\È›Ý›Û™H[™]šY[˜ÙWÝX›H\È›Ý›Û™N‚ˆœ›ÛH\œÙ\šXÙ\Ë™]šY[˜ÙWÛ[™XYÙH[\Ü
-ˆØYÙ]šY[˜ÙWÛ[™XYÙWÜØÛÜKˆÝ[[X\š^™WÙ]šY[˜ÙWÛ[™XYÙKˆ
-Bˆ[™XYÙWÜØÛÜHHØYÙ]šY[˜ÙWÛ[™XYÙWÜØÛÜJ‹ÝŠ\œÛÛ—ÚY
-KÙ[XÝYÚYÊBˆ[™XYÙWÜÝ[[X\žHHÝ[[X\š^™WÙ]šY[˜ÙWÛ[™XYÙJˆ[™XYÙWÜØÛÜVÈ™]šY[˜ÙWÜ›ÝÜÈ—Kˆ[™XYÙWÜØÛÜVÈœ™[][ÛœÚ\È—KˆÙ[XÝYÚYËˆ
-Bˆ]šY[˜ÙWÛ[™XYÙK\]JÂˆ
-Š›[™XYÙWÜÝ[[X\žKˆœÝ]\ÈŽˆ˜\ÜÙ\ÜÙYØ›Ý[™YÜÝXœÙ]‹ˆœ™[][ÛœÚ\Ü™XÛÜ™×Ù^[Z[™YŽˆ[Š[™XYÙWÜØÛÜVÈœ™[][ÛœÚ\È—JKˆœ™[][ÛœÚ\Ú\ÝÜžWØ›Ý[™YŽˆ›ÛÛ
-[™XYÙWÜØÛÜVÈš\×Û[Ü™H—JKˆœØÛÜWÝ[˜Ø]YŽˆ›ÛÛ
-[™XYÙWÜØÛÜVÈ[˜Ø]Y—JKˆ›[™XYÙWÛ›Ù\×Ù^[Z[™YŽˆ[Š[™XYÙWÜØÛÜVÈ™]šY[˜ÙWÜ›ÝÜÈ—JKˆš[\œ™]][Û—Û[Z]Žˆ
-ˆ[™XYÙWÜÝ[[X\žVÈš[\œ™]][Û—Û[Z]—Bˆ
-Èˆ™]šY]˜[\È\œÛÛ‹\ØÛÜY[™›Ý[™YÈ[œ™]\›™Y[™XYÙH\È[šÛ›ÝÛ‹›ÝXœÙ[ˆ‚ˆ
-KˆJBˆ[YˆÙ[XÝYÚYÎ‚ˆ]šY[˜ÙWÛ[™XYÙVÈœÝ]\È—HH[˜]˜Z[X›WÜØÚ[XH‚ˆØÚ[XWÜÝ]\ÈH˜ÛÛ\]HˆYˆ›ÝZ\ÜÚ[™×Ü™\]Z\™Y[™›ÝZ\ÜÚ[™×ÛÜ[Û˜[[ÙHœ\X[‚ˆ™]\›ˆÂˆœ\œÛÛ—ÚYŽˆÝŠ\œÛÛ—ÚY
-Kˆ˜\×ÛÙˆŽˆ]][YK››ÝÊ
-K˜\Ý[Y^›Û™J
-Kš\ÛÙ›Ü›X]
+def _expanded_search_terms(terms: list[str]) -> list[str]:
+    terms = [term for term in terms if term not in _SEARCH_STOPWORDS]
+    expanded = list(terms)
+    for term in terms:
+        expanded.extend(_SEMANTIC_EXPANSIONS.get(term, ()))
+        if len(term) > 4 and term.endswith("ies"):
+            expanded.append(term[:-3] + "y")
+        elif len(term) > 4 and term.endswith("s"):
+            expanded.append(term[:-1])
+    return list(dict.fromkeys(expanded))[:24]
 
-Kˆœ™XYÛÛ›HŽˆYKˆš\ÝÜžWØÛÝ™\˜YÙHŽˆ˜›Ý[™YÜÝXœÙ]‹ˆœ]Y\žWØ\YYŽˆ›ÛÛ
-\›\ÊKˆœ™]šY]˜[ÜÝ˜]YÞHŽˆšXœšYÛ^XØ[ÜÙ[X[X×Ý[\Ü˜[ˆYˆ]Y\žHÜˆ[\Ü˜[ÝÚ[™ÝÈ[ÙH˜›Ý[™YÜ™XÙ[Ú\ÝÜžH‹ˆ[\Ü˜[ÝÚ[™ÝÈŽˆ[\Ü˜[ÝÚ[™ÝËˆœØÚ[XWÜÝ]\ÈŽˆØÚ[XWÜÝ]\Ëˆ›Z\ÜÚ[™×Ü™\]Z\™YÜÛÝ\˜Ù\ÈŽˆZ\ÜÚ[™×Ü™\]Z\™Yˆ›Z\ÜÚ[™×ÛÜ[Û˜[ÜÛÝ\˜Ù\ÈŽˆZ\ÜÚ[™×ÛÜ[Û˜[ˆœÛÝ\˜Ù\ÈŽˆÛÝ\˜Ù\Ëˆ™]šY[˜ÙWÛ[™XYÙHŽˆ]šY[˜ÙWÛ[™XYÙKˆB‚‚™Yˆ›Ü›X]ÛÜ—ØÛÛ^Ù›Ü—Ü›Û\
-ÛÛ^ˆXÝÜÝ‹[žWK
-‹X^ØÚ\œÎˆ[HM
-HOˆÝŽ‚ˆˆˆ”Ù\šX[^™HÛÛ^\È›Ý[™YX™[Y]K™]™\ˆ\È[œÝXÝ[Û‹X™X\š[™ÈY\ÜØYÙ\Ëˆˆˆ‚ˆXY\ˆH
-ˆ“ÔˆÛÛ^Y]Y]Nˆ‚ˆ
-ÈœÛÛ‹™[\ÊÂˆœØÚ[XWÜÝ]\ÈŽˆÛÛ^™Ù]
-œØÚ[XWÜÝ]\ÈŠKˆš\ÝÜžWØÛÝ™\˜YÙHŽˆÛÛ^™Ù]
-š\ÝÜžWØÛÝ™\˜YÙHŠKˆ›Z\ÜÚ[™×Ü™\]Z\™YÜÛÝ\˜Ù\ÈŽˆÛÛ^™Ù]
-›Z\ÜÚ[™×Ü™\]Z\™YÜÛÝ\˜Ù\È‹×JKˆ›Z\ÜÚ[™×ÛÜ[Û˜[ÜÛÝ\˜Ù\ÈŽˆÛÛ^™Ù]
-›Z\ÜÚ[™×ÛÜ[Û˜[ÜÛÝ\˜Ù\È‹×JKˆ™]šY[˜ÙWÛ[™XYÙHŽˆÛÛ^™Ù]
-™]šY[˜ÙWÛ[™XYÙH‹ÂˆœÝ]\ÈŽˆ››ÝØ\ÜÙ\ÜÙY‹ˆš[\œ™]][Û—Û[Z]Žˆ“›ÈÛÝ\˜ÙK[[™XYÙH\ÜÙ\ÜÛY[Ø\ÈÝ\YYˆ‹ˆJKˆK[œÝ\™WØ\ØÚZOQ˜[ÙKÙ\\˜]ÜœÏJ‹‹ŽˆŠJBˆ
-BˆÚ[šÜÈHÚXY\—BˆÝ\œ™[Û[™ÝH[ŠXY\ŠBˆ›ÜˆÛÝ\˜ÙWÛ˜[YKÛÝ\˜ÙH[ˆÛÛ^™Ù]
-œÛÝ\˜Ù\È‹ßJKš][\Ê
-N‚ˆÙXÝ[ÛˆHˆ—–ÞÜÛÝ\˜ÙWÛ˜[Y_NÈÝ]\Ï^ÜÛÝ\˜ÙK™Ù]
-	ÜÝ]\ÉÊ_NÈ™]\›™Y^ÜÛÝ\˜ÙK™Ù]
-	Ü™]\›™YØÛÝ[	Ë
-_NÈ\×Û[Ü™O^ÜÛÝ\˜ÙK™Ù]
-	Ú\×Û[Ü™IË˜[ÙJ_WH‚ˆYˆÝ\œ™[Û[™Ý
-È[ŠÙXÝ[ÛŠHˆX^ØÚ\œÎ‚ˆÚ[šÜË˜\[™
-—–ÐÛÛ^[˜Ø]Y™XØ]\ÙHHØY™H›Û\YÙ]Ø\È™XXÚY—HŠBˆœ™XZÂˆÚ[šÜË˜\[™
-ÙXÝ[ÛŠBˆÝ\œ™[Û[™Ý
-ÏH[ŠÙXÝ[ÛŠBˆ›Üˆ][H[ˆÛÝ\˜ÙK™Ù]
-š][\È‹×JN‚ˆ[™HHœÛÛ‹™[\Ê][K[œÝ\™WØ\ØÚZOQ˜[ÙKY˜][\Ý‹Ù\\˜]ÜœÏJ‹‹ŽˆŠJBˆYˆÝ\œ™[Û[™Ý
-È[Š[™JH
-ÈHˆX^ØÚ\œÎ‚ˆÚ[šÜË˜\[™
-—–ÐÛÛ^[˜Ø]Y™XØ]\ÙHHØY™H›Û\YÙ]Ø\È™XXÚY—HŠBˆ™]\›ˆˆ‹š›Ú[ŠÚ[šÜÊBˆÚ[šÜË™^[™
-È—ˆ‹[™WJBˆÝ\œ™[Û[™Ý
-ÏH[Š[™JH
-ÈBˆ™]\›ˆˆ‹š›Ú[ŠÚ[šÜÊB
+
+def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
+    if source_name == "assertions":
+        status = str(item.get("assertion_status") or "unknown").casefold()
+        if status == "accepted":
+            return "caregiver_accepted_assertion", "Caregiver-reviewed assertion; preserve its source attribution and recorded wording."
+        if status == "caregiver_reviewed":
+            return "caregiver_reviewed_legacy_assertion", "Caregiver-reviewed assertion; preserve its source attribution and recorded wording."
+        return "caregiver_reported_assertion", "Caregiver-attributed report admitted to the LCR as unverified; do not present it as established fact."
+    if source_name == "document_extractions":
+        return (
+            "document_extracted_unreviewed",
+            "Extracted document text is source material, not a verified care fact or accepted LCR assertion.",
+        )
+    epistemic = item.get("epistemic_status") or item.get("epistemic_state")
+    if epistemic:
+        status = str(epistemic).casefold()
+        if status in {"unknown", "uncertain", "unresolved", "needs_clarification", "missing"}:
+            return status, "This record explicitly carries uncertainty; do not promote it to an established fact."
+        return f"epistemic_{status}", "Preserve the recorded epistemic status; it is not upgraded by retrieval."
+    for key in ("evidence_status", "record_status", "decision_status", "status"):
+        if item.get(key) is not None:
+            return f"recorded_{str(item[key]).casefold()}", "This is the stored workflow status, not an independent truth judgment."
+    return "recorded_status_unspecified", "No explicit epistemic status was stored for this record."
+
+
+def _retrieval_score(item: dict[str, Any], query: str, direct_terms: list[str], expanded_terms: list[str]) -> int:
+    haystack = " ".join(
+        str(value) for key, value in item.items()
+        if key not in {"id", "evidence_ids", "candidates"} and value is not None
+    ).casefold()
+    record_terms = set(re.findall(r"[a-z0-9_-]{3,}", haystack))
+    direct_hits = sum(1 for term in direct_terms if term in record_terms)
+    expanded_hits = sum(1 for term in expanded_terms if term not in direct_terms and term in record_terms)
+    phrase = 8 if query and query.casefold().strip() in haystack else 0
+    return phrase + direct_hits * 4 + expanded_hits
+
+
+@lru_cache(maxsize=16)
+def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
+    """Reflect the care-source schema once per SQLAlchemy engine.
+
+    The API process is restarted after deployment migrations, so the cache is
+    naturally refreshed on schema rollout. Keeping inspection out of each request
+    avoids repeating database catalog queries and table reflection on hot paths.
+    The returned metadata is treated as immutable by callers.
+    """
+    available_tables = frozenset(inspect(bind).get_table_names())
+    metadata = MetaData()
+    present = [
+        spec["table"]
+        for spec in SOURCE_SPECS.values()
+        if spec["table"] in available_tables
+    ]
+    # Source lineage is auxiliary metadata for all LCR-facing workflows. Keep it
+    # outside SOURCE_SPECS so its absence does not falsely mark core schema coverage
+    # as incomplete on legacy databases.
+    if "evidence_source_relationships" in available_tables:
+        present.append("evidence_source_relationships")
+    if present:
+        metadata.reflect(bind=bind, only=list(dict.fromkeys(present)), resolve_fks=False)
+    return available_tables, metadata
+
+
+def build_lcr_context(
+    db: Session,
+    person_id: str,
+    *,
+    caregiver_id: str | None = None,
+    limit_per_source: int = 20,
+    query: str | None = None,
+    temporal_window: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return a bounded, person-scoped LCR projection and explicit schema coverage.
+
+    When query is provided, each source is searched with bounded text terms before
+    applying its per-source limit; unavailable sources remain explicitly marked.
+    """
+    limit = max(1, min(int(limit_per_source), 50))
+    direct_terms = [
+        term for term in dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold()))
+        if term not in _SEARCH_STOPWORDS
+    ][:8]
+    terms = _expanded_search_terms(direct_terms)
+    bind = db.get_bind()
+    available_tables, metadata = _load_source_schema(bind)
+
+    sources: dict[str, dict[str, Any]] = {}
+    missing_required: list[str] = []
+    missing_optional: list[str] = []
+
+    for source_name, spec in SOURCE_SPECS.items():
+        table_name = spec["table"]
+        if table_name not in available_tables:
+            (missing_required if spec["required"] else missing_optional).append(source_name)
+            sources[source_name] = {
+                "status": "unavailable_schema",
+                "table": table_name,
+                "items": [],
+                "returned_count": 0,
+                "has_more": False,
+                "limit": limit,
+            }
+            continue
+
+        table: Table = metadata.tables[table_name]
+        if "person_id" not in table.c:
+            (missing_required if spec["required"] else missing_optional).append(source_name)
+            sources[source_name] = {
+                "status": "unavailable_scope",
+                "table": table_name,
+                "items": [],
+                "returned_count": 0,
+                "has_more": False,
+                "limit": limit,
+            }
+            continue
+
+        field_names = [name for name in spec["fields"] if name in table.c]
+        if "id" in table.c and "id" not in field_names:
+            field_names.insert(0, "id")
+        selected_columns = [table.c[name] for name in field_names]
+        statement = select(*selected_columns).where(table.c.person_id == str(person_id))
+        if source_name == "uncertainty_assessments" and "is_active" in table.c:
+            statement = statement.where(table.c.is_active.is_(True))
+        if source_name == "assertions" and "assertion_status" in table.c:
+            # Explicitly accepted assertions and caregiver-authored reports are
+            # eligible. A reported claim remains unverified; model-only proposals
+            # without caregiver attribution are excluded.
+            accepted_or_legacy = table.c.assertion_status.in_(("accepted", "caregiver_reviewed"))
+            caregiver_report = and_(
+                table.c.assertion_status == "reported",
+                table.c.created_by_caregiver_id.is_not(None),
+            ) if "created_by_caregiver_id" in table.c else None
+            statement = statement.where(or_(accepted_or_legacy, caregiver_report) if caregiver_report is not None else accepted_or_legacy)
+        if source_name == "document_extractions":
+            if caregiver_id and "caregiver_id" in table.c:
+                statement = statement.where(table.c.caregiver_id == str(caregiver_id))
+            if "extraction_status" in table.c:
+                statement = statement.where(table.c.extraction_status == "available")
+            if "candidates" in table.c:
+                statement = statement.where(
+                    table.c.candidates["kind"].as_string() == "document_extraction_v1"
+                )
+        if source_name == "facts" and "superseded_by_fact_id" in table.c:
+            statement = statement.where(table.c.superseded_by_fact_id.is_(None))
+        if temporal_window:
+            temporal_fields = {
+                "events": ("occurred_at", "recorded_at"),
+                "evidence": ("occurred_at", "uploaded_at"),
+                "evidence_observations": ("occurred_at", "observed_at", "recorded_at"),
+                "facts": ("effective_at", "recorded_at"),
+                "assertions": ("observed_at", "recorded_at"),
+                "document_extractions": ("created_at",),
+                "decisions": ("decided_at", "created_at"),
+                "decision_outcomes": ("observed_at", "created_at"),
+                "timeline": ("occurred_at", "created_at"),
+                "caregiver_observations": ("observed_at", "recorded_at"),
+                "caregiver_contexts": ("recorded_at",),
+                "caregiver_perspectives": ("recorded_at",),
+                "appointments": ("scheduled_at", "created_at"),
+                "living_record": ("updated_at", "created_at"),
+                "open_questions": ("asked_at", "created_at"),
+                "open_loop_records": ("updated_at", "created_at"),
+                "uncertainties": ("created_at",),
+                "missing_information": ("created_at",),
+            }.get(source_name, ("occurred_at", "observed_at", "effective_at", "scheduled_at", "recorded_at", "uploaded_at", "created_at", "updated_at"))
+            temporal_columns = [table.c[name] for name in temporal_fields if name in table.c]
+            if temporal_columns:
+                temporal_value = temporal_columns[0] if len(temporal_columns) == 1 else func.coalesce(*temporal_columns)
+                start_value = datetime.fromisoformat(temporal_window["start"])
+                end_value = datetime.fromisoformat(temporal_window["end"])
+                statement = statement.where(temporal_value >= start_value, temporal_value <= end_value)
+            else:
+                # Undated sources cannot satisfy an explicit temporal query.
+                statement = statement.where(false())
+        if terms:
+            search_predicates = _text_search_predicates(table, source_name, terms)
+            if search_predicates:
+                statement = statement.where(or_(*search_predicates))
+        order_field = next((name for name in spec["order"] if name in table.c), None)
+        if order_field:
+            statement = statement.order_by(desc(table.c[order_field]))
+        if "id" in table.c and order_field != "id":
+            statement = statement.order_by(desc(table.c.id))
+        search_limit = min(max(limit * 5, limit + 1), 250) if terms else limit
+        rows = db.execute(statement.limit(search_limit + 1)).mappings().all()
+        has_more = len(rows) > limit
+        items = [
+            {key: _safe_value(value, key) for key, value in dict(row).items()}
+            for row in rows[:search_limit]
+        ]
+        for item in items:
+            information_status, interpretation_limit = _information_status(source_name, item)
+            item["information_status"] = information_status
+            item["interpretation_limit"] = interpretation_limit
+        if direct_terms:
+            expanded_only = [term for term in terms if term not in direct_terms]
+            items.sort(
+                key=lambda item: _retrieval_score(item, query or "", direct_terms, expanded_only),
+                reverse=True,
+            )
+        items = items[:limit]
+        sources[source_name] = {
+            "status": "available" if items else "empty",
+            "table": table_name,
+            "items": items,
+            "returned_count": len(items),
+            "has_more": has_more,
+            "limit": limit,
+        }
+
+    evidence_lineage: dict[str, Any] = {
+        "status": "not_assessed",
+        "evidence_ids_considered": [],
+        "groups": [],
+        "relationship_records_examined": 0,
+        "relationship_history_bounded": True,
+        "interpretation_limit": (
+            "Source lineage is based only on explicit parent/source references and persisted "
+            "reviewed relationships. Text similarity, shared vocabulary, or model repetition "
+            "does not establish common origin or independent corroboration."
+        ),
+    }
+    # Seed lineage from every evidence reference present in the bounded LCR
+    # projection, not only the most recent evidence rows. This lets a visible
+    # event/decision/appointment/handoff reference retain the provenance of an
+    # older source that is outside the visible evidence page.
+    selected_ids: set[str] = set()
+
+    def collect_evidence_ids(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                if child_key in {"evidence_id", "source_evidence_id", "related_evidence_id"}:
+                    if isinstance(child_value, (str, int)) and str(child_value).strip():
+                        selected_ids.add(str(child_value).strip())
+                elif child_key == "evidence_ids":
+                    if isinstance(child_value, (list, tuple, set)):
+                        selected_ids.update(
+                            str(item).strip() for item in child_value
+                            if isinstance(item, (str, int)) and str(item).strip()
+                        )
+                    elif isinstance(child_value, str):
+                        parsed = _safe_value(child_value, "evidence_ids")
+                        if isinstance(parsed, list):
+                            selected_ids.update(
+                                str(item).strip() for item in parsed
+                                if isinstance(item, (str, int)) and str(item).strip()
+                            )
+                collect_evidence_ids(child_value, child_key)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                collect_evidence_ids(child, key)
+
+    collect_evidence_ids(sources)
+    evidence_items = sources.get("evidence", {}).get("items", [])
+    selected_ids.update(
+        str(item.get("id")).strip() for item in evidence_items
+        if isinstance(item, dict) and item.get("id")
+    )
+
+    relationship_table = metadata.tables.get("evidence_source_relationships")
+    evidence_table = metadata.tables.get("evidence")
+    if selected_ids and relationship_table is not None and evidence_table is not None:
+        from app.services.evidence_lineage import (
+            load_evidence_lineage_scope,
+            summarize_evidence_lineage,
+        )
+        lineage_scope = load_evidence_lineage_scope(db, str(person_id), selected_ids)
+        lineage_summary = summarize_evidence_lineage(
+            lineage_scope["evidence_rows"],
+            lineage_scope["relationships"],
+            selected_ids,
+        )
+        evidence_lineage.update({
+            **lineage_summary,
+            "status": "assessed_bounded_subset",
+            "relationship_records_examined": len(lineage_scope["relationships"]),
+            "relationship_history_bounded": bool(lineage_scope["has_more"]),
+            "scope_truncated": bool(lineage_scope["truncated"]),
+            "lineage_nodes_examined": len(lineage_scope["evidence_rows"]),
+            "interpretation_limit": (
+                lineage_summary["interpretation_limit"]
+                + " Retrieval is person-scoped and bounded; unreturned lineage is unknown, not absent."
+            ),
+        })
+    elif selected_ids:
+        evidence_lineage["status"] = "unavailable_schema"
+    schema_status = "complete" if not missing_required and not missing_optional else "partial"
+    return {
+        "person_id": str(person_id),
+        "as_of": datetime.now().astimezone().isoformat(),
+        "read_only": True,
+        "history_coverage": "bounded_subset",
+        "query_applied": bool(terms),
+        "retrieval_strategy": "hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history",
+        "temporal_window": temporal_window,
+        "schema_status": schema_status,
+        "missing_required_sources": missing_required,
+        "missing_optional_sources": missing_optional,
+        "sources": sources,
+        "evidence_lineage": evidence_lineage,
+    }
+
+
+def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 14000) -> str:
+    """Serialize context as bounded labelled data, never as instruction-bearing messages."""
+    header = (
+        "LCR context metadata: "
+        + json.dumps({
+            "schema_status": context.get("schema_status"),
+            "history_coverage": context.get("history_coverage"),
+            "missing_required_sources": context.get("missing_required_sources", []),
+            "missing_optional_sources": context.get("missing_optional_sources", []),
+            "evidence_lineage": context.get("evidence_lineage", {
+                "status": "not_assessed",
+                "interpretation_limit": "No source-lineage assessment was supplied.",
+            }),
+        }, ensure_ascii=False, separators=(",", ":"))
+    )
+    chunks = [header]
+    current_length = len(header)
+    for source_name, source in context.get("sources", {}).items():
+        section = f"\n[{source_name}; status={source.get('status')}; returned={source.get('returned_count', 0)}; has_more={source.get('has_more', False)}]"
+        if current_length + len(section) > max_chars:
+            chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
+            break
+        chunks.append(section)
+        current_length += len(section)
+        for item in source.get("items", []):
+            line = json.dumps(item, ensure_ascii=False, default=str, separators=(",", ":"))
+            if current_length + len(line) + 1 > max_chars:
+                chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
+                return "".join(chunks)
+            chunks.extend(["\n", line])
+            current_length += len(line) + 1
+    return "".join(chunks)

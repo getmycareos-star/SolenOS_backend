@@ -36,65 +36,355 @@ def _postgres_conversation_db():
     connection.exec_driver_sql(f'SET search_path TO "{schema}"')
 
     metadata = ConversationSession.metadata
-    if "situations" not in ÕÈZ®Ëkºwµçkz»§Â+a…æþ
-Þ§ûZŠWè­û¥–‹­¦ë\\œÛÛ‹XH‚ˆ
-BˆØ\™YÚ]™\—ØÈHØ\™YÚ]™\ŠˆYH˜Ø\™YÚ]™\‹XÈ‹˜[YOHØ\™YÚ]™\ˆÈ‹™[][ÛœÚ\H™˜[Z[H‹\œÛÛ—ÚYHœ\œÛÛ‹Xˆ‚ˆ
-Bˆ‹˜YØ[
-Ü\œÛÛ‹Ý\—Ü\œÛÛ‹Ø\™YÚ]™\‹Ø\™YÚ]™\—Ø‹Ø\™YÚ]™\—Ø×JBˆ‹™›\Ú
+    if "situations" not in metadata.tables:
+        Table("situations", metadata, Column("id", String, primary_key=True))
+    connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
+    metadata.create_all(
+        connection,
+        tables=[
+            Person.__table__, Caregiver.__table__, CareEvent.__table__,
+            CareAssertion.__table__, CaptureAnalysis.__table__,
+            ConversationSession.__table__, ConversationMessage.__table__,
+        ],
+    )
+    return engine, connection, schema
 
-Bˆ]™[HØ\™Q]™[
-ˆYH™Z[KXØ\™KY]™[‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹]™[Ý\OH™Z[WÛØœÙ\˜][Ûˆ‹ˆÝ]\ÏHœ™XÛÜ™Y‹ØØÝ\œ™YØ][›ÝÈH[YY[J^\ÏLJK]OH”ÛY\\Ü\[Ûˆ‹ˆ\ØÜš\[ÛHØ\™YÚ]™\ˆ™XÛÜ™Y™\X]YØZÚ[™È\š[™ÈHšYÚˆ‹ˆ]šY[˜ÙWÚYÏV×KÜ™X]YØžWØØ\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XH‹ˆ
-BˆXØÙ\YHØ\™P\ÜÙ\[ÛŠˆYH˜XØÙ\YX\ÜÙ\[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹ÝXš™XÝÝ\OHœ\œÛÛˆ‹ˆÝXš™XÝÚYHœ\œÛÛ‹XH‹šY[HœÛY\Ü]\›ˆ‹\ÜÙ\[Û—ÚÚ[™Hœ™\ÜYÜÝ]H‹ˆ\ÜÙ\YÝ˜[YOH•ØZÙ\È™\X]YHÝ™\›šYÚ‹ÛÝ\˜ÙWÛX™[HØ\™YÚ]™\ˆ™]šY]È‹ˆÛÝ\˜ÙWÝ^H”ÛY\\È[\œ\Y‹]šY[˜ÙWÚYÏV×K\ÜÙ\[Û—ÜÝ]\ÏH˜XØÙ\Y‹ˆØœÙ\™YØ][›ÝÈH[YY[J^\ÏLJKÜ™X]YØžWØØ\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XH‹ˆ
-Bˆ™Z™XÝYHØ\™P\ÜÙ\[ÛŠˆYHœ™Z™XÝYX\ÜÙ\[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹ÝXš™XÝÝ\OHœ\œÛÛˆ‹ˆÝXš™XÝÚYHœ\œÛÛ‹XH‹šY[HœÛY\Ü]\›ˆ‹\ÜÙ\[Û—ÚÚ[™Hœ™\ÜYÜÝ]H‹ˆ\ÜÙ\YÝ˜[YOH”™Z™XÝYÛY\ÛZ[H‹ÛÝ\˜ÙWÛX™[HØ\™YÚ]™\ˆ™Z™XÝ[Ûˆ‹ˆÛÝ\˜ÙWÝ^H”™Z™XÝY\ÜÙ\[Ûˆ‹]šY[˜ÙWÚYÏV×K\ÜÙ\[Û—ÜÝ]\ÏHœ™Z™XÝY‹ˆØœÙ\™YØ][›ÝÈH[YY[J^\ÏLJKÜ™X]YØžWØØ\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XH‹ˆ
-Bˆ[™[™ÈHØ\™P\ÜÙ\[ÛŠˆYHœ[™[™ËX\ÜÙ\[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹ÝXš™XÝÝ\OHœ\œÛÛˆ‹ˆÝXš™XÝÚYHœ\œÛÛ‹XH‹šY[HœÛY\Ü]\›ˆ‹\ÜÙ\[Û—ÚÚ[™Hœ™\ÜYÜÝ]H‹ˆ\ÜÙ\YÝ˜[YOH”[™[™ÈÛY\ÛZ[H‹ÛÝ\˜ÙWÛX™[H•[œ™]šY]ÙY[Ù[›ÜÜØ[‹ˆÛÝ\˜ÙWÝ^H”ÛY\ÛZ[H]ØZ][™È™]šY]È‹]šY[˜ÙWÚYÏV×K\ÜÙ\[Û—ÜÝ]\ÏHœ™\ÜY‹ˆØœÙ\™YØ][›ÝÈH[YY[J^\ÏLJKÜ™X]YØžWØØ\™YÚ]™\—ÚYS›Û™Kˆ
-Bˆ^˜XÝ[ÛˆHØ\\™P[˜[\Ú\ÊˆYH™ØÝ[Y[Y^˜XÝ[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹Ø\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XH‹ˆÛÝ\˜ÙWÙ]™[ÚYS›Û™KÛÝ\˜ÙWÙ]šY[˜ÙWÚYH™ØÝ[Y[Y]šY[˜ÙH‹ÛÝ\˜ÙWÝ^JˆÛ[šXÈ]\ŽˆÛY\\Ý\˜˜[˜ÙHØ\È™\ÜYžHH˜[Z[Kˆ‚ˆ
-K^˜XÝ[Û—ÜÝ]\ÏH˜]˜Z[X›H‹Ø[™Y]\Ï^ÂˆšÚ[™Žˆ™ØÝ[Y[Ù^˜XÝ[Û—ÝŒH‹™š[[˜[YHŽˆ˜Û[šXË[]\‹‹ˆ™^˜XÝ[Û—ÛY]ÙŽˆœÙ\™\—Ý^‹ˆK™]šY]×Ú\ÝÜžOV×Kˆ
-BˆÝ\—ØØ\™YÚ]™\—Ù^˜XÝ[ÛˆHØ\\™P[˜[\Ú\ÊˆYH›Ý\‹XØ\™YÚ]™\‹YØÝ[Y[‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹Ø\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹Xˆ‹ˆÛÝ\˜ÙWÙ]šY[˜ÙWÚYH›Ý\‹XØ\™YÚ]™\‹Y]šY[˜ÙH‹ÛÝ\˜ÙWÝ^H”š]˜]HØÝ[Y[^˜XÝ[Ûˆ‹ˆ^˜XÝ[Û—ÜÝ]\ÏH˜]˜Z[X›H‹Ø[™Y]\Ï^ÈšÚ[™Žˆ™ØÝ[Y[Ù^˜XÝ[Û—ÝŒHŸK™]šY]×Ú\ÝÜžOV×Kˆ
-Bˆ˜Z[YÙ^˜XÝ[ÛˆHØ\\™P[˜[\Ú\ÊˆYH™˜Z[YYØÝ[Y[Y^˜XÝ[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹Ø\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XH‹ˆÛÝ\˜ÙWÙ]šY[˜ÙWÚYH™˜Z[YYØÝ[Y[Y]šY[˜ÙH‹ÛÝ\˜ÙWÝ^H“]\Ý›Ý™H™]šY]™Y‹ˆ^˜XÝ[Û—ÜÝ]\ÏH™˜Z[Y‹Ø[™Y]\Ï^ÈšÚ[™Žˆ™ØÝ[Y[Ù^˜XÝ[Û—ÝŒHŸK™]šY]×Ú\ÝÜžOV×Kˆ
-BˆÝ\—Ü\œÛÛ—Ù]™[HØ\™Q]™[
-ˆYH›Ý\‹\\œÛÛ‹Y]™[‹\œÛÛ—ÚYHœ\œÛÛ‹Xˆ‹]™[Ý\OH™Z[WÛØœÙ\˜][Ûˆ‹ˆÝ]\ÏHœ™XÛÜ™Y‹ØØÝ\œ™YØ][›ÝÈH[YY[J^\ÏLJK]OH”š]˜]HÛY\]™[‹ˆ\ØÜš\[ÛH”š]˜]H™XÛÜ™›Üˆ[›Ý\ˆ\œÛÛˆ‹]šY[˜ÙWÚYÏV×KÜ™X]YØžWØØ\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XÈ‹ˆ
-BˆÝ\—Ü\œÛÛ—Ø\ÜÙ\[ÛˆHØ\™P\ÜÙ\[ÛŠˆYH›Ý\‹\\œÛÛ‹X\ÜÙ\[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹Xˆ‹ÝXš™XÝÝ\OHœ\œÛÛˆ‹ˆÝXš™XÝÚYHœ\œÛÛ‹Xˆ‹šY[HœÛY\Ü]\›ˆ‹\ÜÙ\[Û—ÚÚ[™Hœ™\ÜYÜÝ]H‹ˆ\ÜÙ\YÝ˜[YOH”š]˜]H\ÜÙ\[Ûˆ‹ÛÝ\˜ÙWÛX™[H“Ý\ˆ™XÛÜ™‹ÛÝ\˜ÙWÝ^H”š]˜]H‹ˆ]šY[˜ÙWÚYÏV×K\ÜÙ\[Û—ÜÝ]\ÏH˜XØÙ\Y‹ØœÙ\™YØ][›ÝÈH[YY[J^\ÏLJKˆ
-BˆÝ\—Ü\œÛÛ—Ù^˜XÝ[ÛˆHØ\\™P[˜[\Ú\ÊˆYH›Ý\‹\\œÛÛ‹YØÝ[Y[‹\œÛÛ—ÚYHœ\œÛÛ‹Xˆ‹Ø\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XÈ‹ˆÛÝ\˜ÙWÙ]šY[˜ÙWÚYH›Ý\‹\\œÛÛ‹Y]šY[˜ÙH‹ÛÝ\˜ÙWÝ^H”š]˜]H^˜XÝ[Ûˆ›Üˆ[›Ý\ˆ\œÛÛˆ‹ˆ^˜XÝ[Û—ÜÝ]\ÏH˜]˜Z[X›H‹Ø[™Y]\Ï^ÈšÚ[™Žˆ™ØÝ[Y[Ù^˜XÝ[Û—ÝŒHŸK™]šY]×Ú\ÝÜžOV×Kˆ
-Bˆš[Ü—ÜÙ\ÜÚ[ÛˆHÛÛ™\œØ][Û”Ù\ÜÚ[ÛŠˆYHœš[Ü‹\Ù\ÜÚ[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹Ø\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XH‹Ý]\ÏH˜\˜Ú]™Y‚ˆ
-BˆÝ\—Ü\œÛÛ—ÜÙ\ÜÚ[ÛˆHÛÛ™\œØ][Û”Ù\ÜÚ[ÛŠˆYH›Ý\‹\\œÛÛ‹\Ù\ÜÚ[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹Xˆ‹Ø\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹XÈ‹Ý]\ÏH˜XÝ]™H‚ˆ
-BˆÝ\—ØØ\™YÚ]™\—ÜÙ\ÜÚ[ÛˆHÛÛ™\œØ][Û”Ù\ÜÚ[ÛŠˆYH›Ý\‹XØ\™YÚ]™\‹\Ù\ÜÚ[Ûˆ‹\œÛÛ—ÚYHœ\œÛÛ‹XH‹Ø\™YÚ]™\—ÚYH˜Ø\™YÚ]™\‹Xˆ‹Ý]\ÏH˜XÝ]™H‚ˆ
-Bˆ‹˜YØ[
-Âˆ]™[XØÙ\Y[™[™Ë™Z™XÝY^˜XÝ[Û‹Ý\—ØØ\™YÚ]™\—Ù^˜XÝ[Û‹ˆ˜Z[YÙ^˜XÝ[Û‹Ý\—Ü\œÛÛ—Ù]™[Ý\—Ü\œÛÛ—Ø\ÜÙ\[Û‹ˆÝ\—Ü\œÛÛ—Ù^˜XÝ[Û‹š[Ü—ÜÙ\ÜÚ[Û‹Ý\—ØØ\™YÚ]™\—ÜÙ\ÜÚ[Û‹Ý\—Ü\œÛÛ—ÜÙ\ÜÚ[Û‹ˆJBˆ‹™›\Ú
 
-Bˆ‹˜YØ[
-ÂˆÛÛ™\œØ][Û“Y\ÜØYÙJˆYHœš[Ü‹\Ù\ÜÚ[Û‹[Y\ÜØYÙH‹Ù\ÜÚ[Û—ÚYHœš[Ü‹\Ù\ÜÚ[Ûˆ‹›ÛOH\Ù\ˆ‹ˆÛÛ[H•ÙH\ØÝ\ÜÙYÛY\[™šYÚØZÚ[™È\Ý[YKˆ‹]šY[˜ÙWÚY×ÚœÛÛH–×H‹ˆ
-KˆÛÛ™\œØ][Û“Y\ÜØYÙJˆYH›Ý\‹XØ\™YÚ]™\‹[Y\ÜØYÙH‹Ù\ÜÚ[Û—ÚYH›Ý\‹XØ\™YÚ]™\‹\Ù\ÜÚ[Ûˆ‹›ÛOH\Ù\ˆ‹ˆÛÛ[H”š]˜]HÛY\]Z[Èœ›ÛH[›Ý\ˆØ\™YÚ]™\‹ˆ‹]šY[˜ÙWÚY×ÚœÛÛH–×H‹ˆ
-KˆÛÛ™\œØ][Û“Y\ÜØYÙJˆYH›Ý\‹\\œÛÛ‹[Y\ÜØYÙH‹Ù\ÜÚ[Û—ÚYH›Ý\‹\\œÛÛ‹\Ù\ÜÚ[Ûˆ‹›ÛOH\Ù\ˆ‹ˆÛÛ[H”š]˜]HÛY\]Z[È›Üˆ[›Ý\ˆ\œÛÛ‹ˆ‹]šY[˜ÙWÚY×ÚœÛÛH–×H‹ˆ
-KˆJBˆ‹˜ÛÛ[Z]
 
-B‚ˆÈ\È\È[[[Û˜[HH™]ÈÛÛ\[š[ÛˆÙ\ÜÚ[ÛŽˆ™]šY]˜[]\Ýš[™ˆÈH™]š[Ý\ÈÙ\ÜÚ[Û‰ÜÈY\ÜØYÙH›ÝYÚHÚ\™Y\œÛÛ‹ØØ\™YÚ]™\ˆØÛÜK‚ˆÛÛ^HZ[Ý[šYšYYÛÜ—ØÛÛ^
-ˆ‹œ\œÛÛ‹XH‹˜Ø\™YÚ]™\‹XH‹]Y\žOHœÛY\‹[Z]Ü\—ÜÛÝ\˜ÙOLŒˆ
-Bˆ[\Ü˜[ØÛÛ^HZ[Ý[šYšYYÛÜ—ØÛÛ^
-ˆ‹œ\œÛÛ‹XH‹˜Ø\™YÚ]™\‹XH‹]Y\žOHœÛY\Y\Ý\™^H‹[Z]Ü\—ÜÛÝ\˜ÙOLŒˆ
-B‚ˆÛÝ\˜Ù\ÈHÛÛ^ÈœÛÝ\˜Ù\È—Bˆ\ÜÙ\Ü›ÝÖÈšY—H›Üˆ›ÝÈ[ˆÛÝ\˜Ù\ÖÈ™]™[È—VÈš][\È—_HHÈ™Z[KXØ\™KY]™[ŸBˆ\ÜÙ\Ü›ÝÖÈšY—H›Üˆ›ÝÈ[ˆÛÝ\˜Ù\ÖÈ™ØÝ[Y[Ù^˜XÝ[ÛœÈ—VÈš][\È—_HOHÈ™ØÝ[Y[Y^˜XÝ[ÛˆŸBˆ\ÜÙ\Ü›ÝÖÈšY—H›Üˆ›ÝÈ[ˆÛÝ\˜Ù\ÖÈ˜\ÜÙ\[ÛœÈ—VÈš][\È—_HOHÈ˜XØÙ\YX\ÜÙ\[ÛˆŸBˆ\ÜÙ\œ[™[™ËX\ÜÙ\[Ûˆˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ˜\ÜÙ\[ÛœÈ—JBˆ\ÜÙ\œ™Z™XÝYX\ÜÙ\[Ûˆˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ˜\ÜÙ\[ÛœÈ—JBˆ\ÜÙ\™˜Z[YYØÝ[Y[Y^˜XÝ[Ûˆˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ™ØÝ[Y[Ù^˜XÝ[ÛœÈ—JBˆ\ÜÙ\›Ý\‹XØ\™YÚ]™\‹YØÝ[Y[ˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ™ØÝ[Y[Ù^˜XÝ[ÛœÈ—JBˆ\ÜÙ\›Ý\‹\\œÛÛ‹YØÝ[Y[ˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ™ØÝ[Y[Ù^˜XÝ[ÛœÈ—JBˆ\ÜÙ\›Ý\‹\\œÛÛ‹Y]™[ˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ™]™[È—JBˆ\ÜÙ\›Ý\‹\\œÛÛ‹X\ÜÙ\[Ûˆˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ˜\ÜÙ\[ÛœÈ—JBˆ\ÝÜžHHÛÝ\˜Ù\ÖÈ˜ÛÛ\[š[Û—ØÛÛ™\œØ][Ûˆ—VÈš][\È—Bˆ\ÜÙ\Ü›ÝÖÈšY—H›Üˆ›ÝÈ[ˆ\ÝÜž_HOHÈœš[Ü‹\Ù\ÜÚ[Û‹[Y\ÜØYÙHŸBˆ\ÜÙ\›Ý\‹\\œÛÛ‹[Y\ÜØYÙHˆ›Ý[ˆÝŠ\ÝÜžJBˆ\ÜÙ\\ÝÜžVÌVÈš[™›Ü›X][Û—ÜÝ]\È—HOH˜ÛÛ™\œØ][Û—ØÛÛ^ÛÛ›H‚ˆ\ÜÙ\ÛÝ\˜Ù\ÖÈ™ØÝ[Y[Ù^˜XÝ[ÛœÈ—VÈš][\È—VÌVÈš[™›Ü›X][Û—ÜÝ]\È—HOH™ØÝ[Y[Ù^˜XÝYÝ[œ™]šY]ÙY‚ˆ\ÜÙ\ÛÝ\˜Ù\ÖÈ˜\ÜÙ\[ÛœÈ—VÈš][\È—VÌVÈš[™›Ü›X][Û—ÜÝ]\È—H[ˆÂˆ˜Ø\™YÚ]™\—ØXØÙ\YØ\ÜÙ\[Ûˆ‹˜Ø\™YÚ]™\—Ü™]šY]ÙYÛYØXÞWØ\ÜÙ\[Ûˆ‚ˆBˆ\ÜÙ\ÛÛ^Èœ™]šY]˜[ØÛÛ˜XÝ—VÈœ™]šY]˜[ÜÝ˜]YÞH—HOHšXœšYÛ^XØ[ÜÙ[X[X×Ý[\Ü˜[‚ˆ\ÜÙ\[\Ü˜[ØÛÛ^Èœ™]šY]˜[ØÛÛ˜XÝ—VÈ[\Ü˜[ÝÚ[™ÝÈ—VÈ˜˜\Ú\È—HOH™^XÚ]Ý\Ù\—Ý[\Ü˜[Ù^™\ÜÚ[Ûˆ‚ˆ\ÜÙ\™Z[KXØ\™KY]™[ˆ[ˆÜ›ÝÖÈšY—H›Üˆ›ÝÈ[ˆ[\Ü˜[ØÛÛ^ÈœÛÝ\˜Ù\È—VÈ™]™[È—VÈš][\È—_Bˆš[˜[N‚ˆØÛÜÙWÜÜÝÜ™\×ØÛÛ™\œØ][Û—ÙŠ[™Ú[™KÛÛ›™XÝ[Û‹ØÚ[XJB‚‚™Yˆ\ÝÝ[\Ü˜[Ü™]šY]˜[Ü™\ÛÛ™\×Ù^XÚ]Ü™[]]™WÝÚ[™ÝÜÊ
-N‚ˆ›ÝÈH]][YJŒ‹LK‹L‹š[™›ÏUUÊBˆÚ[™ÝÈHÝ[\Ü˜[ÝÚ[™ÝÊ•Ú]\[™YY\Ý\™^HÚ]ÛY\È‹›ÝÏ[›ÝÊBˆ\ÜÙ\Ú[™ÝÈ\È›Ý›Û™Bˆ\ÜÙ\Ú[™ÝÖÈœÝ\—HOHŒŒ‹LLKLUŒŒ
-ÌŒ‚ˆ\ÜÙ\Ú[™ÝÖÈ™[™—KœÝ\ÝÚ]
-ŒŒ‹LLKLUŒÎNNNHŠBˆ\ÜÙ\Ý[\Ü˜[ÝÚ[™ÝÊ•[YHX›Ý]ÛY\‹›ÝÏ[›ÝÊH\È›Û™BˆØØ[ÝÚ[™ÝÈHÝ[\Ü˜[ÝÚ[™ÝÊˆ•Ú]\[™YY\Ý\™^OÈ‹ˆ›ÝÏY]][YJŒ‹LK‹‹š[™›ÏUUÊKˆ[Y^›Û™WÛ˜[YOH[Y\šXØKÓÜ×Ð[™Ù[\È‹ˆ
-Bˆ\ÜÙ\ØØ[ÝÚ[™ÝÈ\È›Ý›Û™Bˆ\ÜÙ\ØØ[ÝÚ[™ÝÖÈœÝ\—HOHŒŒ‹LLKLŒŒ
-ÌŒ‚ˆ\ÜÙ\ØØ[ÝÚ[™ÝÖÈ[Y^›Û™H—HOH[Y\šXØKÓÜ×Ð[™Ù[\È‚‚‚™Yˆ\ÝÚXœšYÜ™]šY]˜[Ù›Ý\—ÜÛÝ\˜Ù\×Ø[™ÜÝ]\×ÙØ]WÛÛ—ÛØØ[ÜÜ[]J
-N‚ˆ[™Ú[™KÛÛ›™XÝ[ÛˆHÜÜ[]WÜ™]šY]˜[ÙŠ
-BˆžN‚ˆ›ÝÈH]][YK››ÝÊUÊBˆÚ]ÛÛ›™XÝ[Û‹˜™YÚ[Š
-N‚ˆÛÛ›™XÝ[Û‹™^XÝ]J\œÛÛ‹—×ÝX›W×Ëš[œÙ\
+def _sqlite_retrieval_db():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    connection = engine.connect()
+    metadata = ConversationSession.metadata
+    if "situations" not in metadata.tables:
+        Table("situations", metadata, Column("id", String, primary_key=True))
+    connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
+    metadata.create_all(connection, tables=[
+        Person.__table__, Caregiver.__table__, CareEvent.__table__,
+        CareAssertion.__table__, CaptureAnalysis.__table__,
+        ConversationSession.__table__, ConversationMessage.__table__,
+    ])
+    connection.commit()
+    return engine, connection
 
-KÈšYŽˆœ\œÛÛ‹[ØØ[‹›˜[YHŽˆØ\™H™XÚ\Y[ŸJBˆÛÛ›™XÝ[Û‹™^XÝ]JØ\™YÚ]™\‹—×ÝX›W×Ëš[œÙ\
+def _close_postgres_conversation_db(engine, connection, schema):
+    connection.close()
+    with engine.begin() as cleanup:
+        cleanup.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    engine.dispose()
 
-KÂˆšYŽˆ˜Ø\™YÚ]™\‹[ØØ[‹›˜[YHŽˆØ\™YÚ]™\ˆ‹œ™[][ÛœÚ\Žˆ™˜[Z[H‹œ\œÛÛ—ÚYŽˆœ\œÛÛ‹[ØØ[‚ˆJBˆÛÛ›™XÝ[Û‹™^XÝ]JØ\™Q]™[—×ÝX›W×Ëš[œÙ\
 
-KÂˆšYŽˆ™Z[KY]™[[ØØ[‹œ\œÛÛ—ÚYŽˆœ\œÛÛ‹[ØØ[‹™]™[Ý\HŽˆ™Z[WÛØœÙ\˜][Ûˆ‹ˆœÝ]\ÈŽˆœ™XÛÜ™Y‹›ØØÝ\œ™YØ]Žˆ›ÝÈH[YY[J^\ÏLJK]HŽˆ”ÛY\\Ü\[Ûˆ‹ˆ™\ØÜš\[ÛˆŽˆ”™\X]YØZÚ[™ÈÝ™\›šYÚ‹™]šY[˜ÙWÚYÈŽˆ×K˜Ü™X]YØžWØØ\™YÚ]™\—ÚYŽˆ˜Ø\™YÚ]™\‹[ØØ[‹ˆJBˆÛÛ›™XÝ[Û‹™^XÝ]JØ\™P\ÜÙ\[Û‹—×ÝX›W×Ëš[œÙ\
+def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            own = ConversationSession(
+                id="own-session", person_id="person-a", caregiver_id="caregiver-a", status="active"
+            )
+            other_caregiver = ConversationSession(
+                id="other-caregiver-session", person_id="person-a",
+                caregiver_id="caregiver-b", status="active"
+            )
+            other_person = ConversationSession(
+                id="other-person-session", person_id="person-b",
+                caregiver_id="caregiver-a", status="active"
+            )
+            db.add_all([own, other_caregiver, other_person])
+            db.flush()
+            db.add_all([
+                ConversationMessage(
+                    id="own-message", session_id=own.id, role="user",
+                    content="Caregiver reported repeated waking overnight",
+                    evidence_ids_json="[]",
+                ),
+                ConversationMessage(
+                    id="assistant-message", session_id=own.id, role="assistant",
+                    content="Unsupported assistant summary about waking",
+                    evidence_ids_json="[]",
+                ),
+                ConversationMessage(
+                    id="other-caregiver-message", session_id=other_caregiver.id, role="user",
+                    content="Private waking detail from another caregiver",
+                    evidence_ids_json="[]",
+                ),
+                ConversationMessage(
+                    id="other-person-message", session_id=other_person.id, role="user",
+                    content="Private waking detail for another person",
+                    evidence_ids_json="[]",
+                ),
+            ])
+            db.commit()
+            result = _conversation_context(
+                db, person_id="person-a", caregiver_id="caregiver-a",
+                query="sleep waking", limit=8,
+            )
 
-KÂˆÂˆšYŽˆ˜XØÙ\Y[ØØ[‹œ\œÛÛ—ÚYŽˆœ\œÛÛ‹[ØØ[‹œÝXš™XÝÝ\HŽˆœ\œÛÛˆ‹œÝXš™XÝÚYŽˆœ\œÛÛ‹[ØØ[‹ˆ™šY[ŽˆœÛY\Ü]\›ˆ‹˜\ÜÙ\[Û—ÚÚ[™Žˆœ™\ÜYÜÝ]H‹˜\ÜÙ\YÝ˜[YHŽˆ”™\X]YØZÚ[™È‹ˆœÛÝ\˜ÙWÛX™[ŽˆØ\™YÚ]™\ˆ™]šY]È‹œÛÝ\˜ÙWÝ^Žˆ”ÛY\[\œ\Y‹™]šY[˜ÙWÚYÈŽˆ×Kˆ˜\ÜÙ\[Û—ÜÝ]\ÈŽˆ˜XØÙ\Y‹›ØœÙ\™YØ]Žˆ›ÝÈH[YY[J^\ÏLJKˆKˆÂˆšYŽˆœ[™[™Ë[ØØ[‹œ\œÛÛ—ÚYŽˆœ\œÛÛ‹[ØØ[‹œÝXš™XÝÝ\HŽˆœ\œÛÛˆ‹œÝXš™XÝÚYŽˆœ\œÛÛ‹[ØØ[‹ˆ™šY[ŽˆœÛY\Ü]\›ˆ‹˜\ÜÙ\[Û—ÚÚ[™Žˆœ™\ÜYÜÝ]H‹˜\ÜÙ\YÝ˜[YHŽˆ”[™[™ÈÛZ[H‹ˆœÛÝ\˜ÙWÛX™[Žˆ“[Ù[›ÜÜØ[‹œÛÝ\˜ÙWÝ^Žˆ•[œ™]šY]ÙYÛY\ÛZ[H‹™]šY[˜ÙWÚYÈŽˆ×Kˆ˜\ÜÙ\[Û—ÜÝ]\ÈŽˆœ™\ÜY‹›ØœÙ\™YØ]Žˆ›ÝÈH[YY[J^\ÏLJKˆKˆJBˆÛÛ›™XÝ[Û‹™^XÝ]JØ\\™P[˜[\Ú\Ë—×ÝX›W×Ëš[œÙ\
+        assert result["returned_count"] == 2
+        by_id = {item["id"]: item for item in result["items"]}
+        assert set(by_id) == {"own-message", "assistant-message"}
+        assert all(item["information_status"] == "conversation_context_only" for item in by_id.values())
+        assert all(item["is_lcr_assertion"] is False for item in by_id.values())
+        assert all(item["is_care_evidence"] is False for item in by_id.values())
+        assert by_id["assistant-message"]["role"] == "assistant"
+        assert "Private waking detail" not in str(result)
+    finally:
+        _close_postgres_conversation_db(engine, connection, schema)
 
-KÂˆšYŽˆ™ØÝ[Y[[ØØ[‹œ\œÛÛ—ÚYŽˆœ\œÛÛ‹[ØØ[‹˜Ø\™YÚ]™\—ÚYŽˆ˜Ø\™YÚ]™\‹[ØØ[‹ˆœÛÝ\˜ÙWÙ]šY[˜ÙWÚYŽˆ™ØÝ[Y[Y]šY[˜ÙK[ØØ[‹œÛÝ\˜ÙWÝ^ŽˆÛ[šXÈ]\ˆ™\ÜÈÛY\\Ý\˜˜[˜ÙKˆ‹ˆ™^˜XÝ[Û—ÜÝ]\ÈŽˆ˜]˜Z[X›H‹˜Ø[™Y]\ÈŽˆÈšÚ[™Žˆ™ØÝ[Y[Ù^˜XÝ[Û—ÝŒHŸKœ™]šY]×Ú\ÝÜžHŽˆ×KˆJBˆÛÛ›™XÝ[Û‹™^XÝ]JÛÛ™\œØ][Û”Ù\ÜÚ[Û‹—×ÝX›W×Ëš[œÙ\
 
-KÂˆšYŽˆ›Û\Ù\ÜÚ[Û‹[ØØ[‹œ\œÛÛ—ÚYŽˆœ\œÛÛ‹[ØØ[‹˜Ø\™YÚ]™\—ÚYŽˆ˜Ø\™YÚ]™\‹[ØØ[‹œÝ]\ÈŽˆ˜\˜Ú]™Y‹ˆJBˆÛÛ›™XÝ[Û‹™^XÝ]JÛÛ™\œØ][Û“Y\ÜØYÙK—×ÝX›W×Ëš[œÙ\
+def test_companion_history_is_bounded_across_prior_sessions():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            active = ConversationSession(
+                id="active-session", person_id="person-a",
+                caregiver_id="caregiver-a", status="active"
+            )
+            archived = ConversationSession(
+                id="archived-session", person_id="person-a",
+                caregiver_id="caregiver-a", status="archived"
+            )
+            db.add_all([active, archived])
+            db.flush()
+            db.add_all([
+                ConversationMessage(
+                    id=f"active-{index}", session_id=active.id, role="user",
+                    content=f"Caregiver note {index}", evidence_ids_json="[]"
+                )
+                for index in range(10)
+            ])
+            db.add(ConversationMessage(
+                id="archived-message", session_id=archived.id, role="user",
+                content="Archived caregiver note", evidence_ids_json="[]"
+            ))
+            db.commit()
+            result = _conversation_context(
+                db, person_id="person-a", caregiver_id="caregiver-a",
+                query=None, limit=3,
+            )
+        assert result["returned_count"] == 3
+        assert result["has_more"] is True
+        assert all(
+            item["session_id"] in {"active-session", "archived-session"}
+            for item in result["items"]
+        )
+    finally:
+        _close_postgres_conversation_db(engine, connection, schema)
 
-KÂˆšYŽˆ›Û[Y\ÜØYÙK[ØØ[‹œÙ\ÜÚ[Û—ÚYŽˆ›Û\Ù\ÜÚ[Û‹[ØØ[‹œ›ÛHŽˆ\Ù\ˆ‹ˆ˜ÛÛ[Žˆ•ÙH\ØÝ\ÜÙYÛY\[™šYÚØZÚ[™È™Y›Ü™Kˆ‹™]šY[˜ÙWÚY×ÚœÛÛˆŽˆ–×H‹ˆœÛÝ\˜ÙWÜ™XÛÜ™Ü™Yœ×ÚœÛÛˆŽˆ–×H‹ˆJBˆÚ]Ù\ÜÚ[ÛŠš[™XÛÛ›™XÝ[ÛŠH\ÈŽ‚ˆÛÛ^HZ[Ý[šYšYYÛÜ—ØÛÛ^
-‹œ\œÛÛ‹[ØØ[‹˜Ø\™YÚ]™\‹[ØØ[‹]Y\žOHœÛY\ŠBˆY\Ý\™^HHZ[Ý[šYšYYÛÜ—ØÛÛ^
-‹œ\œÛÛ‹[ØØ[‹˜Ø\™YÚ]™\‹[ØØ[‹]Y\žOHœÛY\Y\Ý\™^HŠBˆÛÝ\˜Ù\ÈHÛÛ^ÈœÛÝ\˜Ù\È—Bˆ\ÜÙ\™Z[KY]™[[ØØ[ˆ[ˆÜ›ÝÖÈšY—H›Üˆ›ÝÈ[ˆÛÝ\˜Ù\ÖÈ™]™[È—VÈš][\È—_Bˆ\ÜÙ\Ü›ÝÖÈšY—H›Üˆ›ÝÈ[ˆÛÝ\˜Ù\ÖÈ™ØÝ[Y[Ù^˜XÝ[ÛœÈ—VÈš][\È—_HOHÈ™ØÝ[Y[[ØØ[ŸBˆ\ÜÙ\Ü›ÝÖÈšY—H›Üˆ›ÝÈ[ˆÛÝ\˜Ù\ÖÈ˜\ÜÙ\[ÛœÈ—VÈš][\È—_HOHÈ˜XØÙ\Y[ØØ[ŸBˆ\ÜÙ\œ[™[™Ë[ØØ[ˆ›Ý[ˆÝŠÛÝ\˜Ù\ÖÈ˜\ÜÙ\[ÛœÈ—JBˆ\ÜÙ\Ü›ÝÖÈšY—H›Üˆ›ÝÈ[ˆÛÝ\˜Ù\ÖÈ˜ÛÛ\[š[Û—ØÛÛ™\œØ][Ûˆ—VÈš][\È—_HOHÈ›Û[Y\ÜØYÙK[ØØ[ŸBˆ\ÜÙ\™Z[KY]™[[ØØ[ˆ[ˆÜ›ÝÖÈšY—H›Üˆ›ÝÈ[ˆY\Ý\™^VÈœÛÝ\˜Ù\È—VÈ™]™[È—VÈš][\È—_Bˆ\ÜÙ\ÛÝ\˜Ù\ÖÈ™ØÝ[Y[Ù^˜XÝ[ÛœÈ—VÈš][\È—VÌVÈš[™›Ü›X][Û—ÜÝ]\È—HOH™ØÝ[Y[Ù^˜XÝYÝ[œ™]šY]ÙY‚ˆš[˜[N‚ˆÛÛ›™XÝ[Û‹˜ÛÜÙJ
-Bˆ[™Ú[™K™\ÜÜÙJ
-B
+
+def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        now = datetime.now(UTC)
+        with Session(bind=connection) as db:
+            person = Person(id="person-a", name="Care recipient")
+            other_person = Person(id="person-b", name="Different care recipient")
+            caregiver = Caregiver(
+                id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"
+            )
+            caregiver_b = Caregiver(
+                id="caregiver-b", name="Caregiver B", relationship="family", person_id="person-a"
+            )
+            caregiver_c = Caregiver(
+                id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b"
+            )
+            db.add_all([person, other_person, caregiver, caregiver_b, caregiver_c])
+            db.flush()
+            event = CareEvent(
+                id="daily-care-event", person_id="person-a", event_type="daily_observation",
+                status="recorded", occurred_at=now - timedelta(days=1), title="Sleep disruption",
+                description="Caregiver recorded repeated waking during the night.",
+                evidence_ids=[], created_by_caregiver_id="caregiver-a",
+            )
+            accepted = CareAssertion(
+                id="accepted-assertion", person_id="person-a", subject_type="person",
+                subject_id="person-a", field="sleep_pattern", assertion_kind="reported_state",
+                asserted_value="Wakes repeatedly overnight", source_label="Caregiver review",
+                source_text="Sleep is interrupted", evidence_ids=[], assertion_status="accepted",
+                observed_at=now - timedelta(days=1), created_by_caregiver_id="caregiver-a",
+            )
+            rejected = CareAssertion(
+                id="rejected-assertion", person_id="person-a", subject_type="person",
+                subject_id="person-a", field="sleep_pattern", assertion_kind="reported_state",
+                asserted_value="Rejected sleep claim", source_label="Caregiver rejection",
+                source_text="Rejected assertion", evidence_ids=[], assertion_status="rejected",
+                observed_at=now - timedelta(days=1), created_by_caregiver_id="caregiver-a",
+            )
+            pending = CareAssertion(
+                id="pending-assertion", person_id="person-a", subject_type="person",
+                subject_id="person-a", field="sleep_pattern", assertion_kind="reported_state",
+                asserted_value="Pending sleep claim", source_label="Unreviewed model proposal",
+                source_text="Sleep claim awaiting review", evidence_ids=[], assertion_status="reported",
+                observed_at=now - timedelta(days=1), created_by_caregiver_id=None,
+            )
+            extraction = CaptureAnalysis(
+                id="document-extraction", person_id="person-a", caregiver_id="caregiver-a",
+                source_event_id=None, source_evidence_id="document-evidence", source_text=(
+                    "Clinic letter: sleep disturbance was reported by the family."
+                ), extraction_status="available", candidates={
+                    "kind": "document_extraction_v1", "filename": "clinic-letter.txt",
+                    "extraction_method": "server_text",
+                }, review_history=[],
+            )
+            other_caregiver_extraction = CaptureAnalysis(
+                id="other-caregiver-document", person_id="person-a", caregiver_id="caregiver-b",
+                source_evidence_id="other-caregiver-evidence", source_text="Private document extraction",
+                extraction_status="available", candidates={"kind": "document_extraction_v1"}, review_history=[],
+            )
+            failed_extraction = CaptureAnalysis(
+                id="failed-document-extraction", person_id="person-a", caregiver_id="caregiver-a",
+                source_evidence_id="failed-document-evidence", source_text="Must not be retrieved",
+                extraction_status="failed", candidates={"kind": "document_extraction_v1"}, review_history=[],
+            )
+            other_person_event = CareEvent(
+                id="other-person-event", person_id="person-b", event_type="daily_observation",
+                status="recorded", occurred_at=now - timedelta(days=1), title="Private sleep event",
+                description="Private record for another person", evidence_ids=[], created_by_caregiver_id="caregiver-c",
+            )
+            other_person_assertion = CareAssertion(
+                id="other-person-assertion", person_id="person-b", subject_type="person",
+                subject_id="person-b", field="sleep_pattern", assertion_kind="reported_state",
+                asserted_value="Private assertion", source_label="Other record", source_text="Private",
+                evidence_ids=[], assertion_status="accepted", observed_at=now - timedelta(days=1),
+            )
+            other_person_extraction = CaptureAnalysis(
+                id="other-person-document", person_id="person-b", caregiver_id="caregiver-c",
+                source_evidence_id="other-person-evidence", source_text="Private extraction for another person",
+                extraction_status="available", candidates={"kind": "document_extraction_v1"}, review_history=[],
+            )
+            prior_session = ConversationSession(
+                id="prior-session", person_id="person-a", caregiver_id="caregiver-a", status="archived"
+            )
+            other_person_session = ConversationSession(
+                id="other-person-session", person_id="person-b", caregiver_id="caregiver-c", status="active"
+            )
+            other_caregiver_session = ConversationSession(
+                id="other-caregiver-session", person_id="person-a", caregiver_id="caregiver-b", status="active"
+            )
+            db.add_all([
+                event, accepted, pending, rejected, extraction, other_caregiver_extraction,
+                failed_extraction, other_person_event, other_person_assertion,
+                other_person_extraction, prior_session, other_caregiver_session, other_person_session,
+            ])
+            db.flush()
+            db.add_all([
+                ConversationMessage(
+                    id="prior-session-message", session_id="prior-session", role="user",
+                    content="We discussed sleep and night waking last time.", evidence_ids_json="[]",
+                ),
+                ConversationMessage(
+                    id="other-caregiver-message", session_id="other-caregiver-session", role="user",
+                    content="Private sleep details from another caregiver.", evidence_ids_json="[]",
+                ),
+                ConversationMessage(
+                    id="other-person-message", session_id="other-person-session", role="user",
+                    content="Private sleep details for another person.", evidence_ids_json="[]",
+                ),
+            ])
+            db.commit()
+
+            # This is intentionally a new Companion session: retrieval must find
+            # the previous session's message through the shared person/caregiver scope.
+            context = build_unified_lcr_context(
+                db, "person-a", "caregiver-a", query="sleep", limit_per_source=20,
+            )
+            temporal_context = build_unified_lcr_context(
+                db, "person-a", "caregiver-a", query="sleep yesterday", limit_per_source=20,
+            )
+
+        sources = context["sources"]
+        assert {row["id"] for row in sources["events"]["items"]} >= {"daily-care-event"}
+        assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-extraction"}
+        assert {row["id"] for row in sources["assertions"]["items"]} == {"accepted-assertion"}
+        assert "pending-assertion" not in str(sources["assertions"])
+        assert "rejected-assertion" not in str(sources["assertions"])
+        assert "failed-document-extraction" not in str(sources["document_extractions"])
+        assert "other-caregiver-document" not in str(sources["document_extractions"])
+        assert "other-person-document" not in str(sources["document_extractions"])
+        assert "other-person-event" not in str(sources["events"])
+        assert "other-person-assertion" not in str(sources["assertions"])
+        history = sources["companion_conversation"]["items"]
+        assert {row["id"] for row in history} == {"prior-session-message"}
+        assert "other-person-message" not in str(history)
+        assert history[0]["information_status"] == "conversation_context_only"
+        assert sources["document_extractions"]["items"][0]["information_status"] == "document_extracted_unreviewed"
+        assert sources["assertions"]["items"][0]["information_status"] in {
+            "caregiver_accepted_assertion", "caregiver_reviewed_legacy_assertion"
+        }
+        assert context["retrieval_contract"]["retrieval_strategy"] == "hybrid_lexical_semantic_temporal"
+        assert temporal_context["retrieval_contract"]["temporal_window"]["basis"] == "explicit_user_temporal_expression"
+        assert "daily-care-event" in {row["id"] for row in temporal_context["sources"]["events"]["items"]}
+    finally:
+        _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_temporal_retrieval_resolves_explicit_relative_windows():
+    now = datetime(2026, 11, 6, 12, tzinfo=UTC)
+    window = _temporal_window("What happened yesterday with sleep?", now=now)
+    assert window is not None
+    assert window["start"] == "2026-11-05T00:00:00+00:00"
+    assert window["end"].startswith("2026-11-05T23:59:59")
+    assert _temporal_window("Tell me about sleep", now=now) is None
+    local_window = _temporal_window(
+        "What happened yesterday?",
+        now=datetime(2026, 11, 6, 2, tzinfo=UTC),
+        timezone_name="America/Los_Angeles",
+    )
+    assert local_window is not None
+    assert local_window["start"] == "2026-11-04T08:00:00+00:00"
+    assert local_window["timezone"] == "America/Los_Angeles"
+
+
+def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
+    engine, connection = _sqlite_retrieval_db()
+    try:
+        now = datetime.now(UTC)
+        with connection.begin():
+            connection.execute(Person.__table__.insert(), {"id": "person-local", "name": "Care recipient"})
+            connection.execute(Caregiver.__table__.insert(), {
+                "id": "caregiver-local", "name": "Caregiver", "relationship": "family", "person_id": "person-local"
+            })
+            connection.execute(CareEvent.__table__.insert(), {
+                "id": "daily-event-local", "person_id": "person-local", "event_type": "daily_observation",
+                "status": "recorded", "occurred_at": now - timedelta(days=1), "title": "Sleep disruption",
+                "description": "Repeated waking overnight", "evidence_ids": [], "created_by_caregiver_id": "caregiver-local",
+            })
+            connection.execute(CareAssertion.__table__.insert(), [
+                {
+                    "id": "accepted-local", "person_id": "person-local", "subject_type": "person", "subject_id": "person-local",
+                    "field": "sleep_pattern", "assertion_kind": "reported_state", "asserted_value": "Repeated waking",
+                    "source_label": "Caregiver review", "source_text": "Sleep interrupted", "evidence_ids": [],
+                    "assertion_status": "accepted", "observed_at": now - timedelta(days=1),
+                },
+                {
+                    "id": "pending-local", "person_id": "person-local", "subject_type": "person", "subject_id": "person-local",
+                    "field": "sleep_pattern", "assertion_kind": "reported_state", "asserted_value": "Pending claim",
+                    "source_label": "Model proposal", "source_text": "Unreviewed sleep claim", "evidence_ids": [],
+                    "assertion_status": "reported", "observed_at": now - timedelta(days=1),
+                },
+            ])
+            connection.execute(CaptureAnalysis.__table__.insert(), {
+                "id": "document-local", "person_id": "person-local", "caregiver_id": "caregiver-local",
+                "source_evidence_id": "document-evidence-local", "source_text": "Clinic letter reports sleep disturbance.",
+                "extraction_status": "available", "candidates": {"kind": "document_extraction_v1"}, "review_history": [],
+            })
+            connection.execute(ConversationSession.__table__.insert(), {
+                "id": "old-session-local", "person_id": "person-local", "caregiver_id": "caregiver-local", "status": "archived",
+            })
+            connection.execute(ConversationMessage.__table__.insert(), {
+                "id": "old-message-local", "session_id": "old-session-local", "role": "user",
+                "content": "We discussed sleep and night waking before.", "evidence_ids_json": "[]",
+                "source_record_refs_json": "[]",
+            })
+        with Session(bind=connection) as db:
+            context = build_unified_lcr_context(db, "person-local", "caregiver-local", query="sleep")
+            yesterday = build_unified_lcr_context(db, "person-local", "caregiver-local", query="sleep yesterday")
+        sources = context["sources"]
+        assert "daily-event-local" in {row["id"] for row in sources["events"]["items"]}
+        assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-local"}
+        assert {row["id"] for row in sources["assertions"]["items"]} == {"accepted-local"}
+        assert "pending-local" not in str(sources["assertions"])
+        assert {row["id"] for row in sources["companion_conversation"]["items"]} == {"old-message-local"}
+        assert "daily-event-local" in {row["id"] for row in yesterday["sources"]["events"]["items"]}
+        assert sources["document_extractions"]["items"][0]["information_status"] == "document_extracted_unreviewed"
+    finally:
+        connection.close()
+        engine.dispose()
