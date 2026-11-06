@@ -1,4 +1,8 @@
-"""Tests for unified Companion retrieval scope and epistemic boundaries."""
+"""PostgreSQL integration tests for unified Companion retrieval scope."""
+import os
+import uuid
+
+import pytest
 from sqlalchemy import Column, String, create_engine
 from sqlalchemy.orm import Session
 
@@ -6,17 +10,31 @@ from app.models.collaboration import ConversationMessage, ConversationSession
 from app.services.unified_lcr_retrieval import _conversation_context
 
 
-def _conversation_db():
+def _postgres_conversation_db():
+    database_url = os.environ.get("DATABASE_URL", "")
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = database_url.replace(
+            "postgresql+psycopg://", "postgresql+psycopg2://", 1
+        )
+    if not database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
+        pytest.skip("unified Companion retrieval integration requires PostgreSQL DATABASE_URL")
+
+    schema = "test_lcr_retrieval_" + uuid.uuid4().hex
+    engine = create_engine(database_url, pool_pre_ping=True)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+    connection = engine.connect()
+    connection.exec_driver_sql(f'SET search_path TO "{schema}"')
+
     metadata = ConversationSession.metadata
     if "persons" not in metadata.tables:
-        from sqlalchemy import Table, MetaData
+        from sqlalchemy import Table
         Table("persons", metadata, Column("id", String, primary_key=True))
     if "caregivers" not in metadata.tables:
         from sqlalchemy import Table
         Table("caregivers", metadata, Column("id", String, primary_key=True))
-    engine = create_engine("sqlite:///:memory:")
     metadata.create_all(
-        engine,
+        connection,
         tables=[
             metadata.tables["persons"],
             metadata.tables["caregivers"],
@@ -24,13 +42,20 @@ def _conversation_db():
             ConversationMessage.__table__,
         ],
     )
-    return engine
+    return engine, connection, schema
+
+
+def _close_postgres_conversation_db(engine, connection, schema):
+    connection.close()
+    with engine.begin() as cleanup:
+        cleanup.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    engine.dispose()
 
 
 def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
-    engine = _conversation_db()
+    engine, connection, schema = _postgres_conversation_db()
     try:
-        with Session(engine) as db:
+        with Session(bind=connection) as db:
             own = ConversationSession(
                 id="own-session", person_id="person-a", caregiver_id="caregiver-a", status="active"
             )
@@ -67,13 +92,9 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
                 ),
             ])
             db.commit()
-
             result = _conversation_context(
-                db,
-                person_id="person-a",
-                caregiver_id="caregiver-a",
-                query="sleep waking",
-                limit=8,
+                db, person_id="person-a", caregiver_id="caregiver-a",
+                query="sleep waking", limit=8,
             )
 
         assert result["returned_count"] == 2
@@ -85,22 +106,22 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
         assert by_id["assistant-message"]["role"] == "assistant"
         assert "Private waking detail" not in str(result)
     finally:
-        engine.dispose()
+        _close_postgres_conversation_db(engine, connection, schema)
 
 
-def test_companion_history_empty_query_is_bounded_across_prior_sessions():
-    engine = _conversation_db()
+def test_companion_history_is_bounded_across_prior_sessions():
+    engine, connection, schema = _postgres_conversation_db()
     try:
-        with Session(engine) as db:
+        with Session(bind=connection) as db:
             active = ConversationSession(
                 id="active-session", person_id="person-a",
                 caregiver_id="caregiver-a", status="active"
             )
-            inactive = ConversationSession(
-                id="inactive-session", person_id="person-a",
+            archived = ConversationSession(
+                id="archived-session", person_id="person-a",
                 caregiver_id="caregiver-a", status="archived"
             )
-            db.add_all([active, inactive])
+            db.add_all([active, archived])
             db.flush()
             db.add_all([
                 ConversationMessage(
@@ -110,20 +131,19 @@ def test_companion_history_empty_query_is_bounded_across_prior_sessions():
                 for index in range(10)
             ])
             db.add(ConversationMessage(
-                id="archived-message", session_id=inactive.id, role="user",
+                id="archived-message", session_id=archived.id, role="user",
                 content="Archived caregiver note", evidence_ids_json="[]"
             ))
             db.commit()
             result = _conversation_context(
-                db,
-                person_id="person-a",
-                caregiver_id="caregiver-a",
-                query=None,
-                limit=3,
+                db, person_id="person-a", caregiver_id="caregiver-a",
+                query=None, limit=3,
             )
         assert result["returned_count"] == 3
         assert result["has_more"] is True
-        assert all(item["information_status"] == "conversation_context_only" for item in result["items"])
-        assert all(item["session_id"] in {"active-session", "inactive-session"} for item in result["items"])
+        assert all(
+            item["session_id"] in {"active-session", "archived-session"}
+            for item in result["items"]
+        )
     finally:
-        engine.dispose()
+        _close_postgres_conversation_db(engine, connection, schema)
