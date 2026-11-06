@@ -76,19 +76,19 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
                 limit=8,
             )
 
-        assert result["returned_count"] == 1
-        item = result["items"][0]
-        assert item["id"] == "own-message"
-        assert item["information_status"] == "conversation_context_only"
-        assert item["is_lcr_assertion"] is False
-        assert item["is_care_evidence"] is False
-        assert "Unsupported assistant summary" not in str(result)
+        assert result["returned_count"] == 2
+        by_id = {item["id"]: item for item in result["items"]}
+        assert set(by_id) == {"own-message", "assistant-message"}
+        assert all(item["information_status"] == "conversation_context_only" for item in by_id.values())
+        assert all(item["is_lcr_assertion"] is False for item in by_id.values())
+        assert all(item["is_care_evidence"] is False for item in by_id.values())
+        assert by_id["assistant-message"]["role"] == "assistant"
         assert "Private waking detail" not in str(result)
     finally:
         engine.dispose()
 
 
-def test_companion_history_empty_query_is_bounded_and_excludes_inactive_sessions():
+def test_companion_history_empty_query_is_bounded_across_prior_sessions():
     engine = _conversation_db()
     try:
         with Session(engine) as db:
@@ -124,6 +124,6 @@ def test_companion_history_empty_query_is_bounded_and_excludes_inactive_sessions
         assert result["returned_count"] == 3
         assert result["has_more"] is True
         assert all(item["information_status"] == "conversation_context_only" for item in result["items"])
-        assert "Archived caregiver note" not in str(result)
+        assert all(item["session_id"] in {"active-session", "inactive-session"} for item in result["items"])
     finally:
         engine.dispose()
