@@ -37,15 +37,13 @@ def _conversation_context(
     query: str | None,
     limit: int,
 ) -> dict[str, Any]:
-    """Read relevant prior caregiver turns, never assistant-generated claims."""
+    """Read relevant prior turns; keep all dialogue explicitly non-evidentiary."""
     statement = (
         db.query(ConversationMessage, ConversationSession)
         .join(ConversationSession, ConversationSession.id == ConversationMessage.session_id)
         .filter(
             ConversationSession.person_id == str(person_id),
             ConversationSession.caregiver_id == str(caregiver_id),
-            ConversationSession.status == "active",
-            ConversationMessage.role == "user",
         )
     )
     terms = _query_terms(query)
@@ -64,11 +62,12 @@ def _conversation_context(
         items.append({
             "id": str(message.id),
             "session_id": str(conversation.id),
-            "role": "user",
+            "role": str(message.role or "unknown"),
             "content": (message.content or "")[:MAX_CONVERSATION_MESSAGE_CHARS],
             "event_time": None,
             "recorded_at": message.created_at.isoformat() if message.created_at else None,
             "information_status": "conversation_context_only",
+            "interpretation_limit": "Dialogue is not independent care evidence or an accepted LCR assertion.",
             "is_lcr_assertion": False,
             "is_care_evidence": False,
             "source_attribution": "caregiver_companion_message",
@@ -82,7 +81,7 @@ def _conversation_context(
         "has_more": len(rows) > len(bounded),
         "limit": max(1, min(int(limit), MAX_CONVERSATION_CONTEXT_ITEMS)),
         "interpretation_limit": (
-            "Prior caregiver dialogue is conversational context only. It is not "
+            "Prior Companion dialogue is conversational context only. It is not "
             "a verified care event, accepted LCR assertion, or independent evidence."
         ),
     }
