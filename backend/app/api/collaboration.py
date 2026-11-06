@@ -192,6 +192,8 @@ async def upload_evidence(
         "json": "application/json", "xml": "application/xml", "yaml": "application/yaml",
         "yml": "application/yaml", "pdf": "application/pdf", "jpg": "image/jpeg",
         "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+        "tif": "image/tiff", "tiff": "image/tiff", "bmp": "image/bmp",
+        "heic": "image/heic", "heif": "image/heif",
         "doc": "application/msword",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "rtf": "application/rtf", "eml": "message/rfc822", "msg": "application/vnd.ms-outlook",
@@ -205,7 +207,8 @@ async def upload_evidence(
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
-        "image/jpeg", "image/png", "image/webp", "image/gif",
+        "image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff", "image/bmp",
+        "image/heic", "image/heif",
     }
     octet_stream_document = mime_type == "application/octet-stream" and suffix in {"doc", "docx", "rtf", "eml", "msg"}
     if mime_type not in allowed_mime_types and not octet_stream_document:
@@ -227,6 +230,10 @@ async def upload_evidence(
         "image/png": lambda blob: blob.startswith(b"\x89PNG\r\n\x1a\n"),
         "image/gif": lambda blob: blob.startswith((b"GIF87a", b"GIF89a")),
         "image/webp": lambda blob: len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP",
+        "image/tiff": lambda blob: blob.startswith((b"II*\\x00", b"MM\\x00*")),
+        "image/bmp": lambda blob: blob.startswith(b"BM"),
+        "image/heic": lambda blob: len(blob) >= 12 and blob[4:8] == b"ftyp" and blob[8:12] in {b"heic", b"heix", b"hevc", b"hevx", b"mif1"},
+        "image/heif": lambda blob: len(blob) >= 12 and blob[4:8] == b"ftyp" and blob[8:12] in {b"mif1", b"msf1", b"heic", b"heix"},
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": lambda blob: blob.startswith(b"PK\x03\x04"),
         "application/msword": lambda blob: blob.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
         "application/vnd.ms-outlook": lambda blob: blob.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),

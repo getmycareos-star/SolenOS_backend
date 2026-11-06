@@ -50,7 +50,11 @@ def review_capture_candidate(
     if analysis is None:
         # Do not disclose whether another care record owns this analysis.
         raise HTTPException(status_code=404, detail="Capture analysis not found")
-    if analysis.extraction_status != "available" or not isinstance(analysis.candidates, dict):
+    if not isinstance(analysis.candidates, dict):
+        raise HTTPException(status_code=409, detail="No reviewable extraction candidates are available")
+    if analysis.candidates.get("kind") == "document_extraction_v1":
+        raise HTTPException(status_code=409, detail="Use the document candidate review workflow for this analysis")
+    if analysis.extraction_status != "available":
         raise HTTPException(status_code=409, detail="No reviewable extraction candidates are available")
     candidates_payload = copy.deepcopy(analysis.candidates)
     observations = candidates_payload.get("observations")

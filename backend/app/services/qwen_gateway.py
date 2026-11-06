@@ -6,6 +6,7 @@ Ollama's native HTTP API; it never calls a hosted inference provider.
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 import time
@@ -196,7 +197,7 @@ def qwen_chat(
 def extract_review_candidates(
     source_text: str,
     *,
-    source_event_id: str,
+    source_event_id: str | None,
     source_evidence_id: str | None = None,
 ) -> dict:
     """Return only verbatim-grounded, explicitly review-required candidate observations."""
@@ -249,13 +250,20 @@ def extract_review_candidates(
             continue
         if any(term in observation.casefold() for term in ("diagnosed with", "caused by", "should increase dose", "should stop medication")):
             continue
+        source_start = bounded_source.find(quote)
         candidate = {
             "subject": subject.strip()[:120],
             "observation": observation.strip()[:500],
             "source_quote": quote,
+            "source_span_start": source_start,
+            "source_span_end": source_start + len(quote),
             "review_status": "pending_review",
-            "source_event_id": source_event_id,
         }
+        page_markers = list(re.finditer(r"\[Page\s+(\d+)\]", bounded_source[:source_start]))
+        if page_markers:
+            candidate["source_page_number"] = int(page_markers[-1].group(1))
+        if source_event_id:
+            candidate["source_event_id"] = source_event_id
         if source_evidence_id:
             candidate["source_evidence_id"] = source_evidence_id
         observations.append(candidate)
