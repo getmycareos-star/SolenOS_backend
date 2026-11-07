@@ -144,6 +144,7 @@ def review_capture_candidate(
             updated_by_caregiver_id=caregiver_id,
         )
         db.add(assertion)
+        db.flush()
         candidate["review_status"] = "accepted_by_caregiver"
         candidate["accepted_at"] = reviewed_at
         candidate["accepted_by_caregiver_id"] = caregiver_id
