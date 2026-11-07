@@ -274,6 +274,17 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     )
     assert approval.status_code == 200, approval.text
     assert approval.json()["review_status"] == "approved_for_sharing"
+    approval_retry = client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve",
+        headers=owner_headers,
+        json={
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary", "documents"],
+            "expires_at": expiry,
+        },
+    )
+    assert approval_retry.status_code == 200, approval_retry.text
+    assert approval_retry.json()["review_status"] == "approved_for_sharing"
 
     shared = client.post(
         "/api/v1/handoffs",
@@ -288,6 +299,19 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     )
     assert shared.status_code == 201, shared.text
     handoff_id = shared.json()["id"]
+    shared_retry = client.post(
+        "/api/v1/handoffs",
+        headers={**owner_headers, "X-Request-ID": "postgres-handoff-share-001"},
+        json={
+            "person_id": owner["person"]["id"],
+            "draft_id": draft_id,
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary", "documents"],
+            "expires_at": expiry,
+        },
+    )
+    assert shared_retry.status_code in {200, 201}, shared_retry.text
+    assert shared_retry.json()["id"] == handoff_id
     db = SessionLocal()
     try:
         handoff = db.query(HandoffRecord).filter_by(id=handoff_id).one()
