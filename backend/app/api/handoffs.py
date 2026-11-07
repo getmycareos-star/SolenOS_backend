@@ -295,9 +295,10 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         ).with_for_update().first()
         if approved_draft is None:
             raise HTTPException(status_code=404, detail="Approved handoff draft not found")
-        freshness = _draft_source_freshness(db, approved_draft)
-        if freshness.get("status") != "current":
-            raise HTTPException(status_code=409, detail="The approved draft sources changed or cannot be revalidated; sharing was refused")
+        if approved_draft.review_status != "shared":
+            freshness = _draft_source_freshness(db, approved_draft)
+            if freshness.get("status") != "current":
+                raise HTTPException(status_code=409, detail="The approved draft sources changed or cannot be revalidated; sharing was refused")
         if (
             approved_draft.review_status not in {"approved_for_sharing", "shared"}
             or approved_draft.approved_by_caregiver_id != caregiver_id
