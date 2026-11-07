@@ -144,3 +144,54 @@ class NotificationReadReceipt(Base):
     record_metadata = Column("metadata", JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+
+class HandoffDraft(Base):
+    """Caregiver-owned, versioned handoff draft; never a shared HandoffRecord."""
+    __tablename__ = "handoff_drafts"
+    __table_args__ = (
+        UniqueConstraint("person_id", "caregiver_id", "request_id", name="uq_handoff_drafts_request"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_id)
+    person_id = Column(String(255), nullable=False, index=True)
+    caregiver_id = Column(String(255), nullable=False, index=True)
+    request_id = Column(String(255), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    purpose = Column(String(64), nullable=False)
+    audience = Column(String(32), nullable=False)
+    window_days = Column(Integer, nullable=False)
+    structured_content = Column(JSON, nullable=False, default=dict)
+    source_snapshot = Column(JSON, nullable=False, default=dict)
+    generation_metadata = Column(JSON, nullable=False, default=dict)
+    generation_status = Column(String(48), nullable=False, default="not_generated")
+    validation_status = Column(String(48), nullable=False, default="not_assessed")
+    review_status = Column(String(48), nullable=False, default="pending_review")
+    revision_number = Column(Integer, nullable=False, default=1)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by_caregiver_id = Column(String(255), nullable=True)
+    approval_revision = Column(Integer, nullable=True)
+    approval_content_sha256 = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class HandoffDraftRevision(Base):
+    """Append-only content/source snapshot for every saved caregiver draft revision."""
+    __tablename__ = "handoff_draft_revisions"
+    __table_args__ = (
+        UniqueConstraint("draft_id", "revision_number", name="uq_handoff_draft_revision_number"),
+    )
+
+    id = Column(String(36), primary_key=True, default=_id)
+    draft_id = Column(String(36), nullable=False, index=True)
+    person_id = Column(String(255), nullable=False, index=True)
+    caregiver_id = Column(String(255), nullable=False, index=True)
+    revision_number = Column(Integer, nullable=False)
+    content = Column(JSON, nullable=False)
+    source_snapshot = Column(JSON, nullable=False)
+    content_sha256 = Column(String(64), nullable=False)
+    change_type = Column(String(32), nullable=False)
+    created_by_caregiver_id = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
