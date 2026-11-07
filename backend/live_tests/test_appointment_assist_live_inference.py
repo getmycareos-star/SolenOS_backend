@@ -107,7 +107,7 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
         assert "scheduled" in data["reply"].casefold(), f"Qwen did not ground its response in the saved appointment status: {data['reply']!r}"
         assert appointment_id not in data["reply"], "Caregiver-facing Qwen output must not expose internal appointment IDs"
         assert not __import__("re").search(
-            r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
             data["reply"],
             __import__("re").IGNORECASE,
         ), "Caregiver-facing Qwen output must not expose UUIDs"
