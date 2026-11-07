@@ -46,6 +46,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError(
-        "This reconciliation is forward-only; event-time text must be preserved."
-    )
+    # Deliberately retain the nullable text column. This reconciliation may
+    # be replayed after a test rollback; dropping it would discard event-time
+    # provenance. The subsequent upgrade is safe because upgrade() is
+    # idempotent when the column already exists.
+    return None
