@@ -1466,7 +1466,7 @@ def prepare_handoff_draft(
                     "epistemic_status": str(epistemic_value) if epistemic_value is not None else "not_recorded",
                     "record_status": str(record_status) if record_status is not None else "not_recorded",
                     "evidence_ids": _explicit_evidence_ids(row),
-                    "text": text,
+                    "text": source_text_value,
                     "stale_warning": bool(recorded_time is not None and _iso(recorded_time) < (now - timedelta(days=30)).isoformat()),
                 })
 
