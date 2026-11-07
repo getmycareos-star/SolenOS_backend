@@ -1,10 +1,16 @@
 """Persistence helpers for Companion proposals using the shared AI-output governance records."""
 import json
+import logging
 import uuid
+
+from sqlalchemy.orm import sessionmaker
 
 from sqlalchemy.orm import Session
 
 from app.models.ai_output_governance import AIOutputLCRProposal
+from app.services.qwen_gateway import extract_companion_care_candidates
+
+logger = logging.getLogger(__name__)
 
 
 def proposal_payload(proposal: AIOutputLCRProposal) -> dict:
@@ -89,3 +95,39 @@ def persist_companion_candidates(
     else:
         db.rollback()
     return output
+
+
+
+def process_companion_care_update_message(
+    bind,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    conversation_id: str,
+    message_id: str,
+    source_text: str,
+) -> None:
+    """Run candidate extraction after the chat response has been sent.
+
+    A separate session is created from the request's database bind. Model
+    latency and failures therefore cannot hold the Companion request open or
+    roll back the already-committed conversation pair.
+    """
+    session_factory = sessionmaker(bind=bind, expire_on_commit=False)
+    db = session_factory()
+    try:
+        extraction = extract_companion_care_candidates(source_text)
+        persist_companion_candidates(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            source_text=source_text,
+            extraction=extraction,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Companion care-update identification failed after message persistence")
+    finally:
+        db.close()
