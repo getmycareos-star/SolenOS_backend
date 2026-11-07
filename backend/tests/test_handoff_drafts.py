@@ -693,3 +693,70 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         assert audit.target_id == draft_id
     finally:
         db.close()
+
+
+def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(client, monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    with engine.begin() as connection:
+        connection.execute(
+            text("""INSERT INTO care_facts
+                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+            {
+                "id": "stale-handoff-fact",
+                "person_id": person_id,
+                "fact_type": "caregiver_observation",
+                "fact_value": "Caregiver reports a calm morning.",
+                "epistemic_status": "reported",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def grounded_generation(records, purpose, audience):
+        source = next(row for row in records if row["source_id"] == "stale-handoff-fact")
+        return {
+            "status": "generated",
+            "provider": "ollama",
+            "model": "qwen-test-fixture",
+            "sections": [{
+                "section": "Recent observation",
+                "source_ref": "care_facts:stale-handoff-fact",
+                "text": source["text"],
+            }],
+        }
+
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", grounded_generation)
+    headers = {"Authorization": f"Bearer {session['access_token']}", "X-Request-ID": "stale-draft-source-001"}
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "family_transition", "window_days": 30},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE care_facts SET fact_value = :value WHERE id = :id"),
+            {"value": "Caregiver reports a difficult morning.", "id": "stale-handoff-fact"},
+        )
+
+    retrieved = test_client.get(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert retrieved.json()["source_freshness"]["status"] == "stale"
+    approval = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "recipient_caregiver_ids": ["not-a-real-recipient"],
+            "scope": ["lcr_summary"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        },
+    )
+    assert approval.status_code == 409, approval.text
