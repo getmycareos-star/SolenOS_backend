@@ -80,10 +80,8 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "table": "care_assertions",
         "required": True,
         "fields": ["id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value",
-                   "source_event_id", "source_label", "source_text", "source_conversation_id",
-                   "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids",
-                   "assertion_status", "observed_at", "review_after_days", "created_by_caregiver_id",
-                   "recorded_at"],
+                   "source_event_id", "source_label", "source_text", "source_conversation_id", "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids", "assertion_status",
+                   "observed_at", "review_after_days", "created_by_caregiver_id", "recorded_at"],
         "order": ["recorded_at", "created_at"],
     },
     "decisions": {
@@ -645,8 +643,25 @@ def build_lcr_context(
     }
 
 
+def _prompt_safe_context_value(value: Any) -> Any:
+    """Remove opaque database identifiers before care context is sent to a model."""
+    if isinstance(value, dict):
+        return {
+            key: _prompt_safe_context_value(item)
+            for key, item in value.items()
+            if key != "id"
+            and key != "ids"
+            and not key.endswith("_id")
+            and not key.endswith("_ids")
+            and key != "source_record_refs"
+        }
+    if isinstance(value, list):
+        return [_prompt_safe_context_value(item) for item in value]
+    return value
+
+
 def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 14000) -> str:
-    """Serialize context as bounded labelled data, never as instruction-bearing messages."""
+    """Serialize bounded, identifier-free care context as labelled data."""
     header = (
         "LCR context metadata: "
         + json.dumps({
@@ -654,10 +669,10 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             "history_coverage": context.get("history_coverage"),
             "missing_required_sources": context.get("missing_required_sources", []),
             "missing_optional_sources": context.get("missing_optional_sources", []),
-            "evidence_lineage": context.get("evidence_lineage", {
+            "evidence_lineage": _prompt_safe_context_value(context.get("evidence_lineage", {
                 "status": "not_assessed",
                 "interpretation_limit": "No source-lineage assessment was supplied.",
-            }),
+            })),
         }, ensure_ascii=False, separators=(",", ":"))
     )
     chunks = [header]
@@ -670,7 +685,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
         chunks.append(section)
         current_length += len(section)
         for item in source.get("items", []):
-            line = json.dumps(item, ensure_ascii=False, default=str, separators=(",", ":"))
+            line = json.dumps(_prompt_safe_context_value(item), ensure_ascii=False, default=str, separators=(",", ":"))
             if current_length + len(line) + 1 > max_chars:
                 chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
                 return "".join(chunks)

@@ -1,12 +1,15 @@
-"""Live Qwen evaluation through the actual Companion HTTP and database path.
+"""Live Qwen evaluation through the actual Companion HTTP and PostgreSQL path.
 
 This suite is deliberately separate from mocked unit tests. It uses only synthetic
-records in an isolated SQLite database and a real Ollama model supplied by CI.
+records in an isolated PostgreSQL database and a real Ollama model supplied by CI.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
+import logging
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,11 +30,29 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+if os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") == "1" and not DATABASE_URL.startswith(
+    ("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://")
+):
+    raise RuntimeError("Live Companion inference evaluation requires PostgreSQL DATABASE_URL; SQLite is not supported.")
 engine = create_engine(
-    "sqlite:////tmp/solenos-live-inference.db",
-    connect_args={"check_same_thread": False},
+    DATABASE_URL or "postgresql+psycopg2://localhost/solenos_live_inference",
+    pool_pre_ping=True,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def _latency_percentiles(samples_ms: list[float]) -> dict[str, float]:
+    ordered = sorted(samples_ms)
+
+    def percentile(p: float) -> float:
+        position = (len(ordered) - 1) * p
+        lower = int(position)
+        upper = min(lower + 1, len(ordered) - 1)
+        fraction = position - lower
+        return round(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction, 3)
+
+    return {"p50": percentile(0.50), "p95": percentile(0.95), "p99": percentile(0.99)}
 
 
 def override_db():
@@ -84,8 +105,34 @@ def _create_synthetic_record(client: TestClient):
     return session, older_id
 
 
-def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch):
+def test_live_qwen_identifies_only_source_grounded_actual_care_observations():
+    """Exercise the real candidate classifier; no phrase rules or mocked model output."""
+    ordinary_messages = [
+        "Good afternoon. I hope everything is going well today.",
+        "Can you explain the difference between dementia and delirium?",
+        "What questions should I prepare for the next appointment?",
+    ]
+    for message in ordinary_messages:
+        result = extract_companion_care_candidates(message)
+        assert result == {"observations": []}, (
+            f"Ordinary conversation unexpectedly produced a care candidate: {message!r} -> {result!r}"
+        )
+
+    care_disclosure = (
+        "Over the last three evenings, she has needed help finishing her meal."
+    )
+    result = extract_companion_care_candidates(care_disclosure)
+    observations = result.get("observations", [])
+    assert observations, "Live Qwen did not identify the explicitly reported care observation."
+    for candidate in observations:
+        quote = candidate.get("source_quote")
+        assert isinstance(quote, str) and quote in care_disclosure
+        event_time_quote = candidate.get("event_time_quote")
+        assert not event_time_quote or event_time_quote in quote
+
+def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch, caplog):
     """Real model inference must pass a small, fixed, evidence-bounded evaluation."""
+    caplog.set_level(logging.INFO)
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
@@ -252,6 +299,46 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
             assert [row.role for row in saved] == ["user", "assistant"] * 6
         finally:
             db.close()
+
+        # Measure real PostgreSQL retrieval and real Ollama inference separately.
+        # Request IDs must join both stages to the same HTTP request; telemetry is
+        # metadata-only and contains no prompt, response, care ID or care content.
+        stage_samples: dict[str, list[float]] = {"retrieval": [], "inference": []}
+        stage_request_ids: set[str] = set()
+        http_request_ids: set[str] = set()
+        stage_messages = [record.getMessage() for record in caplog.records]
+        for message in stage_messages:
+            stage = re.search(
+                r"companion_stage_profile request_id=([0-9a-f]{32}) stage=(retrieval|inference) duration_ms=([0-9.]+)",
+                message,
+            )
+            if stage:
+                request_id, stage_name, duration = stage.groups()
+                stage_request_ids.add(request_id)
+                stage_samples[stage_name].append(float(duration))
+            if '"event":"http_request"' in message:
+                http_match = re.search(r'"request_id":"([0-9a-f]{32})"', message)
+                if http_match:
+                    http_request_ids.add(http_match.group(1))
+
+        assert stage_samples["retrieval"], "Live Companion emitted no retrieval-stage timing."
+        assert stage_samples["inference"], "Live Companion emitted no real inference-stage timing."
+        assert stage_request_ids.issubset(http_request_ids), "Companion stage timing did not correlate to HTTP request IDs."
+        telemetry = " ".join(
+            message for message in stage_messages
+            if "companion_stage_profile" in message
+        )
+        assert "waking several times overnight" not in telemetry
+        assert "Caregiver reported waking several times overnight" not in telemetry
+        print(json.dumps({
+            "event": "live_companion_stage_benchmark",
+            "scope": "isolated_postgresql_ci_with_live_ollama",
+            "retrieval_samples": len(stage_samples["retrieval"]),
+            "inference_samples": len(stage_samples["inference"]),
+            "retrieval_duration_ms": _latency_percentiles(stage_samples["retrieval"]),
+            "inference_duration_ms": _latency_percentiles(stage_samples["inference"]),
+            "request_ids_correlated": len(stage_request_ids),
+        }, separators=(",", ":")))
     finally:
         client.close()
         app.dependency_overrides.clear()
@@ -367,29 +454,3 @@ def test_live_qwen_companion_care_update_identification_distinguishes_observatio
             "Live Qwen converted ordinary conversation or a general question into a care proposal: "
             f"{message!r} -> {result!r}"
         )
-
-
-def test_live_qwen_identifies_only_source_grounded_actual_care_observations():
-    """Exercise the real candidate classifier; no phrase rules or mocked model output."""
-    ordinary_messages = [
-        "Good afternoon. I hope everything is going well today.",
-        "Can you explain the difference between dementia and delirium?",
-        "What questions should I prepare for the next appointment?",
-    ]
-    for message in ordinary_messages:
-        result = extract_companion_care_candidates(message)
-        assert result == {"observations": []}, (
-            f"Ordinary conversation unexpectedly produced a care candidate: {message!r} -> {result!r}"
-        )
-
-    care_disclosure = (
-        "Over the last three evenings, she has needed help finishing her meal."
-    )
-    result = extract_companion_care_candidates(care_disclosure)
-    observations = result.get("observations", [])
-    assert observations, "Live Qwen did not identify the explicitly reported care observation."
-    for candidate in observations:
-        quote = candidate.get("source_quote")
-        assert isinstance(quote, str) and quote in care_disclosure
-        event_time_quote = candidate.get("event_time_quote")
-        assert not event_time_quote or event_time_quote in quote

@@ -77,13 +77,15 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
     engine, connection, schema = _postgres_conversation_db()
     try:
         with Session(bind=connection) as db:
-            person = Person(id="person-a", name="Care recipient A")
-            other_person_record = Person(id="person-b", name="Care recipient B")
-            db.add_all([person, other_person_record])
+            db.add_all([
+                Person(id="person-a", name="Care recipient A"),
+                Person(id="person-b", name="Care recipient B"),
+            ])
             db.flush()
             db.add_all([
                 Caregiver(id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"),
                 Caregiver(id="caregiver-b", name="Caregiver B", relationship="family", person_id="person-a"),
+                Caregiver(id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b"),
             ])
             db.flush()
             own = ConversationSession(
@@ -95,7 +97,7 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
             )
             other_person = ConversationSession(
                 id="other-person-session", person_id="person-b",
-                caregiver_id="caregiver-a", status="active"
+                caregiver_id="caregiver-c", status="active"
             )
             db.add_all([own, other_caregiver, other_person])
             db.flush()
@@ -143,12 +145,9 @@ def test_companion_history_is_bounded_across_prior_sessions():
     engine, connection, schema = _postgres_conversation_db()
     try:
         with Session(bind=connection) as db:
-            person = Person(id="person-a", name="Care recipient A")
-            db.add(person)
+            db.add(Person(id="person-a", name="Care recipient A"))
             db.flush()
-            db.add(Caregiver(
-                id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"
-            ))
+            db.add(Caregiver(id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"))
             db.flush()
             active = ConversationSession(
                 id="active-session", person_id="person-a",
@@ -202,7 +201,9 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
             caregiver_c = Caregiver(
                 id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b"
             )
-            db.add_all([person, other_person, caregiver, caregiver_b, caregiver_c])
+            db.add_all([person, other_person])
+            db.flush()
+            db.add_all([caregiver, caregiver_b, caregiver_c])
             db.flush()
             event = CareEvent(
                 id="daily-care-event", person_id="person-a", event_type="daily_observation",

@@ -84,7 +84,13 @@ def review_records():
             source_text="Separate care record evidence.",
             uploaded_by_caregiver_id=caregiver_b.id, source_type="caregiver_report",
         )
-        db.add_all([evidence_a, evidence_b])
+        evidence_replacement = Evidence(
+            id="review-evidence-replacement", person_id=person_a_id, type="caregiver_report",
+            source_text="No independent confirmation of the appointment is present in the reviewed material.",
+            uploaded_by_caregiver_id=caregiver_a.id, source_type="caregiver_report",
+            time_provenance="reviewer_observation",
+        )
+        db.add_all([evidence_a, evidence_b, evidence_replacement])
         db.commit()
     finally:
         db.close()
@@ -542,12 +548,13 @@ def test_claim_assessments_require_exact_source_passages_and_preserve_version_hi
         "subject_type": "appointment",
         "subject_id": "appointment-evidence-test",
         "field": "attendance",
-        "assertion_kind": "current_state",
+        "assertion_kind": "time_bound_observation",
+        "observed_at": "2026-10-28T09:30:00Z",
         "review_after_days": 30,
         "asserted_value": "Attendance has not been independently confirmed.",
         "source_label": "Review note",
         "source_text": "Assessment remains uncertain.",
-        "evidence_ids": [],
+        "evidence_ids": ["review-evidence-replacement"],
     })
     assert replacement_claim_response.status_code == 201, replacement_claim_response.text
     replacement_claim_id = replacement_claim_response.json()["id"]
@@ -801,7 +808,7 @@ def test_generic_care_continuity_writes_reject_foreign_or_missing_evidence_ids(r
         json={
             "action_id": "appointment-action-a",
             "action_type": "appointment",
-            "outcome_status": "reported",
+            "outcome_status": "completed",
             "evidence_ids": ["review-evidence-b"],
         },
     )
@@ -813,7 +820,7 @@ def test_generic_care_continuity_writes_reject_foreign_or_missing_evidence_ids(r
         json={
             "action_id": "appointment-action-a",
             "action_type": "appointment",
-            "outcome_status": "reported",
+            "outcome_status": "completed",
             "evidence_ids": ["evidence-that-does-not-exist"],
         },
     )
@@ -824,7 +831,7 @@ def test_generic_care_continuity_writes_reject_foreign_or_missing_evidence_ids(r
         json={
             "action_id": "appointment-action-a",
             "action_type": "appointment",
-            "outcome_status": "reported",
+            "outcome_status": "completed",
             "evidence_ids": ["review-evidence-a"],
         },
     )

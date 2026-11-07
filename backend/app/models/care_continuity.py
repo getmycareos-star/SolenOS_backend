@@ -99,6 +99,7 @@ class CareActionOutcome(Base):
     __tablename__ = "care_action_outcomes"
     __table_args__ = (
         Index("ix_care_action_outcomes_person_action", "person_id", "action_type", "action_id"),
+        Index("uq_care_action_outcomes_person_action_idempotency", "person_id", "action_id", "idempotency_key", unique=True),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -110,7 +111,25 @@ class CareActionOutcome(Base):
     correction_text = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=False, default=list)
     created_by_caregiver_id = Column(String, nullable=True)
+    idempotency_key = Column(String(128), nullable=True)
+    idempotency_request_sha256 = Column(String(64), nullable=True)
+    related_outcome_id = Column(String(36), nullable=True)
+    review_decision = Column(String(60), nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=True)
+    received_by_caregiver_id = Column(String(255), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by_caregiver_id = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(CareActionOutcome, "before_update")
+def _prevent_care_action_outcome_update(mapper, connection, target):
+    raise ValueError("Care action outcome history is append-only")
+
+
+@event.listens_for(CareActionOutcome, "before_delete")
+def _prevent_care_action_outcome_delete(mapper, connection, target):
+    raise ValueError("Care action outcome history is append-only")
 
 
 class CareDeltaRun(Base):
