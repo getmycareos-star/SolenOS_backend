@@ -3272,9 +3272,10 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
     care_update_candidates = []
-    if not emergency:
+    if not emergency and not _is_casual_greeting(user_text):
         # FastAPI sends the validated conversation response before this background
-        # task performs the separate care-update inference. The original user and
+        # task performs the separate care-update inference. Casual greetings and
+        # emergency responses never create care-review jobs. The original user and
         # assistant messages are already committed and cannot be rolled back by it.
         background_tasks.add_task(
             process_companion_care_update_message,
