@@ -33,8 +33,13 @@ def test_alembic_revision_graph_has_one_resolvable_head():
 
     workflow_merge = script.get_revision("20261102_02_workflow_integrity_merge")
     assert workflow_merge is not None
-    assert len(workflow_merge.revision) > 32
-    merge_file = backend_dir / "alembic" / "versions" / "20261102_02_workflow_integrity_merge.py"
-    merge_source = merge_file.read_text(encoding="utf-8")
-    assert 'inspect(bind).has_table("alembic_version")' in merge_source
-    assert "String(length=64)" in merge_source
+    assert workflow_merge.revision == "20261102_02_wf_integrity_merge"
+    assert len(workflow_merge.revision) <= 32
+
+    appointment_handoff_merge = script.get_revision("20261107_03_appt_handoff_merge")
+    assert appointment_handoff_merge is not None
+    assert set(appointment_handoff_merge.down_revision) == {
+        "20261106_02_action_results",
+        "20261107_02_handoff_drafts",
+    }
+    assert script.get_heads() == ["20261107_03_appt_handoff_merge"]
