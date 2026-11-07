@@ -91,7 +91,6 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     from app.models.collaboration import EvidenceUpload
     from app.models.privacy_delivery import (
         AuditLogEvent,
-        HandoffAcknowledgement,
         HandoffDraft,
         HandoffDraftRevision,
         HandoffRecord,
