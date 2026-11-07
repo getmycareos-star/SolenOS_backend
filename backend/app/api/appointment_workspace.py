@@ -120,6 +120,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
     if payload.idempotency_key:
         existing = db.query(AppointmentWorkspaceRecord).filter(
             AppointmentWorkspaceRecord.person_id == person_id,
+            AppointmentWorkspaceRecord.created_by_caregiver_id == caregiver_id,
             AppointmentWorkspaceRecord.idempotency_key == payload.idempotency_key,
         ).first()
         if existing is not None:
@@ -156,6 +157,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         if payload.idempotency_key:
             existing = db.query(AppointmentWorkspaceRecord).filter(
                 AppointmentWorkspaceRecord.person_id == person_id,
+                AppointmentWorkspaceRecord.created_by_caregiver_id == caregiver_id,
                 AppointmentWorkspaceRecord.idempotency_key == payload.idempotency_key,
             ).first()
             if existing is not None and existing.idempotency_request_sha256 == request_fingerprint:
@@ -922,6 +924,7 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
     if payload.idempotency_key:
         prior_revision = db.query(AppointmentWorkspaceRevision).filter(
             AppointmentWorkspaceRevision.record_id == row.id,
+            AppointmentWorkspaceRevision.changed_by_caregiver_id == caregiver_id,
             AppointmentWorkspaceRevision.idempotency_key == payload.idempotency_key,
         ).first()
         if prior_revision is not None:
@@ -965,6 +968,7 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
         if payload.idempotency_key:
             prior_revision = db.query(AppointmentWorkspaceRevision).filter(
                 AppointmentWorkspaceRevision.record_id == record_id,
+                AppointmentWorkspaceRevision.changed_by_caregiver_id == caregiver_id,
                 AppointmentWorkspaceRevision.idempotency_key == payload.idempotency_key,
             ).first()
             if prior_revision is not None and prior_revision.idempotency_request_sha256 == update_fingerprint:
