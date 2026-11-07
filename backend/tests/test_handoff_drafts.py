@@ -1020,3 +1020,66 @@ def test_qwen_handoff_generation_reports_real_inference_failures(monkeypatch, fa
     assert result["status"] == "unavailable"
     assert result["sections"] == []
     assert result["provider"] == "ollama"
+
+
+def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    with engine.begin() as connection:
+        connection.execute(
+            text("""INSERT INTO care_facts
+                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+            {
+                "id": "handoff-before-new-source",
+                "person_id": person_id,
+                "fact_type": "caregiver_observation",
+                "fact_value": "Caregiver reports a settled morning.",
+                "epistemic_status": "reported",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def grounded_generation(records, purpose, audience):
+        source = next(row for row in records if row["source_id"] == "handoff-before-new-source")
+        return {
+            "status": "generated",
+            "provider": "ollama",
+            "model": "qwen-test-fixture",
+            "sections": [{
+                "section": "Recent observations and changes",
+                "source_ref": "care_facts:handoff-before-new-source",
+                "text": source["text"],
+            }],
+        }
+
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", grounded_generation)
+    headers = {"Authorization": f"Bearer {session['access_token']}", "X-Request-ID": "new-source-after-prepare-001"}
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "family_transition", "window_days": 30},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("""INSERT INTO care_facts
+                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+            {
+                "id": "handoff-after-new-source",
+                "person_id": person_id,
+                "fact_type": "caregiver_observation",
+                "fact_value": "Caregiver reports a changed afternoon routine.",
+                "epistemic_status": "reported",
+                "created_at": (datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat(),
+            },
+        )
+
+    retrieved = test_client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=headers)
+    assert retrieved.status_code == 200, retrieved.text
+    assert retrieved.json()["source_freshness"]["status"] == "stale"
