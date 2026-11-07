@@ -536,6 +536,76 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 current = _fingerprint(dict(row))
             if current != expected:
                 stale.append(f"{source_table}:{source_id}")
+        snapshot_ids_by_table = {}
+        for item in source_records:
+            if isinstance(item, dict) and item.get("source_table") and item.get("source_id"):
+                snapshot_ids_by_table.setdefault(item["source_table"], set()).add(str(item["source_id"]))
+        created_after = draft.created_at
+        if created_after is not None:
+            for table_name in SOURCES:
+                if not inspector.has_table(table_name):
+                    continue
+                table = Table(table_name, metadata, autoload_with=bind)
+                if not {"id", "person_id"}.issubset(set(table.c.keys())):
+                    continue
+                timestamp_name = next(
+                    (name for name in ("recorded_at", "created_at", "uploaded_at", "updated_at") if name in table.c),
+                    None,
+                )
+                if timestamp_name is None:
+                    continue
+                query = select(table.c.id).where(
+                    table.c.person_id == draft.person_id,
+                    table.c[timestamp_name] > created_after,
+                )
+                if table_name == "care_events" and "event_type" in table.c:
+                    query = query.where(table.c.event_type.notin_(DAILY_CARE_EVENT_TYPES))
+                if SOURCES[table_name].get("require_caregiver_owned_evidence"):
+                    evidence_link_column = SOURCES[table_name].get("evidence_link_column", "source_evidence_id")
+                    if not inspector.has_table("evidence") or evidence_link_column not in table.c:
+                        unknown.append(f"new_source_check:{table_name}")
+                        continue
+                    evidence_table = Table("evidence", metadata, autoload_with=bind)
+                    query = query.join(
+                        evidence_table,
+                        table.c[evidence_link_column] == evidence_table.c.id,
+                    ).where(
+                        evidence_table.c.person_id == draft.person_id,
+                        evidence_table.c.uploaded_by_caregiver_id == draft.caregiver_id,
+                    )
+                new_ids = {
+                    str(value) for value in db.execute(query).scalars().all()
+                    if str(value) not in snapshot_ids_by_table.get(table_name, set())
+                }
+                if new_ids:
+                    stale.append(f"new_records:{table_name}")
+            if inspector.has_table("care_events"):
+                event_table = Table("care_events", metadata, autoload_with=bind)
+                if {"id", "person_id", "event_type", "recorded_at"}.issubset(set(event_table.c.keys())):
+                    new_daily = db.execute(
+                        select(event_table.c.id).where(
+                            event_table.c.person_id == draft.person_id,
+                            event_table.c.event_type.in_(DAILY_CARE_EVENT_TYPES),
+                            event_table.c.recorded_at > created_after,
+                        )
+                    ).scalars().all()
+                    known_daily = snapshot_ids_by_table.get("care_events", set())
+                    if any(str(value) not in known_daily for value in new_daily):
+                        stale.append("new_records:daily_care")
+            if inspector.has_table("evidence"):
+                evidence_table = Table("evidence", metadata, autoload_with=bind)
+                if {"id", "person_id", "type", "uploaded_by_caregiver_id", "uploaded_at"}.issubset(set(evidence_table.c.keys())):
+                    new_documents = db.execute(
+                        select(evidence_table.c.id).where(
+                            evidence_table.c.person_id == draft.person_id,
+                            evidence_table.c.type == "document",
+                            evidence_table.c.uploaded_by_caregiver_id == draft.caregiver_id,
+                            evidence_table.c.uploaded_at > created_after,
+                        )
+                    ).scalars().all()
+                    known_documents = snapshot_ids_by_table.get("evidence_uploads", set())
+                    if any(str(value) not in known_documents for value in new_documents):
+                        stale.append("new_records:documents")
         if stale:
             return {"status": "stale", "stale_source_count": len(stale), "unknown_source_count": len(unknown)}
         if unknown:
