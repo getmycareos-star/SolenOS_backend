@@ -152,6 +152,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         assert assertion.created_by_caregiver_id == session["caregiver"]["id"]
         assert assertion.assertion_status == "caregiver_reviewed"
         assert assertion.asserted_value == "sleep: Mum slept poorly last night."
+        assert assertion.source_text == source
     finally:
         db.close()
 
