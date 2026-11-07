@@ -1,0 +1,59 @@
+name: Companion grounding PostgreSQL integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'ci/**']
+    paths:
+      - "backend/app/api/collaboration.py"
+      - "backend/app/services/unified_lcr_retrieval.py"
+      - "backend/tests/test_companion_response_contract.py"
+      - "backend/tests/test_companion_care_update_postgres.py"
+      - "backend/tests/test_unified_lcr_retrieval.py"
+      - ".github/workflows/companion-grounding-postgres.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  companion-grounding-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_companion
+          POSTGRES_PASSWORD: solenos_companion_ci
+          POSTGRES_DB: solenos_companion
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_companion -d solenos_companion"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://solenos_companion:solenos_companion_ci@localhost:5432/solenos_companion
+      SOLENOS_COMPANION_TEST_DATABASE_URL: postgresql+psycopg://solenos_companion:solenos_companion_ci@localhost:5432/solenos_companion
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and PostgreSQL test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx 'psycopg[binary]'
+      - name: Apply complete Alembic migration chain
+        working-directory: backend
+        run: python -m alembic upgrade head
+      - name: Verify Companion-to-LCR lifecycle, source references and retrieval against PostgreSQL
+        run: >-
+          python -m pytest
+          backend/tests/test_companion_care_update_postgres.py
+          backend/tests/test_companion_response_contract.py
+          backend/tests/test_unified_lcr_retrieval.py
+          -q -rs

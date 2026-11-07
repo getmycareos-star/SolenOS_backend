@@ -137,6 +137,28 @@ class QwenAssistRequest(BaseModel):
     appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
+def _request_anonymous_session_id(request: Request, db: Session, person_id: str, caregiver_id: str) -> str:
+    """Resolve the authenticated bearer session ID for post-response work."""
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if session_id:
+        return str(session_id)
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.person_id == str(person_id),
+        AnonymousSession.caregiver_id == str(caregiver_id),
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    return str(session.id)
+
+
 def _scope(request: Request, db: Session) -> tuple[str, str]:
     # Prefer middleware-scoped identity. Fallback resolves the same bearer
     # capability from the database; request-body IDs are never credentials.
@@ -903,10 +925,23 @@ def _humanize_model_context_line(line: str) -> str:
         ("filename", "filename"),
         ("description", "description"),
         ("source_text", "document text"),
-        ("fact_value", "care fact reported value"),
         ("summary", "summary"),
         ("content", "content"),
         ("field", "field"),
+        ("asserted_value", "accepted LCR assertion"),
+        ("fact_type", "care fact type"),
+        ("fact_value", "care fact reported value"),
+        ("epistemic_status", "information status"),
+        ("assertion_status", "assertion review status"),
+        ("assertion_kind", "assertion type"),
+        ("source_label", "source"),
+        ("source_type", "source type"),
+        ("source_quote", "original source quotation"),
+        ("source_passage", "source passage"),
+        ("ambiguity_note", "recorded ambiguity"),
+        ("gap_reason", "reason information is missing"),
+        ("known_value", "known value"),
+        ("conflict_type", "conflict type"),
         ("value", "recorded value"),
         ("status", "status"),
         ("freshness_status", "freshness review status"),
@@ -1046,6 +1081,165 @@ def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
     )
 
 
+def _contains_promoted_unreviewed_claim(reply: str, source_text: str) -> bool:
+    """Require attribution when support comes only from unreviewed or conversational sources.
+
+    This narrow deterministic guard is not a general semantic-entailment proof.
+    It prevents common affirmative person-care statements from shedding the
+    source status carried by extracted documents, pending caregiver reports,
+    and prior Companion dialogue.
+    """
+    source_lines = (source_text or "").splitlines()
+    source = (source_text or "").casefold()
+    unreviewed_markers = (
+        "document_extracted_unreviewed",
+        "caregiver_reported_pending_review",
+        "caregiver_reported_unverified",
+        "conversation_context_only",
+    )
+    if not any(marker in source for marker in unreviewed_markers):
+        return False
+    accepted_lines = [
+        line.casefold() for line in source_lines
+        if "caregiver_accepted_assertion" in line or "caregiver_reviewed_legacy_assertion" in line
+    ]
+
+    attribution = re.compile(
+        r"\b(?:document|letter|note|record|message|conversation)\s+"
+        r"(?:says|states|reports|records|mentions|describes|indicates)\b|"
+        r"\b(?:you|the caregiver|a caregiver|your earlier message|the earlier conversation)\s+"
+        r"(?:previously\s+)?(?:reported|said|mentioned|described|wrote)\b|"
+        r"\b(?:you|the caregiver)\s+(?:mentioned|reported|said)\s+earlier\b|"
+        r"\baccording to\s+(?:the\s+)?(?:document|letter|note|caregiver|message)\b|"
+        r"\b(?:unreviewed|unverified|not yet reviewed|pending review)\b",
+        re.IGNORECASE,
+    )
+    factual_person_claim = re.compile(
+        r"\b(?:mum|mom|mother|dad|father|the person|the patient|she|he|they)\s+"
+        r"(?:has|had|is|was|were|are|takes|took|uses|used|needs|needed|experienced|"
+        r"experiences|fell|slept|missed|received|started|stopped|improved|worsened|"
+        r"developed|shows|showed)\b",
+        re.IGNORECASE,
+    )
+    stopwords = {"has", "had", "is", "was", "were", "are", "the", "a", "an", "that", "this", "with", "for", "and", "or", "to", "of"}
+    for sentence in re.split(r"(?<=[.!?])\s+", (reply or "").strip()):
+        if not factual_person_claim.search(sentence) or attribution.search(sentence):
+            continue
+        claim_terms = set(re.findall(r"[a-z0-9']{3,}", sentence.casefold())) - stopwords
+        accepted_supports_claim = any(
+            claim_terms and claim_terms.issubset(set(re.findall(r"[a-z0-9']{3,}", line)))
+            for line in accepted_lines
+        )
+        if not accepted_supports_claim:
+            logger.warning("Qwen care-grounding rejection: rule=promoted_unreviewed_source_claim")
+            return True
+    return False
+
+
+_GROUNDING_STOPWORDS = {
+    "about", "after", "again", "also", "and", "are", "because", "been", "before",
+    "being", "but", "can", "could", "did", "does", "doing", "during", "each",
+    "for", "from", "had", "has", "have", "her", "here", "him", "his", "how",
+    "into", "its", "just", "may", "might", "more", "most", "not", "now", "off",
+    "only", "our", "out", "over", "same", "she", "should", "some", "such", "than",
+    "that", "the", "their", "them", "then", "there", "these", "they", "this", "those",
+    "through", "today", "under", "until", "very", "was", "were", "what", "when",
+    "where", "which", "while", "who", "will", "with", "would", "you", "your",
+    "mum", "mom", "mother", "dad", "father", "person", "patient", "caregiver",
+}
+
+
+def _contains_unsupported_factual_claim(reply: str, authorized_lines: list[str]) -> bool:
+    """Reject factual sentences whose meaningful terms lack source-text support.
+
+    This is a conservative lexical entailment screen, not a substitute for a
+    trained semantic entailment model. It fails closed on concrete factual
+    sentences with insufficient overlap and leaves non-factual guidance alone.
+    """
+    source_lines = [str(line).casefold() for line in (authorized_lines or []) if line]
+    if not source_lines:
+        return any(
+            re.search(
+                r"\b(?:takes|took|uses|used|needs|needed|fell|slept|missed|received|started|stopped|"
+                r"improved|worsened|developed|diagnosed|prescribed|recommended|ordered|measured|"
+                r"weighed|increased|decreased|rose|dropped|experienced|experiences)\b",
+                sentence, re.IGNORECASE,
+            )
+            for sentence in re.split(r"(?<=[.!?])\s+", reply or "")
+        )
+
+    factual_predicate = re.compile(
+        r"\b(?:takes|took|uses|used|needs|needed|fell|slept|missed|received|started|stopped|"
+        r"improved|worsened|developed|shows|showed|diagnosed|prescribed|recommended|"
+        r"ordered|measured|weighed|increased|decreased|rose|dropped|experienced|experiences)\b|"
+        r"\b(?:mum|mom|mother|dad|father|she|he|they|the person|the patient)\s+(?:has|had)\s+"
+        r"[a-z]",
+        re.IGNORECASE,
+    )
+    epistemic_only = re.compile(
+        r"\b(?:cannot|can't|unable|not enough|does not establish|do not establish|"
+        r"not recorded|not available|unknown|unclear|uncertain|unresolved|"
+        r"cannot verify|does not prove|not a truth judgment|not enough information)\b",
+        re.IGNORECASE,
+    )
+    for sentence in re.split(r"(?<=[.!?])\s+", (reply or "").strip()):
+        sentence = sentence.strip()
+        if not sentence or not factual_predicate.search(sentence) or epistemic_only.search(sentence):
+            continue
+        terms = {
+            token for token in re.findall(r"[a-z][a-z0-9'-]{2,}", sentence.casefold())
+            if token not in _GROUNDING_STOPWORDS
+        }
+        if not terms:
+            continue
+        # One source line must support the claim; aggregate overlap across
+        # unrelated records is not enough to establish a coherent fact.
+        best_overlap = max(
+            (len(terms & set(re.findall(r"[a-z][a-z0-9'-]{2,}", line))) / len(terms)
+             for line in source_lines),
+            default=0.0,
+        )
+        minimum_terms = 1 if len(terms) == 1 else 2
+        if len(terms) >= minimum_terms and best_overlap < 0.72:
+            logger.warning("Qwen care-grounding rejection: rule=unsupported_factual_sentence")
+            return True
+    return False
+
+
+def _contains_stale_evidence_currentness_claim(reply: str, context_lines: list[str]) -> bool:
+    """Do not describe stale or unassessed evidence as current."""
+    context = "\n".join(context_lines or []).casefold()
+    stale_status = re.search(
+        r"freshness_status[\"']?\s*:\s*[\"']?(?:stale|expired|outdated)\b",
+        context,
+    )
+    unknown_status = re.search(
+        r"freshness_status[\"']?\s*:\s*[\"']?unknown\b",
+        context,
+    )
+    if not (stale_status or unknown_status or "currentness is unknown" in context or "no freshness assessment" in context):
+        return False
+    currentness_claim = re.compile(
+        r"\b(?:current|currently|up[- ]to[- ]date|latest|recent|still valid|not expired)\b",
+        re.IGNORECASE,
+    )
+    return bool(currentness_claim.search(reply or ""))
+
+
+def _contains_unsupported_ambiguous_date_claim(reply: str, context_lines: list[str]) -> bool:
+    """Do not turn ambiguous source dates into definite calendar or relative dates."""
+    context = "\n".join(context_lines or []).casefold()
+    if not re.search(r"\b(?:ambiguous|uncertain|unknown|unresolved)\b.{0,50}\b(?:date|time|timezone|time zone)\b|\b(?:date|time|timezone|time zone)\b.{0,50}\b(?:ambiguous|uncertain|unknown|unresolved)\b", context):
+        return False
+    definite_date = re.compile(
+        r"\b(?:yesterday|today|tomorrow|last (?:night|week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+        r"on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}|\d{4}-\d{2}-\d{2})\b",
+        re.IGNORECASE,
+    )
+    return bool(definite_date.search(reply or ""))
+
+
 def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     """Reject high-impact care-status claims when the supplied source does not support them.
 
@@ -1071,9 +1265,11 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"\b(?:handoff|hand-off)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
         r"\b(?:assigned|delegated)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
         r"\b(?:no|the|a)\s+(?:reminder|notification|message|alert)\s+(?:was\s+)?(?:delivered|sent|received|read)\b",
-        r"\bno\s+(?:change|breakfast|medication|sleep|food|intake|symptom|visit|appointment)"
-        r"(?:\s+(?:intake|food|medication|sleep|symptom|visit|appointment|change))?\s+"
-        r"(?:was\s+)?(?:reported|provided|recorded|observed)\b",
+        (
+            r"\bno\s+(?:change|breakfast|medication|sleep|food|intake|symptom|visit|appointment)"
+            r"(?:\s+(?:intake|food|medication|sleep|symptom|visit|appointment|change))?\s+"
+            r"(?:was\s+)?(?:reported|provided|recorded|observed)\b"
+        ),
         r"\b(?:professional|clinician|doctor|nurse)-reported information\b",
     )
     for pattern_index, pattern in enumerate(patterns):
@@ -1419,6 +1615,38 @@ _CONTRADICTION_QUERY_STOPWORDS = {
     "happened", "happen", "occurred", "occur", "show", "shows", "say", "says",
     "tell", "tells", "about", "different", "conflict", "conflicting", "disagree",
 }
+
+
+def _unresolved_lcr_conflict_response(user_text: str, context_lines: list[str]) -> str | None:
+    """Return a neutral answer when a relevant canonical conflict is unresolved."""
+    query_terms = {
+        term for term in re.findall(r"[a-z]{3,}", (user_text or "").casefold())
+        if term not in _CONTRADICTION_QUERY_STOPWORDS
+    }
+    if not query_terms:
+        return None
+    for line in context_lines or []:
+        brace = line.find("{")
+        if brace < 0:
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("source_type") != "conflicts":
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
+        status = str(record.get("status") or "").casefold()
+        if status in {"resolved", "closed", "dismissed", "superseded"}:
+            continue
+        searchable = json.dumps(record, ensure_ascii=False, default=str).casefold()
+        if query_terms.isdisjoint(set(re.findall(r"[a-z]{3,}", searchable))):
+            continue
+        return (
+            "The care record contains an unresolved conflict relevant to this question. "
+            "The available sources disagree, so I cannot determine which account is correct."
+        )
+    return None
 
 
 def _contradictory_event_evidence_response(user_text: str, event_context: list[str]) -> str | None:
@@ -2499,6 +2727,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     source_lcr_context_ids: list[str] = []
     source_lcr_record_refs: list[dict[str, str]] = []
     source_freshness_assessment_ids: list[str] = []
+    bounded_context_source_lines: list[str] = []
     freshness_source_status = "not_retrieved"
     lcr_context_coverage: dict = {"status": "not_retrieved_for_emergency"}
 
@@ -3058,6 +3287,13 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             "are not care evidence. Never invent events, dates, symptoms, diagnoses, medication status, outcomes, "
             "appointments, actions, owners, deadlines, or trends. If the record does not answer, say the information is "
             "not recorded. If records conflict, state the conflicting reports and that the disagreement is unresolved. "
+            "Source authority is strict: only caregiver-accepted LCR assertions and canonical recorded care events "
+            "may be described as established record facts. Attribute extracted text to its document and call it "
+            "unreviewed unless a separate accepted assertion supports it. Attribute pending statements to the caregiver. "
+            "Prior Companion dialogue is conversation context only and must be attributed to the earlier conversation; "
+            "assistant messages are never evidence. Never promote extracted text, pending proposals, or conversation "
+            "into established care facts. Preserve uncertainty, missing information, event-time provenance, and "
+            "unresolved conflicts. Do not resolve disagreement by recency or plausibility. "
             "For medication questions, report documented instructions only; never advise starting, stopping, or changing "
             "a medicine or dose. For urgent danger, direct the caregiver to urgent real-world help. Do not claim an action "
             "was completed unless the backend verified it. Never write conversation into the Living Care Record. "
@@ -3092,12 +3328,14 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         ):
             model_context_lines.append(lineage_context_line)
         bounded_context: list[str] = []
+        bounded_context_source_lines: list[str] = []
         context_chars = 0
         for line in model_context_lines:
             rendered_line = _humanize_model_context_line(line)
             if context_chars + len(rendered_line) > 2400:
                 continue
             bounded_context.append(rendered_line)
+            bounded_context_source_lines.append(line)
             context_chars += len(rendered_line)
         model_messages.append({
             "role": "user",
@@ -3144,7 +3382,10 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         )
         medication_change_reply = _medication_change_safety_response(user_text)
         unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
-        conflict_response = _contradictory_event_evidence_response(user_text, event_context)
+        conflict_response = (
+            _contradictory_event_evidence_response(user_text, event_context)
+            or _unresolved_lcr_conflict_response(user_text, shared_lcr_lines)
+        )
         if medication_change_reply:
             # Do not rely on a small model to refuse a requested dose change.
             reply = medication_change_reply
@@ -3167,6 +3408,10 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             or _companion_message_needs_revision(reply)
             or _contains_unrequested_saba(reply, validation_source)
             or _contains_unsupported_care_claim(reply, validation_source)
+            or _contains_unsupported_factual_claim(reply, bounded_context)
+            or _contains_stale_evidence_currentness_claim(reply, freshness_context)
+            or _contains_unsupported_ambiguous_date_claim(reply, bounded_context)
+            or _contains_promoted_unreviewed_claim(reply, validation_source)
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
             or (greeting_only and _greeting_reply_needs_revision(reply))
@@ -3210,6 +3455,10 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     or _companion_message_needs_revision(reply)
                     or _contains_unrequested_saba(reply, validation_source)
                     or _contains_unsupported_care_claim(reply, validation_source)
+                    or _contains_unsupported_factual_claim(reply, bounded_context)
+                    or _contains_stale_evidence_currentness_claim(reply, freshness_context)
+                    or _contains_unsupported_ambiguous_date_claim(reply, bounded_context)
+                    or _contains_promoted_unreviewed_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _greeting_reply_needs_revision(reply)
@@ -3247,6 +3496,48 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     # Persist only after a valid model response or the safety guard response exists.
     # This is conversation history, not LCR evidence. A failed inference leaves no
     # new message pair and the uncommitted new session is rolled back by the request.
+    # Provenance returned to the UI must be derived from the exact bounded
+    # source lines actually included in the Qwen prompt, not the wider retrieval
+    # candidate set (some of which may be dropped by the context budget).
+    bounded_event_ids = _context_record_ids(bounded_context_source_lines, "event_id")
+    bounded_evidence_ids = _context_record_ids(bounded_context_source_lines, "evidence_id")
+    bounded_appointment_ids = _context_record_ids(bounded_context_source_lines, "appointment_id")
+    bounded_assertion_ids = _context_record_ids(bounded_context_source_lines, "assertion_id")
+    bounded_freshness_ids = [
+        str(payload["assessment_id"])
+        for line in bounded_context_source_lines
+        if "assessment_id" in line
+        for payload in [json.loads(line[line.index("{"):])]
+        if isinstance(payload, dict) and payload.get("assessment_id")
+    ]
+    bounded_lcr_record_refs = _context_record_refs(bounded_context_source_lines)
+    bounded_lcr_context_ids = _context_record_ids(bounded_context_source_lines, "source_id")
+    source_document_analysis_ids = list(dict.fromkeys(
+        reference["record_id"] for reference in bounded_lcr_record_refs
+        if reference.get("record_type") in {"document_extraction", "document_extractions"}
+    ))
+    bounded_evidence_ids = list(dict.fromkeys([
+        *bounded_evidence_ids,
+        *(
+            reference["record_id"] for reference in bounded_lcr_record_refs
+            if reference.get("record_type") in {"care_evidence", "evidence"}
+        ),
+    ]))
+    bounded_assertion_ids = list(dict.fromkeys([
+        *bounded_assertion_ids,
+        *(
+            reference["record_id"] for reference in bounded_lcr_record_refs
+            if reference.get("record_type") in {"care_assertion", "care_assertions", "assertions"}
+        ),
+    ]))
+    # These response fields drive the UI's counts as well as its inspectable list.
+    # Keep both aligned to exactly what was placed in the bounded inference prompt.
+    source_event_ids = bounded_event_ids
+    source_evidence_ids = bounded_evidence_ids
+    source_appointment_ids = bounded_appointment_ids
+    source_assertion_ids = bounded_assertion_ids
+    source_lcr_context_ids = bounded_lcr_context_ids
+    source_freshness_assessment_ids = bounded_freshness_ids
     source_record_refs = []
     for record_type, identifiers in (
         ("care_event", source_event_ids),
@@ -3260,7 +3551,11 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             {"record_type": record_type, "record_id": str(identifier)}
             for identifier in dict.fromkeys(identifiers)
         )
-    source_record_refs.extend(source_lcr_record_refs)
+    source_record_refs.extend(bounded_lcr_record_refs)
+    source_record_refs = list({
+        (reference["record_type"], reference["record_id"]): reference
+        for reference in source_record_refs
+    }.values())
     response_metadata = {
         "request_sha256": request_sha256,
         "source_event_ids": source_event_ids,

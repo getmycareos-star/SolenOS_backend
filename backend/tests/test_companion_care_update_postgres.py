@@ -17,6 +17,7 @@ from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage
+
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
 care_updates = importlib.import_module("app.services.companion_care_updates")
@@ -107,10 +108,10 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
 
         with TestingSessionLocal() as db:
             source_message = db.query(ConversationMessage).filter_by(id=proposal["source_message_id"]).one()
-            pending = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
+            pending_proposal = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
             assert source_message.content == original
-            assert pending.source_message_id == source_message.id
-            assert pending.source_conversation_id == body["session_id"]
+            assert pending_proposal.source_message_id == source_message.id
+            assert pending_proposal.source_conversation_id == body["session_id"]
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
 
         accepted = review(client, first, proposal["id"], {"decision": "accept"})
@@ -143,6 +144,18 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         prompt_text = "\n".join(str(item.get("content", "")) for item in captured[-1])
         assert original in prompt_text
         assert event_time_text in prompt_text
+        follow_up_body = follow_up.json()
+        assert any(
+            reference.get("record_id") == assertion_id
+            for reference in follow_up_body.get("source_record_refs", [])
+        ), "accepted assertion must be included in the exact provenance references returned to the UI"
+        with TestingSessionLocal() as db:
+            persisted_follow_up = db.query(ConversationMessage).filter_by(
+                session_id=follow_up_body["session_id"], role="assistant"
+            ).order_by(ConversationMessage.created_at.desc()).first()
+            assert persisted_follow_up is not None
+            persisted_refs = __import__("json").loads(persisted_follow_up.source_record_refs_json or "[]")
+            assert persisted_refs == follow_up_body["source_record_refs"]
 
         # Correction is a new proposal version and cannot write until a second explicit acceptance.
         corrected_source = "The caregiver recorded a second observation during the visit."

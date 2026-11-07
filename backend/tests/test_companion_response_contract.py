@@ -522,6 +522,101 @@ def test_companion_allows_explicit_uncertainty_about_unverified_sync_state(monke
 
 
 
+def test_factual_claim_requires_support_from_a_single_retrieved_source():
+    supported = ["Care event: Mum fell in the kitchen on Tuesday morning."]
+    assert collaboration._contains_unsupported_factual_claim(
+        "Mum fell in the kitchen on Tuesday morning.", supported
+    ) is False
+    assert collaboration._contains_unsupported_factual_claim(
+        "Mum developed pneumonia on Tuesday morning.", supported
+    ) is True
+
+
+def test_each_factual_sentence_must_have_its_own_source_support():
+    sources = ["Care event: Mum fell in the kitchen on Tuesday morning."]
+    assert collaboration._contains_unsupported_factual_claim(
+        "Mum fell in the kitchen on Tuesday morning. Mum developed pneumonia.", sources
+    ) is True
+
+
+def test_support_cannot_be_assembled_from_unrelated_source_lines():
+    sources = ["Care event: Mum fell.", "Care note: the kitchen was cleaned."]
+    assert collaboration._contains_unsupported_factual_claim(
+        "Mum fell in the kitchen.", sources
+    ) is True
+
+
+def test_stale_document_cannot_be_described_as_current_or_up_to_date():
+    stale = ['Recorded freshness policy application: {"freshness_status": "stale", "age_days": 420}']
+    assert collaboration._contains_stale_evidence_currentness_claim(
+        "The document is current and up to date.", stale
+    ) is True
+    assert collaboration._contains_stale_evidence_currentness_claim(
+        "The document is marked stale in the record.", stale
+    ) is False
+
+
+def test_ambiguous_source_date_cannot_be_rewritten_as_yesterday():
+    ambiguous = ["Document extraction: source date is ambiguous; timezone unknown"]
+    assert collaboration._contains_unsupported_ambiguous_date_claim(
+        "The event happened yesterday.", ambiguous
+    ) is True
+    assert collaboration._contains_unsupported_ambiguous_date_claim(
+        "The source date is unclear, so I cannot place the event on a calendar day.", ambiguous
+    ) is False
+
+
+def test_unsupported_clinical_conclusion_is_rejected():
+    sources = ["Caregiver report: Mum was restless and awake several times overnight."]
+    assert collaboration._contains_unsupported_factual_claim(
+        "Mum developed delirium overnight.", sources
+    ) is True
+
+
+def test_missing_measurement_is_reported_without_inventing_a_value():
+    assert collaboration._missing_requested_measurement_response(
+        "What was Mum's blood pressure yesterday?",
+        ["Care event: Mum slept poorly yesterday."],
+    ) == "No blood pressure reading is recorded in the available care record for the time you asked about."
+
+
+def test_unreviewed_document_extraction_cannot_be_promoted_to_established_care_fact():
+    source = (
+        "Document extraction: information status: document_extracted_unreviewed; "
+        "document text: Mum has repeated nighttime waking."
+    )
+    assert collaboration._contains_promoted_unreviewed_claim("Mum has repeated nighttime waking.", source) is True
+    assert collaboration._contains_promoted_unreviewed_claim(
+        "The uploaded document reports repeated nighttime waking for Mum.", source
+    ) is False
+
+
+def test_pending_caregiver_report_and_prior_conversation_require_attribution():
+    pending = "Caregiver statement: information status: caregiver_reported_pending_review; Mum fell yesterday."
+    conversation = "Prior Companion conversation: information status: conversation_context_only; Mum fell yesterday."
+    assert collaboration._contains_promoted_unreviewed_claim("Mum fell yesterday.", pending) is True
+    assert collaboration._contains_promoted_unreviewed_claim("You previously reported that Mum fell yesterday.", pending) is False
+    assert collaboration._contains_promoted_unreviewed_claim("Mum fell yesterday.", conversation) is True
+    assert collaboration._contains_promoted_unreviewed_claim("You mentioned earlier that Mum fell yesterday.", conversation) is False
+
+
+def test_accepted_assertion_can_support_a_claim_even_when_unreviewed_sources_are_also_present():
+    source = (
+        "Document extraction: information status: document_extracted_unreviewed; "
+        "document text: Mum has repeated nighttime waking.\n"
+        "Care assertion: information status: caregiver_accepted_assertion; "
+        "accepted LCR assertion: Mum has repeated nighttime waking."
+    )
+    assert collaboration._contains_promoted_unreviewed_claim(
+        "Mum has repeated nighttime waking.", source
+    ) is False
+
+
+def test_accepted_lcr_context_does_not_trigger_unreviewed_attribution_guard():
+    source = "Care assertion: information status: caregiver_accepted_assertion; Mum has repeated waking."
+    assert collaboration._contains_promoted_unreviewed_claim("Mum has repeated waking.", source) is False
+
+
 def test_grounding_rejects_fabricated_record_identifiers_and_accepts_authorized_ids():
     allowed = "Recorded appointment [12345678-1234-4234-8234-123456789abc] for this person."
     fabricated = "The record [87654321-4321-4321-8321-cba987654321] confirms the appointment."
@@ -735,6 +830,43 @@ def test_companion_deterministically_blocks_conflicting_same_day_event_reports(m
         teardown()
 
 
+def test_unresolved_canonical_lcr_conflict_blocks_a_definitive_answer():
+    conflict = "Shared LCR context: " + __import__("json").dumps({
+        "source_type": "conflicts",
+        "source_id": "sleep-conflict-1",
+        "record": {
+            "id": "sleep-conflict-1",
+            "conflict_type": "sleep_observation",
+            "status": "unresolved",
+            "description": "Caregiver reports conflict about repeated nighttime waking.",
+            "resolution": None,
+        },
+    })
+    assert collaboration._unresolved_lcr_conflict_response(
+        "Which sleep report is correct?", [conflict]
+    ) == (
+        "The care record contains an unresolved conflict relevant to this question. "
+        "The available sources disagree, so I cannot determine which account is correct."
+    )
+
+
+def test_resolved_canonical_lcr_conflict_does_not_block_current_answer():
+    conflict = "Shared LCR context: " + __import__("json").dumps({
+        "source_type": "conflicts",
+        "source_id": "sleep-conflict-2",
+        "record": {
+            "id": "sleep-conflict-2",
+            "conflict_type": "sleep_observation",
+            "status": "resolved",
+            "description": "Caregiver reports conflict about repeated nighttime waking.",
+            "resolution": "Caregiver clarified the date of the report.",
+        },
+    })
+    assert collaboration._unresolved_lcr_conflict_response(
+        "Which sleep report is correct?", [conflict]
+    ) is None
+
+
 def test_companion_conflict_guard_does_not_merge_opposite_reports_from_different_dates():
     first_date = datetime(2026, 10, 28, tzinfo=timezone.utc).isoformat()
     second_date = datetime(2026, 10, 29, tzinfo=timezone.utc).isoformat()
@@ -942,6 +1074,48 @@ def test_companion_source_ranking_prefers_relevance_over_recency_and_synonyms():
         "What happened with Mum's sleep?", [recent_unrelated, older_relevant],
         ("title", "description", "event_type", "status"), 1,
     ) == [older_relevant]
+
+
+def test_companion_rejects_document_extraction_promoted_to_established_fact(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "Mum has repeated nighttime waking."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        db.add(Evidence(
+            id="unreviewed-document-evidence", person_id=person_id, type="document",
+            source_text="Original uploaded clinic letter.", uploaded_by_caregiver_id=caregiver_id,
+            evidence_status="recorded", source_type="document",
+        ))
+        db.add(CaptureAnalysis(
+            id="unreviewed-document-extraction", person_id=person_id, caregiver_id=caregiver_id,
+            source_evidence_id="unreviewed-document-evidence",
+            source_text="Clinic letter: Mum has repeated nighttime waking.",
+            extraction_status="available",
+            candidates={"kind": "document_extraction_v1", "filename": "clinic-letter.txt"},
+            review_history=[],
+        ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What does the uploaded document say about Mum's sleep?"},
+        )
+        assert response.status_code == 503, response.text
+        db = TestingSessionLocal()
+        try:
+            assert db.query(ConversationMessage).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown()
 
 
 def test_companion_returns_typed_document_extraction_and_original_evidence_references(monkeypatch):

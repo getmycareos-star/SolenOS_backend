@@ -1652,6 +1652,8 @@ def prepare_handoff_draft(
             raise HTTPException(status_code=409, detail="Draft request ID was already used for different source content")
         return _draft_response(existing)
 
+    # Only generate after idempotency lookup: a replay returns the saved revision
+    # and must not incur a second model call or create a different generated draft.
     generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
     structured_content["generation"] = generated_document
 

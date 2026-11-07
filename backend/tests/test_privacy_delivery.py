@@ -862,6 +862,9 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
         )
         db.add(source_event)
         db.flush()
+        # Match the persisted row used by the freshness verifier, including
+        # server-generated timestamps that may not be populated on the ORM object.
+        db.refresh(source_event)
         from app.api.handoff_drafts import SOURCES, _fingerprint
         source_fields = list(SOURCES["care_events"]["fields"]) + ["evidence_ids", "source_evidence_id"]
         source_row = {name: getattr(source_event, name) for name in dict.fromkeys(source_fields) if hasattr(source_event, name)}

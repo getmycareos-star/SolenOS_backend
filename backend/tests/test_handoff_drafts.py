@@ -1,18 +1,20 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text, inspect
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
-from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
+from app.core.database import Base, get_db
+from app.core.database import SessionLocal as DefaultSessionLocal
 from app.main import app
-from app.models.care import CareEvent, Caregiver, Evidence
-from app.models.capture_analysis import CaptureAnalysis
-from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion
+from app.models.capture_analysis import CaptureAnalysis
+from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care_continuity import CareAssertion, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
+from app.models.collaboration import EvidenceUpload
 from app.models.time_location import Appointment
 
 engine = create_engine(
@@ -39,14 +41,14 @@ def client():
             CREATE TABLE IF NOT EXISTS care_facts (
                 id VARCHAR(36) PRIMARY KEY,
                 person_id VARCHAR(255) NOT NULL,
-                subject_type VARCHAR(80),
-                subject_id VARCHAR(255),
-                fact_type VARCHAR(100),
-                fact_value TEXT,
-                epistemic_status VARCHAR(40),
+                subject_type VARCHAR(80) NOT NULL,
+                subject_id VARCHAR(36),
+                fact_type VARCHAR(100) NOT NULL,
+                fact_value TEXT NOT NULL,
+                epistemic_status VARCHAR(40) NOT NULL DEFAULT 'reported',
                 effective_at DATETIME,
-                recorded_at DATETIME,
-                created_at DATETIME,
+                recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME,
                 superseded_by_fact_id VARCHAR(36),
                 created_by_caregiver_id VARCHAR(255),
@@ -214,7 +216,7 @@ def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_
                 original_text="Call the clinic this week",
                 created_by_caregiver_id=caregiver_id,
                 status="pending_confirmation",
-                deadline=datetime.now(timezone.utc) + timedelta(days=2),
+                deadline=datetime.now(UTC) + timedelta(days=2),
             ),
             Action(
                 id="other-action",
@@ -233,7 +235,7 @@ def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_
             person_id=person_id,
             event_type="care_observation",
             status="recorded",
-            occurred_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            occurred_at=datetime.now(UTC) - timedelta(hours=2),
             title="Recent recorded event",
             description="Reported change to discuss",
             created_by_caregiver_id=caregiver_id,
@@ -242,7 +244,7 @@ def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_
             id="next-appointment",
             person_id=person_id,
             title="Clinic appointment",
-            scheduled_at=datetime.now(timezone.utc) + timedelta(days=2),
+            scheduled_at=datetime.now(UTC) + timedelta(days=2),
             status="scheduled",
             created_by_caregiver_id=caregiver_id,
         ))
@@ -371,7 +373,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     caregiver_id = session["caregiver"]["id"]
     db = TestSessionLocal()
     try:
-        source_time = datetime.now(timezone.utc) - timedelta(days=45)
+        source_time = datetime.now(UTC) - timedelta(days=45)
         evidence = Evidence(
             id="handoff-freshness-evidence",
             person_id=person_id,
@@ -400,7 +402,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             freshness_status="needs_review",
             source_time=source_time,
             source_time_kind="event_occurrence",
-            assessed_at=datetime.now(timezone.utc),
+            assessed_at=datetime.now(UTC),
             age_days=45,
             rationale="The explicit review boundary has elapsed; re-confirm before relying on currentness.",
             assessed_by_caregiver_id=caregiver_id,
@@ -473,7 +475,7 @@ def test_daily_care_adapter_returns_only_persisted_person_scoped_caregiver_repor
             person_id=person_id,
             event_type="structured_daily_capture",
             status="recorded",
-            occurred_at=datetime.now(timezone.utc) - timedelta(hours=3),
+            occurred_at=datetime.now(UTC) - timedelta(hours=3),
             occurred_at_timezone="Africa/Lagos",
             title="Lunch observation",
             description="Lunch was only partly eaten.",
@@ -515,7 +517,7 @@ def test_daily_care_adapter_returns_only_persisted_person_scoped_caregiver_repor
                 assertion_status="caregiver_reviewed",
                 observed_at=event.occurred_at,
                 created_by_caregiver_id=caregiver_id,
-                recorded_at=datetime.now(timezone.utc),
+                recorded_at=datetime.now(UTC),
             ),
         ])
         db.commit()
@@ -621,12 +623,11 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
 
 
 def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch):
-    import app.api.handoff_drafts as handoff_drafts
+    from app.api import handoff_drafts
     from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
 
     test_client, session = client
     person_id = session["person"]["id"]
-    caregiver_id = session["caregiver"]["id"]
     recipient = Caregiver(
         id="handoff-draft-recipient",
         name="Receiving caregiver",
@@ -649,12 +650,12 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
             {
                 "id": "persisted-handoff-fact",
                 "person_id": person_id,
-            "subject_type": "care_recipient",
-            "subject_id": person_id,
+                "subject_type": "care_recipient",
+                "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports that she prefers tea.",
                 "epistemic_status": "reported",
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -730,7 +731,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         json={
             "recipient_caregiver_ids": [recipient_id],
             "scope": ["lcr_summary"],
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
         },
     )
     assert approved.status_code == 200, approved.text
@@ -754,7 +755,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
 
 
 def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(client, monkeypatch):
-    import app.api.handoff_drafts as handoff_drafts
+    from app.api import handoff_drafts
 
     test_client, session = client
     person_id = session["person"]["id"]
@@ -766,12 +767,12 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
             {
                 "id": "stale-handoff-fact",
                 "person_id": person_id,
-            "subject_type": "care_recipient",
-            "subject_id": person_id,
+                "subject_type": "care_recipient",
+                "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports a calm morning.",
                 "epistemic_status": "reported",
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -816,14 +817,14 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
         json={
             "recipient_caregiver_ids": ["not-a-real-recipient"],
             "scope": ["lcr_summary"],
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(days=2)).isoformat(),
         },
     )
     assert approval.status_code == 409, approval.text
 
 
 def test_qwen_handoff_generation_rejects_fabricated_source_and_quote(monkeypatch):
-    import app.api.handoff_drafts as handoff_drafts
+    from app.api import handoff_drafts
 
     monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
     monkeypatch.setattr(
@@ -856,7 +857,7 @@ def test_qwen_handoff_generation_rejects_fabricated_source_and_quote(monkeypatch
 
 
 def test_qwen_handoff_generation_accepts_only_exact_source_quotation(monkeypatch):
-    import app.api.handoff_drafts as handoff_drafts
+    from app.api import handoff_drafts
 
     monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
     monkeypatch.setattr(
@@ -1047,12 +1048,12 @@ def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkey
             {
                 "id": "handoff-before-new-source",
                 "person_id": person_id,
-            "subject_type": "care_recipient",
-            "subject_id": person_id,
+                "subject_type": "care_recipient",
+                "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports a settled morning.",
                 "epistemic_status": "reported",
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -1087,12 +1088,12 @@ def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkey
             {
                 "id": "handoff-after-new-source",
                 "person_id": person_id,
-            "subject_type": "care_recipient",
-            "subject_id": person_id,
+                "subject_type": "care_recipient",
+                "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports a changed afternoon routine.",
                 "epistemic_status": "reported",
-                "created_at": (datetime.now(timezone.utc) + timedelta(seconds=2)).isoformat(),
+                "created_at": (datetime.now(UTC) + timedelta(seconds=2)).isoformat(),
             },
         )
 
