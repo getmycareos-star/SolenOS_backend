@@ -390,7 +390,10 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         source_record_ids = sorted(source_ids)
         if not source_record_ids:
             raise HTTPException(status_code=422, detail="The approved draft has no server-resolvable source records")
-        validated_source_records = _validate_summary_source_record_ids(db, person_id, source_record_ids)
+        validated_source_records = (
+            _validate_summary_source_record_ids(db, person_id, source_record_ids)
+            if approved_draft.review_status != "shared" else {}
+        )
         source_statuses = source_snapshot.get("source_statuses", {})
         scope_source_keys = {
             "lcr_summary": set(source_statuses) - {"documents", "appointments", "actions", "care_action_outcomes", "open_questions", "information_gaps", "community", "evidence_lineage"},
