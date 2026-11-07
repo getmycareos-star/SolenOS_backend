@@ -159,6 +159,28 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     return str(session.person_id), str(session.caregiver_id)
 
 
+
+def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str, caregiver_id: str) -> str:
+    """Resolve the verified bearer session without depending on ASGI state propagation."""
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if session_id:
+        return str(session_id)
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.person_id == str(person_id),
+        AnonymousSession.caregiver_id == str(caregiver_id),
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    return str(session.id)
+
 def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None) -> dict:
     reactions = db.query(CommunityReaction).filter(CommunityReaction.post_id == post.id).all()
     counts = {"like": 0, "thank_you": 0, "support": 0}
@@ -3262,7 +3284,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             conversation_id=session.id,
             message_id=str(user_row.id),
             source_text=user_text,
-            anonymous_session_id=str(request.state.anonymous_session_id),
+            anonymous_session_id=_resolve_anonymous_session_id(request, db, person_id, caregiver_id),
         )
     history = (
         db.query(ConversationMessage)
