@@ -1,5 +1,5 @@
 import asyncio
-import time
+import time as _time
 import base64
 import hashlib
 import json
@@ -2432,7 +2432,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
-    companion_request_started = time.perf_counter()
+    companion_request_started = _time.perf_counter()
     companion_request_id = getattr(request.state, "request_id", None)
     person_id, caregiver_id = _scope(request, db)
     if payload.person_id != person_id:
@@ -3132,7 +3132,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
-        retrieval_duration_ms = round((time.perf_counter() - companion_request_started) * 1000, 2)
+        retrieval_duration_ms = round((_time.perf_counter() - companion_request_started) * 1000, 2)
         logger.info(
             "solenos_companion_stage %s",
             json.dumps({
@@ -3147,7 +3147,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             }, separators=(",", ":")),
         )
         base, model = _ollama_url()
-        inference_started = time.perf_counter()
+        inference_started = _time.perf_counter()
         try:
             reply = await asyncio.to_thread(
                 _ollama_chat,
@@ -3161,7 +3161,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 json.dumps({
                     "event": "companion_inference_complete",
                     "request_id": companion_request_id,
-                    "duration_ms": round((time.perf_counter() - inference_started) * 1000, 2),
+                    "duration_ms": round((_time.perf_counter() - inference_started) * 1000, 2),
                     "retrieval_duration_ms": retrieval_duration_ms,
                     "model": model,
                     "outcome": "success",
@@ -3173,7 +3173,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 json.dumps({
                     "event": "companion_inference_complete",
                     "request_id": companion_request_id,
-                    "duration_ms": round((time.perf_counter() - inference_started) * 1000, 2),
+                    "duration_ms": round((_time.perf_counter() - inference_started) * 1000, 2),
                     "retrieval_duration_ms": retrieval_duration_ms,
                     "model": model,
                     "outcome": "http_error",
@@ -3186,7 +3186,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 json.dumps({
                     "event": "companion_inference_complete",
                     "request_id": companion_request_id,
-                    "duration_ms": round((time.perf_counter() - inference_started) * 1000, 2),
+                    "duration_ms": round((_time.perf_counter() - inference_started) * 1000, 2),
                     "retrieval_duration_ms": retrieval_duration_ms,
                     "model": model,
                     "outcome": "error",
