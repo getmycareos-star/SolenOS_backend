@@ -25,4 +25,27 @@ def upgrade():
 
 
 def downgrade():
-    raise RuntimeError("Appointment revision idempotency protects durable care history and cannot be removed automatically.")
+def downgrade():
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table("appointment_workspace_revisions"):
+        return
+    columns = {item["name"] for item in inspector.get_columns("appointment_workspace_revisions")}
+    if "idempotency_key" in columns:
+        count = bind.execute(
+            sa.text('SELECT COUNT(*) FROM "appointment_workspace_revisions" WHERE idempotency_key IS NOT NULL')
+        ).scalar_one()
+        if count:
+            raise RuntimeError("Refusing to remove appointment_workspace_revisions retry keys while persisted values are in use.")
+    unique_constraints = {item.get("name") for item in inspector.get_unique_constraints("appointment_workspace_revisions")}
+    indexes = {item.get("name") for item in inspector.get_indexes("appointment_workspace_revisions")}
+    if "uq_appointment_workspace_revision_idempotency" in unique_constraints:
+        op.drop_constraint("uq_appointment_workspace_revision_idempotency", "appointment_workspace_revisions", type_="unique")
+    elif "uq_appointment_workspace_revision_idempotency" in indexes:
+        op.drop_index("uq_appointment_workspace_revision_idempotency", table_name="appointment_workspace_revisions")
+    columns = {item["name"] for item in inspect(bind).get_columns("appointment_workspace_revisions")}
+    if "idempotency_request_sha256" in columns:
+        op.drop_column("appointment_workspace_revisions", "idempotency_request_sha256")
+    if "idempotency_key" in columns:
+        op.drop_column("appointment_workspace_revisions", "idempotency_key")
+
