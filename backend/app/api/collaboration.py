@@ -3251,6 +3251,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     for record_type, identifiers in (
         ("care_event", source_event_ids),
         ("care_evidence", source_evidence_ids),
+        ("document_extraction", source_document_analysis_ids),
         ("appointment", source_appointment_ids),
         ("care_assertion", source_assertion_ids),
         ("freshness_assessment", source_freshness_assessment_ids),
