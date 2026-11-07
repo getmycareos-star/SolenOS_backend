@@ -1049,7 +1049,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "original_source_reference": row.original_source_reference,
                 "source_text_sha256": row.source_text_sha256,
             } for row in linked]
-            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked, analysis_snapshot))
+            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot}))
             source_revision_value = event.updated_at or event.recorded_at
             output.append({
                 "source_type": "daily_care_observation",
