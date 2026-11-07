@@ -544,7 +544,18 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 if row is None:
                     stale.append(f"{source_table}:{source_id}")
                     continue
-                current = _fingerprint(dict(row))
+                fingerprint_row = dict(row)
+                # Reflected SQLAlchemy tables see JSONList columns as text, while
+                # ORM-created snapshots contain Python lists. Normalize before
+                # hashing so an unchanged source does not become falsely stale.
+                if isinstance(fingerprint_row.get("evidence_ids"), str):
+                    try:
+                        parsed_evidence_ids = json.loads(fingerprint_row["evidence_ids"])
+                        if isinstance(parsed_evidence_ids, list):
+                            fingerprint_row["evidence_ids"] = parsed_evidence_ids
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+                current = _fingerprint(fingerprint_row)
             if current != expected:
                 stale.append(f"{source_table}:{source_id}")
         snapshot_ids_by_table = {}
