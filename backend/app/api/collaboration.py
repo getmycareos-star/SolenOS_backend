@@ -2771,7 +2771,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text, re.IGNORECASE,
         ))
         event_context = _filter_context_lines_to_query(
-            retrieval_query, _rank_context_lines(retrieval_query, event_context, 5)
+            retrieval_query, _rank_context_lines(retrieval_query, event_context, 10)
         )
         assertion_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 4)
