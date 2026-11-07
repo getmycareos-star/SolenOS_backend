@@ -35,21 +35,21 @@ def upgrade() -> None:
 
     indexes = {item["name"] for item in inspect(bind).get_indexes("appointment_workspace_records")}
     constraints = {item.get("name") for item in inspect(bind).get_unique_constraints("appointment_workspace_records")}
-    if "uq_appointment_workspace_person_idempotency" not in indexes | constraints:
+    if "uq_appointment_workspace_person_caregiver_idempotency" not in indexes | constraints:
         op.create_index(
-            "uq_appointment_workspace_person_idempotency",
+            "uq_appointment_workspace_person_caregiver_idempotency",
             "appointment_workspace_records",
-            ["person_id", "idempotency_key"],
+            ["person_id", "created_by_caregiver_id", "idempotency_key"],
             unique=True,
         )
 
     indexes = {item["name"] for item in inspect(bind).get_indexes("appointment_workspace_revisions")}
     constraints = {item.get("name") for item in inspect(bind).get_unique_constraints("appointment_workspace_revisions")}
-    if "uq_appointment_workspace_revision_idempotency" not in indexes | constraints:
+    if "uq_appointment_workspace_revision_caregiver_idempotency" not in indexes | constraints:
         op.create_index(
-            "uq_appointment_workspace_revision_idempotency",
+            "uq_appointment_workspace_revision_caregiver_idempotency",
             "appointment_workspace_revisions",
-            ["record_id", "idempotency_key"],
+            ["record_id", "changed_by_caregiver_id", "idempotency_key"],
             unique=True,
         )
 
@@ -58,8 +58,8 @@ def downgrade() -> None:
     bind = op.get_bind()
     inspector = inspect(bind)
     for table, index_name in (
-        ("appointment_workspace_revisions", "uq_appointment_workspace_revision_idempotency"),
-        ("appointment_workspace_records", "uq_appointment_workspace_person_idempotency"),
+        ("appointment_workspace_revisions", "uq_appointment_workspace_revision_caregiver_idempotency"),
+        ("appointment_workspace_records", "uq_appointment_workspace_person_caregiver_idempotency"),
     ):
         if not inspector.has_table(table):
             continue
