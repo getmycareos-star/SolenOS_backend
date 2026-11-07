@@ -1134,6 +1134,10 @@ def main():
                     "Correction history did not preserve the generated original candidate")
             require(persisted_analysis.review_history[0]["reviewed_by_caregiver_id"] == caregiver_a,
                     "Correction history lost caregiver attribution")
+            persisted_candidate = persisted_analysis.candidates["observations"][0]
+            require(persisted_candidate["observation"] == "Generated suggestion: interrupted sleep."
+                    and persisted_candidate["corrected_observation"] == "Caregiver corrected the report: sleep was interrupted twice overnight.",
+                    "Caregiver correction overwrote the original Daily Care candidate instead of preserving both values")
             persisted_event = source_db.query(CareEvent).filter_by(id=daily_event_id).one()
             require(persisted_event.description == original_event_description,
                     "Caregiver review mutated the original Daily Care observation")
