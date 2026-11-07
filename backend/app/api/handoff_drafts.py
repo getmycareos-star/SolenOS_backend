@@ -1017,7 +1017,12 @@ def prepare_handoff_draft(
         "sections": sections,
         "generation": generated_document,
     }
-    canonical_snapshot = json.dumps(source_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    fingerprint_snapshot = {
+        "source_statuses": statuses,
+        "source_records": records,
+        "evidence_lineage": evidence_lineage,
+    }
+    canonical_snapshot = json.dumps(fingerprint_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     request_fingerprint = hashlib.sha256(json.dumps({
         "purpose": payload.purpose,
         "audience": payload.audience,
