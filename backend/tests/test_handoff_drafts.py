@@ -9,6 +9,8 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.capture_analysis import CaptureAnalysis
+from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
 from app.models.time_location import Appointment
@@ -138,7 +140,7 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
     assert all(item["source_id"] != "other-person-fact" for item in body["source_references"])
     assert "MUST NOT LEAK" not in response.text
     assert body["source_statuses"]["community"]["status"] == "not_authorized"
-    assert body["source_statuses"]["documents"]["status"] == "unavailable"
+    assert body["source_statuses"]["documents"]["status"] == "empty"
     with engine.connect() as connection:
         saved = connection.execute(
             text("SELECT fact_value FROM care_facts WHERE id = 'owned-fact'")
@@ -444,3 +446,126 @@ def test_preparation_response_and_audit_event_share_the_same_draft_id(client):
         assert audit.caregiver_id == session["caregiver"]["id"]
     finally:
         db.close()
+
+
+def test_daily_care_adapter_returns_only_persisted_person_scoped_caregiver_reports(client):
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            id="daily-care-source-evidence",
+            person_id=person_id,
+            type="caregiver_observation",
+            source_text="Caregiver reported that lunch was only partly eaten.",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            reported_by_label="Family caregiver",
+        )
+        event = CareEvent(
+            id="daily-care-source-event",
+            person_id=person_id,
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(hours=3),
+            occurred_at_timezone="Africa/Lagos",
+            title="Lunch observation",
+            description="Lunch was only partly eaten.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, event])
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_statuses"]["daily_care"]["status"] == "available"
+    item = next(
+        row for row in body["source_references"]
+        if row["source_id"] == "daily-care-source-event"
+    )
+    assert item["source_type"] == "daily_care_observation"
+    assert item["epistemic_status"] == "caregiver_reported"
+    assert item["record_status"] == "recorded"
+    assert item["details"]["occurred_at_timezone"] == "Africa/Lagos"
+    assert item["details"]["review_status"] == "caregiver_reported_not_independently_verified"
+    assert item["evidence_ids"] == ["daily-care-source-evidence"]
+
+
+def test_document_adapter_separates_verified_original_upload_from_extracted_text(client):
+    import hashlib
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    original = b"Follow-up appointment is scheduled for 12 December."
+    digest = hashlib.sha256(original).hexdigest()
+    db = TestSessionLocal()
+    try:
+        document = Evidence(
+            id="handoff-document-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="Uploaded document record",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="clinic/letter-12",
+        )
+        db.add(document)
+        db.flush()
+        db.add(EvidenceUpload(
+            evidence_id=document.id,
+            filename="clinic-letter.txt",
+            mime_type="text/plain",
+            content=original,
+            size_bytes=len(original),
+            sha256=digest,
+        ))
+        db.add(CaptureAnalysis(
+            id="handoff-document-extraction",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_evidence_id=document.id,
+            source_text=original.decode("utf-8"),
+            extraction_status="available",
+            candidates={
+                "kind": "document_extraction_v1",
+                "binary_sha256": digest,
+                "extraction_method": "server_utf8_text",
+            },
+            review_history=[],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_statuses"]["documents"]["status"] == "available"
+    extracted = next(
+        row for row in body["source_references"]
+        if row["source_id"] == "handoff-document-extraction"
+    )
+    original_ref = next(
+        row for row in body["source_references"]
+        if row["source_id"] == "handoff-document-evidence"
+    )
+    assert extracted["source_type"] == "document_extracted_text"
+    assert extracted["details"]["document_id"] == document.id
+    assert extracted["details"]["binary_sha256"] == digest
+    assert extracted["epistemic_status"] == "unreviewed_document_extraction"
+    assert extracted["record_status"] == "extracted_not_caregiver_reviewed"
+    assert original_ref["source_type"] == "uploaded_document"
+    assert original_ref["details"]["extraction_status"] == "available"
