@@ -357,7 +357,15 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             )
             if scope_key not in payload.scope:
                 raise HTTPException(status_code=403, detail="The approved sharing scope does not cover every generated handoff section")
-            grouped_sections.setdefault(scope_key, []).append(f"{item.get('section', 'Care information')}: {quote} [source: {source_ref}]")
+            epistemic_status = str(item.get("epistemic_status") or source.get("epistemic_status") or "not_recorded")
+            record_status = str(item.get("record_status") or source.get("record_status") or "not_recorded")
+            event_at = item.get("event_at") or source.get("event_at") or "not_recorded"
+            recorded_at = item.get("recorded_at") or source.get("recorded_at") or "not_recorded"
+            grouped_sections.setdefault(scope_key, []).append(
+                f"{item.get('section', 'Care information')}: {quote} "
+                f"[epistemic_status={epistemic_status}; record_status={record_status}; "
+                f"event_at={event_at}; recorded_at={recorded_at}; source={source_ref}]"
+            )
             if source.get("source_table") in allowed_source_tables:
                 source_ids.add(str(source.get("source_id")))
             for evidence_id in source.get("evidence_ids", []):
