@@ -1354,3 +1354,72 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
         assert {item.decision for item in decisions} >= {"accepted", "corrected", "rejected"}
     finally:
         db.close()
+
+
+
+def test_fresh_companion_session_retrieves_only_accepted_appointment_assertions(client, monkeypatch):
+    import app.api.collaboration as collaboration
+
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "outcome_pending",
+        "payload": {
+            "caregiverReport": "Caregiver reports that the person asked for help with dressing this morning.",
+            "clinicianFindings": "Caregiver recorded that the clinician mentioned a follow-up on Tuesday.",
+            "decisions": "Family plans to ask about transport arrangements.",
+        },
+        "change_reason": "Record appointment outcome for Companion retrieval test",
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+    prepared = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals",
+        headers=headers,
+    )
+    assert prepared.status_code == 200, prepared.text
+    proposals = prepared.json()["items"]
+
+    accepted = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[0]['id']}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_assertion_id = accepted.json()["assertion_id"]
+
+    # Leave the professional-information candidate pending and reject the decision candidate.
+    rejected = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[2]['id']}/review",
+        headers=headers,
+        json={"decision": "reject"},
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    captured = {}
+
+    def fake_ollama(base, model, messages, options):
+        captured["messages"] = messages
+        return "The caregiver reported that the person asked for help with dressing this morning."
+
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_ollama)
+    monkeypatch.setattr(collaboration, "process_companion_care_update_message", lambda *args, **kwargs: None)
+
+    response = test_client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "text": "What did the caregiver report about dressing?",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_assertion_ids"] == [accepted_assertion_id]
+    assert body["written_to_lcr"] is False
+    assert body["persistence"] == "conversation_only"
+    assert body["session_id"]
+    prompt = "\n".join(item["content"] for item in captured["messages"] if item.get("role") in {"system", "user"})
+    assert "asked for help with dressing this morning" in prompt
+    assert "mentioned a follow-up on Tuesday" not in prompt
+    assert "plans to ask about transport arrangements" not in prompt
