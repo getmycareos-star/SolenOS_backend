@@ -913,12 +913,8 @@ def _humanize_model_context_line(line: str) -> str:
         ("interpretation_limit", "interpretation limit"),
     )
     parts = []
-    # Shared-retrieval records carry a typed top-level source_id. Keep that
-    # reference available for provenance alignment; ad-hoc recent context keeps
-    # internal row identifiers out of the model prompt.
-    source_id = payload.get("source_id")
-    if source_id:
-        parts.append(f"internal source reference (do not display): {source_id}")
+    # Internal row identifiers remain in response provenance metadata and are
+    # deliberately excluded from model prompt content.
     freshness_is_policy_only = "not a truth judgment" in (line[:brace] or "").casefold()
     for key, label_text in fields:
         value = record.get(key)
