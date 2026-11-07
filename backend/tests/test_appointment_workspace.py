@@ -1156,3 +1156,139 @@ def test_person_historical_projection_reconstructs_latest_revision_per_target(cl
     assert body["items"][0]["state"] == {"status": "reviewed"}
     assert "not a complete historical Living Care Record" in body["interpretation_limit"]
     assert "not-visible" not in response.text
+
+
+def test_appointment_workspace_idempotency_and_read_only_outcome_draft(client):
+    test_client, session, other = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    payload = {
+        "caregiverReport": "Caregiver reports the appointment took place and the person appeared tired.",
+        "clinicianFindings": "Caregiver recorded that the clinician requested a blood test.",
+        "decisions": "No medication change was recorded.",
+        "instructions": "Arrange the blood test.",
+        "unanswered": "When will the result be available?",
+        "medicationReconciliation": "Medication list reviewed with the clinic; no change recorded.",
+        "testsReferrals": "Blood test requested.",
+        "pendingResults": "Blood test result is pending.",
+        "familySummary": "Follow up after the blood test.",
+        "followUps": [
+            {"action": "Call the clinic for the result", "owner": "Family caregiver", "due": "2026-11-14", "status": "open"}
+        ],
+    }
+    create_payload = {
+        "status": "preparation",
+        "payload": payload,
+        "change_reason": "Initial appointment notes",
+        "idempotency_key": "appointment-create-retry-001",
+    }
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=create_payload)
+    assert created.status_code == 201, created.text
+    created_retry = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=create_payload)
+    assert created_retry.status_code == 201, created_retry.text
+    record_id = created.json()["id"]
+    assert created_retry.json()["id"] == record_id
+    assert created_retry.json()["version_number"] == 1
+
+    changed_create = {**create_payload, "payload": {**payload, "caregiverReport": "Different content"}}
+    conflict = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=changed_create)
+    assert conflict.status_code == 409, conflict.text
+
+    revised = {**payload, "pendingResults": "The blood test result is still awaited."}
+    update_payload = {
+        "expected_version": 1,
+        "status": "follow_up_pending",
+        "payload": revised,
+        "change_reason": "Recorded post-appointment follow-up",
+        "idempotency_key": "appointment-update-retry-001",
+    }
+    updated = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json=update_payload,
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["version_number"] == 2
+    updated_retry = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json=update_payload,
+    )
+    assert updated_retry.status_code == 200, updated_retry.text
+    assert updated_retry.json()["version_number"] == 2
+
+    changed_update = {**update_payload, "payload": {**revised, "pendingResults": "Different result"}}
+    changed_retry = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json=changed_update,
+    )
+    assert changed_retry.status_code == 409, changed_retry.text
+
+    outcome = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        headers=headers,
+    )
+    assert outcome.status_code == 200, outcome.text
+    body = outcome.json()
+    assert body["read_only"] is True
+    assert body["updates_lcr"] is False
+    assert body["record_version"] == 2
+    assert body["status"] == "ready_for_review"
+    assert body["sections"]["caregiver_report"][0]["epistemic_status"] == "caregiver_reported"
+    assert body["sections"]["professional_information"][0]["independently_verified"] is False
+    assert body["sections"]["follow_ups"][0]["text"] == "Call the clinic for the result"
+
+    denied = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        headers=other_headers,
+    )
+    assert denied.status_code == 404
+    saved = test_client.get(f"/api/v1/appointment-workspaces/{record_id}", headers=headers)
+    assert saved.status_code == 200
+    assert saved.json()["version_number"] == 2
+    assert saved.json()["payload"] == revised
+
+
+def test_appointment_workspace_explicit_attendance_updates_linked_appointment(client):
+    from datetime import datetime, timezone
+    import uuid
+    from app.models.time_location import Appointment
+
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    appointment_id = str(uuid.uuid4())
+    scheduled_at = datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc)
+    actual_visit_at = datetime(2026, 11, 10, 10, 25, tzinfo=timezone.utc)
+    with TestSessionLocal() as db:
+        db.add(Appointment(
+            id=appointment_id,
+            person_id=owner["person"]["id"],
+            title="Synthetic appointment attendance test",
+            scheduled_at=scheduled_at,
+            created_by_caregiver_id=owner["caregiver"]["id"],
+            status="scheduled",
+        ))
+        db.commit()
+
+    saved = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "appointment_id": appointment_id,
+        "status": "outcome_pending",
+        "payload": {
+            "attendanceStatus": "attended",
+            "actualVisitAt": actual_visit_at.isoformat(),
+            "caregiverReport": "Caregiver recorded that the appointment took place.",
+        },
+        "change_reason": "Caregiver confirmed appointment attendance",
+        "idempotency_key": "appointment-attendance-save-001",
+    })
+    assert saved.status_code == 201, saved.text
+
+    with TestSessionLocal() as db:
+        appointment = db.query(Appointment).filter_by(id=appointment_id).one()
+        assert appointment.status == "completed"
+        assert appointment.completed_at is not None
+        completed_at = appointment.completed_at
+        if completed_at.tzinfo is None:
+            completed_at = completed_at.replace(tzinfo=timezone.utc)
+        assert completed_at == actual_visit_at

@@ -6,6 +6,8 @@ records in an isolated SQLite database and a real Ollama model supplied by CI.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
+import logging
 import os
 
 import pytest
@@ -84,8 +86,9 @@ def _create_synthetic_record(client: TestClient):
     return session, older_id
 
 
-def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch):
+def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch, caplog):
     """Real model inference must pass a small, fixed, evidence-bounded evaluation."""
+    caplog.set_level(logging.INFO)
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
@@ -111,6 +114,48 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         ), f"Live Qwen did not answer the sleep-record question with a grounded detail: {direct_data['reply']!r}"
         assert direct_data["written_to_lcr"] is False
         assert direct_data["persistence"] == "conversation_only"
+
+        # The HTTP response has already completed. Correlate the two server-side
+        # stage records to separate database/context retrieval from real Qwen time.
+        stage_events = []
+        for record in caplog.records:
+            message = record.getMessage()
+            if not message.startswith("solenos_companion_stage "):
+                continue
+            try:
+                stage_events.append(json.loads(message.split(" ", 1)[1]))
+            except (IndexError, json.JSONDecodeError):
+                continue
+        direct_stage_events = [
+            item for item in stage_events
+            if item.get("request_id") == direct.headers.get("x-request-id")
+        ]
+        # Middleware may use a request ID header not exposed by this TestClient
+        # response; if so, use the last retrieval/inference pair emitted by this call.
+        if not direct_stage_events:
+            direct_stage_events = stage_events[-2:]
+        retrieval_stage = next(
+            (item for item in direct_stage_events if item.get("event") == "companion_retrieval_complete"),
+            None,
+        )
+        inference_stage = next(
+            (item for item in direct_stage_events if item.get("event") == "companion_inference_complete"),
+            None,
+        )
+        assert retrieval_stage is not None, f"Missing Companion retrieval timing log: {stage_events!r}"
+        assert inference_stage is not None, f"Missing Companion inference timing log: {stage_events!r}"
+        assert retrieval_stage["request_id"] == inference_stage["request_id"]
+        assert isinstance(retrieval_stage["duration_ms"], (int, float))
+        assert isinstance(inference_stage["duration_ms"], (int, float))
+        assert inference_stage["outcome"] == "success"
+        print("COMPANION_STAGE_TIMING=" + json.dumps({
+            "request_id": retrieval_stage["request_id"],
+            "retrieval_ms": retrieval_stage["duration_ms"],
+            "inference_ms": inference_stage["duration_ms"],
+            "outcome": inference_stage["outcome"],
+            "model": inference_stage.get("model"),
+            "measurement": "real_qwen_http_request_in_synthetic_ci_database",
+        }, separators=(",", ":")))
 
         follow_up = client.post(
             "/api/v1/conversation/message",

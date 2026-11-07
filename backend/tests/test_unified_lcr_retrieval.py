@@ -40,15 +40,9 @@ def _postgres_conversation_db():
     if "situations" not in metadata.tables:
         Table("situations", metadata, Column("id", String, primary_key=True))
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
-    metadata.create_all(
-        connection,
-        tables=[
-            Person.__table__, Caregiver.__table__, CareEvent.__table__,
-            CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
-            ConversationSession.__table__, ConversationMessage.__table__,
-            AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
-        ],
-    )
+    # Isolated schema: include transitive foreign-key targets referenced
+    # by the selected retrieval tables before creating the full test fixture.
+    metadata.create_all(connection)
     return engine, connection, schema
 
 
@@ -205,7 +199,9 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
             caregiver_c = Caregiver(
                 id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b"
             )
-            db.add_all([person, other_person, caregiver, caregiver_b, caregiver_c])
+            db.add_all([person, other_person])
+            db.flush()
+            db.add_all([caregiver, caregiver_b, caregiver_c])
             db.flush()
             event = CareEvent(
                 id="daily-care-event", person_id="person-a", event_type="daily_observation",

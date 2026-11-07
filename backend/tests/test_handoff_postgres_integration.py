@@ -100,10 +100,41 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     client = TestClient(app)
     owner = _create_session(client, "PostgreSQL initiating caregiver")
     recipient_id, recipient_token = _add_linked_recipient(owner["person"]["id"])
-    _accept_consent(owner["person"]["id"], owner["caregiver"]["id"])
-    _accept_consent(owner["person"]["id"], recipient_id)
+    unconsented_recipient_id, _ = _add_linked_recipient(owner["person"]["id"])
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+
+    # The public sharing flow must refuse access before each caregiver accepts
+    # the required privacy/safety consent through the authenticated API.
+    blocked_directory = client.get("/api/v1/handoffs/directory/recipients", headers=owner_headers)
+    assert blocked_directory.status_code == 403, blocked_directory.text
+
+    for consent_headers, caregiver_id in (
+        (owner_headers, owner["caregiver"]["id"]),
+        (recipient_headers, recipient_id),
+    ):
+        accepted_consent = client.post("/api/v1/consent", headers=consent_headers, json={
+            "person_id": owner["person"]["id"],
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": False,
+            "accepted_terms_version": "2026-10",
+        })
+        assert accepted_consent.status_code == 200, accepted_consent.text
+        assert accepted_consent.json()["verified"] is True
+
+    # Sender consent alone is insufficient: a linked recipient must also
+    # explicitly accept the required privacy and safety terms before sharing.
+    ineligible_share = client.post("/api/v1/handoffs", headers=owner_headers, json={
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [unconsented_recipient_id],
+        "scope": ["lcr_summary"],
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+    })
+    assert ineligible_share.status_code == 403, ineligible_share.text
 
     observation = "Caregiver reports that lunch was only partly eaten."
     daily_evidence_id = str(uuid.uuid4())
@@ -355,3 +386,18 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert revoked.status_code == 200, revoked.text
     blocked = client.get(f"/api/v1/handoffs/{handoff_id}/summary", headers=recipient_headers)
     assert blocked.status_code == 404
+
+    revoked_consent = client.post("/api/v1/consent", headers=owner_headers, json={
+        "person_id": owner["person"]["id"],
+        "caregiver_id": owner["caregiver"]["id"],
+        "action": "revoke",
+    })
+    assert revoked_consent.status_code == 200, revoked_consent.text
+    assert revoked_consent.json()["verified"] is False
+    denied_after_consent_revocation = client.post("/api/v1/handoffs", headers=owner_headers, json={
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [recipient_id],
+        "scope": ["lcr_summary"],
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+    })
+    assert denied_after_consent_revocation.status_code == 403, denied_after_consent_revocation.text

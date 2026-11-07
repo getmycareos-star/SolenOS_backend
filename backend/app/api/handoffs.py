@@ -277,6 +277,15 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     ).all()
     if {r.id for r in recipients} != set(payload.recipient_caregiver_ids):
         raise HTTPException(status_code=404, detail="One or more recipients are not linked to this care record")
+    ineligible_recipients = [
+        recipient.id for recipient in recipients
+        if not _has_required_consent(db, person_id, recipient.id)
+    ]
+    if ineligible_recipients:
+        raise HTTPException(
+            status_code=403,
+            detail="Every receiving caregiver must accept the required privacy and safety consent before a handoff can be shared",
+        )
 
     # The client supplies a stable request ID so a lost HTTP response can be
     # retried without creating duplicate handoffs or recipient notifications.
