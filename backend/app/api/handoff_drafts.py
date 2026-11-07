@@ -1175,6 +1175,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             "Return JSON only: {\"items\":[{\"section\":string,\"source_ref\":string,\"quote\":string}]}. "
             "Use only exact contiguous quotations copied verbatim from one supplied source text. "
             "Never paraphrase, infer, diagnose, recommend medication changes, claim causation, or upgrade epistemic status. "
+            "When stale_warning is true, place the quotation in historical context and never describe it as current. "
             "Use concise section names appropriate to the purpose and audience. Omit unsupported sections. "
             "Do not invent IDs, dates, events, names, quotations, or facts."
         )},
