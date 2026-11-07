@@ -116,6 +116,11 @@ def test_correction_preserves_original_and_requires_separate_acceptance(monkeypa
         })
         assert corrected.status_code == 200, corrected.text
         body = corrected.json()
+        correction_replay = review(client, session, proposal["id"], {
+            "decision": "correct", "corrected_text": corrected_text, "correction_context": correction_context,
+        })
+        assert correction_replay.status_code == 200, correction_replay.text
+        assert correction_replay.json()["idempotent_replay"] is True
         assert body["proposal"]["status"] == "corrected"
         new = body["corrected_proposal"]
         assert new["status"] == "pending_authorization" and new["proposal_version"] == 2
@@ -149,6 +154,8 @@ def test_rejection_never_creates_assertion_or_allows_later_acceptance(monkeypatc
         proposal = send(client, session, source).json()["care_update_candidates"][0]
         rejected = review(client, session, proposal["id"], {"decision": "reject"})
         assert rejected.status_code == 200 and rejected.json()["written_to_lcr"] is False
+        rejection_replay = review(client, session, proposal["id"], {"decision": "reject"})
+        assert rejection_replay.status_code == 200 and rejection_replay.json()["idempotent_replay"] is True
         retry = review(client, session, proposal["id"], {"decision": "accept"})
         assert retry.status_code == 409
         db = TestingSessionLocal()
