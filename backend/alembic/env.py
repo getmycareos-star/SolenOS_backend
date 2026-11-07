@@ -1,7 +1,7 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, inspect, pool, text
 
 from app.core.config import get_settings
 from app.core.database import Base
@@ -38,6 +38,22 @@ def run_migrations_online():
         pool_pre_ping=True,
     )
     with connectable.connect() as connection:
+        # Alembic's default version_num column is VARCHAR(32), but this
+        # repository has canonical revision identifiers longer than 32 chars.
+        # Widen/create the bookkeeping table before Alembic attempts to stamp
+        # those revisions. This changes migration metadata only, not care data.
+        if connection.dialect.name == "postgresql":
+            if inspect(connection).has_table("alembic_version"):
+                connection.execute(text(
+                    "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)"
+                ))
+            else:
+                connection.execute(text(
+                    "CREATE TABLE alembic_version ("
+                    "version_num VARCHAR(128) NOT NULL, "
+                    "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+                ))
+            connection.commit()
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

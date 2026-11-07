@@ -213,7 +213,9 @@ def extract_review_candidates(
                 '{"observations":[{"subject":"string","observation":"string","source_quote":"exact verbatim substring from source"}],'
                 '"open_questions":["string"]}. '
                 "Only include observations explicitly supported by the source. Do not infer diagnosis, cause, risk, "
-                "medication changes, or facts not stated. Every source_quote must be copied exactly from the source. "
+                "medication changes, or facts not stated. Every source_quote must be copied exactly from the source, " +
+                "and the observation and subject must themselves be verbatim substrings of that source_quote. " +
+                "Do not paraphrase, summarize, normalize, or add details. "
                 "If there are no supported observations, return an empty observations array. Ask at most three short "
                 "clarifying questions. Never treat greetings or small talk as care observations."
             ),
@@ -246,6 +248,8 @@ def extract_review_candidates(
         if not all(isinstance(value, str) and value.strip() for value in (subject, observation, quote)):
             continue
         if quote not in bounded_source:
+            continue
+        if observation.strip() not in quote or subject.strip().casefold() not in quote.casefold():
             continue
         if any(term in observation.casefold() for term in ("diagnosed with", "caused by", "should increase dose", "should stop medication")):
             continue
