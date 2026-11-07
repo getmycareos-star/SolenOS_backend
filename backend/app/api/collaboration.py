@@ -2718,6 +2718,9 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         retrieval_terms = sorted(_expanded_context_terms(retrieval_query) - retrieval_stopwords)[:24]
         existing_event_ids = {str(event.id) for event in recent_events}
         if retrieval_terms:
+            # Search a bounded historical candidate set before relevance ranking.
+            # A fixed recent-row cap can otherwise let unrelated recent activity
+            # hide an older event that directly matches the caregiver's question.
             matching_events = (
                 db.query(CareEvent)
                 .filter(
@@ -2732,7 +2735,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     ]),
                 )
                 .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
-                .limit(20)
+                .limit(250)
                 .all()
             )
 
