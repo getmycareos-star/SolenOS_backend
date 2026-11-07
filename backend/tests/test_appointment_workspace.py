@@ -1690,3 +1690,111 @@ def test_all_appointment_attendance_outcomes_update_the_scheduled_record(client,
         assert persisted.resolved_at is None
         assert persisted.scheduled_at.replace(tzinfo=timezone.utc).date() == new_time.date()
     db.close()
+
+
+def test_appointment_workspace_rejects_invalid_lifecycle_transition(client):
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "preparation",
+        "payload": {"visit_purpose": "Discuss recent changes"},
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    invalid = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json={
+            "expected_version": 1,
+            "status": "closed_with_outstanding_items",
+            "payload": {"visit_purpose": "Discuss recent changes"},
+            "change_reason": "Invalid direct closure",
+        },
+    )
+    assert invalid.status_code == 409, invalid.text
+    assert invalid.json()["detail"]["code"] == "invalid_appointment_workspace_transition"
+
+    unchanged = test_client.get(f"/api/v1/appointment-workspaces/{record_id}", headers=headers)
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["status"] == "preparation"
+    assert unchanged.json()["version_number"] == 1
+
+
+def test_appointment_preparation_brief_uses_stable_source_coverage_contract(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["person_scope_verified"] is True
+    assert body["read_only"] is True
+    assert body["updates_lcr"] is False
+    assert body["source_coverage"] == {
+        "care_facts": "empty",
+        "care_events": "empty",
+        "appointments": "empty",
+        "evidence_freshness_assessments": "empty",
+        "medications_and_allergies": "unavailable",
+        "documents": "empty",
+        "community": "not_authorized",
+    }
+
+    # The preparation brief must never disclose another person's care data.
+    other_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    assert "Other person private care detail" not in response.text
+
+
+def test_appointment_preparation_brief_includes_person_scoped_extracted_document_text(client):
+    from app.models.capture_analysis import CaptureAnalysis
+
+    test_client, owner, other = client
+    with TestSessionLocal() as db:
+        evidence = Evidence(
+            id="appointment-prep-document",
+            person_id=owner["person"]["id"],
+            type="document",
+            source_text="",
+            uploaded_by_caregiver_id=owner["caregiver"]["id"],
+            source_type="caregiver_upload",
+        )
+        db.add(evidence)
+        db.flush()
+        db.add(CaptureAnalysis(
+            id="appointment-prep-extraction",
+            person_id=owner["person"]["id"],
+            caregiver_id=owner["caregiver"]["id"],
+            source_evidence_id=evidence.id,
+            source_text="Discharge summary: follow-up requested in two weeks.",
+            extraction_status="available",
+            candidates={
+                "kind": "document_extraction_v1",
+                "filename": "discharge-summary.txt",
+                "extraction_method": "server_utf8_text",
+            },
+            review_history=[],
+        ))
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_coverage"]["documents"] == "available"
+    assert len(body["documents"]) == 1
+    assert body["documents"][0]["source_id"] == "appointment-prep-extraction"
+    assert body["documents"][0]["source_evidence_id"] == "appointment-prep-document"
+    assert "follow-up requested in two weeks" in body["documents"][0]["extracted_text"]
+    assert body["documents"][0]["interpretation_limit"].startswith("Extracted document text is source material")
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    private_response = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers=other_headers,
+    )
+    assert private_response.status_code == 200, private_response.text
+    assert private_response.json()["documents"] == []
+    assert private_response.json()["source_coverage"]["documents"] == "empty"
+    assert "Discharge summary" not in private_response.text
