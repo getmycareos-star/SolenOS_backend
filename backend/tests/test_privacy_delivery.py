@@ -850,7 +850,7 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
     quote = "Caregiver reported that the evening routine was completed."
     db = TestSessionLocal()
     try:
-        db.add(CareEvent(
+        source_event = CareEvent(
             id=source_id,
             person_id=owner["person"]["id"],
             event_type="observation",
@@ -859,8 +859,13 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
             title="Evening routine",
             description=quote,
             created_by_caregiver_id=owner["caregiver"]["id"],
-        ))
+        )
+        db.add(source_event)
         db.flush()
+        from app.api.handoff_drafts import SOURCES, _fingerprint
+        source_fields = list(SOURCES["care_events"]["fields"]) + ["evidence_ids", "source_evidence_id"]
+        source_row = {name: getattr(source_event, name) for name in dict.fromkeys(source_fields) if hasattr(source_event, name)}
+        source_fingerprint = _fingerprint(source_row)
         content = {
             "template_sections": [],
             "sections": [],
@@ -898,6 +903,7 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
                     "source_type": "care_event",
                     "source_table": "care_events",
                     "source_id": source_id,
+                    "source_fingerprint": source_fingerprint,
                     "text": quote,
                     "epistemic_status": "not_recorded",
                     "record_status": "recorded",
