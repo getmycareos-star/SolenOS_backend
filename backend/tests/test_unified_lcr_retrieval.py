@@ -78,7 +78,8 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
     try:
         with Session(bind=connection) as db:
             person = Person(id="person-a", name="Care recipient A")
-            db.add(person)
+            other_person_record = Person(id="person-b", name="Care recipient B")
+            db.add_all([person, other_person_record])
             db.flush()
             db.add_all([
                 Caregiver(id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"),
