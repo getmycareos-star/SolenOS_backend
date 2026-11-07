@@ -1,6 +1,15 @@
 name: Companion live Qwen inference evaluation
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/services/qwen_gateway.py"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/api/companion_review.py"
+      - "backend/app/services/companion_care_updates.py"
+      - "backend/live_tests/test_companion_live_inference.py"
+      - ".github/workflows/companion-live-inference.yml"
   pull_request:
     paths:
       - "backend/**"
