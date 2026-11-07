@@ -1067,6 +1067,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             return {"status": "empty", "label": "Uploaded documents and extracted text", "count": 0}, []
         output = []
         missing_originals = 0
+        unavailable_extractions = 0
         assertion_rows = db.query(CareAssertion).filter(
             CareAssertion.person_id == person_id,
         ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
@@ -1117,6 +1118,8 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 effective_extraction_status = "extraction_text_empty"
             else:
                 effective_extraction_status = "available"
+            if effective_extraction_status != "available":
+                unavailable_extractions += 1
             if extraction and effective_extraction_status == "available":
                 extracted_text = (extraction.source_text or "").strip()
                 if extracted_text:
@@ -1207,7 +1210,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 "stale_warning": bool(document.occurred_at and document.occurred_at < datetime.now(timezone.utc) - timedelta(days=30)),
             })
         status = "available" if output else "unavailable" if missing_originals else "empty"
-        reason = "original_upload_bytes_unavailable" if missing_originals and not output else "some_original_uploads_unavailable" if missing_originals else None
+        reason = "original_upload_bytes_unavailable" if missing_originals and not output else "some_original_uploads_unavailable" if missing_originals else "some_documents_not_extracted_or_extraction_failed" if unavailable_extractions else None
         result = {"status": status, "label": "Uploaded documents and extracted text", "count": len(output)}
         if reason:
             result["reason"] = reason
