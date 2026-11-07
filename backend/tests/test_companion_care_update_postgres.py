@@ -187,7 +187,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         # Rejection is terminal and must never create an assertion.
         rejected_source = "The caregiver recorded a separate event for review."
         monkeypatch.setattr(
-            collaboration,
+            care_updates,
             "extract_companion_care_candidates",
             lambda source: {"observations": [{"source_quote": rejected_source}] if source == rejected_source else [],
         )
