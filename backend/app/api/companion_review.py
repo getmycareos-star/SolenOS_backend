@@ -192,7 +192,7 @@ def review_companion_care_update(
                 source_conversation_id=session.id,
                 source_message_id=source_message.id,
                 source_proposal_id=proposal.id,
-                evidence_ids=[], assertion_status="reported",
+                evidence_ids=[], assertion_status="caregiver_reviewed",
                 observed_at=None, created_by_caregiver_id=caregiver_id,
             )
             db.add(assertion)
