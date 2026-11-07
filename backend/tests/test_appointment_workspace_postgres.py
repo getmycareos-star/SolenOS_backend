@@ -253,6 +253,7 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
                 captured["messages"] = messages
                 return "The caregiver reported that dressing required two-person assistance this morning."
 
+            monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
             monkeypatch.setattr(collaboration, "_ollama_chat", fake_ollama)
             monkeypatch.setattr(
                 collaboration,
