@@ -208,7 +208,11 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
             caregiver_c = Caregiver(
                 id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b"
             )
-            db.add_all([person, other_person, caregiver, caregiver_b, caregiver_c])
+            # Flush parent rows before caregivers so this fixture remains valid
+            # even when mapper relationship metadata is not available for ordering.
+            db.add_all([person, other_person])
+            db.flush()
+            db.add_all([caregiver, caregiver_b, caregiver_c])
             db.flush()
             event = CareEvent(
                 id="daily-care-event", person_id="person-a", event_type="daily_observation",
