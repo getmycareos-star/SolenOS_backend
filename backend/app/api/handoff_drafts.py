@@ -381,6 +381,7 @@ def _draft_response(draft: HandoffDraft) -> dict:
         ],
         "evidence_lineage": snapshot.get("evidence_lineage", {}),
         "limitations": snapshot.get("limitations", []),
+        "warning": "This is a caregiver-reviewed handoff draft, not an independent clinical assessment. Missing information is not a negative finding. Verify source status and timestamps before sharing.",
     }
 
 
