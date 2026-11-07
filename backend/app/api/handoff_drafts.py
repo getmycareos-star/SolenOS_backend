@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text
 from sqlalchemy.exc import IntegrityError
@@ -640,6 +640,29 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
     except Exception:
         logger.exception("Handoff draft source revision check failed")
         return {"status": "unknown", "reason": "source_revision_check_failed", "stale_source_count": len(stale), "unknown_source_count": len(unknown) + 1}
+
+@router.get("")
+def list_handoff_drafts(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scoped_identity(request, db)
+    drafts = db.query(HandoffDraft).filter(
+        HandoffDraft.person_id == person_id,
+        HandoffDraft.caregiver_id == caregiver_id,
+    ).order_by(HandoffDraft.updated_at.desc(), HandoffDraft.created_at.desc()).limit(limit).all()
+    return {
+        "items": [
+            {
+                **_draft_response(draft),
+                "updated_at": _iso(draft.updated_at),
+            }
+            for draft in drafts
+        ],
+        "count": len(drafts),
+    }
+
 
 @router.get("/{draft_id}")
 def get_handoff_draft(draft_id: str, request: Request, db: Session = Depends(get_db)):
