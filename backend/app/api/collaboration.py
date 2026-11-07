@@ -41,6 +41,7 @@ from app.models.collaboration import (
     ShareIntake,
 )
 from app.models.improvement_training_example import ImprovementTrainingExample
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
@@ -213,6 +214,7 @@ async def upload_evidence(
         "json": "application/json", "xml": "application/xml", "yaml": "application/yaml",
         "yml": "application/yaml", "pdf": "application/pdf", "jpg": "image/jpeg",
         "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+        "tif": "image/tiff", "tiff": "image/tiff",
         "doc": "application/msword",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "rtf": "application/rtf", "eml": "message/rfc822", "msg": "application/vnd.ms-outlook",
@@ -226,7 +228,7 @@ async def upload_evidence(
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
-        "image/jpeg", "image/png", "image/webp", "image/gif",
+        "image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff",
     }
     octet_stream_document = mime_type == "application/octet-stream" and suffix in {"doc", "docx", "rtf", "eml", "msg"}
     if mime_type not in allowed_mime_types and not octet_stream_document:
@@ -306,10 +308,13 @@ async def upload_evidence(
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
 
-    # Uploaded text remains source evidence; it is not promoted to a care assertion.
-    # The extraction label is client-provided and is recorded as such, never trusted
-    # as proof that OCR or review happened on the server.
+    # Browser-provided extraction text is never authoritative for documents.
+    # The server will extract from the immutable uploaded bytes into CaptureAnalysis.
+    # Persisting client text in Evidence.source_text would expose unverified OCR to
+    # downstream Companion/context retrieval, so document uploads store an empty
+    # source_text until a separate server-authored extraction record exists.
     bounded_text = extracted_text.strip()[:100_000]
+    persisted_source_text = "" if evidence_type == "document" else bounded_text
     digest = hashlib.sha256(data).hexdigest()
     # Serialize duplicate lookup + insertion for this person/content pair.
     # Without a transaction-scoped lock, two simultaneous uploads can both
@@ -337,7 +342,7 @@ async def upload_evidence(
     evidence = EvidenceModel(
         person_id=scoped_person_id,
         type=evidence_type,
-        source_text=bounded_text,
+        source_text=persisted_source_text,
         original_file_path=None,
         uploaded_by_caregiver_id=scoped_caregiver_id,
         extra_metadata=json.dumps({
@@ -347,12 +352,21 @@ async def upload_evidence(
             "sha256": digest,
             "duplicate_detected": duplicate_upload is not None,
             "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
-            "text_source": "client_supplied" if bounded_text else "not_available",
+            "text_source": (
+                "server_extraction_pending" if evidence_type == "document"
+                else "client_supplied_unverified" if bounded_text
+                else "not_available"
+            ),
             "source_integrity": {
                 "binary_sha256_computed_at_ingest": True,
                 "original_binary_persisted": True,
-                "text_extraction_available": bool(bounded_text),
-                "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
+                "text_extraction_available": bool(persisted_source_text),
+                "text_extraction_status": (
+                    "awaiting_server_extraction" if evidence_type == "document"
+                    else "client_supplied_unverified" if bounded_text
+                    else "unavailable"
+                ),
+                "client_supplied_document_text_ignored": bool(evidence_type == "document" and bounded_text),
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
@@ -878,6 +892,7 @@ def _humanize_model_context_line(line: str) -> str:
         ("filename", "filename"),
         ("description", "description"),
         ("source_text", "document text"),
+        ("extracted_text", "document text"),
         ("fact_value", "care fact reported value"),
         ("summary", "summary"),
         ("content", "content"),
@@ -2867,6 +2882,55 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
         source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
+        document_extraction_context: list[str] = []
+        if document_question:
+            # A document-specific Companion question retrieves persisted
+            # extraction rows directly from the authenticated person's scope.
+            # Do not make access to the original server extraction depend on
+            # whether the general evidence-ranking pass retained its metadata
+            # line; the extraction itself is the authoritative document source.
+            extraction_rows = (
+                db.query(CaptureAnalysis, EvidenceUpload)
+                .join(EvidenceUpload, EvidenceUpload.evidence_id == CaptureAnalysis.source_evidence_id)
+                .filter(
+                    CaptureAnalysis.person_id == person_id,
+                    CaptureAnalysis.caregiver_id == caregiver_id,
+                    CaptureAnalysis.extraction_status == "available",
+                )
+                .order_by(CaptureAnalysis.created_at.desc())
+                .limit(4)
+                .all()
+            )
+            seen_document_sources = set()
+            for analysis, upload in extraction_rows:
+                details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+                source_text = (analysis.source_text or "").strip()
+                source_digest = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+                binary_digest = hashlib.sha256(bytes(upload.content)).hexdigest()
+                if (
+                    details.get("kind") != "document_extraction_v1"
+                    or details.get("binary_sha256") != upload.sha256
+                    or binary_digest != upload.sha256
+                    or len(upload.content) != upload.size_bytes
+                    or details.get("source_text_sha256") != source_digest
+                    or not source_text
+                    or str(analysis.source_evidence_id) in seen_document_sources
+                ):
+                    continue
+                seen_document_sources.add(str(analysis.source_evidence_id))
+                if str(analysis.source_evidence_id) not in source_evidence_ids:
+                    source_evidence_ids.append(str(analysis.source_evidence_id))
+                filename = str(details.get("filename") or "Uploaded document")[:180]
+                document_extraction_context.append(
+                    "Persisted document extraction (caregiver-uploaded source material; "
+                    "not an accepted LCR assertion or independently verified fact): "
+                    + json.dumps({
+                        "evidence_id": str(analysis.source_evidence_id),
+                        "filename": filename,
+                        "extraction_method": details.get("extraction_method"),
+                        "extracted_text": source_text[:1400],
+                    }, ensure_ascii=False, default=str)
+                )
         freshness_context: list[str] = []
         if not source_evidence_ids:
             freshness_source_status = "no_linked_evidence"
@@ -2927,7 +2991,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         )
         source_context = [
             *event_context, *assertion_context, *appointment_context, *evidence_context,
-            *freshness_context, *shared_lcr_lines,
+            *freshness_context, *document_extraction_context, *shared_lcr_lines,
             *([] if _is_casual_greeting(user_text) else [lineage_context_line]),
         ]
         trend_assessment = _trend_evidence_assessment(
@@ -2967,8 +3031,8 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             )
 
         model_context_lines = [
-            *event_context, *assertion_context, *appointment_context, *evidence_context,
-            *freshness_context[:1], *shared_lcr_lines[:6],
+            *document_extraction_context[:2], *event_context, *assertion_context,
+            *appointment_context, *evidence_context, *freshness_context[:1], *shared_lcr_lines[:6],
         ]
         if source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",
