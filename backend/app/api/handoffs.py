@@ -366,6 +366,8 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         if not summary_sections or sum(len(value) for value in summary_sections.values()) > 20000:
             raise HTTPException(status_code=422, detail="The validated handoff summary is empty or exceeds the sharing limit")
         source_record_ids = sorted(source_ids)
+        if not source_record_ids:
+            raise HTTPException(status_code=422, detail="The approved draft has no server-resolvable source records")
         validated_source_records = _validate_summary_source_record_ids(db, person_id, source_record_ids)
         snapshot = {
             "sections": summary_sections,
