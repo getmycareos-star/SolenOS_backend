@@ -363,6 +363,12 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             for evidence_id in source.get("evidence_ids", []):
                 if evidence_id:
                     source_ids.add(str(evidence_id))
+        caregiver_notes = content.get("caregiver_notes", []) if isinstance(content, dict) else []
+        for note in caregiver_notes:
+            if isinstance(note, dict) and note.get("attribution") == "caregiver_authored_unverified" and isinstance(note.get("text"), str):
+                grouped_sections.setdefault("lcr_summary", []).append(
+                    "Caregiver-added note (not independently verified): " + note["text"].strip()
+                )
         summary_sections = {
             key: "\n\n".join(values)[:20000]
             for key, values in grouped_sections.items()
