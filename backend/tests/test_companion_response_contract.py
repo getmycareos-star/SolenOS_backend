@@ -864,7 +864,8 @@ def test_historical_event_outside_recent_window_is_retrieved_with_synonym_matchi
         assert response.status_code == 200, response.text
         data = response.json()
         assert older_id in data["source_event_ids"]
-        assert older_id in captured["messages"][-1]["content"]
+        # Internal source IDs remain provenance metadata and are not sent to Qwen.
+        assert older_id not in captured["messages"][-1]["content"]
         assert "waking several times overnight" in captured["messages"][-1]["content"]
         assert data["written_to_lcr"] is False
     finally:
@@ -919,7 +920,8 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
         data = response.json()
         assert older_id in data["source_evidence_ids"]
         assert {"record_type": "care_evidence", "record_id": older_id} in data["source_record_refs"]
-        assert older_id in captured["messages"][-1]["content"]
+        # Model context contains source text, not internal care-record identifiers.
+        assert older_id not in captured["messages"][-1]["content"]
         assert "restless sleep and waking several times overnight" in captured["messages"][-1]["content"]
     finally:
         teardown()
