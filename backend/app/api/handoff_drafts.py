@@ -30,6 +30,26 @@ logger = logging.getLogger(__name__)
 POLICY_VERSION = "handoff-draft-v1"
 MAX_DAYS = 90
 MAX_ROWS_PER_SOURCE = 40
+ALLOWED_HANDOFF_SECTION_LABELS = {
+    "Care recipient and handoff context",
+    "Current care situation",
+    "Recent observations and changes",
+    "Daily Care information",
+    "Relevant care history",
+    "Document-derived information",
+    "Existing decisions and recorded outcomes",
+    "Current concerns and unresolved questions",
+    "Upcoming care commitments",
+    "Relevant historical context",
+    "Missing information and information gaps",
+    "Conflicting or uncertain information",
+    "Care preferences",
+    "Caregiver-reported observations",
+    "Care actions and outcomes",
+    "Open questions",
+    "Appointments",
+    "Conflict history",
+}
 
 # Fixed allowlist: no user-supplied table or column names are accepted.
 SOURCES = {
@@ -419,7 +439,10 @@ def _validate_draft_quotes(content: dict, source_snapshot: dict) -> bool:
             return False
         source = source_by_ref.get(item.get("source_ref"))
         quote = item.get("text")
-        if not source or not isinstance(quote, str) or not quote.strip() or quote not in str(source.get("text") or ""):
+        section = item.get("section")
+        if not source or not isinstance(section, str) or section not in ALLOWED_HANDOFF_SECTION_LABELS:
+            return False
+        if not isinstance(quote, str) or not quote.strip() or quote not in str(source.get("text") or ""):
             return False
     return True
 
@@ -1193,7 +1216,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             "Use only exact contiguous quotations copied verbatim from one supplied source text. "
             "Never paraphrase, infer, diagnose, recommend medication changes, claim causation, or upgrade epistemic status. "
             "When stale_warning is true, place the quotation in historical context and never describe it as current. "
-            "Use concise section names appropriate to the purpose and audience. Omit unsupported sections. "
+            "Use only these section labels: " + ", ".join(sorted(ALLOWED_HANDOFF_SECTION_LABELS)) + ". Omit unsupported sections. "
             "Do not invent IDs, dates, events, names, quotations, or facts."
         )},
         {"role": "user", "content": json.dumps({
@@ -1215,7 +1238,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             source = source_by_ref.get(source_ref) if isinstance(source_ref, str) else None
             if not source or not isinstance(quote, str) or not quote.strip() or len(quote) > 1200:
                 continue
-            if quote not in source["text"] or not isinstance(section, str) or not section.strip():
+            if quote not in source["text"] or not isinstance(section, str) or section.strip() not in ALLOWED_HANDOFF_SECTION_LABELS:
                 continue
             validated.append({
                 "section": section.strip()[:100],
