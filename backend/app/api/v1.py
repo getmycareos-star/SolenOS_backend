@@ -3,6 +3,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import uuid
 import json
 import logging
 import hashlib
@@ -31,6 +33,7 @@ from app.models.memory import (
     Observation as ObservationModel,
     LearningEvent as LearningEventModel,
 )
+from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.time_location import (
     CareWindow as CareWindowModel,
     Appointment as AppointmentModel,
@@ -1340,14 +1343,116 @@ def list_care_windows(person_id: str, status: Optional[str] = None, db: Session 
 
 
 @router.post("/appointments", response_model=AppointmentSchema)
-def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db)):
-    _require_person_and_linked_caregiver(
-        db, appointment.person_id, appointment.created_by_caregiver_id
+def create_appointment(
+    appointment: AppointmentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # Browser-supplied person/caregiver IDs are attribution, never authentication.
+    _require_session_scope(
+        request, db, appointment.person_id, appointment.created_by_caregiver_id
     )
-    db_appt = AppointmentModel(**appointment.model_dump())
-    db.add(db_appt)
-    db.commit()
-    db.refresh(db_appt)
+    if appointment.scheduled_at.tzinfo is None or appointment.scheduled_at.utcoffset() is None:
+        raise HTTPException(status_code=422, detail="Appointment date and time must include a timezone")
+    appointment_zone = timezone.utc
+    if appointment.scheduled_at_timezone:
+        try:
+            appointment_zone = ZoneInfo(appointment.scheduled_at_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise HTTPException(status_code=422, detail="Enter a valid IANA timezone") from exc
+
+    appointment_data = appointment.model_dump(exclude={"idempotency_key"})
+    request_fingerprint = hashlib.sha256(
+        json.dumps(
+            appointment_data,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    idempotency_key = appointment.idempotency_key or f"appointment-{uuid.uuid4().hex}"
+
+    existing_workspace = db.query(AppointmentWorkspaceRecord).filter(
+        AppointmentWorkspaceRecord.person_id == appointment.person_id,
+        AppointmentWorkspaceRecord.idempotency_key == idempotency_key,
+    ).first()
+    if existing_workspace is not None:
+        if existing_workspace.idempotency_request_sha256 != request_fingerprint:
+            raise HTTPException(status_code=409, detail="This appointment idempotency key was already used for different information")
+        existing_appointment = db.query(AppointmentModel).filter(
+            AppointmentModel.id == existing_workspace.appointment_id,
+            AppointmentModel.person_id == appointment.person_id,
+        ).first()
+        if existing_appointment is None:
+            raise HTTPException(status_code=409, detail="The appointment schedule is incomplete and requires support")
+        existing_appointment.workspace_id = existing_workspace.id
+        return existing_appointment
+
+    appointment_id = str(uuid.uuid4())
+    workspace_id = str(uuid.uuid4())
+    db_appt = AppointmentModel(id=appointment_id, **appointment_data)
+    local_scheduled_at = appointment.scheduled_at.astimezone(appointment_zone)
+    workspace_payload = {
+        "appointmentId": appointment_id,
+        "visitPurpose": appointment.title.strip(),
+        "clinician": appointment.provider or "",
+        "visitDate": local_scheduled_at.strftime("%Y-%m-%dT%H:%M"),
+        "location": appointment.location or "",
+        "attendanceStatus": "not_recorded",
+        "medicationQuestions": "\\n".join(appointment.medication_questions or []),
+        "practicalNotes": appointment.travel_notes or "",
+        "documentsToBring": appointment.documents_to_bring or [],
+    }
+    workspace = AppointmentWorkspaceRecord(
+        id=workspace_id,
+        person_id=appointment.person_id,
+        appointment_id=appointment_id,
+        created_by_caregiver_id=appointment.created_by_caregiver_id,
+        updated_by_caregiver_id=appointment.created_by_caregiver_id,
+        status="preparation",
+        version_number=1,
+        payload=workspace_payload,
+        last_revision_reason="Appointment scheduled by caregiver",
+        idempotency_key=idempotency_key,
+        idempotency_request_sha256=request_fingerprint,
+    )
+    revision = AppointmentWorkspaceRevision(
+        id=str(uuid.uuid4()),
+        record_id=workspace_id,
+        person_id=appointment.person_id,
+        revision_number=1,
+        payload=workspace_payload,
+        change_reason="Appointment scheduled by caregiver",
+        changed_by_caregiver_id=appointment.created_by_caregiver_id,
+        idempotency_key=idempotency_key,
+        idempotency_request_sha256=request_fingerprint,
+    )
+    db.add_all([db_appt, workspace, revision])
+    try:
+        db.flush()
+        db.commit()
+        db.refresh(db_appt)
+        db.refresh(workspace)
+    except IntegrityError:
+        db.rollback()
+        existing_workspace = db.query(AppointmentWorkspaceRecord).filter(
+            AppointmentWorkspaceRecord.person_id == appointment.person_id,
+            AppointmentWorkspaceRecord.idempotency_key == idempotency_key,
+        ).first()
+        if existing_workspace is not None:
+            if existing_workspace.idempotency_request_sha256 != request_fingerprint:
+                raise HTTPException(status_code=409, detail="This appointment idempotency key was already used for different information")
+            existing_appointment = db.query(AppointmentModel).filter(
+                AppointmentModel.id == existing_workspace.appointment_id,
+                AppointmentModel.person_id == appointment.person_id,
+            ).first()
+            if existing_appointment is not None:
+                existing_appointment.workspace_id = existing_workspace.id
+                return existing_appointment
+        raise HTTPException(status_code=503, detail="Appointment could not be scheduled safely")
+
+    db_appt.workspace_id = workspace.id
     _log_and_learn(
         db,
         db_appt.person_id,
@@ -1361,7 +1466,12 @@ def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get
 
 
 @router.get("/appointments/{person_id}", response_model=List[AppointmentSchema])
-def list_appointments(person_id: str, db: Session = Depends(get_db)):
+def list_appointments(
+    person_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(AppointmentModel)
         .filter(AppointmentModel.person_id == person_id)
@@ -1372,13 +1482,16 @@ def list_appointments(person_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/appointments/{appointment_id}/lifecycle")
 def update_appointment_lifecycle_endpoint(
-    appointment_id: str, db: Session = Depends(get_db)
+    appointment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
 ):
     appointment = (
         db.query(AppointmentModel).filter(AppointmentModel.id == appointment_id).first()
     )
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    _require_session_scope(request, db, appointment.person_id)
 
     appt_dict = {
         "id": appointment.id,

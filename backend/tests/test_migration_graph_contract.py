@@ -30,3 +30,11 @@ def test_alembic_revision_graph_has_one_resolvable_head():
         "20261029_29_comp_turn_id",
         "20261029_29_ev_rel_scope",
     }
+
+    workflow_merge = script.get_revision("20261102_02_workflow_integrity_merge")
+    assert workflow_merge is not None
+    assert len(workflow_merge.revision) > 32
+    merge_file = backend_dir / "alembic" / "versions" / "20261102_02_workflow_integrity_merge.py"
+    merge_source = merge_file.read_text(encoding="utf-8")
+    assert 'inspect(bind).has_table("alembic_version")' in merge_source
+    assert "String(length=64)" in merge_source

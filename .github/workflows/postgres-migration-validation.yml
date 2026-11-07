@@ -82,7 +82,8 @@ jobs:
               "care_uncertainties": {"person_id", "question", "uncertainty_type", "status"},
               "care_missing_information": {"person_id", "topic", "description", "status"},
               "care_conflicts": {"person_id", "conflict_type", "claim_refs", "description", "status"},
-              "care_action_outcomes": {"person_id", "action_id", "outcome_status"},
+              "care_action_outcomes": {"person_id", "action_id", "outcome_status", "idempotency_key", "idempotency_request_sha256", "related_outcome_id", "review_decision", "received_at", "received_by_caregiver_id", "reviewed_at", "reviewed_by_caregiver_id"},
+              "action_lifecycle_audit": {"action_id", "person_id", "actor_caregiver_id", "previous_responsible_caregiver_id", "new_responsible_caregiver_id", "handoff_id", "assignment_idempotency_key", "assignment_request_sha256"},
               "caregiver_profiles": {"person_id", "session_caregiver_id", "name", "email"},
               "caregiver_contexts": {"person_id", "reported_by_caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
               "caregiver_perspectives": {"person_id", "reported_by_caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
@@ -101,8 +102,8 @@ jobs:
               "care_evidence_revisions": {"person_id", "evidence_id", "revision_number", "current_payload", "changed_at"},
               "care_record_retractions": {"person_id", "care_record_id", "target_type", "target_id", "reason", "status"},
               "care_record_restorations": {"person_id", "care_record_id", "retraction_id", "reason", "restored_at"},
-              "appointment_workspace_records": {"person_id", "appointment_id", "status", "version_number", "payload", "updated_at"},
-              "appointment_workspace_revisions": {"record_id", "person_id", "revision_number", "payload", "changed_at"},
+              "appointment_workspace_records": {"person_id", "appointment_id", "status", "version_number", "payload", "updated_at", "idempotency_key", "idempotency_request_sha256"},
+              "appointment_workspace_revisions": {"record_id", "person_id", "revision_number", "payload", "changed_at", "idempotency_key", "idempotency_request_sha256"},
               "contradictions": {"event_id", "context_key", "effective_from", "effective_to", "matching_candidate_ids"},
               "open_questions": {"person_id", "question", "status", "answer", "answer_provenance", "answered_at", "answered_by_caregiver_id", "claim_id", "intended_answerer_role", "intended_answerer_label", "necessity", "necessity_rationale"},
               "open_question_answer_events": {"id", "question_id", "person_id", "answer", "answer_provenance", "evidence_ids", "answer_version", "answered_by_caregiver_id", "created_at"},
@@ -141,6 +142,31 @@ jobs:
               for item in evidence_uniques
           ), "evidence ingestion idempotency key must be unique within a care record"
           print("PASS evidence ingestion idempotency uniqueness")
+
+          assignment_indexes = inspector.get_indexes("action_lifecycle_audit")
+          assert any(
+              item.get("name") == "uq_action_lifecycle_audit_action_assignment_key"
+              and item.get("unique") is True
+              and item.get("column_names") == ["action_id", "assignment_idempotency_key"]
+              for item in assignment_indexes
+          ), "assignment history idempotency must be unique per action"
+          result_indexes = inspector.get_indexes("care_action_outcomes")
+          assert any(
+              item.get("name") == "uq_care_action_outcomes_person_action_idempotency"
+              and item.get("unique") is True
+              and item.get("column_names") == ["person_id", "action_id", "idempotency_key"]
+              for item in result_indexes
+          ), "result receipt and review idempotency must be unique per action and care record"
+          print("PASS caregiver assignment and result event idempotency indexes")
+
+          with engine.connect() as connection:
+              for trigger_name in ("trg_action_lifecycle_audit_immutable", "trg_care_action_outcomes_immutable"):
+                  trigger = connection.exec_driver_sql(
+                      "SELECT 1 FROM pg_trigger WHERE tgname = %s AND NOT tgisinternal",
+                      (trigger_name,),
+                  ).first()
+                  assert trigger is not None, f"append-only history trigger missing: {trigger_name}"
+          print("PASS PostgreSQL append-only assignment and result history triggers")
 
           conversation_turn_indexes = inspector.get_indexes("conversation_messages")
           conversation_turn_constraints = inspector.get_unique_constraints("conversation_messages")
@@ -677,6 +703,10 @@ jobs:
       - name: Exercise anonymous care continuity against PostgreSQL over HTTP
         working-directory: backend
         run: python scripts/postgres_anonymous_e2e.py
+
+      - name: Run appointment outcome and continuity lifecycle against PostgreSQL
+        working-directory: backend
+        run: python -m pytest tests/test_appointment_workspace_postgres.py -q -vv
 
       - name: Create isolated PostgreSQL migration test databases
         env:

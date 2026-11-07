@@ -11,6 +11,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -328,6 +329,22 @@ def extract_companion_care_candidates(source_text: str) -> dict:
 def _log_inference_result(model: str, started: float, timeout: float, error_category: str | None, failure_reason: str | None) -> None:
     """Emit metadata only. Never include prompts, replies, identifiers, or care content."""
     elapsed_ms = round((time.monotonic() - started) * 1000)
+    now_utc = datetime.now(timezone.utc).isoformat()
+    previous = _READINESS_CACHE.get("result")
+    previous_result = previous if isinstance(previous, dict) else {}
+    succeeded = error_category is None
+    readiness = {
+        "available": succeeded,
+        "state": "ready" if succeeded else "unavailable",
+        "model": model,
+        "last_attempt_at": now_utc,
+        "last_success_at": now_utc if succeeded else previous_result.get("last_success_at"),
+        "duration_ms": elapsed_ms,
+        "failure_reason": failure_reason,
+        "error_category": error_category,
+        "source": "actual_inference",
+    }
+    _READINESS_CACHE.update({"checked_at": time.monotonic(), "result": readiness})
     logger.info(json.dumps({
         "event": "qwen_inference",
         "model": model,
@@ -363,45 +380,36 @@ def qwen_installation_status() -> dict:
 
 
 def qwen_readiness_status(force: bool = False) -> dict:
-    """Require both installed-model inventory and a bounded real inference."""
+    """Report the last real inference outcome without running work during health polling.
+
+    Installation and runtime inventory are reported separately by
+    qwen_installation_status() and qwen_runtime_status(). A process restart has
+    no in-memory inference proof and therefore starts as not_tested.
+    """
     now = time.monotonic()
-    cached_at = float(_READINESS_CACHE.get("checked_at") or 0.0)
+    checked_at = float(_READINESS_CACHE.get("checked_at") or 0.0)
     cached = _READINESS_CACHE.get("result")
-    if not force and cached and now - cached_at < 15.0:
-        return dict(cached)
-    installation = qwen_installation_status()
-    try:
-        base, model, timeout = get_ollama_config()
-        request = urllib.request.Request(base + "/api/tags", headers={"Accept": "application/json"}, method="GET")
-        with urllib.request.urlopen(request, timeout=min(timeout, 5.0)) as response:
-            inventory = json.loads(response.read().decode("utf-8"))
-        names = [str(item.get("name", "")) for item in inventory.get("models", []) if isinstance(item, dict)]
-        if model not in names:
-            result = {"available": False, "state": "model_not_installed", "model": model, "installation": installation, "failure_reason": "configured_model_missing"}
-        else:
-            try:
-                readiness_timeout = max(
-                    5.0,
-                    min(float(os.getenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "45")), 60.0),
-                )
-            except (TypeError, ValueError):
-                readiness_timeout = 45.0
-            probe_answer = qwen_chat(
-                [{"role": "system", "content": "Reply with exactly READY."}, {"role": "user", "content": "Readiness probe. Reply READY."}],
-                timeout=min(timeout, readiness_timeout),
-                options={"temperature": 0, "num_predict": 8, "num_ctx": 256},
-            )
-            if probe_answer.strip().upper() != "READY":
-                result = {"available": False, "state": "unavailable", "model": model, "installation": installation, "failure_reason": "readiness_probe_mismatch", "error_category": "invalid_model_response"}
-            else:
-                result = {"available": True, "state": "ready", "model": model, "installation": installation, "failure_reason": None}
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, dict) else {"reason": "readiness_inference_failed"}
-        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "installation": installation, "failure_reason": detail.get("reason", "readiness_inference_failed"), "error_category": detail.get("code", "readiness_failed")}
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "installation": installation, "failure_reason": type(exc).__name__, "error_category": "runtime_unreachable"}
-    _READINESS_CACHE.update({"checked_at": now, "result": result})
-    return dict(result)
+    if not isinstance(cached, dict):
+        return {
+            "available": False,
+            "state": "not_tested",
+            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "failure_reason": None,
+            "source": "actual_inference",
+            "stale": False,
+        }
+
+    age_seconds = max(0, int(now - checked_at))
+    stale = age_seconds > 300
+    return {
+        **cached,
+        "available": bool(cached.get("available")) and not stale,
+        "state": "stale" if stale else cached.get("state", "unavailable"),
+        "stale": stale,
+        "age_seconds": age_seconds,
+    }
 
 
 def qwen_runtime_status() -> dict:
@@ -414,13 +422,14 @@ def qwen_runtime_status() -> dict:
             payload = json.loads(response.read().decode("utf-8"))
         models = payload.get("models")
         if not isinstance(models, list):
-            return {"available": False, "installation": installation, "error_category": "invalid_model_inventory", "failure_reason": "ollama_tags_missing_models"}
+            return {"available": False, "runtime_available": True, "model_installed": None, "installation": installation, "error_category": "invalid_model_inventory", "failure_reason": "ollama_tags_missing_models"}
         names = [str(item.get("name", "")) for item in models if isinstance(item, dict)]
-        if model not in names:
-            return {"available": False, "installation": installation, "model": model, "error_category": "model_not_installed", "failure_reason": "configured_model_missing"}
-        return {"available": True, "installation": installation, "model": model, "provider": "local_ollama", "inference_api": "ollama_native_http", "hosted_inference_api": False, "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service"}
+        installed = model in names
+        if not installed:
+            return {"available": False, "runtime_available": True, "model_installed": False, "installation": installation, "model": model, "error_category": "model_not_installed", "failure_reason": "configured_model_missing"}
+        return {"available": True, "runtime_available": True, "model_installed": True, "installation": installation, "model": model, "provider": "local_ollama", "inference_api": "ollama_native_http", "hosted_inference_api": False, "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service"}
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": detail.get("code", "configuration_unavailable"), "failure_reason": detail.get("reason", "ollama_configuration_invalid")}
+        return {"available": False, "runtime_available": False, "model_installed": None, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": detail.get("code", "configuration_unavailable"), "failure_reason": detail.get("reason", "ollama_configuration_invalid")}
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": "runtime_unreachable", "failure_reason": type(exc).__name__}
+        return {"available": False, "runtime_available": False, "model_installed": None, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": "runtime_unreachable", "failure_reason": type(exc).__name__}

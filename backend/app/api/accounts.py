@@ -69,12 +69,26 @@ def _verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def _scoped_ids(request: Request) -> tuple[str, str]:
-    person_id = getattr(request.state, "scoped_person_id", None)
-    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_id:
+def _scoped_ids(request: Request, db: Session) -> tuple[str, str]:
+    # Account operations must remain bound to the server-issued bearer session.
+    # Resolve the token directly as a defensive fallback when request.state was
+    # not propagated by an ASGI middleware/test-client boundary.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid care-record session is required")
-    return str(person_id), str(caregiver_id)
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="A valid care-record session is required")
+    request.state.anonymous_session_id = session.id
+    request.state.scoped_person_id = str(session.person_id)
+    request.state.scoped_caregiver_id = str(session.caregiver_id)
+    return str(session.person_id), str(session.caregiver_id)
 
 
 def _account_json(account: CaregiverAccount):
@@ -83,7 +97,7 @@ def _account_json(account: CaregiverAccount):
 
 @router.get("/me")
 def get_my_account(request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _scoped_ids(request)
+    person_id, caregiver_id = _scoped_ids(request, db)
     account = db.query(CaregiverAccount).filter(
         CaregiverAccount.person_id == person_id,
         CaregiverAccount.caregiver_id == caregiver_id,
@@ -93,7 +107,7 @@ def get_my_account(request: Request, db: Session = Depends(get_db)):
 
 @router.post("", status_code=201)
 def create_account(payload: AccountCreate, request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _scoped_ids(request)
+    person_id, caregiver_id = _scoped_ids(request, db)
     email = _validate_email(payload.email)
     if db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first():
         raise HTTPException(status_code=409, detail="An account already uses this email address.")
@@ -204,7 +218,7 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
 
 @router.delete("/me")
 def delete_my_account(payload: AccountDelete, request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _scoped_ids(request)
+    person_id, caregiver_id = _scoped_ids(request, db)
     account = db.query(CaregiverAccount).filter(
         CaregiverAccount.person_id == person_id,
         CaregiverAccount.caregiver_id == caregiver_id,
