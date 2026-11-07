@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
 from app.core.database import get_db
-from app.models.privacy_delivery import AuditLogEvent
+from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraftRevision
 from app.models.care import Evidence, CareEvent
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
@@ -157,6 +157,16 @@ SOURCES = {
     },
 }
 
+class DraftEditRequest(BaseModel):
+    content: dict = Field(...)
+
+
+class DraftApprovalRequest(BaseModel):
+    recipient_caregiver_ids: list[str] = Field(min_length=1, max_length=10)
+    scope: list[Literal["lcr_summary", "open_loops", "appointments", "documents"]] = Field(min_length=1)
+    expires_at: datetime | None = None
+
+
 class DraftRequest(BaseModel):
     purpose: Literal[
         "family_transition", "professional_appointment", "hospital_discharge",
@@ -277,6 +287,229 @@ def _display_text(row: dict, fields: tuple[str, ...]) -> str:
 
 DAILY_CARE_EVENT_TYPES = {
     "structured_daily_capture", "quick_daily_checkin", "daily_care_entry",
+
+def _draft_response(draft: HandoffDraft) -> dict:
+    content = draft.structured_content if isinstance(draft.structured_content, dict) else {}
+    snapshot = draft.source_snapshot if isinstance(draft.source_snapshot, dict) else {}
+    records = snapshot.get("source_records", [])
+    return {
+        "draft_id": draft.id,
+        "purpose": draft.purpose,
+        "audience": draft.audience,
+        "window": snapshot.get("window"),
+        "prepared_at": _iso(draft.created_at),
+        "read_only": False,
+        "creates_handoff": False,
+        "updates_lcr": False,
+        "generation_status": draft.generation_status,
+        "validation_status": draft.validation_status,
+        "review_status": draft.review_status,
+        "revision_number": draft.revision_number,
+        "approval": {
+            "approved_at": _iso(draft.approved_at),
+            "approved_by_caregiver_id": draft.approved_by_caregiver_id,
+            "approval_revision": draft.approval_revision,
+            "approval_parameters": draft.approval_parameters,
+        },
+        "template_sections": content.get("template_sections", []),
+        "sections": content.get("sections", []),
+        "generation": content.get("generation", {}),
+        "source_statuses": snapshot.get("source_statuses", {}),
+        "source_references": [
+            {key: item.get(key) for key in (
+                "source_type", "source_table", "source_id", "event_at", "recorded_at",
+                "due_at", "details", "epistemic_status", "record_status", "stale_warning",
+                "evidence_ids", "evidence_sources", "evidence_reference_status",
+            )}
+            for item in records if isinstance(item, dict)
+        ],
+        "evidence_lineage": snapshot.get("evidence_lineage", {}),
+        "limitations": snapshot.get("limitations", []),
+    }
+
+
+def _draft_content_hash(content: dict) -> str:
+    canonical = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validate_draft_quotes(content: dict, source_snapshot: dict) -> bool:
+    generation = content.get("generation") if isinstance(content, dict) else None
+    sections = generation.get("sections") if isinstance(generation, dict) else None
+    if not isinstance(sections, list):
+        return False
+    source_records = source_snapshot.get("source_records", [])
+    source_by_ref = {
+        f"{row.get('source_table')}:{row.get('source_id')}": row
+        for row in source_records if isinstance(row, dict)
+    }
+    if not sections:
+        return False
+    for item in sections:
+        if not isinstance(item, dict):
+            return False
+        source = source_by_ref.get(item.get("source_ref"))
+        quote = item.get("text")
+        if not source or not isinstance(quote, str) or not quote.strip() or quote not in str(source.get("text") or ""):
+            return False
+    return True
+
+
+@router.get("/{draft_id}")
+def get_handoff_draft(draft_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scoped_identity(request, db)
+    draft = db.query(HandoffDraft).filter(
+        HandoffDraft.id == draft_id,
+        HandoffDraft.person_id == person_id,
+        HandoffDraft.caregiver_id == caregiver_id,
+    ).first()
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Handoff draft not found")
+    revisions = db.query(HandoffDraftRevision).filter(
+        HandoffDraftRevision.draft_id == draft.id,
+        HandoffDraftRevision.person_id == person_id,
+        HandoffDraftRevision.caregiver_id == caregiver_id,
+    ).order_by(HandoffDraftRevision.revision_number.asc()).all()
+    return {
+        **_draft_response(draft),
+        "revision_history": [{
+            "revision_number": row.revision_number,
+            "content_sha256": row.content_sha256,
+            "change_type": row.change_type,
+            "created_at": _iso(row.created_at),
+            "created_by_caregiver_id": row.created_by_caregiver_id,
+        } for row in revisions],
+        "source_freshness": "revision_recheck_not_yet_available",
+    }
+
+
+@router.put("/{draft_id}")
+def save_handoff_draft_revision(
+    draft_id: str,
+    payload: DraftEditRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scoped_identity(request, db)
+    draft = db.query(HandoffDraft).filter(
+        HandoffDraft.id == draft_id,
+        HandoffDraft.person_id == person_id,
+        HandoffDraft.caregiver_id == caregiver_id,
+    ).with_for_update().first()
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Handoff draft not found")
+    serialized = json.dumps(payload.content, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(serialized) > 40000:
+        raise HTTPException(status_code=413, detail="Draft content exceeds the supported size")
+    if not _validate_draft_quotes(payload.content, draft.source_snapshot or {}):
+        raise HTTPException(status_code=422, detail="Draft contains unsupported text or source references; only exact retrieved quotations can be saved as grounded content")
+    content_hash = _draft_content_hash(payload.content)
+    if content_hash == _draft_content_hash(draft.structured_content or {}):
+        return _draft_response(draft)
+    next_revision = int(draft.revision_number or 0) + 1
+    revision = HandoffDraftRevision(
+        id=str(uuid.uuid4()),
+        draft_id=draft.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        revision_number=next_revision,
+        content=payload.content,
+        source_snapshot=draft.source_snapshot,
+        content_sha256=content_hash,
+        change_type="caregiver_edit",
+        created_by_caregiver_id=caregiver_id,
+    )
+    draft.structured_content = payload.content
+    draft.revision_number = next_revision
+    draft.review_status = "pending_review"
+    draft.approved_at = None
+    draft.approved_by_caregiver_id = None
+    draft.approval_revision = None
+    draft.approval_content_sha256 = None
+    draft.approval_parameters = None
+    draft.validation_status = "exact_quote_reference_validation_passed"
+    db.add(revision)
+    db.add(draft)
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id, action="handoff_draft.revise",
+        target_type="handoff_draft", target_id=draft.id, occurred_at=datetime.now(timezone.utc),
+        outcome="success", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version=POLICY_VERSION,
+        record_metadata={"revision_number": next_revision, "content_sha256": content_hash},
+    ))
+    db.commit()
+    db.refresh(draft)
+    return _draft_response(draft)
+
+
+@router.post("/{draft_id}/approve")
+def approve_handoff_draft(
+    draft_id: str,
+    payload: DraftApprovalRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scoped_identity(request, db)
+    draft = db.query(HandoffDraft).filter(
+        HandoffDraft.id == draft_id,
+        HandoffDraft.person_id == person_id,
+        HandoffDraft.caregiver_id == caregiver_id,
+    ).with_for_update().first()
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Handoff draft not found")
+    if draft.generation_status != "generated" or draft.validation_status != "exact_quote_reference_validation_passed":
+        raise HTTPException(status_code=409, detail="A validated Qwen-grounded draft is required before approval")
+    if not _validate_draft_quotes(draft.structured_content or {}, draft.source_snapshot or {}):
+        raise HTTPException(status_code=409, detail="Draft grounding no longer validates; approval was refused")
+    recipients = [str(value).strip() for value in payload.recipient_caregiver_ids]
+    if not recipients or len(recipients) != len(set(recipients)) or caregiver_id in recipients:
+        raise HTTPException(status_code=422, detail="Recipient selection must be unique and exclude the initiating caregiver")
+    linked = db.query(Caregiver).filter(
+        Caregiver.person_id == person_id,
+        Caregiver.id.in_(recipients),
+    ).all()
+    if {row.id for row in linked} != set(recipients):
+        raise HTTPException(status_code=404, detail="One or more recipients are not linked to this care record")
+    expires_at = payload.expires_at
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=422, detail="Handoff expiry must be in the future")
+    scope = list(dict.fromkeys(payload.scope))
+    if not scope:
+        raise HTTPException(status_code=422, detail="At least one sharing scope is required")
+    content_hash = _draft_content_hash(draft.structured_content or {})
+    draft.approved_at = datetime.now(timezone.utc)
+    draft.approved_by_caregiver_id = caregiver_id
+    draft.approval_revision = draft.revision_number
+    draft.approval_content_sha256 = content_hash
+    draft.approval_parameters = {
+        "recipient_caregiver_ids": sorted(recipients),
+        "scope": sorted(scope),
+        "expires_at": expires_at.isoformat() if expires_at else None,
+    }
+    draft.review_status = "approved_for_sharing"
+    db.add(draft)
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id, action="handoff_draft.approve",
+        target_type="handoff_draft", target_id=draft.id, occurred_at=draft.approved_at,
+        outcome="success", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version=POLICY_VERSION,
+        record_metadata={
+            "revision_number": draft.revision_number,
+            "content_sha256": content_hash,
+            "recipient_count": len(recipients),
+            "scope": sorted(scope),
+            "expires_at": expires_at.isoformat() if expires_at else None,
+        },
+    ))
+    db.commit()
+    db.refresh(draft)
+    return _draft_response(draft)
+
 }
 
 
@@ -766,10 +999,83 @@ def prepare_handoff_draft(
         for name, info in statuses.items()
         if info["status"] in {"unavailable", "not_authorized"}
     ]
+    # Persist the complete source snapshot and initial generated revision in the
+    # same transaction as its audit event. A request ID makes network retries safe.
+    request_id = (request.headers.get("x-request-id") or "").strip() or str(uuid.uuid4())
+    if len(request_id) > 255:
+        raise HTTPException(status_code=422, detail="Draft request ID must be 255 characters or fewer")
+    source_snapshot = {
+        "source_statuses": statuses,
+        "source_records": records,
+        "evidence_lineage": evidence_lineage,
+        "limitations": gaps,
+        "window": {"days": payload.window_days, "from": cutoff.isoformat(), "to": now.isoformat()},
+    }
+    structured_content = {
+        "template_sections": _template_coverage(payload.audience, statuses),
+        "sections": sections,
+        "generation": generated_document,
+    }
+    canonical_snapshot = json.dumps(source_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    request_fingerprint = hashlib.sha256(json.dumps({
+        "purpose": payload.purpose,
+        "audience": payload.audience,
+        "window_days": payload.window_days,
+        "source_snapshot_sha256": hashlib.sha256(canonical_snapshot.encode("utf-8")).hexdigest(),
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    existing = db.query(HandoffDraft).filter(
+        HandoffDraft.person_id == person_id,
+        HandoffDraft.caregiver_id == caregiver_id,
+        HandoffDraft.request_id == request_id,
+    ).with_for_update().first()
+    if existing is not None:
+        if existing.request_fingerprint != request_fingerprint:
+            raise HTTPException(status_code=409, detail="Draft request ID was already used for different source content")
+        return _draft_response(existing)
+
     # One durable identity must bind the response and its audit event.
     # This endpoint currently returns a structured preparation snapshot; the ID
     # is correlation metadata, not a persisted editable draft identity.
     draft_id = str(uuid.uuid4())
+    content_canonical = json.dumps(structured_content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    content_sha256 = hashlib.sha256(content_canonical.encode("utf-8")).hexdigest()
+    generation_status = generated_document.get("status", "not_generated")
+    validation_status = "exact_quote_reference_validation_passed" if generation_status == "generated" else "not_validated"
+    persisted_draft = HandoffDraft(
+        id=draft_id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        request_id=request_id,
+        request_fingerprint=request_fingerprint,
+        purpose=payload.purpose,
+        audience=payload.audience,
+        window_days=payload.window_days,
+        structured_content=structured_content,
+        source_snapshot=source_snapshot,
+        generation_metadata={
+            "provider": generated_document.get("provider"),
+            "model": generated_document.get("model"),
+            "status": generation_status,
+            "validation_status": validation_status,
+        },
+        generation_status=generation_status,
+        validation_status=validation_status,
+        review_status="pending_review",
+        revision_number=1,
+    )
+    initial_revision = HandoffDraftRevision(
+        id=str(uuid.uuid4()),
+        draft_id=draft_id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        revision_number=1,
+        content=structured_content,
+        source_snapshot=source_snapshot,
+        content_sha256=content_sha256,
+        change_type="generated",
+        created_by_caregiver_id=caregiver_id,
+    )
+    db.add_all([persisted_draft, initial_revision])
 
     # Durable, content-free audit event. Fail closed if audit persistence fails.
     try:
@@ -784,7 +1090,7 @@ def prepare_handoff_draft(
             target_id=draft_id,
             occurred_at=now,
             outcome="success",
-            request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+            request_id=request_id,
             policy_version=POLICY_VERSION,
             record_metadata={
                 "purpose": payload.purpose,
@@ -792,6 +1098,9 @@ def prepare_handoff_draft(
                 "window_days": payload.window_days,
                 "source_statuses": {key: value["status"] for key, value in statuses.items()},
                 "source_record_count": len(records),
+                "generation_status": generation_status,
+                "validation_status": validation_status,
+                "revision_number": 1,
             },
         ))
         db.commit()
@@ -799,8 +1108,13 @@ def prepare_handoff_draft(
         db.rollback()
         raise HTTPException(status_code=503, detail="Draft audit could not be persisted; no draft was returned") from exc
 
+    db.refresh(persisted_draft)
     return {
         "draft_id": draft_id,
+        "generation_status": generation_status,
+        "validation_status": validation_status,
+        "review_status": "pending_review",
+        "revision_number": 1,
         "purpose": payload.purpose,
         "audience": payload.audience,
         "template_sections": _template_coverage(payload.audience, statuses),
