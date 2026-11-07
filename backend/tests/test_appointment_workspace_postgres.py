@@ -360,6 +360,13 @@ def _latency_percentiles(samples_ms: list[float]) -> dict[str, float]:
     return {"p50": percentile(0.50), "p95": percentile(0.95), "p99": percentile(0.99)}
 
 
+def test_latency_percentiles_use_interpolation_and_remain_ordered():
+    samples = list(range(1, 21))
+    result = _latency_percentiles(samples)
+    assert result == {"p50": 10.5, "p95": 19.05, "p99": 19.81}
+    assert result["p50"] <= result["p95"] <= result["p99"]
+
+
 def test_postgres_daily_capture_and_appointment_write_latency(monkeypatch):
     """Measure authenticated persistence against isolated PostgreSQL without model inference."""
     from app.api import v1 as api_v1
