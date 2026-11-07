@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261105_01_appt_idempotency"
-down_revision = "20261102_02_workflow_integrity_merge"
+down_revision = "20261102_02_wf_integrity_merge"
 branch_labels = None
 depends_on = None
 
