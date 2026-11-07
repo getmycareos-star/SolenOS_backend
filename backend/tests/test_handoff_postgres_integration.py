@@ -301,6 +301,10 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert recipient_summary.status_code == 200, recipient_summary.text
     assert observation in recipient_summary.json()["summary"]["sections"]["lcr_summary"]
     assert "not independently verified" in recipient_summary.json()["summary"]["sections"]["lcr_summary"].lower()
+    shared_snapshot = recipient_summary.json()["summary"]
+    assert shared_snapshot["source_coverage"]["daily_care"]["status"] == "available"
+    assert shared_snapshot["source_coverage"]["documents"]["status"] == "available"
+    assert len(shared_snapshot["source_references"]) == 2
 
     accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert accepted.status_code == 200, accepted.text
