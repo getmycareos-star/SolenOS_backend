@@ -60,11 +60,14 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
 
-      - name: Verify document review migration downgrade and re-upgrade
+      - name: Verify appointment idempotency migration downgrade and re-upgrade
         working-directory: backend
         run: |
           set -Eeuo pipefail
-          python -m alembic downgrade 20261107_01_companion_lcr_review
+          # Later event-time reconciliation migrations are intentionally
+          # forward-only to preserve persisted care history. Exercise the
+          # reversible appointment idempotency revision in isolation.
+          python -m alembic downgrade 20261107_04_assert_event_time
           python -m alembic upgrade head
           python -m alembic current
 
