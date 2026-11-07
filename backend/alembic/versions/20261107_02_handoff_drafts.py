@@ -115,6 +115,13 @@ def downgrade():
             if count:
                 raise RuntimeError("Refusing to discard persisted handoff drafts or revision history")
     if bind.dialect.name == "postgresql":
+        # PostgreSQL rejects dropping a trigger function while its trigger
+        # still depends on it. Remove the immutable-history trigger first.
+        if inspector.has_table("handoff_draft_revisions"):
+            op.execute(
+                "DROP TRIGGER IF EXISTS trg_handoff_draft_revisions_immutable "
+                "ON handoff_draft_revisions"
+            )
         op.execute("DROP FUNCTION IF EXISTS reject_handoff_draft_revision_mutation()")
     if inspector.has_table("handoff_draft_revisions"):
         op.drop_table("handoff_draft_revisions")
