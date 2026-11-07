@@ -3218,6 +3218,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             conversation_id=session.id,
             message_id=str(user_row.id),
             source_text=user_text,
+            anonymous_session_id=str(request.state.anonymous_session_id),
         )
     history = (
         db.query(ConversationMessage)
