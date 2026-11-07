@@ -97,7 +97,8 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     )
     assert reviewed.status_code == 200, reviewed.text
     result = reviewed.json()
-    assert result["candidate"]["observation"] == "Mum slept poorly last night."
+    assert result["candidate"]["observation"] == "Mum slept badly last night."
+    assert result["candidate"]["corrected_observation"] == "Mum slept poorly last night."
     assert result["candidate"]["review_status"] == "corrected_pending_approval"
     assert result["candidate"]["reviewed_by_caregiver_id"] == session["caregiver"]["id"]
     assert result["written_to_lcr"] is False
@@ -140,7 +141,8 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         record = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
         assert record.source_text
         assert record.source_event_id == body["id"]
-        assert record.candidates["observations"][0]["observation"] == "Mum slept poorly last night."
+        assert record.candidates["observations"][0]["observation"] == "Mum slept badly last night."
+        assert record.candidates["observations"][0]["corrected_observation"] == "Mum slept poorly last night."
         assert len(record.review_history) == 2
         assert record.review_history[0]["original_candidate"]["observation"] == "Mum slept badly last night."
         assert record.review_history[0]["reviewed_by_caregiver_id"] == session["caregiver"]["id"]
@@ -149,6 +151,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         assert assertion.evidence_ids == body["evidence_ids"]
         assert assertion.created_by_caregiver_id == session["caregiver"]["id"]
         assert assertion.assertion_status == "caregiver_reviewed"
+        assert assertion.asserted_value == "sleep: Mum slept poorly last night."
     finally:
         db.close()
 
