@@ -8,6 +8,7 @@ from typing import Literal
 import uuid
 import hashlib
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -24,6 +25,7 @@ from app.models.care_continuity import EvidenceSourceRelationship
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
+logger = logging.getLogger(__name__)
 POLICY_VERSION = "handoff-draft-v1"
 MAX_DAYS = 90
 MAX_ROWS_PER_SOURCE = 40
@@ -278,6 +280,14 @@ DAILY_CARE_EVENT_TYPES = {
 }
 
 
+def _is_stale(value, now: datetime, days: int = 30) -> bool:
+    if value is None:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value < now - timedelta(days=days)
+
+
 def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, now: datetime) -> tuple[dict, list[dict]]:
     """Read persisted Daily Care events and same-person evidence; never promote them to LCR facts."""
     try:
@@ -347,7 +357,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     else "no_evidence_linked"
                 ),
                 "text": text,
-                "stale_warning": bool(event.occurred_at and event.occurred_at < now - timedelta(days=30)),
+                "stale_warning": _is_stale(event.occurred_at, now),
             })
         return {"status": "available" if output else "empty", "label": "Daily Care observations", "count": len(output)}, output
     except Exception:
@@ -421,7 +431,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                         }],
                         "evidence_reference_status": "original_document_verified",
                         "text": extracted_text[:12000],
-                        "stale_warning": bool(document.occurred_at and document.occurred_at < datetime.now(timezone.utc) - timedelta(days=30)),
+                        "stale_warning": _is_stale(document.occurred_at, datetime.now(timezone.utc)),
                     })
             # Preserve the original upload as its own source node even when extraction is absent.
             output.append({
@@ -502,7 +512,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         }, ensure_ascii=False)},
     ]
     try:
-        raw = qwen_chat(messages, response_format="json", options={"temperature": 0, "num_predict": 512})
+        raw = qwen_chat(messages, timeout=30, response_format="json", options={"temperature": 0, "num_predict": 512})
         parsed = json.loads(raw)
         items = parsed.get("items") if isinstance(parsed, dict) else None
         if not isinstance(items, list):
