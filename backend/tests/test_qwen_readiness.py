@@ -30,7 +30,7 @@ def test_missing_installation_state_defaults_to_not_started(tmp_path, monkeypatc
     assert qwen_gateway.qwen_installation_status()["state"] == "not_started"
 
 
-def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
+def test_readiness_checks_runtime_inventory_without_running_inference(monkeypatch):
     class Response:
         def __enter__(self):
             return self
@@ -49,9 +49,12 @@ def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
 
     result = qwen_gateway.qwen_readiness_status(force=True)
     assert result["available"] is True
-    assert result["state"] == "ready"
-    assert len(calls) == 1
-    assert calls[0][1]["timeout"] == 45.0
+    assert result["state"] == "runtime_available"
+    assert result["model_installed"] is True
+    assert result["runtime_available"] is True
+    assert result["inference_verified"] is False
+    assert result["inference_status"] == "not_verified"
+    assert calls == [], "health polling must never invoke the model"
 
 
 def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
@@ -248,17 +251,28 @@ def test_production_evaluation_rejects_non_workflow_bearer(monkeypatch):
         raise AssertionError("Unauthorised production evaluation request must be rejected")
 
 
-def test_readiness_endpoint_uses_cached_probe_instead_of_forcing_each_request(monkeypatch):
+def test_readiness_endpoint_reports_runtime_state_without_forcing_inference(monkeypatch):
     from app.api import collaboration
 
     calls = []
 
     def readiness(force=False):
         calls.append(force)
-        return {"available": False, "state": "unavailable", "failure_reason": "inference_timeout"}
+        return {
+            "available": True,
+            "state": "runtime_available",
+            "model_installed": True,
+            "runtime_available": True,
+            "inference_verified": False,
+            "inference_status": "not_verified",
+        }
 
     monkeypatch.setattr(collaboration, "qwen_readiness_status", readiness)
     result = collaboration.qwen_assistant_readiness()
 
-    assert result["failure_reason"] == "inference_timeout"
+    assert result["state"] == "runtime_available"
+    assert result["model_installed"] is True
+    assert result["runtime_available"] is True
+    assert result["inference_verified"] is False
+    assert result["inference_status"] == "not_verified"
     assert calls == [False]
