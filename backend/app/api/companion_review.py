@@ -86,12 +86,30 @@ def review_companion_care_update(
         AIOutputLCRDecision.person_id == person_id,
     ).order_by(AIOutputLCRDecision.created_at.asc()).all()
     if proposal.status != "pending_authorization":
-        if existing_decisions and existing_decisions[-1].decision == decision:
+        terminal_status = {"accept": "accepted", "correct": "corrected", "reject": "rejected"}[decision]
+        if proposal.status == terminal_status and existing_decisions:
+            if decision == "correct":
+                corrected_value = (payload.corrected_text or "").strip()
+                next_version = int(proposal.proposal_version or 1) + 1
+                corrected_proposal = db.query(AIOutputLCRProposal).filter(
+                    AIOutputLCRProposal.source_message_id == proposal.source_message_id,
+                    AIOutputLCRProposal.candidate_index == proposal.candidate_index,
+                    AIOutputLCRProposal.proposal_version == next_version,
+                ).first()
+                if corrected_proposal is None or (corrected_proposal.proposed_change_json or {}).get("asserted_value") != corrected_value:
+                    raise HTTPException(status_code=409, detail="This proposal already has a different correction decision")
+                return {
+                    "proposal": _proposal_json(proposal),
+                    "corrected_proposal": _proposal_json(corrected_proposal),
+                    "decision": decision,
+                    "idempotent_replay": True,
+                }
             assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
             return {
                 "proposal": _proposal_json(proposal),
                 "decision": decision,
                 "assertion_id": assertion.id if assertion else None,
+                "written_to_lcr": bool(assertion),
                 "idempotent_replay": True,
             }
         raise HTTPException(status_code=409, detail="This proposal already has a review decision")
