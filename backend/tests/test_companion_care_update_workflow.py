@@ -82,6 +82,9 @@ def test_companion_message_persists_source_and_only_acceptance_creates_assertion
         assert assertion_id
         replay = review(client, session, proposal_data["id"], {"decision": "accept"})
         assert replay.status_code == 200 and replay.json()["idempotent_replay"] is True
+        current_care = client.get("/api/v1/care-continuity/current-care", headers={"Authorization": f"Bearer {session['access_token']}"})
+        assert current_care.status_code == 200, current_care.text
+        assert any(item.get("id") == assertion_id for item in current_care.json().get("items", []))
         db = TestingSessionLocal()
         try:
             assertion = db.query(CareAssertion).filter_by(id=assertion_id).one()
@@ -90,7 +93,7 @@ def test_companion_message_persists_source_and_only_acceptance_creates_assertion
             assert assertion.source_proposal_id == proposal_data["id"]
             assert assertion.asserted_value == source
             assert assertion.created_by_caregiver_id == session["caregiver"]["id"]
-            assert assertion.assertion_status == "reported"
+            assert assertion.assertion_status == "caregiver_reviewed"
             decision = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal_data["id"]).one()
             assert decision.decision == "accepted"
             assert decision.reviewer_caregiver_id == session["caregiver"]["id"]
