@@ -20,6 +20,7 @@ from app.models.privacy_delivery import (
     HandoffAcknowledgement,
     HandoffRecipient,
     HandoffRecord,
+    HandoffDraft,
 )
 
 router = APIRouter(prefix="/handoffs", tags=["care handoffs"])
@@ -159,6 +160,7 @@ def _audit(db: Session, request: Request, person_id: str, caregiver_id: str,
 
 class HandoffCreate(BaseModel):
     person_id: str
+    draft_id: str | None = None
     recipient_caregiver_ids: list[str] = Field(min_length=1, max_length=10)
     scope: list[Literal["lcr_summary", "open_loops", "appointments", "documents"]] = Field(min_length=1)
     expires_at: datetime | None = None
@@ -282,12 +284,114 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     if request_id and len(request_id) > 128:
         raise HTTPException(status_code=422, detail="Handoff request ID must be 128 characters or fewer")
 
+    approved_draft = None
+    approved_summary = None
+    if payload.draft_id:
+        approved_draft = db.query(HandoffDraft).filter(
+            HandoffDraft.id == payload.draft_id,
+            HandoffDraft.person_id == person_id,
+            HandoffDraft.caregiver_id == caregiver_id,
+        ).with_for_update().first()
+        if approved_draft is None:
+            raise HTTPException(status_code=404, detail="Approved handoff draft not found")
+        if (
+            approved_draft.review_status != "approved_for_sharing"
+            or approved_draft.approved_by_caregiver_id != caregiver_id
+            or approved_draft.approval_revision != approved_draft.revision_number
+            or approved_draft.generation_status != "generated"
+            or approved_draft.validation_status != "exact_quote_reference_validation_passed"
+        ):
+            raise HTTPException(status_code=409, detail="The handoff draft is not approved in its current revision")
+        content_canonical = json.dumps(
+            approved_draft.structured_content or {},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
+        )
+        content_hash = hashlib.sha256(content_canonical.encode("utf-8")).hexdigest()
+        if content_hash != approved_draft.approval_content_sha256:
+            raise HTTPException(status_code=409, detail="The approved draft content changed; caregiver approval is no longer valid")
+        approval_parameters = approved_draft.approval_parameters or {}
+        requested_expiry = _aware(payload.expires_at).isoformat() if payload.expires_at else None
+        expected_parameters = {
+            "recipient_caregiver_ids": sorted(payload.recipient_caregiver_ids),
+            "scope": sorted(payload.scope),
+            "expires_at": requested_expiry,
+        }
+        if approval_parameters != expected_parameters:
+            raise HTTPException(status_code=409, detail="Recipients, sharing scope, or expiry differ from the caregiver-approved parameters")
+        content = approved_draft.structured_content or {}
+        generation = content.get("generation") if isinstance(content, dict) else None
+        generated_sections = generation.get("sections") if isinstance(generation, dict) else None
+        source_snapshot = approved_draft.source_snapshot or {}
+        source_records = source_snapshot.get("source_records", [])
+        source_by_ref = {
+            f"{row.get('source_table')}:{row.get('source_id')}": row
+            for row in source_records if isinstance(row, dict)
+        }
+        grouped_sections = {}
+        source_ids = set()
+        allowed_source_tables = {
+            "evidence", "care_events", "care_facts", "care_assertions", "appointments",
+            "information_gaps", "open_questions", "care_decisions", "decision_outcomes",
+            "care_timeline_entries",
+        }
+        if not isinstance(generated_sections, list) or not generated_sections:
+            raise HTTPException(status_code=409, detail="The approved draft has no validated source-grounded sections")
+        for item in generated_sections:
+            if not isinstance(item, dict):
+                raise HTTPException(status_code=409, detail="The approved draft structure is invalid")
+            source_ref = item.get("source_ref")
+            source = source_by_ref.get(source_ref) if isinstance(source_ref, str) else None
+            quote = item.get("text")
+            if not source or not isinstance(quote, str) or not quote.strip() or quote not in str(source.get("text") or ""):
+                raise HTTPException(status_code=409, detail="A draft source quotation no longer validates")
+            source_type = source.get("source_type")
+            scope_key = (
+                "documents" if str(source_type).startswith("document_") or source_type == "uploaded_document"
+                else "appointments" if source_type == "appointment"
+                else "open_loops" if source_type in {"care_action", "open_question", "information_gap"}
+                else "lcr_summary"
+            )
+            if scope_key not in payload.scope:
+                raise HTTPException(status_code=403, detail="The approved sharing scope does not cover every generated handoff section")
+            grouped_sections.setdefault(scope_key, []).append(f"{item.get('section', 'Care information')}: {quote} [source: {source_ref}]")
+            if source.get("source_table") in allowed_source_tables:
+                source_ids.add(str(source.get("source_id")))
+            for evidence_id in source.get("evidence_ids", []):
+                if evidence_id:
+                    source_ids.add(str(evidence_id))
+        summary_sections = {
+            key: "\n\n".join(values)[:20000]
+            for key, values in grouped_sections.items()
+        }
+        if not summary_sections or sum(len(value) for value in summary_sections.values()) > 20000:
+            raise HTTPException(status_code=422, detail="The validated handoff summary is empty or exceeds the sharing limit")
+        source_record_ids = sorted(source_ids)
+        validated_source_records = _validate_summary_source_record_ids(db, person_id, source_record_ids)
+        snapshot = {
+            "sections": summary_sections,
+            "source_record_ids": source_record_ids,
+            "source_record_tables": validated_source_records,
+            "prepared_at": approved_draft.created_at.isoformat() if approved_draft.created_at else None,
+            "stored_at": datetime.now(timezone.utc).isoformat(),
+            "caregiver_reviewed": True,
+            "review_attestation": "server_verified_persisted_draft_approval",
+            "draft_id": approved_draft.id,
+            "draft_revision": approved_draft.revision_number,
+            "draft_content_sha256": content_hash,
+            "source_id_validation": "server_verified_person_scope_and_record_existence",
+            "semantic_grounding_status": "exact_quote_and_source_reference_verified_not_semantic_entailment",
+        }
+        canonical_summary = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        snapshot["content_sha256"] = hashlib.sha256(canonical_summary.encode("utf-8")).hexdigest()
+        approved_summary = snapshot
+
     canonical_request = {
         "person_id": person_id,
         "created_by": caregiver_id,
         "recipient_caregiver_ids": sorted(payload.recipient_caregiver_ids),
         "scope": sorted(payload.scope),
         "expires_at": _aware(payload.expires_at).isoformat() if payload.expires_at else None,
+        "draft_id": payload.draft_id,
     }
     request_fingerprint = hashlib.sha256(
         json.dumps(canonical_request, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -327,6 +431,20 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     )
     db.add(handoff)
     db.flush()
+    if approved_summary is not None:
+        handoff.summary_snapshot = approved_summary
+        handoff.summary_id = str(uuid.uuid4())
+        approved_draft.review_status = "shared"
+        db.add(approved_draft)
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "allowed")
+        db.add(AuditLogEvent(
+            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+            person_id=person_id, caregiver_id=caregiver_id, action="handoff_draft.shared",
+            target_type="handoff_draft", target_id=approved_draft.id,
+            occurred_at=now, outcome="success", request_id=request_id or str(uuid.uuid4()),
+            policy_version=POLICY_VERSION,
+            record_metadata={"revision_number": approved_draft.revision_number, "handoff_id": handoff.id, "recipient_count": len(recipients)},
+        ))
     for recipient in recipients:
         db.add(HandoffRecipient(
             id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
