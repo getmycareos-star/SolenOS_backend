@@ -363,46 +363,36 @@ def qwen_installation_status() -> dict:
 
 
 def qwen_readiness_status(force: bool = False) -> dict:
-    """Require both installed-model inventory and a bounded real inference."""
-    now = time.monotonic()
-    cached_at = float(_READINESS_CACHE.get("checked_at") or 0.0)
-    cached = _READINESS_CACHE.get("result")
-    if not force and cached and now - cached_at < 15.0:
-        return dict(cached)
-    installation = qwen_installation_status()
-    try:
-        base, model, timeout = get_ollama_config()
-        request = urllib.request.Request(base + "/api/tags", headers={"Accept": "application/json"}, method="GET")
-        with urllib.request.urlopen(request, timeout=min(timeout, 5.0)) as response:
-            inventory = json.loads(response.read().decode("utf-8"))
-        names = [str(item.get("name", "")) for item in inventory.get("models", []) if isinstance(item, dict)]
-        if model not in names:
-            result = {"available": False, "state": "model_not_installed", "model": model, "installation": installation, "failure_reason": "configured_model_missing"}
-        else:
-            try:
-                readiness_timeout = max(
-                    5.0,
-                    min(float(os.getenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "45")), 60.0),
-                )
-            except (TypeError, ValueError):
-                readiness_timeout = 45.0
-            probe_answer = qwen_chat(
-                [{"role": "system", "content": "Reply with exactly READY."}, {"role": "user", "content": "Readiness probe. Reply READY."}],
-                timeout=min(timeout, readiness_timeout),
-                options={"temperature": 0, "num_predict": 8, "num_ctx": 256},
-            )
-            if probe_answer.strip().upper() != "READY":
-                result = {"available": False, "state": "unavailable", "model": model, "installation": installation, "failure_reason": "readiness_probe_mismatch", "error_category": "invalid_model_response"}
-            else:
-                result = {"available": True, "state": "ready", "model": model, "installation": installation, "failure_reason": None}
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, dict) else {"reason": "readiness_inference_failed"}
-        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "installation": installation, "failure_reason": detail.get("reason", "readiness_inference_failed"), "error_category": detail.get("code", "readiness_failed")}
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "installation": installation, "failure_reason": type(exc).__name__, "error_category": "runtime_unreachable"}
-    _READINESS_CACHE.update({"checked_at": now, "result": result})
-    return dict(result)
+    """Report the last real inference result without running inference during polling.
 
+    Installation state, runtime inventory and successful inference are separate
+    facts. A process restart has no in-memory proof of inference and reports
+    not_tested until a real Companion or evaluation request succeeds.
+    """
+    now = time.monotonic()
+    checked_at = float(_READINESS_CACHE.get("checked_at") or 0.0)
+    cached = _READINESS_CACHE.get("result")
+    if not isinstance(cached, dict):
+        return {
+            "available": False,
+            "state": "not_tested",
+            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "failure_reason": None,
+            "source": "actual_inference",
+            "stale": False,
+        }
+
+    age_seconds = max(0, int(now - checked_at))
+    stale = age_seconds > 300
+    return {
+        **cached,
+        "available": bool(cached.get("available")) and not stale,
+        "state": "stale" if stale else cached.get("state", "unavailable"),
+        "stale": stale,
+        "age_seconds": age_seconds,
+    }
 
 def qwen_runtime_status() -> dict:
     """Return machine-readable installation state and current model inventory status."""
