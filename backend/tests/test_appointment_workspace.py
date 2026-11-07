@@ -1156,3 +1156,64 @@ def test_person_historical_projection_reconstructs_latest_revision_per_target(cl
     assert body["items"][0]["state"] == {"status": "reviewed"}
     assert "not a complete historical Living Care Record" in body["interpretation_limit"]
     assert "not-visible" not in response.text
+
+
+def test_appointment_outcome_draft_is_read_only_and_person_scoped(client):
+    test_client, owner, other = client
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=owner_headers, json={
+        "status": "outcome_pending",
+        "payload": {
+            "caregiver_report": "The caregiver noticed increased night waking.",
+            "clinician_findings": "The caregiver recorded that the clinician requested a sleep diary.",
+            "decisions": "The caregiver recorded that a review will be arranged.",
+            "instructions": "Keep the existing sleep diary for the next review.",
+            "unanswered_questions": ["The reason for the change remains unclear."],
+            "follow_ups": [{"action": "Bring the sleep diary", "owner": "", "due": "", "status": "Open"}],
+        },
+        "change_reason": "Save appointment outcome notes",
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    draft = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        headers=owner_headers,
+    )
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert body["read_only"] is True
+    assert body["updates_lcr"] is False
+    assert body["record_id"] == record_id
+    assert body["status"] == "ready_for_review"
+    assert body["sections"]["caregiver_report"][0]["text"] == "The caregiver noticed increased night waking."
+    professional = body["sections"]["professional_information"][0]
+    assert professional["text"] == "The caregiver recorded that the clinician requested a sleep diary."
+    assert professional["epistemic_status"] == "caregiver_reported"
+    assert body["sections"]["follow_ups"][0]["text"] == "Bring the sleep diary"
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    denied = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        headers=other_headers,
+    )
+    assert denied.status_code == 404
+
+
+def test_empty_appointment_outcome_draft_does_not_invent_content(client):
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "preparation", "payload": {}, "change_reason": "Create an empty appointment workspace",
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+    draft = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        headers=headers,
+    )
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert body["status"] == "no_outcome_information"
+    assert all(not items for items in body["sections"].values())
+    assert body["updates_lcr"] is False
