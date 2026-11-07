@@ -2088,7 +2088,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
             source_evidence_ids.append(str(row.id))
 
-    if payload.workflow in appointment_workflows:
+    document_query_text = (payload.text or "").casefold()
+    document_context_requested = payload.workflow in appointment_workflows or any(
+        term in document_query_text for term in ("document", "upload", "letter", "file", "scan")
+    )
+    if document_context_requested:
         source_document_status = "empty"
         try:
             document_analyses = (
