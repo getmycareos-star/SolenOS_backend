@@ -100,6 +100,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     client = TestClient(app)
     owner = _create_session(client, "PostgreSQL initiating caregiver")
     recipient_id, recipient_token = _add_linked_recipient(owner["person"]["id"])
+    unconsented_recipient_id, _ = _add_linked_recipient(owner["person"]["id"])
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
 
@@ -124,6 +125,16 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
         })
         assert accepted_consent.status_code == 200, accepted_consent.text
         assert accepted_consent.json()["verified"] is True
+
+    # Sender consent alone is insufficient: a linked recipient must also
+    # explicitly accept the required privacy and safety terms before sharing.
+    ineligible_share = client.post("/api/v1/handoffs", headers=owner_headers, json={
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [unconsented_recipient_id],
+        "scope": ["lcr_summary"],
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+    })
+    assert ineligible_share.status_code == 403, ineligible_share.text
 
     observation = "Caregiver reports that lunch was only partly eaten."
     daily_evidence_id = str(uuid.uuid4())
