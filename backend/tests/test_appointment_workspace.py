@@ -1248,3 +1248,43 @@ def test_appointment_workspace_idempotency_and_read_only_outcome_draft(client):
     assert saved.status_code == 200
     assert saved.json()["version_number"] == 2
     assert saved.json()["payload"] == revised
+
+
+def test_appointment_workspace_explicit_attendance_updates_linked_appointment(client):
+    from datetime import datetime, timezone
+    import uuid
+    from app.models.time_location import Appointment
+
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    appointment_id = str(uuid.uuid4())
+    scheduled_at = datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc)
+    actual_visit_at = datetime(2026, 11, 10, 10, 25, tzinfo=timezone.utc)
+    with TestSessionLocal() as db:
+        db.add(Appointment(
+            id=appointment_id,
+            person_id=owner["person"]["id"],
+            title="Synthetic appointment attendance test",
+            scheduled_at=scheduled_at,
+            created_by_caregiver_id=owner["caregiver"]["id"],
+            status="scheduled",
+        ))
+        db.commit()
+
+    saved = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "appointment_id": appointment_id,
+        "status": "outcome_pending",
+        "payload": {
+            "attendanceStatus": "attended",
+            "actualVisitAt": actual_visit_at.isoformat(),
+            "caregiverReport": "Caregiver recorded that the appointment took place.",
+        },
+        "change_reason": "Caregiver confirmed appointment attendance",
+        "idempotency_key": "appointment-attendance-save-001",
+    })
+    assert saved.status_code == 201, saved.text
+
+    with TestSessionLocal() as db:
+        appointment = db.query(Appointment).filter_by(id=appointment_id).one()
+        assert appointment.status == "completed"
+        assert appointment.completed_at == actual_visit_at
