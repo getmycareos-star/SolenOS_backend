@@ -351,6 +351,12 @@ jobs:
       - name: Run persisted change-pattern lifecycle tests against PostgreSQL
         run: python -m pytest backend/tests/test_pattern_postgres_integration.py -q -vv
 
+      - name: Benchmark authenticated Daily Capture writes on PostgreSQL
+        env:
+          SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
+          APP_ENV: test
+        run: python -m pytest backend/tests/test_daily_capture_write_postgres.py -q -vv -s
+
 
   qwen-image-build:
     # The full model-image/inference check is only needed for Qwen-specific PRs.
