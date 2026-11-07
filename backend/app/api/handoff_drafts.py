@@ -1162,6 +1162,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             "record_status": item["record_status"],
             "event_at": item["event_at"],
             "recorded_at": item["recorded_at"],
+            "stale_warning": bool(item.get("stale_warning")),
             "text": item["text"][:3000],
         }
         for item in records if item.get("text")
@@ -1206,6 +1207,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
                 "record_status": source["record_status"],
                 "event_at": source["event_at"],
                 "recorded_at": source["recorded_at"],
+                "stale_warning": bool(source.get("stale_warning")),
             })
         if not validated:
             return {"status": "validation_failed", "provider": "ollama", "model": model, "reason": "no_verifiable_exact_source_quotes", "sections": []}
