@@ -131,7 +131,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert current_care.status_code == 200, current_care.text
     assert any(
         item.get("id") == accepted_body["assertion_id"]
-        and item.get("asserted_value") == "sleep: Mum slept poorly last night."
+        and item.get("description") == "sleep: Mum slept poorly last night."
         for item in current_care.json().get("items", [])
     )
 
