@@ -834,3 +834,137 @@ def test_handoff_outbox_is_owner_scoped_and_tracks_revocation():
         assert "no longer available" in revoked_notice.body.lower()
     finally:
         db.close()
+
+
+def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_create():
+    from app.models.care import CareEvent
+    from app.models.privacy_delivery import HandoffDraft, HandoffRecord
+
+    client = TestClient(app)
+    owner = create_session(client, "Draft sharing owner")
+    recipient_id, _ = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
+
+    source_id = "persisted-draft-share-event"
+    quote = "Caregiver reported that the evening routine was completed."
+    db = TestSessionLocal()
+    try:
+        db.add(CareEvent(
+            id=source_id,
+            person_id=owner["person"]["id"],
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Evening routine",
+            description=quote,
+            created_by_caregiver_id=owner["caregiver"]["id"],
+        ))
+        db.flush()
+        content = {
+            "template_sections": [],
+            "sections": [],
+            "generation": {
+                "status": "generated",
+                "provider": "ollama",
+                "model": "qwen-test-fixture",
+                "sections": [{
+                    "section": "Recent observations",
+                    "source_ref": f"care_events:{source_id}",
+                    "text": quote,
+                    "epistemic_status": "not_recorded",
+                    "record_status": "recorded",
+                }],
+            },
+        }
+        content_sha = hashlib.sha256(
+            __import__("json").dumps(
+                content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+            ).encode("utf-8")
+        ).hexdigest()
+        draft = HandoffDraft(
+            id="approved-draft-for-share",
+            person_id=owner["person"]["id"],
+            caregiver_id=owner["caregiver"]["id"],
+            request_id="draft-share-prepare-001",
+            request_fingerprint="f" * 64,
+            purpose="family_transition",
+            audience="family",
+            window_days=30,
+            structured_content=content,
+            source_snapshot={
+                "source_statuses": {"care_events": {"status": "available", "count": 1}},
+                "source_records": [{
+                    "source_type": "care_event",
+                    "source_table": "care_events",
+                    "source_id": source_id,
+                    "text": quote,
+                    "epistemic_status": "not_recorded",
+                    "record_status": "recorded",
+                    "evidence_ids": [],
+                }],
+                "evidence_lineage": {},
+                "limitations": [],
+            },
+            generation_metadata={"provider": "ollama", "model": "qwen-test-fixture"},
+            generation_status="generated",
+            validation_status="exact_quote_reference_validation_passed",
+            review_status="approved_for_sharing",
+            revision_number=1,
+            approved_at=datetime.now(timezone.utc),
+            approved_by_caregiver_id=owner["caregiver"]["id"],
+            approval_revision=1,
+            approval_content_sha256=content_sha,
+            approval_parameters={
+                "recipient_caregiver_ids": [recipient_id],
+                "scope": ["lcr_summary"],
+                "expires_at": None,
+            },
+        )
+        db.add(draft)
+        db.commit()
+    finally:
+        db.close()
+
+    created = client.post(
+        "/api/v1/handoffs",
+        headers={
+            "Authorization": f"Bearer {owner['access_token']}",
+            "X-Request-ID": "approved-draft-share-request-001",
+        },
+        json={
+            "person_id": owner["person"]["id"],
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary"],
+            "draft_id": "approved-draft-for-share",
+        },
+    )
+    assert created.status_code == 201, created.text
+    handoff_id = created.json()["id"]
+    db = TestSessionLocal()
+    try:
+        handoff = db.query(HandoffRecord).filter_by(id=handoff_id).one()
+        draft = db.query(HandoffDraft).filter_by(id="approved-draft-for-share").one()
+        assert handoff.summary_snapshot["draft_id"] == draft.id
+        assert handoff.summary_snapshot["draft_revision"] == 1
+        assert handoff.summary_snapshot["review_attestation"] == "server_verified_persisted_draft_approval"
+        assert handoff.summary_snapshot["semantic_grounding_status"] == "exact_quote_and_source_reference_verified_not_semantic_entailment"
+        assert handoff.summary_snapshot["sections"]["lcr_summary"].find(quote) >= 0
+        assert draft.review_status == "shared"
+    finally:
+        db.close()
+
+    # A new request with recipient or scope changes cannot reuse the approval.
+    other_recipient_id, _ = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], other_recipient_id)
+    changed = client.post(
+        "/api/v1/handoffs",
+        headers={"Authorization": f"Bearer {owner['access_token']}"},
+        json={
+            "person_id": owner["person"]["id"],
+            "recipient_caregiver_ids": [other_recipient_id],
+            "scope": ["lcr_summary"],
+            "draft_id": "approved-draft-for-share",
+        },
+    )
+    assert changed.status_code == 409, changed.text
