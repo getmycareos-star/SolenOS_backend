@@ -561,19 +561,20 @@ def create_appointment_outcome_proposals(record_id: str, request: Request, db: S
 
     payload = revision.payload if isinstance(revision.payload, dict) else {}
     field_candidates = (
-        ("caregiverReport", "caregiver_report", "Caregiver report"),
-        ("clinicianFindings", "professional_information", "Professional information recorded by caregiver"),
-        ("decisions", "decision", "Decision recorded by caregiver"),
-        ("instructions", "instruction", "Instruction recorded by caregiver"),
-        ("medicationReconciliation", "medication_information", "Medication information recorded by caregiver"),
-        ("pendingResults", "pending_result", "Pending result recorded by caregiver"),
+        (("caregiverReport", "caregiver_report"), "caregiver_report", "Caregiver report"),
+        (("clinicianFindings", "clinician_findings"), "professional_information", "Professional information recorded by caregiver"),
+        (("decisions",), "decision", "Decision recorded by caregiver"),
+        (("instructions",), "instruction", "Instruction recorded by caregiver"),
+        (("medicationReconciliation", "medication_reconciliation"), "medication_information", "Medication information recorded by caregiver"),
+        (("pendingResults", "pending_results"), "pending_result", "Pending result recorded by caregiver"),
     )
     candidates = []
     index = 0
-    for field_name, assertion_field, label in field_candidates:
-        value = payload.get(field_name)
-        if not isinstance(value, str) or not value.strip():
+    for field_names, assertion_field, label in field_candidates:
+        field_name = next((name for name in field_names if isinstance(payload.get(name), str) and payload.get(name).strip()), None)
+        if field_name is None:
             continue
+        value = payload[field_name]
         candidates.append({
             "candidate_index": index,
             "field": assertion_field,
@@ -605,7 +606,7 @@ def create_appointment_outcome_proposals(record_id: str, request: Request, db: S
                     "source_pointer": candidate["source_pointer"],
                     "field": candidate["field"],
                     "label": candidate["label"],
-                    "event_time_text": payload.get("actualVisitDate") if isinstance(payload.get("actualVisitDate"), str) else None,
+                    "event_time_text": payload.get("actualVisitDate") if isinstance(payload.get("actualVisitDate"), str) else payload.get("actual_visit_date") if isinstance(payload.get("actual_visit_date"), str) else None,
                     "epistemic_status": "caregiver_reported",
                     "independently_verified": False,
                 },
@@ -715,6 +716,14 @@ def review_appointment_outcome_proposal(
         if decision == "correct":
             next_id = _appointment_proposal_id(record_id, int(revision_number), int(proposal.candidate_index), int(proposal.proposal_version) + 1)
             corrected_proposal = db.query(AIOutputLCRProposal).filter(AIOutputLCRProposal.id == next_id).first()
+            if corrected_proposal is None:
+                raise HTTPException(status_code=409, detail="The saved correction proposal is unavailable")
+            corrected_change = corrected_proposal.proposed_change_json or {}
+            if (
+                corrected_change.get("asserted_value") != (payload.corrected_text or "").strip()
+                or corrected_change.get("correction_context") != (payload.correction_context or "").strip()
+            ):
+                raise HTTPException(status_code=409, detail="This proposal already has a different correction decision")
         return {
             "proposal": _appointment_proposal_json(proposal),
             "corrected_proposal": _appointment_proposal_json(corrected_proposal) if corrected_proposal else None,
