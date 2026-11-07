@@ -1,14 +1,14 @@
 """Append-only caregiver review events for document intelligence.
 
 Revision ID: 20261106_01_doc_review_events
-Revises: 20261102_02_workflow_integrity_merge
+Revises: 20261102_02_wf_integrity_merge
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261106_01_doc_review_events"
-down_revision = "20261102_02_workflow_integrity_merge"
+down_revision = "20261102_02_wf_integrity_merge"
 branch_labels = None
 depends_on = None
 
