@@ -1048,6 +1048,9 @@ def main():
             source_db.commit()
             source_db.refresh(analysis)
             daily_analysis_id = analysis.id
+            daily_analysis_count_before_retry = source_db.query(CaptureAnalysis).filter_by(
+                person_id=person_a, source_event_id=daily_event_id,
+            ).count()
         finally:
             source_db.close()
 
@@ -1196,6 +1199,16 @@ def main():
                 and daily_replay.get("evidence_ids") == [daily_evidence_id]
                 and daily_replay.get("idempotent_replay") is True,
                 f"Unchanged Daily Care retry created a duplicate or changed its IDs: {status}: {daily_replay}")
+
+        retry_db = SessionLocal()
+        try:
+            daily_analysis_count_after_retry = retry_db.query(CaptureAnalysis).filter_by(
+                person_id=person_a, source_event_id=daily_event_id,
+            ).count()
+            require(daily_analysis_count_after_retry == daily_analysis_count_before_retry,
+                    "Idempotent Daily Care retry created a duplicate persisted candidate analysis")
+        finally:
+            retry_db.close()
         changed_daily_capture = {
             **daily_capture_payload,
             "notes": "Different report must not reuse the original request key.",
