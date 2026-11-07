@@ -1286,6 +1286,8 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
     try:
         assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
         assert assertion.assertion_status == "caregiver_reviewed"
+        assert assertion.subject_type == "person"
+        assert assertion.field == "caregiver_report"
         assert assertion.created_by_caregiver_id == owner["caregiver"]["id"]
         assert assertion.source_proposal_id == proposals[0]["id"]
         assert assertion.source_conversation_id is None
