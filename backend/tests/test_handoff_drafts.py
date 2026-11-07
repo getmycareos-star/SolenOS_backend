@@ -569,3 +569,127 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
     assert extracted["record_status"] == "extracted_not_caregiver_reviewed"
     assert original_ref["source_type"] == "uploaded_document"
     assert original_ref["details"]["extraction_status"] == "available"
+
+
+def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+    from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    recipient = Caregiver(
+        id="handoff-draft-recipient",
+        name="Receiving caregiver",
+        relationship="family",
+        person_id=person_id,
+    )
+    db = TestSessionLocal()
+    try:
+        db.add(recipient)
+        db.commit()
+    finally:
+        db.close()
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("""INSERT INTO care_facts
+                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+            {
+                "id": "persisted-handoff-fact",
+                "person_id": person_id,
+                "fact_type": "caregiver_observation",
+                "fact_value": "Caregiver reports that she prefers tea.",
+                "epistemic_status": "reported",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    calls = {"count": 0}
+
+    def grounded_generation(records, purpose, audience):
+        calls["count"] += 1
+        source = next(row for row in records if row["source_id"] == "persisted-handoff-fact")
+        return {
+            "status": "generated",
+            "provider": "ollama",
+            "model": "qwen-test-fixture",
+            "sections": [{
+                "section": "Care preferences",
+                "source_ref": "care_facts:persisted-handoff-fact",
+                "text": source["text"],
+                "epistemic_status": source["epistemic_status"],
+                "record_status": source["record_status"],
+                "event_at": source["event_at"],
+                "recorded_at": source["recorded_at"],
+            }],
+        }
+
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", grounded_generation)
+    headers = {
+        "Authorization": f"Bearer {session['access_token']}",
+        "x-request-id": "handoff-draft-idempotency-001",
+    }
+    payload = {"purpose": "family_transition", "audience": "family", "window_days": 30}
+    prepared = test_client.post("/api/v1/handoff-drafts/prepare", headers=headers, json=payload)
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+    assert prepared.json()["generation_status"] == "generated"
+    assert prepared.json()["validation_status"] == "exact_quote_reference_validation_passed"
+
+    retried = test_client.post("/api/v1/handoff-drafts/prepare", headers=headers, json=payload)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["draft_id"] == draft_id
+    assert calls["count"] == 1
+
+    retrieved = test_client.get(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert len(retrieved.json()["revision_history"]) == 1
+
+    edited_content = retrieved.json()
+    edited_content = {
+        "template_sections": edited_content["template_sections"],
+        "sections": edited_content["sections"],
+        "generation": edited_content["generation"],
+    }
+    edited_content["generation"]["sections"][0]["section"] = "What the caregiver reported"
+    saved = test_client.put(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"content": edited_content},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["revision_number"] == 2
+    assert saved.json()["review_status"] == "pending_review"
+
+    approved = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "recipient_caregiver_ids": [recipient.id],
+            "scope": ["lcr_summary"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["review_status"] == "approved_for_sharing"
+    assert approved.json()["approval"]["approval_revision"] == 2
+    assert approved.json()["approval"]["approval_parameters"]["recipient_caregiver_ids"] == [recipient.id]
+
+    db = TestSessionLocal()
+    try:
+        stored = db.query(HandoffDraft).filter(HandoffDraft.id == draft_id).one()
+        revisions = db.query(HandoffDraftRevision).filter(HandoffDraftRevision.draft_id == draft_id).all()
+        audit = db.query(__import__("app.models.privacy_delivery", fromlist=["AuditLogEvent"]).AuditLogEvent).filter(
+            __import__("app.models.privacy_delivery", fromlist=["AuditLogEvent"]).AuditLogEvent.target_id == draft_id,
+            __import__("app.models.privacy_delivery", fromlist=["AuditLogEvent"]).AuditLogEvent.action == "handoff_draft.prepare",
+        ).one()
+        assert stored.review_status == "approved_for_sharing"
+        assert len(revisions) == 2
+        assert audit.target_id == draft_id
+    finally:
+        db.close()
