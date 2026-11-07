@@ -159,6 +159,28 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     return str(session.person_id), str(session.caregiver_id)
 
 
+
+def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str, caregiver_id: str) -> str:
+    """Resolve the verified bearer session without depending on ASGI state propagation."""
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if session_id:
+        return str(session_id)
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.person_id == str(person_id),
+        AnonymousSession.caregiver_id == str(caregiver_id),
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    return str(session.id)
+
 def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None) -> dict:
     reactions = db.query(CommunityReaction).filter(CommunityReaction.post_id == post.id).all()
     counts = {"like": 0, "thank_you": 0, "support": 0}
@@ -307,10 +329,10 @@ async def upload_evidence(
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
 
-    # Uploaded text remains source evidence; it is not promoted to a care assertion.
-    # The extraction label is client-provided and is recorded as such, never trusted
-    # as proof that OCR or review happened on the server.
-    bounded_text = extracted_text.strip()[:100_000]
+    # Client-supplied OCR/text is never stored as source evidence. Extraction
+    # must be performed from the persisted original bytes by the server.
+    client_text_submitted = bool((extracted_text or "").strip())
+    bounded_text = ""
     digest = hashlib.sha256(data).hexdigest()
     # Serialize duplicate lookup + insertion for this person/content pair.
     # Without a transaction-scoped lock, two simultaneous uploads can both
@@ -348,12 +370,13 @@ async def upload_evidence(
             "sha256": digest,
             "duplicate_detected": duplicate_upload is not None,
             "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
-            "text_source": "client_supplied" if bounded_text else "not_available",
+            "text_source": "server_extraction_pending",
             "source_integrity": {
                 "binary_sha256_computed_at_ingest": True,
                 "original_binary_persisted": True,
-                "text_extraction_available": bool(bounded_text),
-                "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
+                "text_extraction_available": False,
+                "text_extraction_status": "server_extraction_pending",
+                "client_supplied_document_text_ignored": client_text_submitted,
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
@@ -388,8 +411,9 @@ async def upload_evidence(
         "source_integrity": {
             "binary_sha256_computed_at_ingest": True,
             "original_binary_persisted": True,
-            "text_extraction_available": bool(bounded_text),
-            "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
+            "text_extraction_available": False,
+            "text_extraction_status": "server_extraction_pending",
+            "client_supplied_document_text_ignored": client_text_submitted,
         },
     }
 
@@ -913,12 +937,8 @@ def _humanize_model_context_line(line: str) -> str:
         ("interpretation_limit", "interpretation limit"),
     )
     parts = []
-    # Shared-retrieval records carry a typed top-level source_id. Keep that
-    # reference available for provenance alignment; ad-hoc recent context keeps
-    # internal row identifiers out of the model prompt.
-    source_id = payload.get("source_id")
-    if source_id:
-        parts.append(f"internal source reference (do not display): {source_id}")
+    # Internal row identifiers remain in response provenance metadata and are
+    # deliberately excluded from model prompt content.
     freshness_is_policy_only = "not a truth judgment" in (line[:brace] or "").casefold()
     for key, label_text in fields:
         value = record.get(key)
@@ -3254,9 +3274,10 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
     care_update_candidates = []
-    if not emergency:
+    if not emergency and not _is_casual_greeting(user_text):
         # FastAPI sends the validated conversation response before this background
-        # task performs the separate care-update inference. The original user and
+        # task performs the separate care-update inference. Casual greetings and
+        # emergency responses never create care-review jobs. The original user and
         # assistant messages are already committed and cannot be rolled back by it.
         background_tasks.add_task(
             process_companion_care_update_message,
@@ -3266,7 +3287,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             conversation_id=session.id,
             message_id=str(user_row.id),
             source_text=user_text,
-            anonymous_session_id=str(request.state.anonymous_session_id),
+            anonymous_session_id=_resolve_anonymous_session_id(request, db, person_id, caregiver_id),
         )
     history = (
         db.query(ConversationMessage)

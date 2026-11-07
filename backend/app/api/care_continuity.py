@@ -956,7 +956,7 @@ WRITABLE = {
 
 def _table(db: Session, name: str) -> Table:
     try:
-        return Table(name, MetaData(), autoload_with=db.get_bind())
+        return Table(name, MetaData(), autoload_with=db.connection())
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Care-continuity schema is not ready: {name}") from exc
 
@@ -2744,6 +2744,7 @@ def _person_scoped_rows(resource: str, person_id: str, request: Request, db: Ses
 @router.patch("/assertions/{assertion_id}/status")
 def review_assertion_status(assertion_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_identity(request, db)
+    defer_document_review_commit = bool(db.info.get("defer_document_review_commit"))
     assertions = _table(db, "care_assertions")
     row = db.execute(select(assertions).where(
         assertions.c.id == assertion_id,
@@ -2801,12 +2802,16 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
                 changed_by_caregiver_id=caregiver_id,
                 changed_at=datetime.now(timezone.utc),
             ))
-        db.commit()
+        if not defer_document_review_commit:
+            db.commit()
         updated = db.execute(select(assertions).where(
             assertions.c.id == assertion_id,
             assertions.c.person_id == person_id,
         )).mappings().one()
         response = _jsonable(dict(updated))
+        if defer_document_review_commit:
+            response["change_intelligence_status"] = "deferred"
+            return response
         change_intelligence_status = "available"
         try:
             reconcile_person_change_intelligence(db, person_id)
@@ -3268,7 +3273,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
     if resource == "assertions":
         assertion_kind = data.get("assertion_kind", "current_state")
-        if assertion_kind not in {"current_state", "time_bound_observation"}:
+        if assertion_kind not in {"current_state", "time_bound_observation", "document_reviewed_observation"}:
             raise HTTPException(status_code=422, detail="Unsupported assertion kind")
         data["assertion_kind"] = assertion_kind
         # A newly submitted assertion is always a report. Confirmation requires
@@ -3595,7 +3600,8 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             db.execute(update(retractions).where(
                 retractions.c.id == data["retraction_id"], retractions.c.person_id == person_id
             ).values(status="restored"))
-        db.commit()
+        if not db.info.get("defer_document_review_commit"):
+            db.commit()
         return _jsonable(dict(row))
     except HTTPException:
         db.rollback()
