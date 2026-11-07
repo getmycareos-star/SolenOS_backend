@@ -281,6 +281,70 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             assert "requested a call next Tuesday" not in prompt
             assert "ask about transport availability" not in prompt
 
+            # Appointment follow-ups use the shared Open Loop store, with a
+            # stable source reference, explicit owner/deadline provenance and
+            # caregiver-reported completion kept distinct from verified closure.
+            follow_up_source_id = record_id + ":follow-up-1"
+            follow_up_payload = {
+                "loop_type": "follow_up",
+                "title": "Call the clinic for the test result",
+                "description": "Caregiver-recorded appointment follow-up; result is not yet known.",
+                "source_type": "appointment_workspace",
+                "source_id": follow_up_source_id,
+                "owner_role": "caregiver",
+                "owner_label": "Family caregiver",
+                "deadline_at": "2026-11-10T12:00:00+00:00",
+                "deadline_source": "explicit_user",
+                "deadline_timezone": "UTC",
+                "idempotency_key": "appointment-follow-up:" + follow_up_source_id,
+            }
+            follow_up = client.post("/api/v1/open-loops", headers=fresh_headers, json=follow_up_payload)
+            assert follow_up.status_code == 201, follow_up.text
+            loop_id = follow_up.json()["id"]
+            assert follow_up.json()["source_type"] == "appointment_workspace"
+            assert follow_up.json()["source_id"] == follow_up_source_id
+            assert follow_up.json()["owner_label"] == "Family caregiver"
+            assert follow_up.json()["deadline_timezone"] == "UTC"
+            assert follow_up.json()["status"] == "open"
+
+            follow_up_replay = client.post("/api/v1/open-loops", headers=fresh_headers, json=follow_up_payload)
+            assert follow_up_replay.status_code == 201, follow_up_replay.text
+            assert follow_up_replay.json()["id"] == loop_id
+
+            follow_up_update = client.patch(
+                f"/api/v1/open-loops/{loop_id}",
+                headers=fresh_headers,
+                json={
+                    "title": "Call the clinic and ask for the result",
+                    "description": "Caregiver updated the wording; the result remains unconfirmed.",
+                    "owner_role": "caregiver",
+                    "owner_label": "Family caregiver",
+                    "deadline_at": "2026-11-11T12:00:00+00:00",
+                    "deadline_source": "explicit_user",
+                    "deadline_timezone": "UTC",
+                    "reason": "Caregiver updated appointment follow-up details",
+                    "idempotency_key": "appointment-follow-up-update:" + follow_up_source_id,
+                },
+            )
+            assert follow_up_update.status_code == 200, follow_up_update.text
+            assert follow_up_update.json()["title"] == "Call the clinic and ask for the result"
+
+            reported_done = client.post(
+                f"/api/v1/open-loops/{loop_id}/outcomes",
+                headers=fresh_headers,
+                json={
+                    "text": "Caregiver marked the task done; the result has not been independently verified.",
+                    "evidence": [],
+                    "idempotency_key": "appointment-follow-up-done:" + follow_up_source_id,
+                },
+            )
+            assert reported_done.status_code == 200, reported_done.text
+            assert reported_done.json()["outcome_status"] == "outcome_reported"
+            assert reported_done.json()["status"] == "open"
+
+            foreign_follow_up = client.get(f"/api/v1/open-loops/{loop_id}", headers=other_headers)
+            assert foreign_follow_up.status_code == 404, foreign_follow_up.text
+
             with test_session_local() as db:
                 assertions = db.query(CareAssertion).filter(
                     CareAssertion.person_id == person_id
