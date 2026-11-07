@@ -1628,6 +1628,7 @@ def prepare_handoff_draft(
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
         "sections": sections,
+        "caregiver_notes": [],
     }
     fingerprint_snapshot = {
         "source_statuses": statuses,
