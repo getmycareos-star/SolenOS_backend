@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import (
@@ -1981,6 +1982,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     context_lines: list[str] = []
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
+    source_document_analysis_ids: list[str] = []
+    source_document_status = "not_authorized"
     source_appointment_ids: list[str] = []
     source_handoff_ids: list[str] = []
     source_notification_ids: list[str] = []
@@ -2064,6 +2067,49 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"{(row.source_text or '')[:1800]}"
             )
             source_evidence_ids.append(str(row.id))
+
+    if payload.workflow in appointment_workflows:
+        source_document_status = "empty"
+        try:
+            document_analyses = (
+                db.query(CaptureAnalysis)
+                .filter(CaptureAnalysis.person_id == person_id)
+                .order_by(CaptureAnalysis.created_at.desc())
+                .limit(30)
+                .all()
+            )
+            for analysis in document_analyses:
+                metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+                if metadata.get("kind") != "document_extraction_v1" or not analysis.source_evidence_id:
+                    continue
+                source_document = db.query(EvidenceModel).filter(
+                    EvidenceModel.id == analysis.source_evidence_id,
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.type == "document",
+                ).first()
+                if source_document is None:
+                    continue
+                source_document_analysis_ids.append(str(analysis.id))
+                source_evidence_ids.append(str(source_document.id))
+                source_document_status = "available"
+                context_lines.append(
+                    f"Persisted extracted document [{analysis.id}] from evidence [{source_document.id}]: "
+                    f"extraction_status={analysis.extraction_status}; "
+                    f"filename={metadata.get('filename') or 'unknown'}; "
+                    f"uploaded_by_caregiver_id={source_document.uploaded_by_caregiver_id}; "
+                    f"recorded_at={analysis.created_at.isoformat() if analysis.created_at else 'unknown'}; "
+                    f"extracted_text={(analysis.source_text or '')[:1800]}. "
+                    "This is extracted source text, not an accepted LCR fact or independent clinical verification."
+                )
+                if len(source_document_analysis_ids) >= 5:
+                    break
+        except Exception:
+            db.rollback()
+            source_document_analysis_ids = []
+            source_document_status = "failed"
+            context_lines.append(
+                "Persisted document extraction context could not be retrieved. Document content is unknown for this request."
+            )
 
     if payload.workflow in {"handoff", "care_coordination", "care_transition"}:
         handoffs = db.query(CaregiverHandoff).filter(
@@ -2338,7 +2384,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "written_to_lcr": False,
         "persistence": "read_only_assistance",
         "source_event_ids": source_event_ids,
-        "source_evidence_ids": source_evidence_ids,
+        "source_evidence_ids": list(dict.fromkeys(source_evidence_ids)),
+        "source_document_analysis_ids": source_document_analysis_ids,
+        "source_document_status": source_document_status,
         "source_appointment_ids": source_appointment_ids,
         "source_handoff_ids": source_handoff_ids,
         "source_notification_ids": source_notification_ids,
