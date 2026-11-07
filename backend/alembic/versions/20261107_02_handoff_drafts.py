@@ -1,14 +1,14 @@
 """Add persistent caregiver-reviewed handoff drafts and immutable revisions.
 
 Revision ID: 20261107_02_handoff_drafts
-Revises: 20261107_01_companion_lcr_review
+Revises: 20261107_02_doc_companion_merge
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
 revision = "20261107_02_handoff_drafts"
-down_revision = "20261107_01_companion_lcr_review"
+down_revision = "20261107_02_doc_companion_merge"
 branch_labels = None
 depends_on = None
 
