@@ -28,7 +28,21 @@ concurrency:
 jobs:
   live-qwen-evaluation:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: solenos_live_inference
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d solenos_live_inference"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       OLLAMA_BASE_URL: http://127.0.0.1:11434
       OLLAMA_MODEL: qwen3.5:4b
@@ -37,7 +51,7 @@ jobs:
       OLLAMA_NUM_PREDICT: "96"
       OLLAMA_NUM_THREADS: "2"
       SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
-      DATABASE_URL: sqlite:////tmp/solenos-live-inference.db
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_live_inference
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

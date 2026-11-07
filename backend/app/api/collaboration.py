@@ -7,6 +7,7 @@ import math
 import os
 import re
 import secrets
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -14,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, inspect, or_, text
@@ -912,12 +913,7 @@ def _humanize_model_context_line(line: str) -> str:
         ("interpretation_limit", "interpretation limit"),
     )
     parts = []
-    # Shared-retrieval records carry a typed top-level source_id. Keep that
-    # reference available for provenance alignment; ad-hoc recent context keeps
-    # internal row identifiers out of the model prompt.
-    source_id = payload.get("source_id")
-    if source_id:
-        parts.append(f"internal source reference (do not display): {source_id}")
+    # Source identifiers remain in response provenance metadata, never in model context.
     freshness_is_policy_only = "not a truth judgment" in (line[:brace] or "").casefold()
     for key, label_text in fields:
         value = record.get(key)
@@ -1749,9 +1745,9 @@ def qwen_assistant_installation():
 
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
-    # Performs a bounded real inference when the cached probe is stale. Reusing
-    # the gateway cache prevents health polling from serially running 12-second
-    # CPU inference probes and competing with actual Companion requests.
+    # Health polling must never load the model or run inference. This reports
+    # only the last actual inference result; installation and runtime inventory
+    # are available separately from /assistant/installation.
     return {
         **qwen_readiness_status(),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
@@ -2440,6 +2436,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        retrieval_started = time.perf_counter()
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
         recent_events = (
@@ -2545,12 +2542,46 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         # event can reference important evidence, but standalone document uploads
         # may not yet be linked to an event; prioritize recent documents while
         # retaining event-linked and other recent evidence within a strict bound.
+        # Prior conversation can resolve a referential follow-up, but it
+        # remains conversational context only and is never care evidence.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        is_referential_follow_up = bool(re.search(
+            r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
+            r"what about|what happened|why did that|the same|what was that)\b",
+            user_text.casefold(),
+        ))
+        previous_assistant = next(
+            (row for row in prior_messages if row.role == "assistant"),
+            None,
+        )
+        previous_metadata = {}
+        if is_referential_follow_up and previous_assistant:
+            try:
+                previous_metadata = json.loads(previous_assistant.response_metadata_json or "{}")
+            except (TypeError, ValueError):
+                previous_metadata = {}
+        prior_event_ids = [
+            str(value) for value in previous_metadata.get("source_event_ids", []) if value
+        ]
+        prior_evidence_ids = [
+            str(value) for value in previous_metadata.get("source_evidence_ids", []) if value
+        ]
+
         linked_ids = list(dict.fromkeys(
             str(evidence_id)
             for event in recent_events
             for evidence_id in (event.evidence_ids or [])
             if evidence_id
         ))
+        if is_referential_follow_up:
+            linked_ids = list(dict.fromkeys([*linked_ids, *prior_evidence_ids]))
         evidence_query = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
@@ -2619,17 +2650,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             )
         source_context.extend(evidence_context)
 
-        # Prior conversation can resolve a follow-up reference, but it remains
-        # conversational context only and is never care evidence.
-        prior_messages = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        retrieval_query = _context_query_with_history(user_text, prior_messages)
-
         # Recent-only retrieval can hide an older but directly relevant observation
         # behind a burst of unrelated daily notes. Supplement the recency window with
         # a bounded, server-scoped lexical search before ranking the final context.
@@ -2667,6 +2687,27 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 .limit(20)
                 .all()
             )
+
+            # A short referential follow-up ("What about that?") must retain
+            # the source records cited in the immediately preceding assistant
+            # turn. Re-fetch by server-side person scope and recorded status;
+            # conversation metadata is only a retrieval hint, never authority.
+            if is_referential_follow_up and prior_event_ids:
+                already_selected = {str(event.id) for event in matching_events}
+                carried_events = (
+                    db.query(CareEvent)
+                    .filter(
+                        CareEvent.person_id == person_id,
+                        CareEvent.id.in_(prior_event_ids),
+                        CareEvent.status == "recorded",
+                    )
+                    .all()
+                )
+                matching_events.extend(
+                    event for event in carried_events
+                    if str(event.id) not in already_selected
+                )
+
             for event in matching_events:
                 event_id = str(event.id)
                 if event_id in existing_event_ids:
@@ -3000,12 +3041,26 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 "Respond naturally in a few words, do not ask a question, and do not introduce a care topic. "
                 "Generate the wording for this exact message; do not reuse a stored response."
             )
+        retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+        logger.info(
+            "companion_stage_profile request_id=%s stage=retrieval duration_ms=%.2f outcome=completed events=%d assertions=%d "
+            "appointments=%d evidence=%d shared_lcr_records=%d context_chars=%d",
+            getattr(request.state, "request_id", "unavailable"),
+            retrieval_ms,
+            len(source_event_ids),
+            len(source_assertion_ids),
+            len(source_appointment_ids),
+            len(source_evidence_ids),
+            len(source_lcr_context_ids),
+            context_chars,
+        )
         # All ORM data needed for this prompt has been copied into JSON/plain
         # strings. Release the read transaction before slow Qwen inference so
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
         base, model = _ollama_url()
+        inference_started = time.perf_counter()
         try:
             reply = await asyncio.to_thread(
                 _ollama_chat,
@@ -3014,13 +3069,39 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 model_messages,
                 {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
             )
-        except HTTPException:
+        except asyncio.CancelledError:
+            # A browser disconnect can cancel the awaiting request while the
+            # worker thread continues. Record the request-side cancellation
+            # separately from the eventual gateway inference result.
+            logger.info(
+                "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=client_cancelled",
+                getattr(request.state, "request_id", "unavailable"),
+                (time.perf_counter() - inference_started) * 1000,
+            )
+            raise
+        except HTTPException as exc:
+            logger.info(
+                "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=failed status_code=%d",
+                getattr(request.state, "request_id", "unavailable"),
+                (time.perf_counter() - inference_started) * 1000,
+                exc.status_code,
+            )
             raise
         except Exception as exc:
+            logger.info(
+                "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=failed status_code=503",
+                getattr(request.state, "request_id", "unavailable"),
+                (time.perf_counter() - inference_started) * 1000,
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
+        logger.info(
+            "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=succeeded",
+            getattr(request.state, "request_id", "unavailable"),
+            (time.perf_counter() - inference_started) * 1000,
+        )
         validation_source = user_text + "\n" + "\n".join(bounded_context)
         missing_measurement_reply = _missing_requested_measurement_response(
             user_text,

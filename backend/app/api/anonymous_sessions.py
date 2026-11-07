@@ -93,15 +93,25 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
 def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
     """Rotate a still-valid anonymous capability without changing record ownership."""
     session_id = getattr(request.state, "anonymous_session_id", None)
-    if not session_id:
-        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
-    session = (
-        db.query(AnonymousSession)
-        .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
-        .first()
+    session_query = db.query(AnonymousSession).filter(
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
     )
+    if session_id:
+        session = session_query.filter(AnonymousSession.id == session_id).first()
+    else:
+        # Keep refresh self-contained as well as middleware-protected. Some ASGI
+        # middleware/test-client combinations do not propagate request.state;
+        # resolve the same server-issued bearer capability directly rather than
+        # treating a missing state attribute as an invalid session.
+        authorization = request.headers.get("authorization", "")
+        scheme, _, raw_token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not raw_token.strip():
+            raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+        token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+        session = session_query.filter(AnonymousSession.token_hash == token_hash).first()
     if not session:
-        raise HTTPException(status_code=401, detail="Anonymous session is invalid")
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
     caregiver_profile = ensure_caregiver_profile_for_session(
         db, person_id=session.person_id, session_caregiver_id=session.caregiver_id
     )

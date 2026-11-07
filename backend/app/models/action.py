@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Integer, UniqueConstraint, event
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Integer, UniqueConstraint, Index, event
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -165,6 +165,9 @@ class Action(Base):
 class ActionLifecycleAudit(Base):
     """Append-only actor-attributed record of every registered-action transition."""
     __tablename__ = "action_lifecycle_audit"
+    __table_args__ = (
+        Index("uq_action_lifecycle_audit_action_assignment_key", "action_id", "assignment_idempotency_key", unique=True),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     action_id = Column(String, ForeignKey("actions.id"), nullable=False, index=True)
@@ -174,6 +177,11 @@ class ActionLifecycleAudit(Base):
     new_status = Column(String, nullable=False)
     reason = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=True)
+    previous_responsible_caregiver_id = Column(String(255), nullable=True)
+    new_responsible_caregiver_id = Column(String(255), nullable=True)
+    handoff_id = Column(String(36), nullable=True)
+    assignment_idempotency_key = Column(String(128), nullable=True)
+    assignment_request_sha256 = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

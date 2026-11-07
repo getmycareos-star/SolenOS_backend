@@ -30,6 +30,7 @@ def test_registered_action_routes_are_mounted_once_with_unique_operation_ids():
         ("/api/v1/registered-actions/{person_id}", "get"),
         ("/api/v1/registered-actions/{action_id}/history", "get"),
         ("/api/v1/registered-actions/{action_id}/status", "patch"),
+        ("/api/v1/registered-actions/{action_id}/assignee", "patch"),
     }
     operation_ids = []
     actual = set()

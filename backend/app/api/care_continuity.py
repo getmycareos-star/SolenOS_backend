@@ -945,8 +945,8 @@ WRITABLE = {
     "uncertainties": {"care_record_id", "target_type", "target_id", "question", "uncertainty_type", "status", "source_ids", "resolved_at"},
     "missing-information": {"care_record_id", "topic", "description", "priority", "status", "resolved_at"},
     "conflicts": {"care_record_id", "conflict_type", "status", "claim_refs", "description", "resolution", "resolved_at"},
-    "action-outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids"},
-    "outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids"},
+    "action-outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids", "idempotency_key", "related_outcome_id", "review_decision"},
+    "outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids", "idempotency_key", "related_outcome_id", "review_decision"},
     "record-identifiers": {"care_record_id", "identifier_type", "identifier_fingerprint", "masked_value", "source_type", "source_id", "status", "valid_from", "valid_to"},
     "record-sections": {"care_record_id", "section_key", "section_payload"},
     "record-links": {"source_record_id", "target_record_id", "relationship"},
@@ -3266,13 +3266,147 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
+    if resource in {"action-outcomes", "outcomes"}:
+        outcome_status = str(data.get("outcome_status") or "")
+        allowed_outcomes = {"useful", "completed", "corrected", "unresolved", "not_useful", "not_done", "result_received", "result_reviewed"}
+        if outcome_status not in allowed_outcomes:
+            raise HTTPException(status_code=422, detail="Unsupported follow-up outcome status")
+        if outcome_status in {"result_received", "result_reviewed"}:
+            if data.get("action_type") != "follow_up_result":
+                raise HTTPException(status_code=422, detail="Appointment result events must use the follow-up result type")
+            if not isinstance(data.get("notes"), str) or not data["notes"].strip():
+                raise HTTPException(status_code=422, detail="Add a description for the received result or its review")
+            idempotency_key = data.get("idempotency_key")
+            if not isinstance(idempotency_key, str) or not 16 <= len(idempotency_key.strip()) <= 128:
+                raise HTTPException(status_code=422, detail="A retry-safe result record key is required")
+            data["idempotency_key"] = idempotency_key.strip()
+            action_table = _table(db, "actions")
+            action_row = db.execute(select(action_table).where(
+                action_table.c.id == data["action_id"],
+                action_table.c.person_id == person_id,
+            ).with_for_update()).mappings().first()
+            if action_row is None:
+                raise HTTPException(status_code=404, detail="Follow-up action was not found in this care record")
+            responsible_caregiver_id = action_row.get("responsible_caregiver_id") or action_row.get("created_by_caregiver_id")
+            if str(responsible_caregiver_id or "") != str(caregiver_id):
+                raise HTTPException(status_code=403, detail="Only the caregiver responsible for this follow-up can record or review its result")
+            if outcome_status == "result_received":
+                if not data.get("evidence_ids"):
+                    raise HTTPException(status_code=422, detail="A received result must link to its saved source evidence")
+                if data.get("related_outcome_id") or data.get("review_decision"):
+                    raise HTTPException(status_code=422, detail="A received result cannot contain a review decision")
+            else:
+                if not data.get("related_outcome_id"):
+                    raise HTTPException(status_code=422, detail="A result review must refer to a previously received result")
+                allowed_review_decisions = {"acknowledged", "follow_up_required", "disputed", "needs_clinician_review", "not_relevant"}
+                if data.get("review_decision") not in allowed_review_decisions:
+                    raise HTTPException(status_code=422, detail="Choose a valid result review decision")
+                outcomes_table = _table(db, "care_action_outcomes")
+                received = db.execute(select(outcomes_table).where(
+                    outcomes_table.c.id == data["related_outcome_id"],
+                    outcomes_table.c.person_id == person_id,
+                    outcomes_table.c.action_id == data["action_id"],
+                    outcomes_table.c.outcome_status == "result_received",
+                )).mappings().first()
+                if received is None:
+                    raise HTTPException(status_code=404, detail="The received result was not found for this follow-up")
+                received_evidence_ids = received.get("evidence_ids") or []
+                if isinstance(received_evidence_ids, str):
+                    try:
+                        received_evidence_ids = json.loads(received_evidence_ids)
+                    except (TypeError, ValueError):
+                        received_evidence_ids = []
+                if not data.get("evidence_ids"):
+                    data["evidence_ids"] = list(received_evidence_ids)
+                elif not set(data["evidence_ids"]).issubset(set(received_evidence_ids)):
+                    raise HTTPException(status_code=422, detail="A review must refer only to evidence attached to the received result")
+            result_evidence_ids = data.get("evidence_ids") or []
+            if not isinstance(result_evidence_ids, list) or not result_evidence_ids:
+                raise HTTPException(status_code=422, detail="A result event must retain at least one source evidence reference")
+            result_evidence_ids = list(dict.fromkeys(
+                str(value).strip() for value in result_evidence_ids
+                if isinstance(value, str) and value.strip()
+            ))
+            evidence_table = _table(db, "evidence")
+            scoped_evidence_ids = {
+                str(row[0]) for row in db.execute(select(evidence_table.c.id).where(
+                    evidence_table.c.person_id == person_id,
+                    evidence_table.c.id.in_(result_evidence_ids),
+                )).all()
+            }
+            if scoped_evidence_ids != set(result_evidence_ids):
+                raise HTTPException(status_code=404, detail="One or more result evidence items were not found in this care record")
+            data["evidence_ids"] = result_evidence_ids
+            outcomes_table = _table(db, "care_action_outcomes")
+            if db.get_bind().dialect.name == "postgresql":
+                result_lock_key = int.from_bytes(hashlib.sha256(
+                    f"{person_id}:follow-up-result:{data['action_id']}:{data['idempotency_key']}".encode("utf-8")
+                ).digest()[:8], byteorder="big", signed=True)
+                db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": result_lock_key})
+            fingerprint = hashlib.sha256(json.dumps(
+                data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+            ).encode("utf-8")).hexdigest()
+            existing_result = db.execute(select(outcomes_table).where(
+                outcomes_table.c.person_id == person_id,
+                outcomes_table.c.action_id == data["action_id"],
+                outcomes_table.c.idempotency_key == data["idempotency_key"],
+            )).mappings().first()
+            if existing_result is not None:
+                if existing_result.get("idempotency_request_sha256") == fingerprint:
+                    return _jsonable(dict(existing_result))
+                raise HTTPException(status_code=409, detail="This result record key was already used for different information")
+            data["idempotency_request_sha256"] = fingerprint
+
     if resource == "assertions":
         assertion_kind = data.get("assertion_kind", "current_state")
         if assertion_kind not in {"current_state", "time_bound_observation"}:
             raise HTTPException(status_code=422, detail="Unsupported assertion kind")
         data["assertion_kind"] = assertion_kind
+        if data.get("subject_type") == "appointment":
+            if assertion_kind != "time_bound_observation":
+                raise HTTPException(status_code=422, detail="Appointment outcome entries must retain their actual visit time")
+            if not data.get("observed_at"):
+                raise HTTPException(status_code=422, detail="Appointment outcome entries require the visit date")
         # A newly submitted assertion is always a report. Confirmation requires
         # a separate reviewed transition and cannot be set by the caller.
+        evidence_ids = list(dict.fromkeys(str(value) for value in (data.get('evidence_ids') or []) if isinstance(value, str) and value.strip()))
+        if db.get_bind().dialect.name == 'postgresql':
+            field_lock_key = int.from_bytes(hashlib.sha256((
+                f"{person_id}:assertion-field:{data.get('subject_type')}:{data.get('subject_id')}:{data.get('field')}"
+            ).encode('utf-8')).digest()[:8], byteorder='big', signed=True)
+            db.execute(text('SELECT pg_advisory_xact_lock(:lock_key)'), {'lock_key': field_lock_key})
+        if data.get("subject_type") == "appointment" and not evidence_ids:
+            raise HTTPException(status_code=422, detail="Appointment outcome entries must link to their saved source evidence")
+        if evidence_ids:
+            if db.get_bind().dialect.name == 'postgresql':
+                lock_key = int.from_bytes(hashlib.sha256((
+                    f"{person_id}:appointment-assertion:{data.get('subject_type')}:{data.get('subject_id')}:{data.get('field')}:{','.join(sorted(evidence_ids))}"
+                ).encode('utf-8')).digest()[:8], byteorder='big', signed=True)
+                db.execute(text('SELECT pg_advisory_xact_lock(:lock_key)'), {'lock_key': lock_key})
+            prior_assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.subject_type == data.get('subject_type'),
+                CareAssertion.subject_id == data.get('subject_id'),
+                CareAssertion.field == data.get('field'),
+                CareAssertion.assertion_kind == data.get('assertion_kind', 'current_state'),
+            ).all()
+            for prior in prior_assertions:
+                prior_evidence_ids = list(prior.evidence_ids or [])
+                if set(prior_evidence_ids) != set(evidence_ids):
+                    continue
+                if prior.asserted_value != data.get('asserted_value'):
+                    raise HTTPException(status_code=409, detail='This source has already been recorded with different wording. Add new evidence before changing the care record entry.')
+                return _jsonable({
+                    'id': prior.id, 'person_id': prior.person_id, 'subject_type': prior.subject_type,
+                    'subject_id': prior.subject_id, 'field': prior.field, 'assertion_kind': prior.assertion_kind,
+                    'asserted_value': prior.asserted_value, 'source_event_id': prior.source_event_id,
+                    'source_label': prior.source_label, 'source_text': prior.source_text,
+                    'evidence_ids': prior.evidence_ids, 'assertion_status': prior.assertion_status,
+                    'observed_at': prior.observed_at, 'review_after_days': prior.review_after_days,
+                    'created_by_caregiver_id': prior.created_by_caregiver_id,
+                    'updated_by_caregiver_id': prior.updated_by_caregiver_id, 'recorded_at': prior.recorded_at,
+                })
+        data['evidence_ids'] = evidence_ids
         data["assertion_status"] = "reported"
         review_days = data.get("review_after_days")
         if review_days is not None:
@@ -3402,6 +3536,14 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         data["id"] = str(uuid.uuid4())
     if "created_by_caregiver_id" in table.c:
         data["created_by_caregiver_id"] = caregiver_id
+    if resource in {"action-outcomes", "outcomes"}:
+        event_time = datetime.now(timezone.utc)
+        if data.get("outcome_status") == "result_received":
+            data["received_at"] = event_time
+            data["received_by_caregiver_id"] = caregiver_id
+        elif data.get("outcome_status") == "result_reviewed":
+            data["reviewed_at"] = event_time
+            data["reviewed_by_caregiver_id"] = caregiver_id
     # Corrections use a domain-specific attribution column. Bind it from the
     # authenticated session; never accept a caller-supplied caregiver identity.
     if resource == "corrections" and "requested_by_caregiver_id" in table.c:
@@ -3580,6 +3722,46 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     try:
         result = db.execute(insert(table).values(**data).returning(table))
         row = result.mappings().one()
+        if resource == "assertions" and row["subject_type"] == "appointment":
+            # Keep competing source-backed reports visible. A contradiction
+            # records disagreement; it does not decide which account is true.
+            from app.models.uncertainty import Contradiction
+            prior_assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.subject_type == row["subject_type"],
+                CareAssertion.subject_id == row["subject_id"],
+                CareAssertion.field == row["field"],
+                CareAssertion.assertion_kind == row["assertion_kind"],
+                CareAssertion.id != row["id"],
+            ).all()
+            for prior in prior_assertions:
+                if prior.asserted_value == row["asserted_value"]:
+                    continue
+                assertion_ids = sorted({str(prior.id), str(row["id"])})
+                conflict_key = "assertion-conflict:" + hashlib.sha256(
+                    "|".join(assertion_ids).encode("utf-8")
+                ).hexdigest()
+                existing_conflict = db.query(Contradiction.id).filter(
+                    Contradiction.person_id == person_id,
+                    Contradiction.context_key == conflict_key,
+                ).first()
+                if existing_conflict:
+                    continue
+                evidence_union = list(dict.fromkeys(
+                    list(prior.evidence_ids or []) + list(row.get("evidence_ids") or [])
+                ))
+                db.add(Contradiction(
+                    person_id=person_id,
+                    subject_type=row["subject_type"],
+                    subject_id=row["subject_id"],
+                    field=row["field"],
+                    description="Different source-backed reports were recorded for this appointment detail. Both accounts have been kept for review.",
+                    evidence_ids=evidence_union,
+                    source_assertion_ids=assertion_ids,
+                    matching_candidate_ids=[],
+                    context_key=conflict_key,
+                    resolution_status="unresolved",
+                ))
         if resource == "record-change-items":
             _append_revision_for_change_item(db, person_id, caregiver_id, data)
         if resource == "living-records" and inspect(db.get_bind()).has_table("care_record_status_history"):

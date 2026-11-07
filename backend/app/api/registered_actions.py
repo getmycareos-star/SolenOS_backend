@@ -4,6 +4,7 @@ Suggestions remain in the LCR assessment layer. This API creates an action only
 when an authenticated caregiver submits an explicit approval.
 """
 import hashlib
+import hmac
 import json
 import re
 import uuid
@@ -12,6 +13,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
@@ -20,6 +22,8 @@ from app.core.database import get_db
 from app.models.action import Action, ActionLifecycleAudit
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence
+from app.models.collaboration import ConsentRecord
+from app.models.privacy_delivery import HandoffRecord, HandoffRecipient
 from app.models.reminder import CareReminder
 from app.schemas.action import ActionCandidate
 from app.services.action_normalization import ActionNormalizationService
@@ -117,6 +121,21 @@ class ActionStatusChange(BaseModel):
         if value is not None and (value.tzinfo is None or value.utcoffset() is None):
             raise ValueError("Deferred-until date must include a timezone offset")
         return value
+
+
+class ActionAssigneeChange(BaseModel):
+    target_caregiver_id: str = Field(min_length=1, max_length=255)
+    handoff_id: str = Field(min_length=1, max_length=36)
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=16, max_length=128)
+    reason: str = Field(min_length=3, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_must_be_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A reason is required for reassignment")
+        return value.strip()
 
 
 class RegisteredActionRead(BaseModel):
@@ -374,8 +393,127 @@ def registered_action_history(action_id: str, request: Request, db: Session = De
         "new_status": row.new_status,
         "reason": row.reason,
         "evidence_ids": row.evidence_ids or [],
+        "previous_responsible_caregiver_id": row.previous_responsible_caregiver_id,
+        "new_responsible_caregiver_id": row.new_responsible_caregiver_id,
+        "handoff_id": row.handoff_id,
         "created_at": row.created_at,
     } for row in rows]
+
+
+@router.patch("/registered-actions/{action_id}/assignee", response_model=RegisteredActionRead)
+def reassign_registered_action(action_id: str, payload: ActionAssigneeChange,
+                               request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _session_scope(request, db)
+    action = db.query(Action).filter(
+        Action.id == action_id, Action.person_id == person_id
+    ).with_for_update().first()
+    if action is None or action.status not in {"approved", "in_progress", "deferred", "needs_clarification"}:
+        raise HTTPException(status_code=404, detail="Open registered action not found")
+    assignment_fingerprint = hashlib.sha256(json.dumps({
+        "target_caregiver_id": payload.target_caregiver_id,
+        "handoff_id": payload.handoff_id,
+        "expected_version": payload.expected_version,
+        "reason": payload.reason,
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+    if db.get_bind().dialect.name == "postgresql":
+        assignment_lock_key = int.from_bytes(hashlib.sha256(
+            f"{person_id}:action-assignment:{action.id}:{payload.idempotency_key}".encode("utf-8")
+        ).digest()[:8], byteorder="big", signed=True)
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": assignment_lock_key})
+    prior_assignment = db.query(ActionLifecycleAudit).filter(
+        ActionLifecycleAudit.action_id == action.id,
+        ActionLifecycleAudit.assignment_idempotency_key == payload.idempotency_key,
+    ).first()
+    if prior_assignment is not None:
+        if prior_assignment.assignment_request_sha256 != assignment_fingerprint:
+            raise HTTPException(status_code=409, detail="This assignment save key was already used for different information")
+        if action.responsible_caregiver_id != prior_assignment.new_responsible_caregiver_id:
+            raise HTTPException(status_code=409, detail="This assignment was completed, but responsibility has since changed")
+        return _with_linked_reminder(db, action)
+    current_owner = action.responsible_caregiver_id or action.created_by_caregiver_id
+    if current_owner != caregiver_id:
+        raise HTTPException(status_code=403, detail="Only the currently responsible caregiver can reassign this action")
+    if action.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Action changed since it was loaded; refresh before retrying")
+    if payload.target_caregiver_id == caregiver_id:
+        raise HTTPException(status_code=422, detail="Choose another caregiver to reassign this action")
+
+    target = db.query(Caregiver).filter(
+        Caregiver.id == payload.target_caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="The selected caregiver is not linked to this care record")
+
+    now = datetime.now(timezone.utc)
+    handoff = db.query(HandoffRecord).filter(
+        HandoffRecord.id == payload.handoff_id,
+        HandoffRecord.person_id == person_id,
+        HandoffRecord.created_by == caregiver_id,
+        HandoffRecord.handoff_status == "accepted",
+        HandoffRecord.revoked_at.is_(None),
+    ).with_for_update().first()
+    if handoff is None or handoff.expires_at is None or (
+        handoff.expires_at.replace(tzinfo=timezone.utc) if handoff.expires_at.tzinfo is None else handoff.expires_at
+    ) <= now:
+        raise HTTPException(status_code=403, detail="An active, accepted handoff is required before reassignment")
+    snapshot = dict(handoff.summary_snapshot or {})
+    expected_snapshot_hash = snapshot.pop("content_sha256", None)
+    actual_snapshot_hash = hashlib.sha256(json.dumps(
+        snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+    if snapshot.get("caregiver_reviewed") is not True or not expected_snapshot_hash or not hmac.compare_digest(expected_snapshot_hash, actual_snapshot_hash):
+        raise HTTPException(status_code=403, detail="A valid caregiver-reviewed handoff summary is required before reassignment")
+    scopes = set(handoff.scope_snapshot or [])
+    if not scopes.intersection({"open_loops", "appointments"}):
+        raise HTTPException(status_code=403, detail="This handoff does not include follow-up responsibilities")
+    recipient = db.query(HandoffRecipient).filter(
+        HandoffRecipient.handoff_id == handoff.id,
+        HandoffRecipient.person_id == person_id,
+        HandoffRecipient.recipient_id == target.id,
+        HandoffRecipient.access_status == "accepted",
+        HandoffRecipient.accepted_at.is_not(None),
+        HandoffRecipient.revoked_at.is_(None),
+    ).first()
+    if recipient is None:
+        raise HTTPException(status_code=403, detail="The selected caregiver has not accepted this handoff")
+    for consent_caregiver_id in (caregiver_id, target.id):
+        consent = db.query(ConsentRecord).filter(
+            ConsentRecord.person_id == person_id,
+            ConsentRecord.caregiver_id == consent_caregiver_id,
+            ConsentRecord.revoked_at.is_(None),
+            ConsentRecord.medical_disclaimer_acknowledged.is_(True),
+            ConsentRecord.privacy_model_acknowledged.is_(True),
+            ConsentRecord.multi_caregiver_acknowledged.is_(True),
+            ConsentRecord.no_advertising_acknowledged.is_(True),
+        ).first()
+        if consent is None:
+            raise HTTPException(status_code=403, detail="Required caregiver consent is missing or has been revoked")
+
+    previous_owner = action.responsible_caregiver_id
+    action.responsible_caregiver_id = target.id
+    db.add(ActionLifecycleAudit(
+        id=str(uuid.uuid4()),
+        action_id=action.id,
+        person_id=person_id,
+        actor_caregiver_id=caregiver_id,
+        previous_status=action.status,
+        new_status=action.status,
+        reason=payload.reason,
+        evidence_ids=action.source_evidence_ids or [action.source_evidence_id],
+        previous_responsible_caregiver_id=previous_owner or action.created_by_caregiver_id,
+        new_responsible_caregiver_id=target.id,
+        handoff_id=handoff.id,
+        assignment_idempotency_key=payload.idempotency_key,
+        assignment_request_sha256=assignment_fingerprint,
+    ))
+    try:
+        db.commit()
+    except StaleDataError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Action was changed concurrently; refresh before retrying")
+    db.refresh(action)
+    return _with_linked_reminder(db, action)
 
 
 @router.patch("/registered-actions/{action_id}/status", response_model=RegisteredActionRead)

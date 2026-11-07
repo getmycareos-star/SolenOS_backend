@@ -1,5 +1,7 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+import logging
+import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -172,6 +174,43 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
 
 
 
+def test_companion_stage_timings_share_http_request_id_without_logging_care_content(monkeypatch, caplog):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "That information is not recorded."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        with caplog.at_level(logging.INFO):
+            response = client.post(
+                "/api/v1/conversation/message",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"person_id": person_id, "text": "Hey, how are you?"},
+            )
+        assert response.status_code == 200, response.text
+
+        messages = [record.getMessage() for record in caplog.records]
+        stage_logs = [message for message in messages if "companion_stage_profile" in message]
+        assert len(stage_logs) == 2
+        retrieval = next(message for message in stage_logs if "stage=retrieval" in message)
+        inference = next(message for message in stage_logs if "stage=inference" in message)
+        retrieval_id = re.search(r"request_id=([0-9a-f]{32})", retrieval)
+        inference_id = re.search(r"request_id=([0-9a-f]{32})", inference)
+        assert retrieval_id and inference_id
+        assert retrieval_id.group(1) == inference_id.group(1)
+        http_log = next(message for message in messages if '"event":"http_request"' in message and '"/conversation/message"' in message)
+        assert retrieval_id.group(1) in http_log
+        assert "What does the care record say about the person?" not in " ".join(stage_logs)
+        assert "That information is not recorded." not in " ".join(stage_logs)
+        assert "duration_ms=" in retrieval
+        assert "duration_ms=" in inference
+    finally:
+        teardown()
+
+
 def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch):
     client = setup_client(monkeypatch)
     outputs = iter([
@@ -337,6 +376,22 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(mon
         token, person_id, caregiver_id = create_session(client)
         db = TestingSessionLocal()
         now = datetime.now(timezone.utc)
+        older_evidence = Evidence(
+            person_id=person_id,
+            type="document",
+            source_text="Older care note: restless sleep and waking several times overnight.",
+            original_file_path=None,
+            uploaded_at=now - timedelta(days=120),
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata='{"filename":"older-sleep-note.txt"}',
+            time_provenance="caregiver_reported",
+            confidence=None,
+            evidence_status="recorded",
+            source_type="document",
+        )
+        db.add(older_evidence)
+        db.flush()
+        older_evidence_id = str(older_evidence.id)
         older = CareEvent(
             person_id=person_id,
             event_type="observation",
@@ -344,7 +399,7 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(mon
             occurred_at=now - timedelta(days=120),
             title="Sleep history",
             description="Caregiver reported waking several times overnight and restless sleep.",
-            evidence_ids=[],
+            evidence_ids=[older_evidence_id],
             created_by_caregiver_id=caregiver_id,
             time_provenance="caregiver_reported",
         )
@@ -375,6 +430,102 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(mon
         assert older_id in data["source_event_ids"]
         assert "restless sleep" in data["reply"].casefold()
         assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_companion_referential_follow_up_retains_previously_cited_source_event(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = []
+
+    def fake_qwen(base, model, messages, options=None):
+        captured.append(messages)
+        return "The earlier caregiver report described restless sleep overnight."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        now = datetime.now(timezone.utc)
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=120),
+            title="Sleep history",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=index + 1),
+                title=f"Unrelated household note {index}",
+                description=f"Household activity note {index}.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = str(older.id)
+        db.close()
+        headers = {"Authorization": f"Bearer {token}"}
+
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert older_id in first_data["source_event_ids"]
+        assert older_evidence_id in first_data["source_evidence_ids"]
+
+        # Push the cited document outside both the recent-document and recent-
+        # evidence windows. A short follow-up must retain it from prior citations.
+        db = TestingSessionLocal()
+        for index in range(25):
+            db.add(Evidence(
+                person_id=person_id,
+                type="document",
+                source_text=f"Unrelated newer household document {index}.",
+                original_file_path=None,
+                uploaded_at=now - timedelta(days=index + 1),
+                uploaded_by_caregiver_id=caregiver_id,
+                extra_metadata='{"filename":"unrelated-household-paperwork.txt"}',
+                time_provenance="caregiver_reported",
+                confidence=None,
+                evidence_status="recorded",
+                source_type="document",
+            ))
+        db.commit()
+        db.close()
+
+        follow_up = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "session_id": first_data["session_id"],
+                "text": "What about that?",
+            },
+        )
+        assert follow_up.status_code == 200, follow_up.text
+        follow_up_data = follow_up.json()
+        assert older_id in follow_up_data["source_event_ids"]
+        assert older_evidence_id in follow_up_data["source_evidence_ids"]
+        assert follow_up_data["written_to_lcr"] is False
+        assert len(captured) == 2
+        # The model receives the humanized source text, not the internal record ID.
+        assert older_id not in captured[1][-1]["content"]
+        assert "waking several times overnight" in captured[1][-1]["content"]
+        assert "Older care note: restless sleep and waking several times overnight." in captured[1][-1]["content"]
     finally:
         teardown()
 
@@ -864,7 +1015,9 @@ def test_historical_event_outside_recent_window_is_retrieved_with_synonym_matchi
         assert response.status_code == 200, response.text
         data = response.json()
         assert older_id in data["source_event_ids"]
-        assert older_id in captured["messages"][-1]["content"]
+        # Internal source IDs are returned as provenance metadata, not sent
+        # into the model prompt; the prompt receives the humanized source text.
+        assert older_id not in captured["messages"][-1]["content"]
         assert "waking several times overnight" in captured["messages"][-1]["content"]
         assert data["written_to_lcr"] is False
     finally:
@@ -919,7 +1072,8 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
         data = response.json()
         assert older_id in data["source_evidence_ids"]
         assert {"record_type": "care_evidence", "record_id": older_id} in data["source_record_refs"]
-        assert older_id in captured["messages"][-1]["content"]
+        # The model receives relevant humanized source text, never internal IDs.
+        assert older_id not in captured["messages"][-1]["content"]
         assert "restless sleep and waking several times overnight" in captured["messages"][-1]["content"]
     finally:
         teardown()
@@ -940,7 +1094,6 @@ def test_companion_source_ranking_prefers_relevance_over_recency_and_synonyms():
         "What happened with Mum's sleep?", [recent_unrelated, older_relevant],
         ("title", "description", "event_type", "status"), 1,
     ) == [older_relevant]
-
 
 def test_companion_returns_typed_document_extraction_and_original_evidence_references(monkeypatch):
     client = setup_client(monkeypatch)
