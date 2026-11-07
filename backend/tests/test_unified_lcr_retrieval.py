@@ -414,7 +414,9 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
         sources = context["sources"]
         assert "daily-event-local" in {row["id"] for row in sources["events"]["items"]}
         assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-local"}
-        assert {row["id"] for row in sources["assertions"]["items"]} == {"accepted-local"}
+        assert {row["id"] for row in sources["assertions"]["items"]} == {
+            "accepted-local", "caregiver-reviewed-local"
+        }
         assert "pending-local" not in str(sources["assertions"])
         assert {row["id"] for row in sources["companion_conversation"]["items"]} == {"old-message-local"}
         assert "daily-event-local" in {row["id"] for row in yesterday["sources"]["events"]["items"]}
