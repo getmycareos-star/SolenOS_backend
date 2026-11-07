@@ -8,6 +8,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 
 from app.models.ai_output_governance import AIOutputLCRProposal
+from app.models.anonymous_session import AnonymousSession
+from app.models.collaboration import ConversationMessage, ConversationSession
+from datetime import datetime, timezone
 from app.services.qwen_gateway import extract_companion_care_candidates
 
 logger = logging.getLogger(__name__)
@@ -106,6 +109,7 @@ def process_companion_care_update_message(
     conversation_id: str,
     message_id: str,
     source_text: str,
+    anonymous_session_id: str,
 ) -> None:
     """Run candidate extraction after the chat response has been sent.
 
@@ -116,6 +120,21 @@ def process_companion_care_update_message(
     session_factory = sessionmaker(bind=bind, expire_on_commit=False)
     db = session_factory()
     try:
+        auth_session = db.query(AnonymousSession).filter(
+            AnonymousSession.id == anonymous_session_id,
+            AnonymousSession.person_id == person_id,
+            AnonymousSession.caregiver_id == caregiver_id,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        ).first()
+        conversation = db.query(ConversationSession).filter_by(
+            id=conversation_id, person_id=person_id, caregiver_id=caregiver_id,
+        ).first()
+        original_message = db.query(ConversationMessage).filter_by(
+            id=message_id, session_id=conversation_id, role="user",
+        ).first()
+        if auth_session is None or conversation is None or original_message is None or original_message.content != source_text:
+            return
         extraction = extract_companion_care_candidates(source_text)
         persist_companion_candidates(
             db,
