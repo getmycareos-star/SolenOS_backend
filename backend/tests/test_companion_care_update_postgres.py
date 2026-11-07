@@ -142,6 +142,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         assert follow_up.status_code == 200, follow_up.text
         prompt_text = "\n".join(str(item.get("content", "")) for item in captured[-1])
         assert original in prompt_text
+        assert event_time_text in prompt_text
 
         # Correction is a new proposal version and cannot write until a second explicit acceptance.
         corrected_source = "The caregiver recorded a second observation during the visit."
