@@ -334,10 +334,20 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "interpretation_limit": "Full assessment history is available through the evidence-freshness history endpoint; this preparation view shows only the latest result per policy and linked evidence.",
         },
         "source_coverage": {
-            "care_facts": "available" if fact_rows is not None else "unavailable",
-            "care_events": "available" if event_items else "no_records_returned",
-            "appointments": "available" if appointment_items else "no_records_returned",
-            "evidence_freshness_assessments": ("unavailable_schema" if not freshness_schema_available else "available" if freshness_assessments else ("no_records_returned" if referenced_evidence_ids else "not_applicable_no_linked_evidence")),
+            # Keep this contract stable for the caregiver UI and downstream
+            # consumers: empty means queried successfully with no matching rows;
+            # unavailable means this source is not integrated or its schema is
+            # absent; failed means the query itself could not be completed.
+            "care_facts": (
+                "failed" if fact_rows is None
+                else "available" if facts else "empty"
+            ),
+            "care_events": "available" if event_items else "empty",
+            "appointments": "available" if appointment_items else "empty",
+            "evidence_freshness_assessments": (
+                "unavailable" if not freshness_schema_available
+                else "available" if freshness_assessments else "empty"
+            ),
             "medications_and_allergies": "unavailable",
             "documents": "unavailable",
             "community": "not_authorized",
