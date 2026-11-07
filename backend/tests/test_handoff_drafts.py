@@ -939,8 +939,9 @@ def test_document_adapter_preserves_failed_ocr_without_claiming_extraction(clien
         )
         db.add(document)
         db.flush()
+        document_id = str(document.id)
         db.add(EvidenceUpload(
-            evidence_id=document.id,
+            evidence_id=document_id,
             filename="scanned-letter.pdf",
             mime_type="application/pdf",
             content=original,
