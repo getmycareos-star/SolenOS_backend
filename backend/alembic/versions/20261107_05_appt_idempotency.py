@@ -74,10 +74,13 @@ def downgrade() -> None:
                 )
         indexes = {item.get("name") for item in inspect(bind).get_indexes(table)}
         constraints = {item.get("name") for item in inspect(bind).get_unique_constraints(table)}
-        if index_name in indexes:
-            op.drop_index(index_name, table_name=table)
-        elif index_name in constraints:
+        # PostgreSQL backs a UNIQUE constraint with an index. Drop the
+        # constraint first when inspection reports both objects; DROP INDEX
+        # cannot remove an index owned by a table constraint.
+        if index_name in constraints:
             op.drop_constraint(index_name, table, type_="unique")
+        elif index_name in indexes:
+            op.drop_index(index_name, table_name=table)
         columns = {column["name"] for column in inspect(bind).get_columns(table)}
         for column_name in ("idempotency_request_sha256", "idempotency_key"):
             if column_name in columns:
