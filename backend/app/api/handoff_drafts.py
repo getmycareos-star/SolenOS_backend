@@ -321,7 +321,7 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "source_statuses": snapshot.get("source_statuses", {}),
         "source_references": [
             {key: item.get(key) for key in (
-                "source_type", "source_table", "source_id", "event_at", "recorded_at",
+                "source_type", "source_table", "source_id", "source_fingerprint", "source_revision", "source_revision_status", "event_at", "recorded_at",
                 "due_at", "details", "epistemic_status", "record_status", "stale_warning",
                 "evidence_ids", "evidence_sources", "evidence_reference_status",
             )}
