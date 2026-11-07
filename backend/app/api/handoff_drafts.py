@@ -1389,11 +1389,16 @@ def prepare_handoff_draft(
     })
     evidence_by_id = {}
     evidence_rows = []
+    evidence_lookup_failed = False
     if referenced_evidence_ids:
-        evidence_rows = db.query(Evidence).filter(
-            Evidence.person_id == person_id,
-            Evidence.id.in_(referenced_evidence_ids),
-        ).all()
+        try:
+            evidence_rows = db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(referenced_evidence_ids),
+            ).all()
+        except Exception:
+            evidence_lookup_failed = True
+            logger.exception("Handoff evidence reference lookup failed")
         evidence_by_id = {
             row.id: {
                 "evidence_id": row.id,
@@ -1425,24 +1430,43 @@ def prepare_handoff_draft(
         ]
         item["evidence_reference_status"] = (
             "linked_sources_available" if item["evidence_sources"]
+            else "failed" if evidence_lookup_failed and item.get("evidence_ids")
             else "referenced_sources_unavailable" if item.get("evidence_ids")
             else "no_evidence_linked"
         )
 
     from app.services.evidence_lineage import load_evidence_lineage_scope, summarize_evidence_lineage
-    lineage_scope = load_evidence_lineage_scope(db, person_id, referenced_evidence_ids)
-    evidence_lineage = summarize_evidence_lineage(
-        lineage_scope["evidence_rows"],
-        lineage_scope["relationships"],
-        referenced_evidence_ids,
-    )
-    evidence_lineage["scope_truncated"] = bool(lineage_scope["truncated"])
-    evidence_lineage["lineage_nodes_examined"] = len(lineage_scope["evidence_rows"])
-    evidence_lineage["relationship_records_examined"] = len(lineage_scope["relationships"])
-    if lineage_scope["truncated"]:
-        evidence_lineage["interpretation_limit"] += (
-            " Provenance retrieval reached a safety bound; unreturned lineage is unknown, not absent."
+    try:
+        if evidence_lookup_failed:
+            raise RuntimeError("evidence_reference_lookup_failed")
+        lineage_scope = load_evidence_lineage_scope(db, person_id, referenced_evidence_ids)
+        evidence_lineage = summarize_evidence_lineage(
+            lineage_scope["evidence_rows"],
+            lineage_scope["relationships"],
+            referenced_evidence_ids,
         )
+        evidence_lineage["scope_truncated"] = bool(lineage_scope["truncated"])
+        evidence_lineage["lineage_nodes_examined"] = len(lineage_scope["evidence_rows"])
+        evidence_lineage["relationship_records_examined"] = len(lineage_scope["relationships"])
+        evidence_lineage_status = "available" if evidence_lineage.get("groups") else "empty"
+        if lineage_scope["truncated"]:
+            evidence_lineage["interpretation_limit"] += (
+                " Provenance retrieval reached a safety bound; unreturned lineage is unknown, not absent."
+            )
+    except Exception:
+        logger.exception("Handoff evidence lineage retrieval failed")
+        evidence_lineage = {
+            "status": "failed", "groups": [], "evidence_ids_considered": referenced_evidence_ids,
+            "interpretation_limit": "Evidence lineage could not be verified; missing lineage must not be interpreted as absent.",
+            "scope_truncated": False, "lineage_nodes_examined": 0, "relationship_records_examined": 0,
+        }
+        evidence_lineage_status = "failed"
+    statuses["evidence_lineage"] = {
+        "status": evidence_lineage_status,
+        "reason": "lineage_retrieval_failed" if evidence_lineage_status == "failed" else None,
+        "label": "Evidence provenance and lineage",
+        "count": len(evidence_lineage.get("groups", [])),
+    }
 
     sections = []
     for table_name, spec in SOURCES.items():
