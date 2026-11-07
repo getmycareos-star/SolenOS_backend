@@ -188,7 +188,7 @@ def review_companion_care_update(
                 subject_id=person_id, field="care_observation",
                 assertion_kind="time_bound_observation", asserted_value=accepted_value,
                 source_label="Caregiver-reviewed Companion conversation",
-                source_text=source_quote,
+                source_text=(source_quote + (("\nCaregiver-supplied correction context: " + correction_context) if correction_context else "")),
                 source_conversation_id=session.id,
                 source_message_id=source_message.id,
                 source_proposal_id=proposal.id,
