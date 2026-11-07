@@ -650,12 +650,16 @@ def list_appointment_outcome_proposals(record_id: str, request: Request, db: Ses
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Appointment workspace not found")
-    proposals = db.query(AIOutputLCRProposal).filter(
+    scoped_proposals = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.person_id == person_id,
         AIOutputLCRProposal.caregiver_id == caregiver_id,
         AIOutputLCRProposal.proposal_type == "appointment_workspace_outcome",
-        AIOutputLCRProposal.proposed_change_json["source_record_id"].as_string() == record_id,
-    ).order_by(AIOutputLCRProposal.candidate_index.asc(), AIOutputLCRProposal.proposal_version.asc()).limit(100).all()
+    ).order_by(AIOutputLCRProposal.created_at.desc()).limit(500).all()
+    proposals = [
+        item for item in scoped_proposals
+        if (item.proposed_change_json or {}).get("source_record_id") == record_id
+    ][:100]
+    proposals.sort(key=lambda item: (item.candidate_index, item.proposal_version))
     return {"items": [_appointment_proposal_json(item) for item in proposals], "append_only_decisions": True}
 
 
