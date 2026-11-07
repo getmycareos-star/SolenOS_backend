@@ -22,6 +22,19 @@ class CompanionCareUpdateReview(BaseModel):
     correction_context: str | None = Field(default=None, max_length=4000)
 
 
+def _parse_explicit_event_time(value: str | None):
+    """Parse only unambiguous timezone-aware ISO timestamps; retain other wording separately."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    from datetime import datetime
+    candidate = value.strip()
+    try:
+        parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
 def _proposal_json(proposal: AIOutputLCRProposal) -> dict:
     return {
         "id": proposal.id,
@@ -211,7 +224,8 @@ def review_companion_care_update(
                 source_message_id=source_message.id,
                 source_proposal_id=proposal.id,
                 evidence_ids=[], assertion_status="caregiver_reviewed",
-                observed_at=None, created_by_caregiver_id=caregiver_id,
+                observed_at=_parse_explicit_event_time(original.get("event_time_text")), event_time_text=original.get("event_time_text"),
+                created_by_caregiver_id=caregiver_id,
             )
             db.add(assertion)
             db.flush()
