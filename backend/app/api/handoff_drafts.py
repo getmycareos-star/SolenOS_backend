@@ -462,7 +462,17 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 ).all() if evidence_ids else []
                 evidence_by_id = {str(row.id): row for row in evidence_rows}
                 linked = [evidence_by_id[value] for value in evidence_ids if value in evidence_by_id]
-                current = _fingerprint(_daily_care_fingerprint_payload(event, linked))
+                analyses = db.query(CaptureAnalysis).filter(
+                    CaptureAnalysis.person_id == draft.person_id,
+                    CaptureAnalysis.source_event_id == event.id,
+                ).order_by(CaptureAnalysis.created_at.asc()).limit(20).all()
+                analysis_snapshot = [{
+                    "id": row.id, "source_evidence_id": row.source_evidence_id,
+                    "extraction_status": row.extraction_status, "candidates": row.candidates,
+                    "review_history": row.review_history, "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                } for row in analyses]
+                current = _fingerprint(_daily_care_fingerprint_payload(event, linked, analysis_snapshot))
             elif item.get("source_type") == "document_extracted_text":
                 extraction = db.query(CaptureAnalysis).filter(
                     CaptureAnalysis.id == source_id,
@@ -801,7 +811,7 @@ def _fingerprint(value) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _daily_care_fingerprint_payload(event, linked_evidence: list) -> dict:
+def _daily_care_fingerprint_payload(event, linked_evidence: list, analyses: list | None = None) -> dict:
     return {
         "id": event.id,
         "event_type": event.event_type,
@@ -817,6 +827,7 @@ def _daily_care_fingerprint_payload(event, linked_evidence: list) -> dict:
             {"id": row.id, "source_text_sha256": row.source_text_sha256, "source_type": row.source_type}
             for row in linked_evidence
         ],
+        "capture_analyses": analyses or [],
     }
 
 
@@ -886,6 +897,16 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 continue
             linked_ids = [str(value) for value in (event.evidence_ids or []) if isinstance(value, str)]
             linked = [evidence_by_id[value] for value in linked_ids if value in evidence_by_id]
+            analyses = db.query(CaptureAnalysis).filter(
+                CaptureAnalysis.person_id == person_id,
+                CaptureAnalysis.source_event_id == event.id,
+            ).order_by(CaptureAnalysis.created_at.asc()).limit(20).all()
+            analysis_snapshot = [{
+                "id": row.id, "source_evidence_id": row.source_evidence_id,
+                "extraction_status": row.extraction_status, "candidates": row.candidates,
+                "review_history": row.review_history, "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            } for row in analyses]
             sources = [{
                 "evidence_id": row.id,
                 "source_type": row.source_type,
@@ -902,7 +923,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "original_source_reference": row.original_source_reference,
                 "source_text_sha256": row.source_text_sha256,
             } for row in linked]
-            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked))
+            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked, analysis_snapshot))
             source_revision_value = event.updated_at or event.recorded_at
             output.append({
                 "source_type": "daily_care_observation",
@@ -919,7 +940,9 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     "occurred_at_timezone": event.occurred_at_timezone,
                     "created_by_caregiver_id": event.created_by_caregiver_id,
                     "review_status": "caregiver_reported_not_independently_verified",
-                    "revision_status": "revision_not_exposed_by_source",
+                    "capture_analysis_references": [row["id"] for row in analysis_snapshot],
+                    "capture_analysis_review_history": [row["review_history"] for row in analysis_snapshot if row["review_history"]],
+                    "revision_status": "capture_analysis_review_history_preserved; care_event_version_not_exposed",
                     "source_revision": None,
                 },
                 "epistemic_status": "caregiver_reported",
