@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent
+from app.models.care_continuity import CareAssertion
 from app.models.time_location import Appointment
 from app.main import app
 import app.main as main_module
@@ -113,6 +114,7 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
 
         with TestingSessionLocal() as db:
             assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
             persisted = db.query(Appointment).filter_by(id=appointment_id, person_id=person_id).one()
             assert persisted.status == "scheduled"
             assert persisted.title == "Neurology review"
