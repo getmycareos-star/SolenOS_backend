@@ -13,6 +13,7 @@ from app.models.care import CareEvent, Caregiver, Person
 from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -46,6 +47,7 @@ def _postgres_conversation_db():
             Person.__table__, Caregiver.__table__, CareEvent.__table__,
             CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
+            QwenBackgroundJob.__table__, QwenModelOutput.__table__,
             AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
         ],
     )
@@ -64,6 +66,7 @@ def _sqlite_retrieval_db():
         Person.__table__, Caregiver.__table__, CareEvent.__table__,
         CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
         ConversationSession.__table__, ConversationMessage.__table__,
+        QwenBackgroundJob.__table__, QwenModelOutput.__table__,
         AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
     ])
     connection.commit()
