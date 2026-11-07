@@ -19,6 +19,7 @@ from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
+care_updates = importlib.import_module("app.services.companion_care_updates")
 app = main_module.app
 
 
@@ -68,7 +69,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
     event_time_text = "2026-11-06T18:00:00+01:00"
     original = "The caregiver recorded a change during the morning routine at " + event_time_text + "."
     monkeypatch.setattr(
-        collaboration,
+        care_updates,
         "extract_companion_care_candidates",
         lambda source: {"observations": [{"source_quote": original, "event_time_quote": event_time_text}] if source == original else [],
     )
@@ -127,7 +128,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         first_auth = {"Authorization": f"Bearer {first['access_token']}"}
 
         # A later Companion turn must receive the accepted assertion through the shared retrieval path.
-        monkeypatch.setattr(collaboration, "extract_companion_care_candidates", lambda source: {"observations": []})
+        monkeypatch.setattr(care_updates, "extract_companion_care_candidates", lambda source: {"observations": []})
         follow_up = send(client, first, "What has been recorded about this observation?", "companion-pg-followup-0002")
         assert follow_up.status_code == 200, follow_up.text
         prompt_text = "\n".join(str(item.get("content", "")) for item in captured[-1])
@@ -136,7 +137,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         # Correction is a new proposal version and cannot write until a second explicit acceptance.
         corrected_source = "The caregiver recorded a second observation during the visit."
         monkeypatch.setattr(
-            collaboration,
+            care_updates,
             "extract_companion_care_candidates",
             lambda source: {"observations": [{"source_quote": corrected_source}] if source == corrected_source else [],
         )
