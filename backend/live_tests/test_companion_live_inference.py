@@ -104,7 +104,10 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         assert direct.status_code == 200, direct.text
         direct_data = direct.json()
         assert direct_data["ai_generated"] is True
-        assert older_event_id in direct_data["source_event_ids"]
+        assert older_event_id in direct_data["source_event_ids"], (
+            "The older sleep event must remain in the bounded, query-relevant event retrieval set; "
+            f"retrieved IDs: {direct_data['source_event_ids']}"
+        )
         assert any(
             word in direct_data["reply"].casefold()
             for word in ("sleep", "slept", "waking", "awake", "restless", "overnight")
