@@ -114,6 +114,12 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
             assert assertion.recorded_at is not None
             assert assertion.observed_at != assertion.recorded_at
 
+        # Refresh the bearer capability, then verify a later authenticated Companion turn retrieves the accepted assertion.
+        refreshed = client.post("/api/v1/sessions/refresh", headers=first_auth)
+        assert refreshed.status_code == 200, refreshed.text
+        first["access_token"] = refreshed.json()["access_token"]
+        first_auth = {"Authorization": f"Bearer {first['access_token']}"}
+
         # A later Companion turn must receive the accepted assertion through the shared retrieval path.
         monkeypatch.setattr(collaboration, "extract_companion_care_candidates", lambda source: {"observations": []})
         follow_up = send(client, first, "What has been recorded about this observation?", "companion-pg-followup-0002")
