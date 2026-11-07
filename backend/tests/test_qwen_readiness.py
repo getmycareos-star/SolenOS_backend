@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
+import time
 
 from app.services import qwen_gateway
 
@@ -30,31 +30,98 @@ def test_missing_installation_state_defaults_to_not_started(tmp_path, monkeypatc
     assert qwen_gateway.qwen_installation_status()["state"] == "not_started"
 
 
-def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
+def test_readiness_polling_never_calls_runtime_or_inference(monkeypatch):
+    monkeypatch.setattr(
+        qwen_gateway,
+        "get_ollama_config",
+        lambda: (_ for _ in ()).throw(AssertionError("health polling must not resolve runtime config")),
+    )
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("health polling must not run inference")),
+    )
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("health polling must not call Ollama")),
+    )
+    qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
+
+    result = qwen_gateway.qwen_readiness_status(force=True)
+
+    assert result["available"] is False
+    assert result["state"] == "not_tested"
+    assert result["last_attempt_at"] is None
+    assert result["source"] == "actual_inference"
+
+
+def test_actual_inference_updates_readiness_without_logging_content(monkeypatch, caplog):
+    import logging
+
     class Response:
         def __enter__(self):
             return self
         def __exit__(self, *args):
             return False
         def read(self):
-            return b'{"models":[{"name":"qwen3.5:4b"}]}'
+            return b'{"message":{"content":"synthetic secret reply"}}'
 
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 90.0))
-    monkeypatch.setenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "45")
-    monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "installed"})
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
-    calls = []
-    monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: calls.append((args, kwargs)) or "READY")
     qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
+    caplog.set_level(logging.INFO, logger=qwen_gateway.__name__)
 
-    result = qwen_gateway.qwen_readiness_status(force=True)
-    assert result["available"] is True
-    assert result["state"] == "ready"
-    assert len(calls) == 1
-    assert calls[0][1]["timeout"] == 45.0
+    answer = qwen_gateway.qwen_chat([{"role": "user", "content": "synthetic secret prompt"}])
+    readiness = qwen_gateway.qwen_readiness_status()
+
+    assert answer == "synthetic secret reply"
+    assert readiness["available"] is True
+    assert readiness["state"] == "ready"
+    assert readiness["last_success_at"]
+    output = "\n".join(record.getMessage() for record in caplog.records)
+    assert '"event":"qwen_inference"' in output
+    assert '"duration_ms":' in output
+    assert "synthetic secret prompt" not in output
+    assert "synthetic secret reply" not in output
 
 
-def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
+def test_failed_inference_updates_readiness_and_preserves_last_success(monkeypatch):
+    from fastapi import HTTPException
+
+    prior_success = "2026-11-06T10:00:00+00:00"
+    qwen_gateway._READINESS_CACHE.update({
+        "checked_at": 0.0,
+        "result": {"available": True, "state": "ready", "last_success_at": prior_success},
+    })
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("hidden")))
+    try:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "synthetic prompt"}])
+    except HTTPException as exc:
+        assert exc.status_code == 504
+    else:
+        raise AssertionError("inference timeout must fail")
+
+    readiness = qwen_gateway.qwen_readiness_status()
+    assert readiness["available"] is False
+    assert readiness["state"] == "unavailable"
+    assert readiness["last_success_at"] == prior_success
+    assert readiness["failure_reason"] == "socket_timeout"
+
+
+def test_stale_inference_is_not_reported_as_ready(monkeypatch):
+    qwen_gateway._READINESS_CACHE.update({
+        "checked_at": time.monotonic() - 301,
+        "result": {"available": True, "state": "ready", "last_success_at": "2026-11-06T10:00:00+00:00"},
+    })
+    result = qwen_gateway.qwen_readiness_status()
+    assert result["available"] is False
+    assert result["state"] == "stale"
+    assert result["stale"] is True
+
+
+def test_runtime_inventory_separates_runtime_reachability_from_model_installation(monkeypatch):
     class Response:
         def __enter__(self):
             return self
@@ -66,14 +133,13 @@ def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
     monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
     monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "downloading"})
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
-    monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("inference must not run")))
-    qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
 
-    result = qwen_gateway.qwen_readiness_status(force=True)
+    result = qwen_gateway.qwen_runtime_status()
+
+    assert result["runtime_available"] is True
+    assert result["model_installed"] is False
     assert result["available"] is False
-    assert result["state"] == "model_not_installed"
-    assert result["failure_reason"] == "configured_model_missing"
-
+    assert result["installation"]["state"] == "downloading"
 
 
 def test_assistant_status_does_not_claim_operational_when_only_inventory_is_available(monkeypatch):
@@ -81,6 +147,8 @@ def test_assistant_status_does_not_claim_operational_when_only_inventory_is_avai
 
     monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
         "available": True,
+        "runtime_available": True,
+        "model_installed": True,
         "installation": {"state": "installed"},
     })
     monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda: {
@@ -92,6 +160,8 @@ def test_assistant_status_does_not_claim_operational_when_only_inventory_is_avai
     status = collaboration.qwen_assistant_status()
     assert status["available"] is False
     assert status["operational"] is False
+    assert status["runtime_available"] is True
+    assert status["model_installed"] is True
     assert status["installation"]["state"] == "installed"
     assert status["readiness"]["failure_reason"] == "inference_timeout"
 
@@ -248,17 +318,18 @@ def test_production_evaluation_rejects_non_workflow_bearer(monkeypatch):
         raise AssertionError("Unauthorised production evaluation request must be rejected")
 
 
-def test_readiness_endpoint_uses_cached_probe_instead_of_forcing_each_request(monkeypatch):
+def test_readiness_endpoint_returns_last_inference_without_triggering_model_work(monkeypatch):
     from app.api import collaboration
 
     calls = []
 
     def readiness(force=False):
         calls.append(force)
-        return {"available": False, "state": "unavailable", "failure_reason": "inference_timeout"}
+        return {"available": False, "state": "not_tested", "source": "actual_inference"}
 
     monkeypatch.setattr(collaboration, "qwen_readiness_status", readiness)
     result = collaboration.qwen_assistant_readiness()
 
-    assert result["failure_reason"] == "inference_timeout"
+    assert result["state"] == "not_tested"
+    assert result["source"] == "actual_inference"
     assert calls == [False]

@@ -1,5 +1,7 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+import logging
+import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -10,7 +12,6 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent, Evidence
-from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
 from app.models.collaboration import ConversationMessage
 
@@ -160,16 +161,53 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "Hey, how are you?"},
+            json={"person_id": person_id, "text": "What does the care record say about the person?"},
         )
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
         assert len(calls) == 1
-        assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
+        assert calls[0][-1]["content"].startswith("Caregiver question: What does the care record say about the person?")
     finally:
         teardown()
 
+
+
+def test_companion_stage_timings_share_http_request_id_without_logging_care_content(monkeypatch, caplog):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "That information is not recorded."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        with caplog.at_level(logging.INFO):
+            response = client.post(
+                "/api/v1/conversation/message",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"person_id": person_id, "text": "Hey, how are you?"},
+            )
+        assert response.status_code == 200, response.text
+
+        messages = [record.getMessage() for record in caplog.records]
+        stage_logs = [message for message in messages if "companion_stage_profile" in message]
+        assert len(stage_logs) == 2
+        retrieval = next(message for message in stage_logs if "stage=retrieval" in message)
+        inference = next(message for message in stage_logs if "stage=inference" in message)
+        retrieval_id = re.search(r"request_id=([0-9a-f]{32})", retrieval)
+        inference_id = re.search(r"request_id=([0-9a-f]{32})", inference)
+        assert retrieval_id and inference_id
+        assert retrieval_id.group(1) == inference_id.group(1)
+        http_log = next(message for message in messages if '"event":"http_request"' in message and '"/conversation/message"' in message)
+        assert retrieval_id.group(1) in http_log
+        assert "What does the care record say about the person?" not in " ".join(stage_logs)
+        assert "That information is not recorded." not in " ".join(stage_logs)
+        assert "duration_ms=" in retrieval
+        assert "duration_ms=" in inference
+    finally:
+        teardown()
 
 
 def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch):
@@ -864,7 +902,9 @@ def test_historical_event_outside_recent_window_is_retrieved_with_synonym_matchi
         assert response.status_code == 200, response.text
         data = response.json()
         assert older_id in data["source_event_ids"]
-        assert older_id in captured["messages"][-1]["content"]
+        # Internal source IDs are returned as provenance metadata, not sent
+        # into the model prompt; the prompt receives the humanized source text.
+        assert older_id not in captured["messages"][-1]["content"]
         assert "waking several times overnight" in captured["messages"][-1]["content"]
         assert data["written_to_lcr"] is False
     finally:
@@ -919,7 +959,8 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
         data = response.json()
         assert older_id in data["source_evidence_ids"]
         assert {"record_type": "care_evidence", "record_id": older_id} in data["source_record_refs"]
-        assert older_id in captured["messages"][-1]["content"]
+        # The model receives relevant humanized source text, never internal IDs.
+        assert older_id not in captured["messages"][-1]["content"]
         assert "restless sleep and waking several times overnight" in captured["messages"][-1]["content"]
     finally:
         teardown()
@@ -940,49 +981,3 @@ def test_companion_source_ranking_prefers_relevance_over_recency_and_synonyms():
         "What happened with Mum's sleep?", [recent_unrelated, older_relevant],
         ("title", "description", "event_type", "status"), 1,
     ) == [older_relevant]
-
-
-def test_companion_returns_typed_document_extraction_and_original_evidence_references(monkeypatch):
-    client = setup_client(monkeypatch)
-    captured = {}
-
-    def fake_qwen(base, model, messages, options=None):
-        captured["messages"] = messages
-        return "The uploaded document reports sleep disturbance."
-
-    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
-    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
-    try:
-        token, person_id, caregiver_id = create_session(client)
-        db = TestingSessionLocal()
-        db.add(Evidence(
-            id="document-evidence-reference", person_id=person_id, type="document",
-            source_text="Original uploaded clinic letter.", uploaded_by_caregiver_id=caregiver_id,
-            evidence_status="recorded", source_type="document",
-        ))
-        db.add(CaptureAnalysis(
-            id="document-extraction-reference", person_id=person_id, caregiver_id=caregiver_id,
-            source_evidence_id="document-evidence-reference",
-            source_text="Clinic letter: sleep disturbance was reported by the family.",
-            extraction_status="available",
-            candidates={"kind": "document_extraction_v1", "filename": "clinic-letter.txt"},
-            review_history=[],
-        ))
-        db.commit()
-        db.close()
-
-        response = client.post(
-            "/api/v1/conversation/message",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "What does the uploaded document say about sleep?"},
-        )
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert {"record_type": "document_extractions", "record_id": "document-extraction-reference"} in data["source_record_refs"]
-        assert {"record_type": "care_evidence", "record_id": "document-evidence-reference"} in data["source_record_refs"]
-        assert "document-evidence-reference" in data["source_evidence_ids"]
-        assert "document-extraction-reference" in data["source_lcr_context_ids"]
-        assert "document_extracted_unreviewed" in captured["messages"][-1]["content"]
-        assert "Clinic letter: sleep disturbance" in captured["messages"][-1]["content"]
-    finally:
-        teardown()

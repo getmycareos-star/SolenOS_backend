@@ -1,60 +1,40 @@
 import asyncio
 import base64
-import hashlib
 import json
 import logging
+import hashlib
 import math
 import os
 import re
 import secrets
+import time
+import uuid
 import urllib.error
 import urllib.request
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, inspect, or_, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, or_, text
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
+from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import CareEvent, Caregiver, Person
-from app.models.care import Evidence as EvidenceModel
-from app.models.care_continuity import (
-    CareAssertion,
-    EvidenceFreshnessAssessment,
-    EvidenceFreshnessPolicy,
-)
+from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
-from app.models.collaboration import (
-    CommunityPost,
-    CommunityReaction,
-    ConsentRecord,
-    ConversationMessage,
-    ConversationSession,
-    EvidenceUpload,
-    ShareIntake,
-)
-from app.models.improvement_training_example import ImprovementTrainingExample
+from app.models.care_continuity import CareAssertion, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status, qwen_readiness_status
+from app.services.unified_lcr_retrieval import build_unified_lcr_context
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.models.time_location import Appointment
-from app.services.qwen_gateway import (
-    extract_review_candidates,
-    get_ollama_config,
-    qwen_chat,
-    qwen_readiness_status,
-    qwen_runtime_status,
-)
-from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
-from app.models.ai_output_governance import AIOutputLCRProposal
+from app.models.improvement_training_example import ImprovementTrainingExample
 
 router = APIRouter(tags=["community and companion"])
 logger = logging.getLogger(__name__)
@@ -682,20 +662,9 @@ def _companion_replay_response(
         .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         .all()
     )
-    source_message_id = metadata.get("source_message_id")
-    care_update_candidates = []
-    if source_message_id:
-        proposals = db.query(AIOutputLCRProposal).filter(
-            AIOutputLCRProposal.person_id == person_id,
-            AIOutputLCRProposal.caregiver_id == caregiver_id,
-            AIOutputLCRProposal.source_message_id == source_message_id,
-            AIOutputLCRProposal.proposal_type == "companion_care_observation",
-        ).order_by(AIOutputLCRProposal.candidate_index.asc(), AIOutputLCRProposal.proposal_version.desc()).all()
-        care_update_candidates = [proposal_payload(item) for item in proposals if item.status == "pending_authorization"]
     return {
         "session_id": saved_session.id,
         "person_id": person_id,
-        "care_update_candidates": care_update_candidates,
         "reply": assistant.content,
         "guard_verdict": assistant.guard_verdict,
         "safety_note": assistant.safety_note,
@@ -908,16 +877,9 @@ def _humanize_model_context_line(line: str) -> str:
         ("decision", "decision"),
         ("result", "result"),
         ("time_provenance", "time provenance"),
-        ("information_status", "information status"),
         ("interpretation_limit", "interpretation limit"),
     )
     parts = []
-    # Shared-retrieval records carry a typed top-level source_id. Keep that
-    # reference available for provenance alignment; ad-hoc recent context keeps
-    # internal row identifiers out of the model prompt.
-    source_id = payload.get("source_id")
-    if source_id:
-        parts.append(f"internal source reference (do not display): {source_id}")
     freshness_is_policy_only = "not a truth judgment" in (line[:brace] or "").casefold()
     for key, label_text in fields:
         value = record.get(key)
@@ -985,12 +947,6 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
                 reference = {"record_type": str(record_type), "record_id": str(record_id)}
                 if reference not in references:
                     references.append(reference)
-                record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
-                evidence_id = record.get("source_evidence_id")
-                if record_type == "document_extractions" and evidence_id:
-                    evidence_reference = {"record_type": "care_evidence", "record_id": str(evidence_id)}
-                    if evidence_reference not in references:
-                        references.append(evidence_reference)
         except (ValueError, TypeError, json.JSONDecodeError):
             continue
     return references
@@ -1749,9 +1705,9 @@ def qwen_assistant_installation():
 
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
-    # Performs a bounded real inference when the cached probe is stale. Reusing
-    # the gateway cache prevents health polling from serially running 12-second
-    # CPU inference probes and competing with actual Companion requests.
+    # Health polling must never load the model or run inference. This reports
+    # only the last actual inference result; installation and runtime inventory
+    # are available separately from /assistant/installation.
     return {
         **qwen_readiness_status(),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
@@ -2349,7 +2305,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 
 
 @router.post("/conversation/message")
-async def companion_message(payload: CompanionCreate, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
     person_id, caregiver_id = _scope(request, db)
     if payload.person_id != person_id:
@@ -2440,6 +2396,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        retrieval_started = time.perf_counter()
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
         recent_events = (
@@ -2457,8 +2414,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     "event_id": str(event.id),
                     "event_type": event.event_type,
                     "status": event.status,
-                    "information_status": "recorded_care_event",
-                    "interpretation_limit": "Persisted care-event report; preserve its event status, time provenance, and linked evidence.",
                     "title": event.title,
                     "description": (event.description or "")[:700],
                     "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
@@ -2470,20 +2425,13 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             )
         source_context.extend(event_context)
 
-        # Explicitly accepted assertions and caregiver-authored reports are
-        # eligible. A reported assertion remains an unverified report; pending,
-        # rejected, and model-only proposals are excluded.
+        # Daily Care Qwen assertions enter Companion only after explicit caregiver
+        # approval. Pending proposals and model-only interpretations are excluded.
         approved_assertions = (
             db.query(CareAssertion)
             .filter(
                 CareAssertion.person_id == person_id,
-                or_(
-                    CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
-                    and_(
-                        CareAssertion.assertion_status == "reported",
-                        CareAssertion.created_by_caregiver_id.isnot(None),
-                    ),
-                ),
+                CareAssertion.assertion_status == "caregiver_reviewed",
             )
             .order_by(CareAssertion.recorded_at.desc())
             .limit(30)
@@ -2493,7 +2441,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         for assertion in approved_assertions:
             source_assertion_ids.append(str(assertion.id))
             assertion_context.append(
-                "Caregiver-attributed LCR assertion (status preserved): "
+                "Caregiver-approved LCR assertion (source-attributed): "
                 + json.dumps({
                     "assertion_id": str(assertion.id),
                     "field": assertion.field,
@@ -2505,16 +2453,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     "source_text": (assertion.source_text or "")[:500],
                     "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
                     "status": assertion.assertion_status,
-                    "information_status": (
-                        "caregiver_accepted_assertion" if assertion.assertion_status == "accepted"
-                        else "caregiver_reviewed_legacy_assertion" if assertion.assertion_status == "caregiver_reviewed"
-                        else "caregiver_reported_assertion"
-                    ),
-                    "interpretation_limit": (
-                        "Caregiver-attributed report admitted to the LCR as unverified; do not present it as established fact."
-                        if assertion.assertion_status == "reported"
-                        else "Caregiver-reviewed assertion; preserve source attribution and recorded wording."
-                    ),
                 }, ensure_ascii=False)
             )
         source_context.extend(assertion_context)
@@ -2534,8 +2472,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     "appointment_id": str(appointment.id),
                     "title": appointment.title,
                     "status": appointment.status,
-                    "information_status": "appointment_workflow_status",
-                    "interpretation_limit": "Stored appointment workflow state; a planned or scheduled appointment is not proof it occurred.",
                     "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
                 }, ensure_ascii=False)
             )
@@ -2601,9 +2537,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     "filename": metadata.get("filename"),
                     "mime_type": metadata.get("mime_type"),
                     "status": evidence.evidence_status,
-                    "epistemic_status": evidence.epistemic_status,
-                    "information_status": evidence.epistemic_status or evidence.evidence_status or "reported_evidence",
-                    "interpretation_limit": "Uploaded evidence is source material; its epistemic and review statuses must not be upgraded by retrieval.",
                     "source_type": evidence.source_type,
                     "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
                     "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
@@ -2677,7 +2610,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     "LCR event evidence: "
                     + json.dumps({
                         "event_id": event_id,
-                        "source_id": event_id,
                         "event_type": event.event_type,
                         "status": event.status,
                         "title": event.title,
@@ -2698,13 +2630,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             existing_assertion_ids = set(_context_record_ids(assertion_context, "assertion_id"))
             historical_assertions = db.query(CareAssertion).filter(
                 CareAssertion.person_id == person_id,
-                or_(
-                    CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
-                    and_(
-                        CareAssertion.assertion_status == "reported",
-                        CareAssertion.created_by_caregiver_id.isnot(None),
-                    ),
-                ),
+                CareAssertion.assertion_status == "caregiver_reviewed",
                 or_(*[
                     column.ilike(f"%{term}%")
                     for column in (
@@ -2756,8 +2682,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 appointment_context.append("LCR appointment evidence: " + json.dumps({
                     "appointment_id": appointment_id, "title": appointment.title,
                     "status": appointment.status,
-                    "information_status": "appointment_workflow_status",
-                    "interpretation_limit": "Stored appointment workflow state; a planned or scheduled appointment is not proof it occurred.",
                     "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
                     "location": appointment.location, "provider": appointment.provider,
                     "healthcare_org": appointment.healthcare_org,
@@ -2792,7 +2716,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 if not isinstance(metadata, dict):
                     metadata = {}
                 evidence_context.append("Caregiver-provided evidence: " + json.dumps({
-                    "evidence_id": evidence_id, "source_id": evidence_id, "type": evidence.type,
+                    "evidence_id": evidence_id, "type": evidence.type,
                     "filename": metadata.get("filename"), "mime_type": metadata.get("mime_type"),
                     "status": evidence.evidence_status, "source_type": evidence.source_type,
                     "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
@@ -2914,13 +2838,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     }, ensure_ascii=False, default=str)
                 )
         source_lcr_record_refs = _context_record_refs(shared_lcr_lines)
-        source_evidence_ids = list(dict.fromkeys([
-            *source_evidence_ids,
-            *(
-                reference["record_id"] for reference in source_lcr_record_refs
-                if reference.get("record_type") == "care_evidence"
-            ),
-        ]))
         lineage_context_line = (
             "Evidence source lineage metadata (explicit provenance only; not proof of truth or independence): "
             + json.dumps(evidence_lineage_context, ensure_ascii=False, default=str)
@@ -2937,7 +2854,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             "You are SolenOS AI Companion for family caregivers. Answer the caregiver's current question directly "
             "in plain natural language. Do not use canned replies or fixed response maps. Use only relevant authorized "
             "care-record context. First answer the caregiver’s actual question; be concise unless detail is needed. "
-            "Distinguish recorded facts, caregiver reports, interpretation, uncertainty, and conflicts. Internal source references are for grounding only; never show their identifiers to the caregiver unless explicitly asked. You may use chat "
+            "Distinguish recorded facts, caregiver reports, interpretation, uncertainty, and conflicts. You may use chat "
             "history to resolve references, but never treat chat history as proof of a care event; assistant statements "
             "are not care evidence. Never invent events, dates, symptoms, diagnoses, medication status, outcomes, "
             "appointments, actions, owners, deadlines, or trends. If the record does not answer, say the information is "
@@ -3000,12 +2917,26 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 "Respond naturally in a few words, do not ask a question, and do not introduce a care topic. "
                 "Generate the wording for this exact message; do not reuse a stored response."
             )
+        retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+        logger.info(
+            "companion_stage_profile request_id=%s stage=retrieval duration_ms=%.2f outcome=completed events=%d assertions=%d "
+            "appointments=%d evidence=%d shared_lcr_records=%d context_chars=%d",
+            getattr(request.state, "request_id", "unavailable"),
+            retrieval_ms,
+            len(source_event_ids),
+            len(source_assertion_ids),
+            len(source_appointment_ids),
+            len(source_evidence_ids),
+            len(source_lcr_context_ids),
+            context_chars,
+        )
         # All ORM data needed for this prompt has been copied into JSON/plain
         # strings. Release the read transaction before slow Qwen inference so
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
         base, model = _ollama_url()
+        inference_started = time.perf_counter()
         try:
             reply = await asyncio.to_thread(
                 _ollama_chat,
@@ -3014,13 +2945,39 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 model_messages,
                 {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
             )
-        except HTTPException:
+        except asyncio.CancelledError:
+            # A browser disconnect can cancel the awaiting request while the
+            # worker thread continues. Record the request-side cancellation
+            # separately from the eventual gateway inference result.
+            logger.info(
+                "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=client_cancelled",
+                getattr(request.state, "request_id", "unavailable"),
+                (time.perf_counter() - inference_started) * 1000,
+            )
+            raise
+        except HTTPException as exc:
+            logger.info(
+                "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=failed status_code=%d",
+                getattr(request.state, "request_id", "unavailable"),
+                (time.perf_counter() - inference_started) * 1000,
+                exc.status_code,
+            )
             raise
         except Exception as exc:
+            logger.info(
+                "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=failed status_code=503",
+                getattr(request.state, "request_id", "unavailable"),
+                (time.perf_counter() - inference_started) * 1000,
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
+        logger.info(
+            "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=succeeded",
+            getattr(request.state, "request_id", "unavailable"),
+            (time.perf_counter() - inference_started) * 1000,
+        )
         validation_source = user_text + "\n" + "\n".join(bounded_context)
         missing_measurement_reply = _missing_requested_measurement_response(
             user_text,
@@ -3157,29 +3114,24 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         "ai_generated": ai_generated,
     }
     turn_timestamp = datetime.now(timezone.utc)
-    user_row = ConversationMessage(
-        session_id=session.id, role="user", content=user_text,
-        guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-        source_record_refs_json="[]", created_at=turn_timestamp,
+    assistant_row = ConversationMessage(
+        session_id=session.id, role="assistant", content=reply,
+        guard_verdict=verdict, safety_note=safety_note,
+        evidence_ids_json=json.dumps(evidence_ids),
+        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False, default=str),
+        created_at=turn_timestamp + timedelta(microseconds=1),
     )
     try:
-        # Persist the caregiver's original message before care-update extraction.
-        # Candidate inference is a later, failure-isolated operation.
-        db.add(user_row)
-        db.flush()
-        response_metadata["source_message_id"] = str(user_row.id)
-        assistant_row = ConversationMessage(
-            session_id=session.id, role="assistant", content=reply,
-            guard_verdict=verdict, safety_note=safety_note,
-            evidence_ids_json=json.dumps(evidence_ids),
-            source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
-            client_turn_id=client_turn_id,
-            response_metadata_json=json.dumps(response_metadata, ensure_ascii=False, default=str),
-            created_at=turn_timestamp + timedelta(microseconds=1),
-        )
+        db.add(ConversationMessage(
+            session_id=session.id, role="user", content=user_text,
+            guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+            source_record_refs_json="[]",
+            created_at=turn_timestamp,
+        ))
         db.add(assistant_row)
         db.commit()
-        db.refresh(user_row)
         db.refresh(assistant_row)
     except IntegrityError as exc:
         db.rollback()
@@ -3205,21 +3157,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
-    care_update_candidates = []
-    if not emergency:
-        # FastAPI sends the validated conversation response before this background
-        # task performs the separate care-update inference. The original user and
-        # assistant messages are already committed and cannot be rolled back by it.
-        background_tasks.add_task(
-            process_companion_care_update_message,
-            db.get_bind(),
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            conversation_id=session.id,
-            message_id=str(user_row.id),
-            source_text=user_text,
-            anonymous_session_id=str(request.state.anonymous_session_id),
-        )
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
@@ -3247,7 +3184,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         "written_to_lcr": False,
         "persistence": "conversation_only",
         "idempotent_replay": False,
-        "care_update_candidates": care_update_candidates,
         "messages": [{
             "role": row.role,
             "text": row.content,
