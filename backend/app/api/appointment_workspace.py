@@ -18,11 +18,21 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 
 router = APIRouter(prefix="/appointment-workspaces", tags=["appointment-workspace"])
+
+_ALLOWED_STATUS_TRANSITIONS = {
+    "preparation": {"preparation", "during_visit", "outcome_pending", "follow_up_pending"},
+    "during_visit": {"during_visit", "outcome_pending", "follow_up_pending"},
+    "outcome_pending": {"outcome_pending", "follow_up_pending", "ready_for_review"},
+    "follow_up_pending": {"follow_up_pending", "ready_for_review", "closed_with_outstanding_items"},
+    "ready_for_review": {"ready_for_review", "follow_up_pending", "closed_with_outstanding_items"},
+    "closed_with_outstanding_items": {"closed_with_outstanding_items", "follow_up_pending"},
+}
 
 
 def _scope(request: Request, db: Session) -> tuple[str, str]:
@@ -235,6 +245,56 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         Appointment.person_id == person_id,
     ).order_by(Appointment.scheduled_at.desc()).limit(15).all()
 
+    # Document text is included only after it has been extracted from a
+    # persisted, person-scoped upload. Raw upload metadata alone is not treated
+    # as readable clinical content.
+    documents = []
+    document_source_status = "empty"
+    try:
+        extraction_rows = (
+            db.query(CaptureAnalysis)
+            .filter(CaptureAnalysis.person_id == person_id)
+            .order_by(CaptureAnalysis.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        for extraction in extraction_rows:
+            metadata = extraction.candidates if isinstance(extraction.candidates, dict) else {}
+            if metadata.get("kind") != "document_extraction_v1":
+                continue
+            source_evidence = None
+            if extraction.source_evidence_id:
+                source_evidence = db.query(Evidence).filter(
+                    Evidence.id == extraction.source_evidence_id,
+                    Evidence.person_id == person_id,
+                    Evidence.type == "document",
+                ).first()
+            if source_evidence is None:
+                continue
+            documents.append({
+                "source_table": "capture_analyses",
+                "source_id": str(extraction.id),
+                "source_evidence_id": str(source_evidence.id),
+                "filename": metadata.get("filename"),
+                "extraction_method": metadata.get("extraction_method"),
+                "extraction_status": extraction.extraction_status,
+                "extracted_text": (extraction.source_text or "")[:4000],
+                "source_text_sha256": hashlib.sha256(
+                    (extraction.source_text or "").encode("utf-8")
+                ).hexdigest(),
+                "recorded_at": _iso(extraction.created_at),
+                "uploaded_at": _iso(source_evidence.ingested_at),
+                "uploaded_by_caregiver_id": source_evidence.uploaded_by_caregiver_id,
+                "epistemic_status": source_evidence.epistemic_status or "unknown",
+                "interpretation_limit": "Extracted document text is source material, not an accepted LCR fact or clinical verification.",
+            })
+        document_source_status = "available" if documents else "empty"
+    except Exception:
+        db.rollback()
+        documents = []
+        document_source_status = "failed"
+
+
     facts = []
     if fact_rows is not None:
         for row in fact_rows:
@@ -398,6 +458,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "facts": facts,
         "events": event_items,
         "appointments": appointment_items,
+        "documents": documents,
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
         "freshness_assessment_scope": {
@@ -412,12 +473,18 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "interpretation_limit": "Full assessment history is available through the evidence-freshness history endpoint; this preparation view shows only the latest result per policy and linked evidence.",
         },
         "source_coverage": {
-            "care_facts": "available" if fact_rows is not None else "unavailable",
-            "care_events": "available" if event_items else "no_records_returned",
-            "appointments": "available" if appointment_items else "no_records_returned",
-            "evidence_freshness_assessments": ("unavailable_schema" if not freshness_schema_available else "available" if freshness_assessments else ("no_records_returned" if referenced_evidence_ids else "not_applicable_no_linked_evidence")),
+            "care_facts": (
+                "failed" if fact_rows is None
+                else "available" if facts else "empty"
+            ),
+            "care_events": "available" if event_items else "empty",
+            "appointments": "available" if appointment_items else "empty",
+            "evidence_freshness_assessments": (
+                "unavailable" if not freshness_schema_available
+                else "available" if freshness_assessments else "empty"
+            ),
             "medications_and_allergies": "unavailable",
-            "documents": "unavailable",
+            "documents": document_source_status,
             "community": "not_authorized",
         },
         "limitations": [
@@ -473,6 +540,13 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
             "expected_version": payload.expected_version,
             "current_version": row.version_number,
             "message": "This workspace changed elsewhere. Reload before saving to avoid overwriting newer notes.",
+        })
+    if payload.status is not None and payload.status not in _ALLOWED_STATUS_TRANSITIONS.get(row.status, set()):
+        raise HTTPException(status_code=409, detail={
+            "code": "invalid_appointment_workspace_transition",
+            "current_status": row.status,
+            "requested_status": payload.status,
+            "allowed_statuses": sorted(_ALLOWED_STATUS_TRANSITIONS.get(row.status, set())),
         })
     next_version = row.version_number + 1
     row.payload = payload.payload
