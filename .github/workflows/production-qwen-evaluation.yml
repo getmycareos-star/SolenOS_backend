@@ -1,14 +1,11 @@
 name: Deployed Qwen production acceptance
 
+# Production acceptance is manual while production auto-deploy is paused.
+# Push CI uses the isolated Ollama acceptance workflow instead.
 on:
   push:
     branches: [main]
     paths:
-      - "backend/app/services/qwen_gateway.py"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/main.py"
-      - "start-with-qwen.sh"
-      - "backend/scripts/run_production_qwen_evaluation.py"
       - ".github/workflows/production-qwen-evaluation.yml"
   workflow_dispatch:
 
@@ -22,6 +19,7 @@ concurrency:
 
 jobs:
   production-acceptance:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
