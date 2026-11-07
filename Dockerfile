@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends bash ca-certificates curl libgomp1 tini zstd; \
+    apt-get install -y --no-install-recommends bash ca-certificates curl libgomp1 tini zstd tesseract-ocr tesseract-ocr-eng; \
     curl --retry 4 --retry-all-errors --connect-timeout 20 -fsSL \
       https://ollama.com/download/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst; \
     tar --zstd -xf /tmp/ollama.tar.zst -C /usr; \

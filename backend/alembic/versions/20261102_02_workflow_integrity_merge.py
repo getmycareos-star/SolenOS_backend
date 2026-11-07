@@ -1,3 +1,6 @@
+from alembic import op
+import sqlalchemy as sa
+
 """Merge explicit-action and clarification-review migrations.
 
 Revision ID: 20261102_02_wf_integrity_merge
@@ -16,7 +19,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    pass
+    # PostgreSQL's default Alembic version column is VARCHAR(32), but the
+    # canonical merge revision is longer. Widen migration bookkeeping before
+    # Alembic writes this revision; no application or care data is changed.
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.alter_column(
+            "alembic_version",
+            "version_num",
+            existing_type=sa.String(length=32),
+            type_=sa.String(length=128),
+            existing_nullable=False,
+        )
 
 
 def downgrade() -> None:
