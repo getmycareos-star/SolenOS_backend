@@ -559,15 +559,15 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 table = Table(table_name, metadata, autoload_with=bind)
                 if not {"id", "person_id"}.issubset(set(table.c.keys())):
                     continue
-                timestamp_name = next(
-                    (name for name in ("recorded_at", "created_at", "uploaded_at", "updated_at") if name in table.c),
-                    None,
-                )
-                if timestamp_name is None:
+                timestamp_columns = [
+                    table.c[name] for name in ("recorded_at", "created_at", "uploaded_at", "updated_at")
+                    if name in table.c
+                ]
+                if not timestamp_columns:
                     continue
                 query = select(table.c.id).where(
                     table.c.person_id == draft.person_id,
-                    table.c[timestamp_name] > created_after,
+                    or_(*[column > created_after for column in timestamp_columns]),
                 )
                 if table_name == "care_events" and "event_type" in table.c:
                     query = query.where(table.c.event_type.notin_(DAILY_CARE_EVENT_TYPES))
