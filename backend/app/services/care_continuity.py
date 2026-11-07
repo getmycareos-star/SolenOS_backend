@@ -211,7 +211,7 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
 
     assertions = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
-        CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
+        CareAssertion.assertion_status.in_(["reported", "review_required", "accepted", "caregiver_reviewed"]),
     ).all()
     uncertainty_records = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
