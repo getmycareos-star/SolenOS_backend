@@ -414,6 +414,9 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             "event_at": item.get("event_at"),
             "recorded_at": item.get("recorded_at"),
             "stale_warning": bool(item.get("stale_warning")),
+            "document_id": source_by_ref[item["source_ref"]].get("details", {}).get("document_id"),
+            "original_source_reference": source_by_ref[item["source_ref"]].get("details", {}).get("original_source_reference"),
+            "page_references": source_by_ref[item["source_ref"]].get("details", {}).get("page_references"),
         } for item in generated_sections if item.get("source_ref") in included_source_refs]
         snapshot = {
             "purpose": approved_draft.purpose,
