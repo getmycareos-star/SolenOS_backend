@@ -9,6 +9,7 @@ import app.api.v1 as api_v1_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care_continuity import CareAssertion
 
 pytestmark = pytest.mark.session_security
 
@@ -49,7 +50,7 @@ def create_session(client, name):
     return response.json()
 
 
-def test_daily_capture_persists_candidates_and_review_decision_without_writing_lcr(monkeypatch):
+def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_assertion(monkeypatch):
     client = TestClient(app)
     session = create_session(client, "Care recipient")
     auth = {"Authorization": f"Bearer {session['access_token']}"}
@@ -97,10 +98,42 @@ def test_daily_capture_persists_candidates_and_review_decision_without_writing_l
     assert reviewed.status_code == 200, reviewed.text
     result = reviewed.json()
     assert result["candidate"]["observation"] == "Mum slept poorly last night."
-    assert result["candidate"]["review_status"] == "corrected_by_caregiver"
+    assert result["candidate"]["review_status"] == "corrected_pending_approval"
     assert result["candidate"]["reviewed_by_caregiver_id"] == session["caregiver"]["id"]
     assert result["written_to_lcr"] is False
-    assert "Living Care Record was not changed" in result["message"]
+    assert "remains pending explicit approval" in result["message"]
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+    finally:
+        db.close()
+
+    accepted = client.post(
+        f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
+        headers=auth,
+        json={"candidate_index": 0, "decision": "accept"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_body = accepted.json()
+    assert accepted_body["written_to_lcr"] is True
+    assert accepted_body["assertion_id"]
+    assert accepted_body["candidate"]["review_status"] == "accepted_by_caregiver"
+
+    repeated = client.post(
+        f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
+        headers=auth,
+        json={"candidate_index": 0, "decision": "accept"},
+    )
+    assert repeated.status_code == 409, repeated.text
+
+    current_care = client.get("/api/v1/care-continuity/current-care", headers=auth)
+    assert current_care.status_code == 200, current_care.text
+    assert any(
+        item.get("id") == accepted_body["assertion_id"]
+        and item.get("asserted_value") == "sleep: Mum slept poorly last night."
+        for item in current_care.json().get("items", [])
+    )
 
     db = TestSessionLocal()
     try:
@@ -108,9 +141,14 @@ def test_daily_capture_persists_candidates_and_review_decision_without_writing_l
         assert record.source_text
         assert record.source_event_id == body["id"]
         assert record.candidates["observations"][0]["observation"] == "Mum slept poorly last night."
-        assert len(record.review_history) == 1
+        assert len(record.review_history) == 2
         assert record.review_history[0]["original_candidate"]["observation"] == "Mum slept badly last night."
         assert record.review_history[0]["reviewed_by_caregiver_id"] == session["caregiver"]["id"]
+        assertion = db.query(CareAssertion).filter_by(id=accepted_body["assertion_id"]).one()
+        assert assertion.source_event_id == body["id"]
+        assert assertion.evidence_ids == body["evidence_ids"]
+        assert assertion.created_by_caregiver_id == session["caregiver"]["id"]
+        assert assertion.assertion_status == "caregiver_reviewed"
     finally:
         db.close()
 
