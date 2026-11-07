@@ -37,12 +37,17 @@ def client():
             CREATE TABLE IF NOT EXISTS care_facts (
                 id VARCHAR(36) PRIMARY KEY,
                 person_id VARCHAR(255) NOT NULL,
+                subject_type VARCHAR(80),
+                subject_id VARCHAR(255),
                 fact_type VARCHAR(100),
                 fact_value TEXT,
                 epistemic_status VARCHAR(40),
                 effective_at DATETIME,
+                recorded_at DATETIME,
                 created_at DATETIME,
-                updated_at DATETIME
+                updated_at DATETIME,
+                superseded_by_fact_id VARCHAR(36),
+                created_by_caregiver_id VARCHAR(255)
             )
         """))
     app.dependency_overrides[get_db] = override_get_db
