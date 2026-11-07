@@ -130,7 +130,7 @@ def review_capture_candidate(
                 asserted_value=asserted_value[:4000],
                 source_event_id=source_event.id,
                 source_label="Caregiver-reported Daily Care observation; explicitly reviewed",
-                source_text=analysis.source_text,
+                source_text=source_evidence.source_text,
                 evidence_ids=[source_evidence.id],
                 observed_at=source_event.occurred_at,
                 created_by_caregiver_id=caregiver_id,
