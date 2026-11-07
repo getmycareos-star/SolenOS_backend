@@ -338,6 +338,20 @@ def _explicit_evidence_ids(row: dict) -> list[str]:
     return list(dict.fromkeys(result))
 
 
+def _normalize_reflected_fingerprint_row(row: dict) -> dict:
+    """Canonicalize JSONList text before hashing reflected SQLAlchemy rows."""
+    normalized = dict(row)
+    evidence_ids = normalized.get("evidence_ids")
+    if isinstance(evidence_ids, str):
+        try:
+            parsed = json.loads(evidence_ids)
+            if isinstance(parsed, list):
+                normalized["evidence_ids"] = parsed
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return normalized
+
+
 def _detail_value(value):
     if value is None or isinstance(value, dict):
         return None
@@ -584,17 +598,8 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 if row is None:
                     stale.append(f"{source_table}:{source_id}")
                     continue
-                fingerprint_row = dict(row)
-                # Reflected SQLAlchemy tables see JSONList columns as text, while
-                # ORM-created snapshots contain Python lists. Normalize before hashing.
-                if isinstance(fingerprint_row.get("evidence_ids"), str):
-                    try:
-                        parsed_evidence_ids = json.loads(fingerprint_row["evidence_ids"])
-                        if isinstance(parsed_evidence_ids, list):
-                            fingerprint_row["evidence_ids"] = parsed_evidence_ids
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        pass
-                current = _fingerprint(fingerprint_row)
+                # Use the same canonical JSONList representation as the snapshot writer.
+                current = _fingerprint(_normalize_reflected_fingerprint_row(dict(row)))
             if current != expected:
                 stale.append(f"{source_table}:{source_id}")
         snapshot_ids_by_table = {}
@@ -1450,7 +1455,7 @@ def prepare_handoff_draft(
                 record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
                 if table_name == "uncertainty_assessments":
                     record_status = "active" if row.get("is_active") else "superseded"
-                source_fingerprint = _fingerprint(row)
+                source_fingerprint = _fingerprint(_normalize_reflected_fingerprint_row(row))
                 source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
                 records.append({
                     "source_type": spec["kind"],
