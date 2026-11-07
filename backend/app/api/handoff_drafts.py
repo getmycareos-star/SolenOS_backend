@@ -1175,6 +1175,16 @@ def prepare_handoff_draft(
                 "count": 0,
             }
 
+    # These modules are intentionally not represented as read when no verified
+    # persistent, person-scoped adapter is available.
+    daily_status, daily_records = _verified_daily_care_source(db, person_id, cutoff, now)
+    statuses["daily_care"] = daily_status
+    records.extend(daily_records)
+    document_status, document_records = _verified_document_source(db, person_id, caregiver_id)
+    statuses["documents"] = document_status
+    records.extend(document_records)
+    statuses["community"] = {"status": "not_authorized", "reason": "community_source_not_enabled", "count": 0}
+
     # Resolve only explicitly linked evidence and keep author/reporter/uploader,
     # event time and ingestion time distinct. Missing or cross-person IDs are not
     # copied into the handoff as if their source had been inspected.
@@ -1239,16 +1249,6 @@ def prepare_handoff_draft(
         evidence_lineage["interpretation_limit"] += (
             " Provenance retrieval reached a safety bound; unreturned lineage is unknown, not absent."
         )
-
-    # These modules are intentionally not represented as read when no verified
-    # persistent, person-scoped adapter is available.
-    daily_status, daily_records = _verified_daily_care_source(db, person_id, cutoff, now)
-    statuses["daily_care"] = daily_status
-    records.extend(daily_records)
-    document_status, document_records = _verified_document_source(db, person_id, caregiver_id)
-    statuses["documents"] = document_status
-    records.extend(document_records)
-    statuses["community"] = {"status": "not_authorized", "reason": "community_source_not_enabled", "count": 0}
 
     sections = []
     for table_name, spec in SOURCES.items():
