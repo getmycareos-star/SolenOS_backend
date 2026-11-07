@@ -79,6 +79,33 @@ def upgrade():
             op.create_index(name, "handoff_draft_revisions", [column])
 
 
+    if bind.dialect.name == "postgresql":
+        op.execute("""
+            CREATE OR REPLACE FUNCTION reject_handoff_draft_revision_mutation() RETURNS trigger AS $handoff_revision$
+            BEGIN
+                RAISE EXCEPTION 'Handoff draft revision history is append-only';
+            END;
+            $handoff_revision$ LANGUAGE plpgsql
+        """)
+        op.execute("DROP TRIGGER IF EXISTS trg_handoff_draft_revisions_immutable ON handoff_draft_revisions")
+        op.execute("""
+            CREATE TRIGGER trg_handoff_draft_revisions_immutable
+            BEFORE UPDATE OR DELETE ON handoff_draft_revisions
+            FOR EACH ROW EXECUTE FUNCTION reject_handoff_draft_revision_mutation()
+        """)
+    elif bind.dialect.name == "sqlite":
+        op.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_handoff_draft_revisions_no_update
+            BEFORE UPDATE ON handoff_draft_revisions
+            BEGIN SELECT RAISE(ABORT, 'Handoff draft revision history is append-only'); END
+        """)
+        op.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_handoff_draft_revisions_no_delete
+            BEFORE DELETE ON handoff_draft_revisions
+            BEGIN SELECT RAISE(ABORT, 'Handoff draft revision history is append-only'); END
+        """)
+
+
 def downgrade():
     bind = op.get_bind()
     inspector = inspect(bind)
@@ -87,6 +114,8 @@ def downgrade():
             count = bind.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar_one()
             if count:
                 raise RuntimeError("Refusing to discard persisted handoff drafts or revision history")
+    if bind.dialect.name == "postgresql":
+        op.execute("DROP FUNCTION IF EXISTS reject_handoff_draft_revision_mutation()")
     if inspector.has_table("handoff_draft_revisions"):
         op.drop_table("handoff_draft_revisions")
     if inspector.has_table("handoff_drafts"):
