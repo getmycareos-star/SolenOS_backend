@@ -242,7 +242,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
 
     retrieved = client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=owner_headers)
     assert retrieved.status_code == 200, retrieved.text
-    assert retrieved.json()["source_freshness"]["status"] == "current"
+    assert retrieved.json()["source_freshness"]["status"] == "current", retrieved.json()["source_freshness"]
     edited_content = {
         "template_sections": retrieved.json()["template_sections"],
         "sections": retrieved.json()["sections"],
