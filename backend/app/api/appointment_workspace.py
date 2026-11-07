@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
@@ -156,6 +157,55 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     appointments = db.query(Appointment).filter(
         Appointment.person_id == person_id,
     ).order_by(Appointment.scheduled_at.desc()).limit(15).all()
+
+    # Document text is included only after it has been extracted from a
+    # persisted, person-scoped upload. Raw upload metadata alone is not treated
+    # as readable clinical content.
+    documents = []
+    document_source_status = "empty"
+    try:
+        extraction_rows = (
+            db.query(CaptureAnalysis)
+            .filter(CaptureAnalysis.person_id == person_id)
+            .order_by(CaptureAnalysis.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        for extraction in extraction_rows:
+            metadata = extraction.candidates if isinstance(extraction.candidates, dict) else {}
+            if metadata.get("kind") != "document_extraction_v1":
+                continue
+            source_evidence = None
+            if extraction.source_evidence_id:
+                source_evidence = db.query(Evidence).filter(
+                    Evidence.id == extraction.source_evidence_id,
+                    Evidence.person_id == person_id,
+                    Evidence.type == "document",
+                ).first()
+            if source_evidence is None:
+                continue
+            documents.append({
+                "source_table": "capture_analyses",
+                "source_id": str(extraction.id),
+                "source_evidence_id": str(source_evidence.id),
+                "filename": metadata.get("filename"),
+                "extraction_method": metadata.get("extraction_method"),
+                "extraction_status": extraction.extraction_status,
+                "extracted_text": (extraction.source_text or "")[:4000],
+                "source_text_sha256": __import__("hashlib").sha256(
+                    (extraction.source_text or "").encode("utf-8")
+                ).hexdigest(),
+                "recorded_at": _iso(extraction.created_at),
+                "uploaded_at": _iso(source_evidence.ingested_at),
+                "uploaded_by_caregiver_id": source_evidence.uploaded_by_caregiver_id,
+                "epistemic_status": source_evidence.epistemic_status or "unknown",
+                "interpretation_limit": "Extracted document text is source material, not an accepted LCR fact or clinical verification.",
+            })
+        document_source_status = "available" if documents else "empty"
+    except Exception:
+        db.rollback()
+        documents = []
+        document_source_status = "failed"
 
     facts = []
     if fact_rows is not None:
@@ -320,6 +370,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "facts": facts,
         "events": event_items,
         "appointments": appointment_items,
+        "documents": documents,
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
         "freshness_assessment_scope": {
@@ -349,7 +400,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 else "available" if freshness_assessments else "empty"
             ),
             "medications_and_allergies": "unavailable",
-            "documents": "unavailable",
+            "documents": document_source_status,
             "community": "not_authorized",
         },
         "limitations": [
