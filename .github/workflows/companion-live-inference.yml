@@ -63,7 +63,7 @@ jobs:
       - name: Download the default-model candidate under test
         run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
       - name: Run live Companion inference evaluation
-        run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
+        run: python -m pytest backend/live_tests/test_companion_live_inference.py backend/live_tests/test_document_intelligence_live.py -q -s
       - name: Stop isolated Ollama runtime
         if: always()
         run: docker rm -f solenos-live-ollama || true
