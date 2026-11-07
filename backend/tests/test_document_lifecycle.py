@@ -1,4 +1,7 @@
+import io
+
 import pytest
+from PIL import Image, ImageDraw, ImageFont
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -101,12 +104,54 @@ def test_extract_denies_cross_person_document_access(client):
     assert response.status_code == 404, response.text
 
 
-def test_extract_rejects_scanned_image_without_claiming_ocr(client):
+def _scanned_text_image():
+    image = Image.new("RGB", (2200, 500), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=64)
+    draw.text((60, 150), "Patient walked 20 metres with a frame on 12 October.", fill="black", font=font)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def test_real_tesseract_ocr_extracts_uploaded_scanned_image(client):
     test_client, session = client
-    evidence_id = persist_document(session, b"\x89PNG\r\n\x1a\ninvalid", "scan.png", "image/png")
+    image_bytes = _scanned_text_image()
+    evidence_id = persist_document(session, image_bytes, "scan.png", "image/png")
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
-    assert response.status_code == 415, response.text
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_method"] == "server_tesseract_ocr_image"
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    extracted = retrieved.json()["extracted_text"]
+    assert extracted.startswith("[Image OCR]")
+    assert "Patient walked 20 metres" in extracted
+    assert "12 October" in extracted
+
+
+def test_real_tesseract_ocr_extracts_scanned_pdf_with_page_provenance(client):
+    test_client, session = client
+    image_bytes = _scanned_text_image()
+    image = Image.open(io.BytesIO(image_bytes))
+    pdf_buffer = io.BytesIO()
+    image.save(pdf_buffer, format="PDF", resolution=150)
+    image.close()
+    pdf_bytes = pdf_buffer.getvalue()
+    evidence_id = persist_document(session, pdf_bytes, "scan.pdf", "application/pdf")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_method"] == "server_tesseract_ocr_pdf"
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    extracted = retrieved.json()["extracted_text"]
+    assert "[Page 1 OCR]" in extracted
+    assert "Patient walked 20 metres" in extracted
 
 
 def test_real_upload_endpoint_feeds_document_extraction(client):
@@ -119,11 +164,20 @@ def test_real_upload_endpoint_feeds_document_extraction(client):
             "person_id": session["person"]["id"],
             "caregiver_id": session["caregiver"]["id"],
             "evidence_type": "document",
+            "extracted_text": "FORGED CLIENT TEXT: this must never become authoritative evidence.",
         },
         files={"file": ("uploaded-care-note.txt", b"Uploaded through the real endpoint.", "text/plain")},
     )
     assert uploaded.status_code == 201, uploaded.text
     evidence_id = uploaded.json()["evidence_id"]
+
+    # Client-provided OCR/text must not enter the authoritative Evidence source.
+    with TestSessionLocal() as db:
+        evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        assert evidence.source_text == ""
+        metadata = __import__("json").loads(evidence.extra_metadata or "{}")
+        assert metadata["text_source"] == "server_extraction_pending"
+        assert metadata["source_integrity"]["client_supplied_document_text_ignored"] is True
 
     extracted = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert extracted.status_code == 201, extracted.text
