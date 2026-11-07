@@ -251,6 +251,11 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     )
     assert saved.status_code == 200, saved.text
     assert saved.json()["revision_number"] == 2
+    history = client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=owner_headers).json()["revision_history"]
+    assert len(history) == 2
+    assert history[0]["content"]["generation"]["sections"]
+    assert history[0]["content"].get("caregiver_notes") == []
+    assert history[1]["content"]["caregiver_notes"][0]["text"] == "The family will confirm the next appointment date."
 
     expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     approval = client.post(
