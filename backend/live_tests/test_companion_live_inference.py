@@ -147,6 +147,7 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         assert retrieval_stage["request_id"] == inference_stage["request_id"]
         assert isinstance(retrieval_stage["duration_ms"], (int, float))
         assert isinstance(inference_stage["duration_ms"], (int, float))
+        assert inference_stage["outcome"] == "success"
         print("COMPANION_STAGE_TIMING=" + json.dumps({
             "request_id": retrieval_stage["request_id"],
             "retrieval_ms": retrieval_stage["duration_ms"],
