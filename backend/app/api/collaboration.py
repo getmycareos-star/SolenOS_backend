@@ -329,10 +329,10 @@ async def upload_evidence(
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
 
-    # Uploaded text remains source evidence; it is not promoted to a care assertion.
-    # The extraction label is client-provided and is recorded as such, never trusted
-    # as proof that OCR or review happened on the server.
-    bounded_text = extracted_text.strip()[:100_000]
+    # Client-supplied OCR/text is never stored as source evidence. Extraction
+    # must be performed from the persisted original bytes by the server.
+    client_text_submitted = bool((extracted_text or "").strip())
+    bounded_text = ""
     digest = hashlib.sha256(data).hexdigest()
     # Serialize duplicate lookup + insertion for this person/content pair.
     # Without a transaction-scoped lock, two simultaneous uploads can both
@@ -370,12 +370,13 @@ async def upload_evidence(
             "sha256": digest,
             "duplicate_detected": duplicate_upload is not None,
             "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
-            "text_source": "client_supplied" if bounded_text else "not_available",
+            "text_source": "server_extraction_pending",
             "source_integrity": {
                 "binary_sha256_computed_at_ingest": True,
                 "original_binary_persisted": True,
-                "text_extraction_available": bool(bounded_text),
-                "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
+                "text_extraction_available": False,
+                "text_extraction_status": "server_extraction_pending",
+                "client_supplied_document_text_ignored": client_text_submitted,
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
@@ -410,8 +411,9 @@ async def upload_evidence(
         "source_integrity": {
             "binary_sha256_computed_at_ingest": True,
             "original_binary_persisted": True,
-            "text_extraction_available": bool(bounded_text),
-            "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
+            "text_extraction_available": False,
+            "text_extraction_status": "server_extraction_pending",
+            "client_supplied_document_text_ignored": client_text_submitted,
         },
     }
 
