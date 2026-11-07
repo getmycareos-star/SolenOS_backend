@@ -340,6 +340,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         }
         if not isinstance(generated_sections, list) or not generated_sections:
             raise HTTPException(status_code=409, detail="The approved draft has no validated source-grounded sections")
+        included_source_refs = set()
         for item in generated_sections:
             if not isinstance(item, dict):
                 raise HTTPException(status_code=409, detail="The approved draft structure is invalid")
@@ -357,6 +358,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             )
             if scope_key not in payload.scope:
                 continue
+            included_source_refs.add(source_ref)
             epistemic_status = str(item.get("epistemic_status") or source.get("epistemic_status") or "not_recorded")
             record_status = str(item.get("record_status") or source.get("record_status") or "not_recorded")
             event_at = item.get("event_at") or source.get("event_at") or "not_recorded"
@@ -408,9 +410,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             "event_at": item.get("event_at"),
             "recorded_at": item.get("recorded_at"),
             "stale_warning": bool(item.get("stale_warning")),
-        } for item in generated_sections if item.get("source_ref") in source_by_ref and (
-            "documents" in payload.scope or not str(source_by_ref[item["source_ref"]].get("source_type", "")).startswith("document_")
-        )]
+        } for item in generated_sections if item.get("source_ref") in included_source_refs]
         snapshot = {
             "purpose": approved_draft.purpose,
             "audience": approved_draft.audience,
