@@ -367,3 +367,29 @@ def test_live_qwen_companion_care_update_identification_distinguishes_observatio
             "Live Qwen converted ordinary conversation or a general question into a care proposal: "
             f"{message!r} -> {result!r}"
         )
+
+
+def test_live_qwen_identifies_only_source_grounded_actual_care_observations():
+    """Exercise the real candidate classifier; no phrase rules or mocked model output."""
+    ordinary_messages = [
+        "Good afternoon. I hope everything is going well today.",
+        "Can you explain the difference between dementia and delirium?",
+        "What questions should I prepare for the next appointment?",
+    ]
+    for message in ordinary_messages:
+        result = extract_companion_care_candidates(message)
+        assert result == {"observations": []}, (
+            f"Ordinary conversation unexpectedly produced a care candidate: {message!r} -> {result!r}"
+        )
+
+    care_disclosure = (
+        "Over the last three evenings, she has needed help finishing her meal."
+    )
+    result = extract_companion_care_candidates(care_disclosure)
+    observations = result.get("observations", [])
+    assert observations, "Live Qwen did not identify the explicitly reported care observation."
+    for candidate in observations:
+        quote = candidate.get("source_quote")
+        assert isinstance(quote, str) and quote in care_disclosure
+        event_time_quote = candidate.get("event_time_quote")
+        assert not event_time_quote or event_time_quote in quote
