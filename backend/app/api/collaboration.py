@@ -1837,12 +1837,16 @@ def _verify_production_evaluation_run(request: Request) -> None:
 def evaluate_deployed_qwen(request: Request):
     """Run synthetic-only acceptance probes against the currently deployed local model."""
     _verify_production_evaluation_run(request)
-    readiness = qwen_readiness_status(force=True)
-    if not readiness.get("available"):
+    # This explicit, authenticated evaluation workflow may inspect installation
+    # and runtime inventory, but it must not run a separate readiness inference.
+    # The synthetic acceptance cases below are the actual inference proof.
+    inventory = qwen_runtime_status()
+    if not inventory.get("runtime_available") or not inventory.get("model_installed"):
         raise HTTPException(status_code=503, detail={
             "code": "model_not_ready",
-            "message": "Production evaluation did not run because the deployed model is not ready.",
-            "reason": readiness.get("failure_reason"),
+            "message": "Production evaluation did not run because the configured model is not installed or its runtime is unavailable.",
+            "reason": inventory.get("failure_reason"),
+            "installation": inventory.get("installation"),
         })
 
     cases = _production_qwen_evaluation_cases()
