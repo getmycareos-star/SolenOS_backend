@@ -153,7 +153,10 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         )
         correction_turn = send(client, first, corrected_source, "companion-pg-correction-0003")
         assert correction_turn.status_code == 200, correction_turn.text
-        correction_proposal = pending(client, first)[0]
+        correction_proposal = next(
+            item for item in pending(client, first)
+            if item["proposed_change"].get("source_quote") == corrected_source
+        )
         corrected_text = "The caregiver recorded a clarified second observation during the visit."
         correction_context = "Caregiver clarification: " + corrected_text
         corrected = review(client, first, correction_proposal["id"], {
@@ -194,7 +197,10 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         )
         rejected_turn = send(client, first, rejected_source, "companion-pg-reject-0004")
         assert rejected_turn.status_code == 200, rejected_turn.text
-        rejected_proposal = pending(client, first)[0]
+        rejected_proposal = next(
+            item for item in pending(client, first)
+            if item["proposed_change"].get("source_quote") == rejected_source
+        )
         rejected = review(client, first, rejected_proposal["id"], {"decision": "reject"})
         assert rejected.status_code == 200 and rejected.json()["written_to_lcr"] is False
         rejection_history = client.get(
