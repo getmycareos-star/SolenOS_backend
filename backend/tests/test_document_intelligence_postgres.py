@@ -504,7 +504,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             assert assertion.assertion_kind == "document_reviewed_observation"
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quote_correct
-            assert assertion.asserted_value == f"Subject: Person\nObservation: {corrected_observation}"
+            assert assertion.asserted_value.splitlines() == ["Subject: Person", f"Observation: {corrected_observation.strip()}"]
             assert assertion.created_by_caregiver_id == caregiver_id
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 1
 
