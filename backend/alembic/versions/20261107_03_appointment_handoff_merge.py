@@ -20,4 +20,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("Refusing to split the canonical appointment and handoff migration graph.")
+    # This is a graph-only merge: Alembic may safely split the heads while
+    # downgrading because this revision itself owns no schema or data changes.
+    pass
