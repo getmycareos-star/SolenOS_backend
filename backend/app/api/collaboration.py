@@ -2423,6 +2423,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
+    companion_request_started = time.perf_counter()
+    companion_request_id = getattr(request.state, "request_id", None)
     person_id, caregiver_id = _scope(request, db)
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
@@ -3121,7 +3123,22 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
+        retrieval_duration_ms = round((time.perf_counter() - companion_request_started) * 1000, 2)
+        logger.info(
+            "solenos_companion_stage %s",
+            json.dumps({
+                "event": "companion_retrieval_complete",
+                "request_id": companion_request_id,
+                "duration_ms": retrieval_duration_ms,
+                "event_count": len(source_event_ids),
+                "assertion_count": len(source_assertion_ids),
+                "evidence_count": len(source_evidence_ids),
+                "appointment_count": len(source_appointment_ids),
+                "shared_lcr_ref_count": len(source_lcr_record_refs),
+            }, separators=(",", ":")),
+        )
         base, model = _ollama_url()
+        inference_started = time.perf_counter()
         try:
             reply = await asyncio.to_thread(
                 _ollama_chat,
@@ -3130,9 +3147,43 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 model_messages,
                 {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
             )
+            logger.info(
+                "solenos_companion_stage %s",
+                json.dumps({
+                    "event": "companion_inference_complete",
+                    "request_id": companion_request_id,
+                    "duration_ms": round((time.perf_counter() - inference_started) * 1000, 2),
+                    "retrieval_duration_ms": retrieval_duration_ms,
+                    "model": model,
+                    "outcome": "success",
+                }, separators=(",", ":")),
+            )
         except HTTPException:
+            logger.warning(
+                "solenos_companion_stage %s",
+                json.dumps({
+                    "event": "companion_inference_complete",
+                    "request_id": companion_request_id,
+                    "duration_ms": round((time.perf_counter() - inference_started) * 1000, 2),
+                    "retrieval_duration_ms": retrieval_duration_ms,
+                    "model": model,
+                    "outcome": "http_error",
+                }, separators=(",", ":")),
+            )
             raise
         except Exception as exc:
+            logger.warning(
+                "solenos_companion_stage %s",
+                json.dumps({
+                    "event": "companion_inference_complete",
+                    "request_id": companion_request_id,
+                    "duration_ms": round((time.perf_counter() - inference_started) * 1000, 2),
+                    "retrieval_duration_ms": retrieval_duration_ms,
+                    "model": model,
+                    "outcome": "error",
+                    "error_type": type(exc).__name__,
+                }, separators=(",", ":")),
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
