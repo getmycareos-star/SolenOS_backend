@@ -2316,6 +2316,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         f"Task: {guidance}{appointment_status_guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
         "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
+        "Never expose internal record identifiers, UUIDs, source IDs or opaque keys; refer to records by human-readable titles, dates and statuses. "
         "Keep the response to 35 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
@@ -2332,7 +2333,45 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
         options={"temperature": 0, "num_predict": max_predict},
     )
-    source_context = payload.text + "\n" + "\n".join(context_lines)
+    internal_source_ids = {
+        str(identifier)
+        for source_ids in (
+            source_event_ids, source_evidence_ids, source_document_analysis_ids,
+            source_appointment_ids, source_handoff_ids, source_notification_ids,
+            source_freshness_assessment_ids,
+        )
+        for identifier in source_ids
+        if identifier
+    }
+
+    def strip_internal_identifiers(candidate: str) -> str:
+        sanitized = candidate or ""
+        for identifier in sorted(internal_source_ids, key=len, reverse=True):
+            sanitized = re.sub(
+                rf"\\[\\s*{re.escape(identifier)}\\s*\\]",
+                "",
+                sanitized,
+                flags=re.IGNORECASE,
+            )
+            sanitized = sanitized.replace(identifier, "")
+        sanitized = re.sub(
+            r"\\[\\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\s*\\]",
+            "",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        sanitized = re.sub(
+            r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
+            "",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+        sanitized = re.sub(r"[ \\t]{2,}", " ", sanitized)
+        sanitized = re.sub(r"\\s+([,.;:!?])", r"\\1", sanitized)
+        return sanitized.strip()
+
+    reply = strip_internal_identifiers(reply)
+    source_context = payload.text + "\\n" + "\\n".join(context_lines)
 
     def response_rejection_reasons(candidate: str) -> list[str]:
         reasons = []
@@ -2369,6 +2408,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     "role": "system",
                     "content": (
                         "Revise the draft into a clear, natural, accessible response of 35 words or fewer. "
+                        "Never expose internal record identifiers, UUIDs, source IDs or opaque keys. "
                         "Preserve only claims directly supported by the exact caregiver text or authorized context. "
                         "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
                         "unreported clinical outcome into a fact. "
@@ -2400,6 +2440,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             ],
             options={"temperature": 0, "num_predict": 96},
         )
+    reply = strip_internal_identifiers(reply)
     rejection_reasons = response_rejection_reasons(reply)
     if rejection_reasons:
         logger.warning("Qwen repaired response rejected by grounding validators: %s", ",".join(rejection_reasons))
