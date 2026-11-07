@@ -202,3 +202,26 @@ def test_proposals_are_person_scoped_and_candidate_inference_failure_keeps_messa
             db.close()
     finally:
         teardown()
+
+
+
+def test_ordinary_conversation_and_ungrounded_model_output_create_no_candidate(monkeypatch):
+    source = "What is dementia, and what should I ask at the appointment?"
+    client = setup_client(
+        monkeypatch,
+        lambda text: {"observations": [{"source_quote": "A fabricated fall occurred yesterday."}]},
+    )
+    try:
+        session = create_session(client, "Caregiver source validation")
+        response = send(client, session, source)
+        assert response.status_code == 200, response.text
+        assert response.json()["care_update_candidates"] == []
+        db = TestingSessionLocal()
+        try:
+            assert db.query(ConversationMessage).filter_by(role="user", content=source).count() == 1
+            assert db.query(AIOutputLCRProposal).filter_by(person_id=session["person"]["id"]).count() == 0
+            assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown()
