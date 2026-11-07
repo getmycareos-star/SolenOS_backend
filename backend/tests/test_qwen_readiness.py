@@ -249,3 +249,29 @@ def test_readiness_endpoint_uses_cached_probe_instead_of_forcing_each_request(mo
 
     assert result["failure_reason"] == "inference_timeout"
     assert calls == [False]
+
+
+def test_explicit_production_evaluation_checks_inventory_without_readiness_inference(monkeypatch):
+    from starlette.requests import Request
+    from app.api import collaboration
+
+    monkeypatch.setattr(collaboration, "_verify_production_evaluation_run", lambda request: None)
+    monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
+        "runtime_available": True,
+        "model_installed": True,
+        "model": "qwen3.5:4b",
+        "installation": {"state": "installed"},
+    })
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_readiness_status",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("evaluation must not run a separate readiness inference")),
+    )
+    monkeypatch.setattr(collaboration, "_production_qwen_evaluation_cases", lambda: [])
+    request = Request({"type": "http", "method": "POST", "path": "/api/v1/assistant/evaluate-production", "headers": []})
+
+    result = collaboration.evaluate_deployed_qwen(request)
+    assert result["model"] == "qwen3.5:4b"
+    assert result["synthetic_only"] is True
+    assert result["care_record_accessed"] is False
+    assert result["total"] == 0
