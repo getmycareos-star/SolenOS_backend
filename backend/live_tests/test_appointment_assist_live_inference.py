@@ -103,8 +103,8 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
         assert data["persistence"] == "read_only_assistance"
         assert data["authority"] == "solenos_care_record_and_caregiver"
         assert appointment_id in data["source_appointment_ids"]
-        assert "scheduled" in data["reply"].casefold(), f"Qwen did not ground its response in the saved appointment status: {data['reply']!r}"
         assert isinstance(data["reply"], str) and data["reply"].strip()
+        assert "scheduled" in data["reply"].casefold(), f"Qwen did not ground its response in the saved appointment status: {data['reply']!r}"
         assert len(data["reply"].split()) <= 55
         assert not __import__("re").search(
             r"\b(?:is|was|has been)\s+confirmed\b",
