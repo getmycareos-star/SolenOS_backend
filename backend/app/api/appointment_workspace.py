@@ -24,6 +24,15 @@ from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, Appoin
 
 router = APIRouter(prefix="/appointment-workspaces", tags=["appointment-workspace"])
 
+_ALLOWED_STATUS_TRANSITIONS = {
+    "preparation": {"preparation", "during_visit", "outcome_pending", "follow_up_pending"},
+    "during_visit": {"during_visit", "outcome_pending", "follow_up_pending"},
+    "outcome_pending": {"outcome_pending", "follow_up_pending", "ready_for_review"},
+    "follow_up_pending": {"follow_up_pending", "ready_for_review", "closed_with_outstanding_items"},
+    "ready_for_review": {"ready_for_review", "follow_up_pending", "closed_with_outstanding_items"},
+    "closed_with_outstanding_items": {"closed_with_outstanding_items", "follow_up_pending"},
+}
+
 
 def _scope(request: Request, db: Session) -> tuple[str, str]:
     authorization = request.headers.get("authorization", "")
@@ -440,6 +449,13 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
             "expected_version": payload.expected_version,
             "current_version": row.version_number,
             "message": "This workspace changed elsewhere. Reload before saving to avoid overwriting newer notes.",
+        })
+    if payload.status is not None and payload.status not in _ALLOWED_STATUS_TRANSITIONS.get(row.status, set()):
+        raise HTTPException(status_code=409, detail={
+            "code": "invalid_appointment_workspace_transition",
+            "current_status": row.status,
+            "requested_status": payload.status,
+            "allowed_statuses": sorted(_ALLOWED_STATUS_TRANSITIONS.get(row.status, set())),
         })
     next_version = row.version_number + 1
     row.payload = payload.payload
