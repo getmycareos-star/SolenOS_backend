@@ -12,6 +12,8 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Evidence as EvidenceModel
 from app.models.care_continuity import CareAssertion
 from app.schemas.capture_review import CaptureCandidateReview
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 router = APIRouter(tags=["capture review"])
@@ -117,33 +119,26 @@ def review_capture_candidate(
         if not observation:
             raise HTTPException(status_code=422, detail="The reviewed observation is empty")
         asserted_value = f"{subject}: {observation}" if subject else observation
-        assertion = CareAssertion(
-            person_id=person_id,
-            subject_type="person",
-            subject_id=person_id,
-            field=(subject or "daily_care_observation")[:120],
-            assertion_kind="caregiver_reviewed_daily_care_observation",
-            asserted_value=asserted_value[:4000],
-            source_event_id=source_event.id,
-            source_label="Caregiver-reported Daily Care observation; explicitly reviewed",
-            source_text=json.dumps({
-                "capture_analysis_id": analysis_id,
-                "candidate_index": payload.candidate_index,
-                "original_candidate": original_candidate,
-                "accepted_candidate": {
-                    "subject": subject,
-                    "observation": observation,
-                    "source_quote": candidate.get("source_quote"),
-                },
-                "original_capture_text": analysis.source_text,
-            }, ensure_ascii=False),
-            evidence_ids=[source_evidence.id] if source_evidence else [],
-            assertion_status="caregiver_reviewed",
-            observed_at=source_event.occurred_at,
-            created_by_caregiver_id=caregiver_id,
-            updated_by_caregiver_id=caregiver_id,
+        assertion = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field=(subject or "daily_care_observation")[:120],
+                assertion_kind="time_bound_observation",
+                asserted_value=asserted_value[:4000],
+                source_event_id=source_event.id,
+                source_label="Caregiver-reported Daily Care observation; explicitly reviewed",
+                source_text=analysis.source_text,
+                evidence_ids=[source_evidence.id] if source_evidence else [],
+                observed_at=source_event.occurred_at,
+                created_by_caregiver_id=caregiver_id,
+            ),
+            commit=False,
         )
-        db.add(assertion)
+        assertion.assertion_status = "caregiver_reviewed"
+        assertion.updated_by_caregiver_id = caregiver_id
         db.flush()
         candidate["review_status"] = "accepted_by_caregiver"
         candidate["accepted_at"] = reviewed_at
