@@ -36,3 +36,11 @@ def test_migration_graph_has_one_canonical_head_and_unique_revision_ids():
     assert "20261029_27_completeness" in revision_ids
     assert "20261029_28_conflict_remainder" in revision_ids
     assert "20261029_29_ev_rel_scope" in revision_ids
+
+
+def test_handoff_draft_persistence_migration_is_reachable_from_canonical_head():
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    script = ScriptDirectory.from_config(config)
+    assert script.get_heads() == ["20261107_02_handoff_drafts"]
