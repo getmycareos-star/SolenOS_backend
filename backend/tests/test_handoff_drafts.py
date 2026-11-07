@@ -601,11 +601,13 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     with engine.begin() as connection:
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+                (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :subject_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
             {
                 "id": "persisted-handoff-fact",
                 "person_id": person_id,
+                "subject_type": "care_recipient",
+                "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports that she prefers tea.",
                 "epistemic_status": "reported",
@@ -716,11 +718,13 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
     with engine.begin() as connection:
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+                (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :subject_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
             {
                 "id": "stale-handoff-fact",
                 "person_id": person_id,
+                "subject_type": "care_recipient",
+                "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports a calm morning.",
                 "epistemic_status": "reported",
