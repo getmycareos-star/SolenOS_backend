@@ -173,6 +173,7 @@ class HandoffDraft(Base):
     approved_by_caregiver_id = Column(String(255), nullable=True)
     approval_revision = Column(Integer, nullable=True)
     approval_content_sha256 = Column(String(64), nullable=True)
+    approval_parameters = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
