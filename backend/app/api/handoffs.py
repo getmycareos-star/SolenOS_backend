@@ -295,7 +295,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         if approved_draft is None:
             raise HTTPException(status_code=404, detail="Approved handoff draft not found")
         if (
-            approved_draft.review_status != "approved_for_sharing"
+            approved_draft.review_status not in {"approved_for_sharing", "shared"}
             or approved_draft.approved_by_caregiver_id != caregiver_id
             or approved_draft.approval_revision != approved_draft.revision_number
             or approved_draft.generation_status != "generated"
@@ -419,6 +419,9 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             if existing_fingerprint != request_fingerprint:
                 raise HTTPException(status_code=409, detail="This handoff request ID was already used for a different request")
             return _view(db, existing)
+
+    if approved_draft is not None and approved_draft.review_status != "approved_for_sharing":
+        raise HTTPException(status_code=409, detail="This approved draft has already been shared")
 
     now = datetime.now(timezone.utc)
     expires_at = _aware(payload.expires_at) if payload.expires_at else now + timedelta(days=7)
