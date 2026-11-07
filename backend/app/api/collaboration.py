@@ -2725,7 +2725,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 + json.dumps({
                     "document_extraction_id": str(analysis.id),
                     "source_evidence_id": str(evidence.id),
-                    "filename": extraction_metadata.get("filename") or metadata.get("filename"),
+                    "filename": extraction_metadata.get("filename"),
                     "extraction_status": analysis.extraction_status,
                     "extraction_method": extraction_metadata.get("extraction_method"),
                     "source_text": (analysis.source_text or "")[:1800],
