@@ -80,8 +80,10 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "table": "care_assertions",
         "required": True,
         "fields": ["id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value",
-                   "source_event_id", "source_label", "source_text", "evidence_ids", "assertion_status",
-                   "observed_at", "review_after_days", "created_by_caregiver_id", "recorded_at"],
+                   "source_event_id", "source_label", "source_text", "source_conversation_id",
+                   "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids",
+                   "assertion_status", "observed_at", "review_after_days", "created_by_caregiver_id",
+                   "recorded_at"],
         "order": ["recorded_at", "created_at"],
     },
     "decisions": {
