@@ -9,6 +9,8 @@ from alembic.operations import Operations
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError
 
+from app.core.database import Base
+
 
 def _load_repair_migration():
     backend_dir = Path(__file__).resolve().parents[1]
@@ -33,7 +35,7 @@ def test_missing_document_review_table_is_recreated_with_canonical_constraints_a
 
         inspector = inspect(connection)
         assert inspector.has_table("document_review_events")
-        model_table = migration.Base.metadata.tables["document_review_events"]
+        model_table = Base.metadata.tables["document_review_events"]
         assert {
             column.name for column in model_table.columns
         } == {
