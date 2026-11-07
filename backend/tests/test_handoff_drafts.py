@@ -728,7 +728,7 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
             "provider": "ollama",
             "model": "qwen-test-fixture",
             "sections": [{
-                "section": "Recent observation",
+                "section": "Recent observations and changes",
                 "source_ref": "care_facts:stale-handoff-fact",
                 "text": source["text"],
             }],
@@ -777,7 +777,7 @@ def test_qwen_handoff_generation_rejects_fabricated_source_and_quote(monkeypatch
         "qwen_chat",
         lambda *args, **kwargs: __import__("json").dumps({
             "items": [{
-                "section": "Recent observations",
+                "section": "Recent observations and changes",
                 "source_ref": "care_events:invented-id",
                 "quote": "A fabricated observation.",
             }]
