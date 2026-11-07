@@ -1438,13 +1438,13 @@ def prepare_handoff_draft(
                 event_time = next((row.get(k) for k in spec.get("event_time_fields", ()) if row.get(k) is not None), None)
                 recorded_time = next((row.get(k) for k in spec.get("recorded_time_fields", spec["time_fields"]) if row.get(k) is not None), None)
                 due_time = next((row.get(k) for k in spec.get("due_time_fields", ()) if row.get(k) is not None), None)
-                text = _display_text(row, spec["text_fields"])
+                source_text_value = _display_text(row, spec["text_fields"])
                 details = {key: value for key in spec.get("detail_fields", ()) if (value := _detail_value(row.get(key))) is not None}
                 if row.get("superseded_by_fact_id"):
                     details["fact_lifecycle"] = "superseded"
                 elif table_name == "care_facts":
                     details["fact_lifecycle"] = "current_in_lcr"
-                if not text:
+                if not source_text_value:
                     continue
                 epistemic_value = next((row.get(k) for k in ("epistemic_status", "epistemic_state", "assertion_status") if row.get(k) is not None), None)
                 record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
