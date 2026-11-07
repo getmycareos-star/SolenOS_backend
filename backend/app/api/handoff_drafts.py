@@ -516,6 +516,58 @@ def approve_handoff_draft(
     return _draft_response(draft)
 
 
+def _fingerprint(value) -> str:
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _daily_care_fingerprint_payload(event, linked_evidence: list) -> dict:
+    return {
+        "id": event.id,
+        "event_type": event.event_type,
+        "status": event.status,
+        "occurred_at": event.occurred_at,
+        "occurred_at_timezone": event.occurred_at_timezone,
+        "recorded_at": event.recorded_at,
+        "updated_at": event.updated_at,
+        "title": event.title,
+        "description": event.description,
+        "evidence_ids": list(event.evidence_ids or []),
+        "evidence": [
+            {"id": row.id, "source_text_sha256": row.source_text_sha256, "source_type": row.source_type}
+            for row in linked_evidence
+        ],
+    }
+
+
+def _document_upload_fingerprint_payload(document, upload) -> dict:
+    return {
+        "evidence_id": document.id,
+        "source_text_sha256": document.source_text_sha256,
+        "original_source_reference": document.original_source_reference,
+        "uploaded_at": document.uploaded_at,
+        "binary_sha256": upload.sha256,
+        "size_bytes": upload.size_bytes,
+        "filename": upload.filename,
+        "mime_type": upload.mime_type,
+        "upload_created_at": upload.created_at,
+    }
+
+
+def _document_extraction_fingerprint_payload(extraction, binary_sha256: str) -> dict:
+    return {
+        "id": extraction.id,
+        "source_evidence_id": extraction.source_evidence_id,
+        "source_text": extraction.source_text,
+        "extraction_status": extraction.extraction_status,
+        "candidates": extraction.candidates,
+        "review_history": extraction.review_history,
+        "created_at": extraction.created_at,
+        "updated_at": extraction.updated_at,
+        "binary_sha256": binary_sha256,
+    }
+
+
 def _is_stale(value, now: datetime, days: int = 30) -> bool:
     if value is None:
         return False
@@ -568,10 +620,15 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "original_source_reference": row.original_source_reference,
                 "source_text_sha256": row.source_text_sha256,
             } for row in linked]
+            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked))
+            source_revision_value = event.updated_at or event.recorded_at
             output.append({
                 "source_type": "daily_care_observation",
                 "source_table": "care_events",
                 "source_id": str(event.id),
+                "source_fingerprint": daily_fingerprint,
+                "source_revision": _iso(source_revision_value),
+                "source_revision_status": "timestamp_available" if source_revision_value is not None else "revision_unavailable",
                 "event_at": _iso(event.occurred_at),
                 "recorded_at": _iso(event.recorded_at),
                 "due_at": None,
@@ -632,10 +689,14 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             if extraction and extraction_details.get("kind") == "document_extraction_v1" and extraction_details.get("binary_sha256") == upload.sha256:
                 extracted_text = (extraction.source_text or "").strip()
                 if extracted_text:
+                    extraction_fingerprint = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256))
                     output.append({
                         "source_type": "document_extracted_text",
                         "source_table": "capture_analyses",
                         "source_id": str(extraction.id),
+                        "source_fingerprint": extraction_fingerprint,
+                        "source_revision": _iso(extraction.updated_at or extraction.created_at),
+                        "source_revision_status": "timestamp_available" if (extraction.updated_at or extraction.created_at) is not None else "revision_unavailable",
                         "event_at": _iso(document.occurred_at),
                         "recorded_at": _iso(extraction.created_at),
                         "due_at": None,
@@ -670,10 +731,14 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                         "stale_warning": _is_stale(document.occurred_at, datetime.now(timezone.utc)),
                     })
             # Preserve the original upload as its own source node even when extraction is absent.
+            upload_fingerprint = _fingerprint(_document_upload_fingerprint_payload(document, upload))
             output.append({
                 "source_type": "uploaded_document",
                 "source_table": "evidence_uploads",
                 "source_id": str(document.id),
+                "source_fingerprint": upload_fingerprint,
+                "source_revision": _iso(document.uploaded_at or upload.created_at),
+                "source_revision_status": "timestamp_available" if (document.uploaded_at or upload.created_at) is not None else "revision_unavailable",
                 "event_at": _iso(document.occurred_at),
                 "recorded_at": _iso(document.uploaded_at),
                 "due_at": None,
@@ -900,10 +965,15 @@ def prepare_handoff_draft(
                 continue
             epistemic_value = next((row.get(k) for k in ("epistemic_status", "epistemic_state", "assertion_status") if row.get(k) is not None), None)
             record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
+            source_fingerprint = _fingerprint(row)
+            source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
             records.append({
                 "source_type": spec["kind"],
                 "source_table": table_name,
                 "source_id": str(source_id),
+                "source_fingerprint": source_fingerprint,
+                "source_revision": _iso(source_revision_value),
+                "source_revision_status": "timestamp_available" if source_revision_value is not None else "revision_unavailable",
                 "event_at": _iso(event_time),
                 "recorded_at": _iso(recorded_time),
                 "due_at": _iso(due_time),
