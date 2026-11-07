@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text, inspect
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
@@ -32,6 +33,11 @@ _ALLOWED_STATUS_TRANSITIONS = {
     "ready_for_review": {"ready_for_review", "follow_up_pending", "closed_with_outstanding_items"},
     "closed_with_outstanding_items": {"closed_with_outstanding_items", "follow_up_pending"},
 }
+
+
+def _request_fingerprint(value: dict) -> str:
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _scope(request: Request, db: Session) -> tuple[str, str]:
@@ -103,6 +109,23 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         ).first()
         if appointment is None:
             raise HTTPException(status_code=404, detail="Appointment not found for this care record")
+
+    request_fingerprint = _request_fingerprint({
+        "appointment_id": payload.appointment_id,
+        "status": payload.status,
+        "payload": payload.payload,
+        "change_reason": payload.change_reason,
+    })
+    if payload.idempotency_key:
+        existing = db.query(AppointmentWorkspaceRecord).filter(
+            AppointmentWorkspaceRecord.person_id == person_id,
+            AppointmentWorkspaceRecord.idempotency_key == payload.idempotency_key,
+        ).first()
+        if existing is not None:
+            if existing.idempotency_request_sha256 == request_fingerprint:
+                return _record_out(existing)
+            raise HTTPException(status_code=409, detail="This save key was already used for different appointment information")
+
     row = AppointmentWorkspaceRecord(
         id=str(uuid.uuid4()),
         person_id=person_id,
@@ -113,17 +136,32 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         version_number=1,
         payload=payload.payload,
         last_revision_reason=payload.change_reason,
+        idempotency_key=payload.idempotency_key,
+        idempotency_request_sha256=request_fingerprint if payload.idempotency_key else None,
     )
     db.add(row)
-    db.flush()
     db.add(AppointmentWorkspaceRevision(
         id=str(uuid.uuid4()), record_id=row.id, person_id=person_id,
         revision_number=1, payload=payload.payload,
         change_reason=payload.change_reason, changed_by_caregiver_id=caregiver_id,
+        idempotency_key=payload.idempotency_key,
+        idempotency_request_sha256=request_fingerprint if payload.idempotency_key else None,
     ))
     try:
         db.commit()
         db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        if payload.idempotency_key:
+            existing = db.query(AppointmentWorkspaceRecord).filter(
+                AppointmentWorkspaceRecord.person_id == person_id,
+                AppointmentWorkspaceRecord.idempotency_key == payload.idempotency_key,
+            ).first()
+            if existing is not None and existing.idempotency_request_sha256 == request_fingerprint:
+                return _record_out(existing)
+            if existing is not None:
+                raise HTTPException(status_code=409, detail="This save key was already used for different appointment information") from exc
+        raise HTTPException(status_code=503, detail="Appointment workspace could not be persisted") from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Appointment workspace could not be persisted") from exc
@@ -516,6 +554,23 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
     ).with_for_update().first()
     if row is None:
         raise HTTPException(status_code=404, detail="Appointment workspace not found")
+
+    update_fingerprint = _request_fingerprint({
+        "expected_version": payload.expected_version,
+        "status": payload.status,
+        "payload": payload.payload,
+        "change_reason": payload.change_reason,
+    })
+    if payload.idempotency_key:
+        prior_revision = db.query(AppointmentWorkspaceRevision).filter(
+            AppointmentWorkspaceRevision.record_id == row.id,
+            AppointmentWorkspaceRevision.idempotency_key == payload.idempotency_key,
+        ).first()
+        if prior_revision is not None:
+            if prior_revision.idempotency_request_sha256 == update_fingerprint:
+                return _record_out(row)
+            raise HTTPException(status_code=409, detail="This save key was already used for different appointment information")
+
     if row.version_number != payload.expected_version:
         raise HTTPException(status_code=409, detail={
             "code": "appointment_workspace_version_conflict",
@@ -541,10 +596,27 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
         id=str(uuid.uuid4()), record_id=row.id, person_id=person_id,
         revision_number=next_version, payload=payload.payload,
         change_reason=payload.change_reason, changed_by_caregiver_id=caregiver_id,
+        idempotency_key=payload.idempotency_key,
+        idempotency_request_sha256=update_fingerprint if payload.idempotency_key else None,
     ))
     try:
         db.commit()
         db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        if payload.idempotency_key:
+            prior_revision = db.query(AppointmentWorkspaceRevision).filter(
+                AppointmentWorkspaceRevision.record_id == record_id,
+                AppointmentWorkspaceRevision.idempotency_key == payload.idempotency_key,
+            ).first()
+            if prior_revision is not None and prior_revision.idempotency_request_sha256 == update_fingerprint:
+                current = db.query(AppointmentWorkspaceRecord).filter(
+                    AppointmentWorkspaceRecord.id == record_id,
+                    AppointmentWorkspaceRecord.person_id == person_id,
+                ).first()
+                if current is not None:
+                    return _record_out(current)
+        raise HTTPException(status_code=409, detail="This appointment was updated elsewhere. Reload the saved notes before trying again.") from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Appointment workspace update could not be persisted") from exc
