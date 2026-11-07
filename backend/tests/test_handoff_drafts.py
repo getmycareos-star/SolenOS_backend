@@ -12,7 +12,7 @@ from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion
 from app.models.time_location import Appointment
 
 engine = create_engine(
@@ -476,6 +476,43 @@ def test_daily_care_adapter_returns_only_persisted_person_scoped_caregiver_repor
             created_by_caregiver_id=caregiver_id,
         )
         db.add_all([evidence, event])
+        db.flush()
+        db.add_all([
+            CaptureAnalysis(
+                id="daily-care-review-analysis",
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_evidence_id=evidence.id,
+                source_event_id=event.id,
+                source_text="Lunch was only partly eaten.",
+                extraction_status="available",
+                candidates={"kind": "daily_capture_review_v1"},
+                review_history=[{
+                    "decision": "correct",
+                    "original_candidate": {"text": "Lunch was only partly eaten."},
+                    "reviewed_candidate": {"text": "Lunch was mostly eaten."},
+                    "reviewed_by_caregiver_id": caregiver_id,
+                }],
+            ),
+            CareAssertion(
+                id="daily-care-reviewed-assertion",
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="food_intake",
+                assertion_kind="caregiver_reported_observation",
+                asserted_value="Lunch was mostly eaten.",
+                source_event_id=event.id,
+                source_label="Daily Care review",
+                source_text="Lunch was mostly eaten.",
+                event_time_text=event.occurred_at.isoformat(),
+                evidence_ids=[evidence.id],
+                assertion_status="caregiver_reviewed",
+                observed_at=event.occurred_at,
+                created_by_caregiver_id=caregiver_id,
+                recorded_at=datetime.now(timezone.utc),
+            ),
+        ])
         db.commit()
     finally:
         db.close()
@@ -496,8 +533,10 @@ def test_daily_care_adapter_returns_only_persisted_person_scoped_caregiver_repor
     assert item["epistemic_status"] == "caregiver_reported"
     assert item["record_status"] == "recorded"
     assert item["details"]["occurred_at_timezone"] == "Africa/Lagos"
-    assert item["details"]["review_status"] == "caregiver_reported_not_independently_verified"
+    assert item["details"]["review_status"] == "caregiver_reviewed_assertion_exists"
     assert item["evidence_ids"] == ["daily-care-source-evidence"]
+    assert item["details"]["accepted_assertion_references"] == ["daily-care-reviewed-assertion"]
+    assert item["details"]["capture_analysis_review_history"][0][0]["reviewed_candidate"]["text"] == "Lunch was mostly eaten."
 
 
 def test_document_adapter_separates_verified_original_upload_from_extracted_text(client):
