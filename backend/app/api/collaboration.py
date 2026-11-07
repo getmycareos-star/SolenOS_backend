@@ -7,6 +7,7 @@ import math
 import os
 import re
 import secrets
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -1836,12 +1837,16 @@ def _verify_production_evaluation_run(request: Request) -> None:
 def evaluate_deployed_qwen(request: Request):
     """Run synthetic-only acceptance probes against the currently deployed local model."""
     _verify_production_evaluation_run(request)
-    readiness = qwen_readiness_status(force=True)
-    if not readiness.get("available"):
+    # This explicit, authenticated evaluation workflow may inspect installation
+    # and runtime inventory, but it must not run a separate readiness inference.
+    # The synthetic acceptance cases below are the actual inference proof.
+    inventory = qwen_runtime_status()
+    if not inventory.get("runtime_available") or not inventory.get("model_installed"):
         raise HTTPException(status_code=503, detail={
             "code": "model_not_ready",
-            "message": "Production evaluation did not run because the deployed model is not ready.",
-            "reason": readiness.get("failure_reason"),
+            "message": "Production evaluation did not run because the configured model is not installed or its runtime is unavailable.",
+            "reason": inventory.get("failure_reason"),
+            "installation": inventory.get("installation"),
         })
 
     cases = _production_qwen_evaluation_cases()
@@ -1894,7 +1899,7 @@ def evaluate_deployed_qwen(request: Request):
             })
 
     return {
-        "model": readiness.get("model"),
+        "model": inventory.get("model"),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
         "runtime": "deployed_railway_ollama",
         "synthetic_only": True,
@@ -2488,6 +2493,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        retrieval_started = time.perf_counter()
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
         recent_events = (
@@ -3053,12 +3059,39 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
+        request_id = getattr(request.state, "request_id", None) or request.headers.get("x-request-id") or "unavailable"
+        retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+        logger.info(
+            "companion_stage_profile request_id=%s stage=retrieval duration_ms=%.2f outcome=completed events=%d assertions=%d appointments=%d evidence=%d shared_lcr=%d",
+            request_id, retrieval_ms, len(source_event_ids), len(source_assertion_ids),
+            len(source_appointment_ids), len(source_evidence_ids), len(source_lcr_context_ids),
+        )
         base, model = _ollama_url()
+
+        async def _profiled_companion_inference(messages: list[dict], options: dict) -> str:
+            inference_started = time.perf_counter()
+            try:
+                answer = await asyncio.to_thread(_ollama_chat, base, model, messages, options)
+            except asyncio.CancelledError:
+                logger.warning(
+                    "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=client_cancelled",
+                    request_id, (time.perf_counter() - inference_started) * 1000,
+                )
+                raise
+            except Exception as inference_error:
+                logger.warning(
+                    "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=failed failure_type=%s",
+                    request_id, (time.perf_counter() - inference_started) * 1000, type(inference_error).__name__,
+                )
+                raise
+            logger.info(
+                "companion_stage_profile request_id=%s stage=inference duration_ms=%.2f outcome=succeeded",
+                request_id, (time.perf_counter() - inference_started) * 1000,
+            )
+            return answer
+
         try:
-            reply = await asyncio.to_thread(
-                _ollama_chat,
-                base,
-                model,
+            reply = await _profiled_companion_inference(
                 model_messages,
                 {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
             )
@@ -3124,10 +3157,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     },
                 ]
                 try:
-                    reply = await asyncio.to_thread(
-                        _ollama_chat,
-                        base,
-                        model,
+                    reply = await _profiled_companion_inference(
                         retry_messages,
                         {"temperature": 0.1, "num_predict": 16},
                     )
