@@ -91,17 +91,28 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
 
 @router.post("/refresh")
 def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
-    """Rotate a still-valid anonymous capability without changing record ownership."""
-    session_id = getattr(request.state, "anonymous_session_id", None)
-    if not session_id:
+    """Rotate a still-valid bearer capability without changing record ownership.
+
+    The middleware deliberately short-circuits this endpoint after validating
+    the bearer token. Resolve that same token at the route boundary rather than
+    relying on request.state propagation across the middleware call_next path.
+    """
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
     session = (
         db.query(AnonymousSession)
-        .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
+        .filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        )
         .first()
     )
     if not session:
-        raise HTTPException(status_code=401, detail="Anonymous session is invalid")
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
     caregiver_profile = ensure_caregiver_profile_for_session(
         db, person_id=session.person_id, session_caregiver_id=session.caregiver_id
     )
