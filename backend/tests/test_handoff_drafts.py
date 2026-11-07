@@ -962,3 +962,24 @@ def test_document_adapter_preserves_failed_ocr_without_claiming_extraction(clien
     assert original_ref["details"]["extraction_status"] == "failed"
     assert not any(row["source_type"] == "document_extracted_text" for row in body["source_references"])
     assert body["generation_status"] != "generated"
+
+
+def test_failed_daily_care_adapter_is_not_reported_as_empty(client, monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+
+    test_client, session = client
+
+    def fail_adapter(*args, **kwargs):
+        raise RuntimeError("simulated_daily_care_database_failure")
+
+    monkeypatch.setattr(handoff_drafts, "_verified_daily_care_source", fail_adapter)
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    status = response.json()["source_statuses"]["daily_care"]
+    assert status["status"] == "failed"
+    assert status["reason"] == "daily_care_adapter_failed"
+    assert status["count"] == 0
