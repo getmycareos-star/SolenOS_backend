@@ -496,7 +496,12 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     "review_history": row.review_history, "created_at": row.created_at,
                     "updated_at": row.updated_at,
                 } for row in analyses]
-                current = _fingerprint(_daily_care_fingerprint_payload(event, linked, analysis_snapshot))
+                assertion_rows = db.query(CareAssertion).filter(CareAssertion.person_id == draft.person_id).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
+                assertion_snapshot = [{
+                    "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
+                    "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
+                } for row in assertion_rows if str(row.source_event_id or "") == str(event.id) or any(str(value) in [str(evidence_id) for evidence_id in evidence_ids] for value in (row.evidence_ids or []))]
+                current = _fingerprint(_daily_care_fingerprint_payload(event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot}))
             elif item.get("source_type") == "document_extracted_text":
                 extraction = db.query(CaptureAnalysis).filter(
                     CaptureAnalysis.id == source_id,
@@ -874,7 +879,7 @@ def _fingerprint(value) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _daily_care_fingerprint_payload(event, linked_evidence: list, analyses: list | None = None) -> dict:
+def _daily_care_fingerprint_payload(event, linked_evidence: list, analyses: list | dict | None = None) -> dict:
     return {
         "id": event.id,
         "event_type": event.event_type,
@@ -890,7 +895,7 @@ def _daily_care_fingerprint_payload(event, linked_evidence: list, analyses: list
             {"id": row.id, "source_text_sha256": row.source_text_sha256, "source_type": row.source_type}
             for row in linked_evidence
         ],
-        "capture_analyses": analyses or [],
+        "daily_review_state": analyses or [],
     }
 
 
@@ -972,6 +977,23 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "review_history": row.review_history, "created_at": row.created_at,
                 "updated_at": row.updated_at,
             } for row in analyses]
+            all_assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+            ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
+            daily_assertions = [
+                row for row in all_assertions
+                if str(row.source_event_id or "") == str(event.id)
+                or any(str(value) in [str(evidence_id) for evidence_id in linked_ids] for value in (row.evidence_ids or []))
+            ]
+            assertion_snapshot = [{
+                "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
+                "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
+            } for row in daily_assertions]
+            assertion_references = [{
+                "assertion_id": row.id, "status": row.assertion_status, "field": row.field,
+                "asserted_value": row.asserted_value, "source_event_id": row.source_event_id,
+                "recorded_at": _iso(row.recorded_at), "created_by_caregiver_id": row.created_by_caregiver_id,
+            } for row in daily_assertions]
             sources = [{
                 "evidence_id": row.id,
                 "source_type": row.source_type,
@@ -1004,7 +1026,9 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     "event_type": event.event_type,
                     "occurred_at_timezone": event.occurred_at_timezone,
                     "created_by_caregiver_id": event.created_by_caregiver_id,
-                    "review_status": "caregiver_reported_not_independently_verified",
+                    "review_status": "caregiver_reviewed_assertion_exists" if any(row["status"] == "caregiver_reviewed" for row in assertion_references) else "caregiver_reported_not_independently_verified",
+                    "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
+                    "assertion_references": assertion_references,
                     "capture_analysis_references": [row["id"] for row in analysis_snapshot],
                     "capture_analysis_review_history": [row["review_history"] for row in analysis_snapshot if row["review_history"]],
                     "revision_status": "capture_analysis_review_history_preserved; care_event_version_not_exposed",
