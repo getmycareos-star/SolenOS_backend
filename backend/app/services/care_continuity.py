@@ -55,7 +55,7 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
             CareAssertion.field == payload.field,
             CareAssertion.assertion_kind == "current_state",
             CareAssertion.id != assertion.id,
-            CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
+            CareAssertion.assertion_status.in_(["reported", "review_required", "accepted", "caregiver_reviewed"]),
         )
         .order_by(CareAssertion.recorded_at.asc())
         .all()
