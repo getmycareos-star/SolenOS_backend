@@ -243,6 +243,70 @@ def test_appointment_workspace_persists_versions_and_revision_history(client):
 
 
 
+
+def test_appointment_workspace_create_and_revision_writes_are_idempotent(client):
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    create_payload = {
+        "status": "preparation",
+        "payload": {"visit_purpose": "Review sleep changes", "caregiver_report": "Family-reported"},
+        "change_reason": "Initial appointment preparation",
+        "idempotency_key": "appt-create-request-001",
+    }
+    first = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=create_payload)
+    replay = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=create_payload)
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert replay.json()["version_number"] == 1
+
+    changed_create = {**create_payload, "payload": {"visit_purpose": "Different appointment"}}
+    conflict = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=changed_create)
+    assert conflict.status_code == 409, conflict.text
+
+    record_id = first.json()["id"]
+    update_payload = {
+        "expected_version": 1,
+        "status": "outcome_pending",
+        "payload": {"visit_purpose": "Review sleep changes", "caregiver_report": "Follow-up was requested"},
+        "change_reason": "Save the appointment outcome",
+        "idempotency_key": "appt-update-request-001",
+    }
+    updated = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json=update_payload,
+    )
+    update_replay = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json=update_payload,
+    )
+    assert updated.status_code == 200, updated.text
+    assert update_replay.status_code == 200, update_replay.text
+    assert updated.json()["version_number"] == 2
+    assert update_replay.json()["version_number"] == 2
+
+    changed_update = {
+        **update_payload,
+        "payload": {"visit_purpose": "Changed after initial save"},
+    }
+    changed_replay = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json=changed_update,
+    )
+    assert changed_replay.status_code == 409, changed_replay.text
+
+    revisions = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/revisions",
+        headers=headers,
+    )
+    assert revisions.status_code == 200, revisions.text
+    assert [item["revision_number"] for item in revisions.json()["items"]] == [1, 2]
+
+
+
 def test_appointment_workspace_rejects_invalid_lifecycle_transition(client):
     test_client, session, _ = client
     headers = {"Authorization": f"Bearer {session['access_token']}"}

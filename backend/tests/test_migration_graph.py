@@ -43,4 +43,4 @@ def test_handoff_draft_persistence_migration_is_reachable_from_canonical_head():
     config = Config(str(backend_dir / "alembic.ini"))
     config.set_main_option("script_location", str(backend_dir / "alembic"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["20261107_02_handoff_drafts"]
+    assert script.get_heads() == ["20261108_01_appt_idempotency"]
