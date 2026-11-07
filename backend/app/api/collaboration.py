@@ -2348,30 +2348,30 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         sanitized = candidate or ""
         for identifier in sorted(internal_source_ids, key=len, reverse=True):
             sanitized = re.sub(
-                rf"\\[\\s*{re.escape(identifier)}\\s*\\]",
+                rf"\[\s*{re.escape(identifier)}\s*\]",
                 "",
                 sanitized,
                 flags=re.IGNORECASE,
             )
             sanitized = sanitized.replace(identifier, "")
         sanitized = re.sub(
-            r"\\[\\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\s*\\]",
+            r"\[\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s*\]",
             "",
             sanitized,
             flags=re.IGNORECASE,
         )
         sanitized = re.sub(
-            r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
             "",
             sanitized,
             flags=re.IGNORECASE,
         )
-        sanitized = re.sub(r"[ \\t]{2,}", " ", sanitized)
-        sanitized = re.sub(r"\\s+([,.;:!?])", r"\\1", sanitized)
+        sanitized = re.sub(r"[ \t]{2,}", " ", sanitized)
+        sanitized = re.sub(r"\s+([,.;:!?])", r"\1", sanitized)
         return sanitized.strip()
 
     reply = strip_internal_identifiers(reply)
-    source_context = payload.text + "\\n" + "\\n".join(context_lines)
+    source_context = payload.text + "\n" + "\n".join(context_lines)
 
     def response_rejection_reasons(candidate: str) -> list[str]:
         reasons = []
