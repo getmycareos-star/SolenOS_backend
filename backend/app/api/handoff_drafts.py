@@ -802,15 +802,26 @@ def approve_handoff_draft(
     if not scope:
         raise HTTPException(status_code=422, detail="At least one sharing scope is required")
     content_hash = _draft_content_hash(draft.structured_content or {})
-    draft.approved_at = datetime.now(timezone.utc)
-    draft.approved_by_caregiver_id = caregiver_id
-    draft.approval_revision = draft.revision_number
-    draft.approval_content_sha256 = content_hash
-    draft.approval_parameters = {
+    approval_parameters = {
         "recipient_caregiver_ids": sorted(recipients),
         "scope": sorted(scope),
         "expires_at": expires_at.isoformat(),
     }
+    if draft.review_status in {"approved_for_sharing", "shared"}:
+        same_approval = (
+            draft.approval_revision == draft.revision_number
+            and draft.approval_content_sha256 == content_hash
+            and draft.approval_parameters == approval_parameters
+        )
+        if same_approval:
+            return _draft_response(draft)
+        if draft.review_status == "shared":
+            raise HTTPException(status_code=409, detail="A shared draft cannot be re-approved with different recipients or scope; prepare a new draft")
+    draft.approved_at = datetime.now(timezone.utc)
+    draft.approved_by_caregiver_id = caregiver_id
+    draft.approval_revision = draft.revision_number
+    draft.approval_content_sha256 = content_hash
+    draft.approval_parameters = approval_parameters
     draft.review_status = "approved_for_sharing"
     db.add(draft)
     db.add(AuditLogEvent(
