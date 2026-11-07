@@ -79,10 +79,12 @@ def review_capture_candidate(
     assertion_id = None
 
     if payload.decision == "correct":
+        # Keep model/original candidate fields immutable. Caregiver edits are
+        # stored in separate fields and become authoritative only on acceptance.
         if payload.corrected_subject is not None:
-            candidate["subject"] = payload.corrected_subject.strip()
+            candidate["corrected_subject"] = payload.corrected_subject.strip()
         if payload.corrected_observation is not None:
-            candidate["observation"] = payload.corrected_observation.strip()
+            candidate["corrected_observation"] = payload.corrected_observation.strip()
         candidate["review_status"] = "corrected_pending_approval"
     elif payload.decision == "reject":
         candidate["review_status"] = "rejected_by_caregiver"
@@ -112,8 +114,8 @@ def review_capture_candidate(
         if source_evidence is None:
             raise HTTPException(status_code=409, detail="The Daily Care source evidence could not be verified")
 
-        subject = str(candidate.get("subject") or "").strip()
-        observation = str(candidate.get("observation") or "").strip()
+        subject = str(candidate.get("corrected_subject", candidate.get("subject")) or "").strip()
+        observation = str(candidate.get("corrected_observation", candidate.get("observation")) or "").strip()
         if not observation:
             raise HTTPException(status_code=422, detail="The reviewed observation is empty")
         asserted_value = f"{subject}: {observation}" if subject else observation
