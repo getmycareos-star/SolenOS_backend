@@ -186,7 +186,7 @@ class HandoffDraftRevision(Base):
     )
 
     id = Column(String(36), primary_key=True, default=_id)
-    draft_id = Column(String(36), nullable=False, index=True)
+    draft_id = Column(String(36), ForeignKey("handoff_drafts.id", ondelete="CASCADE"), nullable=False, index=True)
     person_id = Column(String(255), nullable=False, index=True)
     caregiver_id = Column(String(255), nullable=False, index=True)
     revision_number = Column(Integer, nullable=False)
