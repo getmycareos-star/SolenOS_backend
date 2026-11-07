@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 import os
 
 import pytest
@@ -87,6 +88,7 @@ def _create_synthetic_record(client: TestClient):
 
 def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch, caplog):
     """Real model inference must pass a small, fixed, evidence-bounded evaluation."""
+    caplog.set_level(logging.INFO)
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
