@@ -57,6 +57,15 @@ def review(client, session, proposal_id, payload):
         headers={"Authorization": f"Bearer {session['access_token']}"}, json=payload)
 
 
+def pending(client, session):
+    response = client.get(
+        "/api/v1/companion/care-updates",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["items"]
+
+
 def test_companion_message_persists_source_and_only_acceptance_creates_assertion(monkeypatch):
     source = "The caregiver reports a new change during the morning routine."
     client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}] if text == source else []})
@@ -64,7 +73,7 @@ def test_companion_message_persists_source_and_only_acceptance_creates_assertion
         session = create_session(client, "Caregiver one")
         response = send(client, session, source)
         assert response.status_code == 200, response.text
-        proposal_data = response.json()["care_update_candidates"][0]
+        proposal_data = pending(client, session)[0]
         assert proposal_data["status"] == "pending_authorization"
         assert proposal_data["proposed_change"]["asserted_value"] == source
         db = TestingSessionLocal()
@@ -109,7 +118,9 @@ def test_correction_preserves_original_and_requires_separate_acceptance(monkeypa
     client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}] if text == source else []})
     try:
         session = create_session(client, "Caregiver correction")
-        proposal = send(client, session, source).json()["care_update_candidates"][0]
+        send_response = send(client, session, source)
+        assert send_response.status_code == 200, send_response.text
+        proposal = pending(client, session)[0]
         corrected_text = "A caregiver recorded a revised observation during today's visit."
         correction_context = "The caregiver clarifies the revised observation: " + corrected_text
         corrected = review(client, session, proposal["id"], {
@@ -178,7 +189,9 @@ def test_proposals_are_person_scoped_and_candidate_inference_failure_keeps_messa
     try:
         first = create_session(client, "First caregiver")
         second = create_session(client, "Second caregiver")
-        proposal = send(client, first, source).json()["care_update_candidates"][0]
+        send_response = send(client, first, source)
+        assert send_response.status_code == 200, send_response.text
+        proposal = pending(client, first)[0]
         foreign = review(client, second, proposal["id"], {"decision": "accept"})
         assert foreign.status_code == 404
         db = TestingSessionLocal()
