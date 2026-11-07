@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +13,8 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
+from app.models.uncertainty import Contradiction
+from app.models.time_location import Appointment
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -1043,3 +1046,647 @@ def test_person_historical_projection_reconstructs_latest_revision_per_target(cl
     assert body["items"][0]["state"] == {"status": "reviewed"}
     assert "not a complete historical Living Care Record" in body["interpretation_limit"]
     assert "not-visible" not in response.text
+
+
+def test_appointment_workspace_create_is_idempotent_and_rejects_key_reuse(client):
+    test_client, session, _ = client
+    headers = {"Authorization": "Bearer " + session["access_token"]}
+    request_body = {
+        "status": "outcome_pending",
+        "idempotency_key": "appointment-outcome-save-001",
+        "change_reason": "Save visit outcome",
+        "payload": {
+            "attendance_status": "attended",
+            "caregiver_report": "Caregiver reports the appointment took place.",
+            "professional_statements": [],
+            "follow_up_actions": [],
+        },
+    }
+    first = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=request_body)
+    replay = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=request_body)
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert replay.json()["version_number"] == 1
+    changed = {**request_body, "payload": {**request_body["payload"], "caregiver_report": "Different report"}}
+    conflict = test_client.post("/api/v1/appointment-workspaces", headers=headers, json=changed)
+    assert conflict.status_code == 409, conflict.text
+    listed = test_client.get("/api/v1/appointment-workspaces", headers=headers)
+    matching = [item for item in listed.json()["items"] if item["id"] == first.json()["id"]]
+    assert len(matching) == 1
+
+def test_appointment_outcome_updates_the_linked_appointment_and_is_person_scoped(client):
+    from app.models.time_location import Appointment
+    test_client, owner, other = client
+    db = TestSessionLocal()
+    scheduled = datetime.now(timezone.utc) + timedelta(days=2)
+    appointments = []
+    for index, session in enumerate((owner, owner, owner, owner, other)):
+        appointment = Appointment(
+            person_id=session['person']['id'],
+            title='Follow-up visit ' + str(index),
+            scheduled_at=scheduled,
+            provider='Care clinic',
+            status='scheduled',
+            created_by_caregiver_id=session['caregiver']['id'],
+        )
+        db.add(appointment)
+        appointments.append(appointment)
+    db.commit()
+    ids = [item.id for item in appointments]
+    db.close()
+    headers = {'Authorization': 'Bearer ' + owner['access_token']}
+    outcomes = ['attended', 'cancelled', 'rescheduled', 'missed']
+    expected = ['completed', 'cancelled', 'rescheduled', 'missed']
+    for index, (attendance, status) in enumerate(zip(outcomes, expected)):
+        payload = {
+            'appointment_id': ids[index],
+            'status': 'outcome_pending',
+            'idempotency_key': 'appointment-attendance-save-' + str(index),
+            'payload': {
+                'attendanceStatus': attendance,
+                'actualVisitAt': datetime.now(timezone.utc).isoformat() if attendance == 'attended' else None,
+                'rescheduledAt': (scheduled + timedelta(days=5)).isoformat() if attendance == 'rescheduled' else None,
+            },
+        }
+        response = test_client.post('/api/v1/appointment-workspaces', headers=headers, json=payload)
+        assert response.status_code == 201, response.text
+        db = TestSessionLocal()
+        saved = db.query(Appointment).filter(Appointment.id == ids[index]).one()
+        assert saved.status == status
+        if attendance == 'attended':
+            assert saved.completed_at is not None
+        if attendance == 'rescheduled':
+            assert saved.scheduled_at.date() == (scheduled + timedelta(days=5)).date()
+        db.close()
+    cross_person = test_client.post('/api/v1/appointment-workspaces', headers=headers, json={
+        'appointment_id': ids[4],
+        'idempotency_key': 'cross-person-appointment-link-01',
+        'payload': {'attendanceStatus': 'attended'},
+    })
+    assert cross_person.status_code == 404, cross_person.text
+
+def test_appointment_to_lcr_and_follow_up_survives_session_refresh(client):
+    from app.models.time_location import Appointment
+    test_client, owner, other = client
+    db = TestSessionLocal()
+    appointment = Appointment(
+        person_id=owner['person']['id'],
+        title='Neurology review',
+        scheduled_at=datetime.now(timezone.utc) + timedelta(days=1),
+        provider='Clinic',
+        status='scheduled',
+        created_by_caregiver_id=owner['caregiver']['id'],
+    )
+    db.add(appointment)
+    db.commit()
+    appointment_id = appointment.id
+    db.close()
+    headers = {'Authorization': 'Bearer ' + owner['access_token']}
+    actual_visit = datetime.now(timezone.utc).isoformat()
+    note = 'Caregiver reports the professional asked for a review of the current treatment next month.'
+    saved = test_client.post('/api/v1/appointment-workspaces', headers=headers, json={
+        'appointment_id': appointment_id,
+        'status': 'outcome_pending',
+        'idempotency_key': 'appointment-full-flow-0001',
+        'payload': {
+            'attendanceStatus': 'attended',
+            'actualVisitAt': actual_visit,
+            'clinicianFindings': note,
+            'followUps': [{'action': 'Call the clinic for the next review date', 'owner': 'Family caregiver', 'due': '2026-11-12', 'status': 'Not started', 'resultStatus': 'Not expected', 'notes': '', 'register': True}],
+        },
+    })
+    assert saved.status_code == 201, saved.text
+    record_id = saved.json()['id']
+    db = TestSessionLocal()
+    linked = db.query(Appointment).filter(Appointment.id == appointment_id).one()
+    assert linked.status == 'completed'
+    assert linked.completed_at is not None
+    db.close()
+    evidence = test_client.post('/api/v1/evidence', headers=headers, json={
+        'person_id': owner['person']['id'],
+        'type': 'appointment_note',
+        'evidence_kind': 'caregiver_report',
+        'epistemic_status': 'caregiver_reported',
+        'source_text': note,
+        'source_type': 'caregiver_report_of_professional_statement',
+        'reported_by_label': 'Family caregiver',
+        'reported_by_caregiver_id': owner['caregiver']['id'],
+        'uploaded_by_caregiver_id': owner['caregiver']['id'],
+        'occurred_at': actual_visit,
+        'collection_method': 'manual',
+        'ingestion_key': 'appointment-evidence-full-flow-0001',
+    })
+    assert evidence.status_code == 200, evidence.text
+    evidence_replay = test_client.post('/api/v1/evidence', headers=headers, json={
+        'person_id': owner['person']['id'],
+        'type': 'appointment_note',
+        'evidence_kind': 'caregiver_report',
+        'epistemic_status': 'caregiver_reported',
+        'source_text': note,
+        'source_type': 'caregiver_report_of_professional_statement',
+        'reported_by_label': 'Family caregiver',
+        'reported_by_caregiver_id': owner['caregiver']['id'],
+        'uploaded_by_caregiver_id': owner['caregiver']['id'],
+        'occurred_at': actual_visit,
+        'collection_method': 'manual',
+        'ingestion_key': 'appointment-evidence-full-flow-0001',
+    })
+    assert evidence_replay.status_code == 200, evidence_replay.text
+    assert evidence_replay.json()['id'] == evidence.json()['id']
+    assertion = test_client.post('/api/v1/care-continuity/assertions', headers=headers, json={
+        'subject_type': 'appointment',
+        'subject_id': record_id,
+        'field': 'clinicianFindings',
+        'assertion_kind': 'time_bound_observation',
+        'asserted_value': note,
+        'source_label': 'Caregiver-reported professional statement',
+        'source_text': note,
+        'evidence_ids': [evidence.json()['id']],
+        'observed_at': actual_visit,
+    })
+    assert assertion.status_code == 201, assertion.text
+    assertion_replay = test_client.post('/api/v1/care-continuity/assertions', headers=headers, json={
+        'subject_type': 'appointment',
+        'subject_id': record_id,
+        'field': 'clinicianFindings',
+        'assertion_kind': 'time_bound_observation',
+        'asserted_value': note,
+        'source_label': 'Caregiver-reported professional statement',
+        'source_text': note,
+        'evidence_ids': [evidence.json()['id']],
+        'observed_at': actual_visit,
+    })
+    assert assertion_replay.status_code == 201, assertion_replay.text
+    assert assertion_replay.json()['id'] == assertion.json()['id']
+    assertion_conflict = test_client.post('/api/v1/care-continuity/assertions', headers=headers, json={
+        'subject_type': 'appointment',
+        'subject_id': record_id,
+        'field': 'clinicianFindings',
+        'assertion_kind': 'time_bound_observation',
+        'asserted_value': 'Changed wording without new evidence',
+        'source_label': 'Caregiver-reported professional statement',
+        'source_text': note,
+        'evidence_ids': [evidence.json()['id']],
+        'observed_at': actual_visit,
+    })
+    assert assertion_conflict.status_code == 409, assertion_conflict.text
+    accepted = test_client.patch('/api/v1/care-continuity/assertions/' + assertion.json()['id'] + '/status', headers=headers, json={'assertion_status': 'accepted'})
+    assert accepted.status_code == 200, accepted.text
+    conflicting_note = 'A second caregiver note records a different recollection of the professional instruction.'
+    conflicting_evidence = test_client.post('/api/v1/evidence', headers=headers, json={
+        'person_id': owner['person']['id'],
+        'type': 'appointment_note',
+        'evidence_kind': 'caregiver_report',
+        'epistemic_status': 'caregiver_reported',
+        'source_text': conflicting_note,
+        'source_type': 'caregiver_report_of_professional_statement',
+        'reported_by_label': 'Family caregiver',
+        'reported_by_caregiver_id': owner['caregiver']['id'],
+        'uploaded_by_caregiver_id': owner['caregiver']['id'],
+        'occurred_at': actual_visit,
+        'collection_method': 'manual',
+        'ingestion_key': 'appointment-evidence-conflict-0001',
+    })
+    assert conflicting_evidence.status_code == 200, conflicting_evidence.text
+    conflicting_assertion = test_client.post('/api/v1/care-continuity/assertions', headers=headers, json={
+        'subject_type': 'appointment',
+        'subject_id': record_id,
+        'field': 'clinicianFindings',
+        'assertion_kind': 'time_bound_observation',
+        'asserted_value': conflicting_note,
+        'source_label': 'Caregiver-reported professional statement',
+        'source_text': conflicting_note,
+        'evidence_ids': [conflicting_evidence.json()['id']],
+        'observed_at': actual_visit,
+    })
+    assert conflicting_assertion.status_code == 201, conflicting_assertion.text
+    db = TestSessionLocal()
+    contradiction = db.query(Contradiction).filter(
+        Contradiction.person_id == owner['person']['id'],
+        Contradiction.subject_type == 'appointment',
+        Contradiction.subject_id == record_id,
+        Contradiction.field == 'clinicianFindings',
+        Contradiction.resolution_status == 'unresolved',
+    ).one_or_none()
+    assert contradiction is not None
+    assert set(contradiction.source_assertion_ids) == {assertion.json()['id'], conflicting_assertion.json()['id']}
+    db.close()
+    action = test_client.post('/api/v1/registered-actions/' + owner['person']['id'] + '/approve', headers=headers, json={
+        'explicit_approval': True,
+        'idempotency_key': 'appointment-followup-full-flow-0001',
+        'suggestion_id': 'appointment-' + record_id + '-followup-0',
+        'title': 'Call the clinic for the next review date',
+        'action_type': 'follow_up',
+        'rationale': 'Caregiver-approved next step after the appointment.',
+        'limitations': 'The responsible-person name is a note and does not grant account access.',
+        'evidence_ids': [evidence.json()['id']],
+        'create_reminder': False,
+    })
+    assert action.status_code == 201, action.text
+    progressed = test_client.patch('/api/v1/registered-actions/' + action.json()['id'] + '/status', headers=headers, json={
+        'status': 'in_progress',
+        'expected_version': action.json()['version'],
+        'reason': 'Caregiver started the follow-up.',
+    })
+    assert progressed.status_code == 200, progressed.text
+    refreshed = test_client.post('/api/v1/sessions/refresh', headers=headers)
+    assert refreshed.status_code == 200, refreshed.text
+    fresh_headers = {'Authorization': 'Bearer ' + refreshed.json()['access_token']}
+    email = 'appointment-' + uuid4().hex + '@example.com'
+    account = test_client.post('/api/v1/accounts', headers=fresh_headers, json={
+        'email': email,
+        'password': 'SecureAppointmentPass2026!',
+    })
+    assert account.status_code == 201, account.text
+    login = test_client.post('/api/v1/accounts/login', json={
+        'email': email,
+        'password': 'SecureAppointmentPass2026!',
+    })
+    assert login.status_code == 200, login.text
+    device_headers = {'Authorization': 'Bearer ' + login.json()['access_token']}
+    recovered_on_new_device = test_client.get('/api/v1/appointment-workspaces/' + record_id, headers=device_headers)
+    assert recovered_on_new_device.status_code == 200, recovered_on_new_device.text
+    assert recovered_on_new_device.json()['payload']['clinicianFindings'] == note
+    recovered = test_client.get('/api/v1/appointment-workspaces/' + record_id, headers=fresh_headers)
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()['payload']['clinicianFindings'] == note
+    assert recovered.json()['payload']['followUps'][0]['action'] == 'Call the clinic for the next review date'
+    history = test_client.get('/api/v1/appointment-workspaces/' + record_id + '/revisions', headers=fresh_headers)
+    assert history.status_code == 200, history.text
+    assert history.json()['items'][0]['payload']['attendanceStatus'] == 'attended'
+    other_headers = {'Authorization': 'Bearer ' + other['access_token']}
+    denied = test_client.get('/api/v1/appointment-workspaces/' + record_id, headers=other_headers)
+    assert denied.status_code == 404, denied.text
+    other_evidence = test_client.get('/api/v1/evidence/' + other['person']['id'], headers=other_headers)
+    assert other_evidence.status_code == 200, other_evidence.text
+    assert note not in other_evidence.text
+
+def test_follow_up_reassignment_requires_accepted_consent_governed_handoff(client):
+    from app.models.action import ActionLifecycleAudit
+    from app.models.care import Caregiver
+    from app.models.collaboration import ConsentRecord
+    from app.models.privacy_delivery import HandoffRecord, HandoffRecipient
+    from app.models.anonymous_session import AnonymousSession
+    import hashlib
+    import json
+
+    test_client, owner, _ = client
+    owner_headers = {"Authorization": "Bearer " + owner["access_token"]}
+    note = "Caregiver recorded the clinic's request to confirm the next review date."
+    evidence = test_client.post("/api/v1/evidence", headers=owner_headers, json={
+        "person_id": owner["person"]["id"],
+        "type": "appointment_note",
+        "evidence_kind": "caregiver_report",
+        "epistemic_status": "caregiver_reported",
+        "source_text": note,
+        "source_type": "caregiver_report",
+        "reported_by_label": "Family caregiver",
+        "reported_by_caregiver_id": owner["caregiver"]["id"],
+        "uploaded_by_caregiver_id": owner["caregiver"]["id"],
+        "collection_method": "manual",
+        "ingestion_key": "reassignment-evidence-0001",
+    })
+    assert evidence.status_code == 200, evidence.text
+    created = test_client.post("/api/v1/registered-actions/" + owner["person"]["id"] + "/approve",
+        headers=owner_headers, json={
+            "explicit_approval": True,
+            "idempotency_key": "reassignment-action-0001",
+            "suggestion_id": "reassignment-follow-up-0001",
+            "title": "Call the clinic to confirm the next review date",
+            "action_type": "follow_up",
+            "rationale": "Caregiver-approved coordination step.",
+            "evidence_ids": [evidence.json()["id"]],
+            "create_reminder": False,
+        })
+    assert created.status_code == 201, created.text
+    action_id = created.json()["id"]
+
+    db = TestSessionLocal()
+    try:
+        target = Caregiver(
+            id="appointment-follow-up-recipient",
+            name="Second family caregiver",
+            email="follow-up-recipient@example.com",
+            relationship="Family",
+            person_id=owner["person"]["id"],
+        )
+        db.add(target)
+        for caregiver_id in (owner["caregiver"]["id"], target.id):
+            db.add(ConsentRecord(
+                person_id=owner["person"]["id"],
+                caregiver_id=caregiver_id,
+                medical_disclaimer_acknowledged=True,
+                privacy_model_acknowledged=True,
+                multi_caregiver_acknowledged=True,
+                no_advertising_acknowledged=True,
+                accepted_at=datetime.now(timezone.utc),
+            ))
+        handoff_id = "appointment-follow-up-handoff-0001"
+        now = datetime.now(timezone.utc)
+        summary_snapshot = {
+            "sections": {"open_loops": "Call the clinic to confirm the next review date"},
+            "source_record_ids": [],
+            "source_record_tables": [],
+            "prepared_at": now.isoformat(),
+            "stored_at": now.isoformat(),
+            "caregiver_reviewed": True,
+            "review_attestation": "client_declared_not_server_verified",
+            "source_id_validation": "not_supplied",
+            "semantic_grounding_status": "not_automatically_verified",
+        }
+        summary_snapshot["content_sha256"] = hashlib.sha256(
+            json.dumps(summary_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        db.add(HandoffRecord(
+            id=handoff_id,
+            person_id=owner["person"]["id"],
+            created_by=owner["caregiver"]["id"],
+            handoff_status="accepted",
+            scope_snapshot=["open_loops", "appointments"],
+            summary_snapshot=summary_snapshot,
+            expires_at=now + timedelta(days=7),
+            policy_version="handoff-v1",
+        ))
+        db.flush()
+        db.add(HandoffRecipient(
+            id="appointment-follow-up-recipient-link",
+            handoff_id=handoff_id,
+            person_id=owner["person"]["id"],
+            recipient_id=target.id,
+            access_status="accepted",
+            accepted_at=now,
+        ))
+        token = "appointment-follow-up-recipient-token"
+        db.add(AnonymousSession(
+            person_id=owner["person"]["id"],
+            caregiver_id=target.id,
+            token_hash=hashlib.sha256(token.encode()).hexdigest(),
+            expires_at=now + timedelta(days=30),
+        ))
+        db.commit()
+        target_id = target.id
+    finally:
+        db.close()
+
+    denied = test_client.patch("/api/v1/registered-actions/" + action_id + "/assignee",
+        headers=owner_headers, json={
+            "target_caregiver_id": target_id,
+            "handoff_id": "missing-handoff",
+            "expected_version": created.json()["version"],
+            "idempotency_key": "appointment-follow-up-denied-0001",
+            "reason": "Transfer follow-up responsibility.",
+        })
+    assert denied.status_code == 403, denied.text
+
+    reassigned = test_client.patch("/api/v1/registered-actions/" + action_id + "/assignee",
+        headers=owner_headers, json={
+            "target_caregiver_id": target_id,
+            "handoff_id": handoff_id,
+            "expected_version": created.json()["version"],
+            "idempotency_key": "appointment-follow-up-assigned-0001",
+            "reason": "The second caregiver accepted responsibility for the clinic call.",
+        })
+    assert reassigned.status_code == 200, reassigned.text
+    assert reassigned.json()["responsible_caregiver_id"] == target_id
+    assert reassigned.json()["version"] == created.json()["version"] + 1
+    assignment_replay = test_client.patch("/api/v1/registered-actions/" + action_id + "/assignee",
+        headers=owner_headers, json={
+            "target_caregiver_id": target_id,
+            "handoff_id": handoff_id,
+            "expected_version": created.json()["version"],
+            "idempotency_key": "appointment-follow-up-assigned-0001",
+            "reason": "The second caregiver accepted responsibility for the clinic call.",
+        })
+    assert assignment_replay.status_code == 200, assignment_replay.text
+    assert assignment_replay.json()["version"] == reassigned.json()["version"]
+
+    history = test_client.get("/api/v1/registered-actions/" + action_id + "/history", headers=owner_headers)
+    assert history.status_code == 200, history.text
+    assignment = next(row for row in history.json() if row["handoff_id"] == handoff_id)
+    assert assignment["previous_responsible_caregiver_id"] == owner["caregiver"]["id"]
+    assert assignment["new_responsible_caregiver_id"] == target_id
+
+    target_headers = {"Authorization": "Bearer " + token}
+    target_update = test_client.patch("/api/v1/registered-actions/" + action_id + "/status",
+        headers=target_headers, json={
+            "status": "in_progress",
+            "expected_version": reassigned.json()["version"],
+            "reason": "The assigned caregiver began the clinic follow-up.",
+        })
+    assert target_update.status_code == 200, target_update.text
+    assert target_update.json()["status"] == "in_progress"
+
+    db = TestSessionLocal()
+    try:
+        audit = db.query(ActionLifecycleAudit).filter(
+            ActionLifecycleAudit.action_id == action_id,
+            ActionLifecycleAudit.handoff_id == handoff_id,
+        ).one()
+        audit.reason = "Attempted audit alteration"
+        with pytest.raises(ValueError, match="append-only"):
+            db.commit()
+        db.rollback()
+    finally:
+        db.close()
+
+
+def test_follow_up_result_receipt_and_review_are_separate_idempotent_events(client):
+    from app.models.care_continuity import CareActionOutcome
+
+    test_client, owner, other = client
+    headers = {"Authorization": "Bearer " + owner["access_token"]}
+    action_source = "Caregiver recorded the clinician's request to obtain the test result."
+    action_evidence = test_client.post("/api/v1/evidence", headers=headers, json={
+        "person_id": owner["person"]["id"],
+        "type": "appointment_note",
+        "evidence_kind": "caregiver_report",
+        "epistemic_status": "caregiver_reported",
+        "source_text": action_source,
+        "source_type": "caregiver_report",
+        "reported_by_label": "Family caregiver",
+        "reported_by_caregiver_id": owner["caregiver"]["id"],
+        "uploaded_by_caregiver_id": owner["caregiver"]["id"],
+        "collection_method": "manual",
+        "ingestion_key": "appointment-result-action-source-0001",
+    })
+    assert action_evidence.status_code == 200, action_evidence.text
+    action = test_client.post("/api/v1/registered-actions/" + owner["person"]["id"] + "/approve",
+        headers=headers, json={
+            "explicit_approval": True,
+            "idempotency_key": "appointment-result-action-0001",
+            "suggestion_id": "appointment-result-follow-up-0001",
+            "title": "Call the clinic to obtain the test result",
+            "action_type": "follow_up",
+            "rationale": "Caregiver-approved result coordination.",
+            "evidence_ids": [action_evidence.json()["id"]],
+            "create_reminder": False,
+        })
+    assert action.status_code == 201, action.text
+
+    result_text = "Caregiver reports that the clinic sent the requested result and it needs clinician interpretation."
+    result_evidence = test_client.post("/api/v1/evidence", headers=headers, json={
+        "person_id": owner["person"]["id"],
+        "type": "appointment_result",
+        "evidence_kind": "caregiver_report",
+        "epistemic_status": "caregiver_reported",
+        "source_text": result_text,
+        "source_type": "caregiver_recorded_received_result",
+        "reported_by_label": "Family caregiver",
+        "reported_by_caregiver_id": owner["caregiver"]["id"],
+        "uploaded_by_caregiver_id": owner["caregiver"]["id"],
+        "collection_method": "manual",
+        "ingestion_key": "appointment-result-evidence-0001",
+    })
+    assert result_evidence.status_code == 200, result_evidence.text
+
+    received_payload = {
+        "action_id": action.json()["id"],
+        "action_type": "follow_up_result",
+        "outcome_status": "result_received",
+        "notes": result_text,
+        "evidence_ids": [result_evidence.json()["id"]],
+        "idempotency_key": "appointment-result-received-0001",
+    }
+    received = test_client.post("/api/v1/care-continuity/action-outcomes", headers=headers, json=received_payload)
+    assert received.status_code == 201, received.text
+    replay = test_client.post("/api/v1/care-continuity/action-outcomes", headers=headers, json=received_payload)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == received.json()["id"]
+
+    conflicting_replay = test_client.post("/api/v1/care-continuity/action-outcomes", headers=headers, json={
+        **received_payload,
+        "notes": "Different result wording using the same save key.",
+    })
+    assert conflicting_replay.status_code == 409, conflicting_replay.text
+
+    reviewed_payload = {
+        "action_id": action.json()["id"],
+        "action_type": "follow_up_result",
+        "outcome_status": "result_reviewed",
+        "related_outcome_id": received.json()["id"],
+        "review_decision": "needs_clinician_review",
+        "notes": "The caregiver reviewed the received information and recorded that a clinician must interpret it.",
+        "evidence_ids": [result_evidence.json()["id"]],
+        "idempotency_key": "appointment-result-reviewed-0001",
+    }
+    reviewed = test_client.post("/api/v1/care-continuity/action-outcomes", headers=headers, json=reviewed_payload)
+    assert reviewed.status_code == 201, reviewed.text
+    assert reviewed.json()["created_by_caregiver_id"] == owner["caregiver"]["id"]
+    assert reviewed.json()["related_outcome_id"] == received.json()["id"]
+    assert reviewed.json()["review_decision"] == "needs_clinician_review"
+    assert reviewed.json()["reviewed_by_caregiver_id"] == owner["caregiver"]["id"]
+    assert reviewed.json()["reviewed_at"] is not None
+    assert received.json()["received_by_caregiver_id"] == owner["caregiver"]["id"]
+    assert received.json()["received_at"] is not None
+
+    timeline = test_client.get("/api/v1/care-continuity/outcomes/" + owner["person"]["id"], headers=headers)
+    assert timeline.status_code == 200, timeline.text
+    result_events = [row for row in timeline.json() if row.get("action_id") == action.json()["id"]]
+    assert {row["outcome_status"] for row in result_events} >= {"result_received", "result_reviewed"}
+
+    other_headers = {"Authorization": "Bearer " + other["access_token"]}
+    other_timeline = test_client.get("/api/v1/care-continuity/outcomes/" + other["person"]["id"], headers=other_headers)
+    assert other_timeline.status_code == 200, other_timeline.text
+    assert not any(row.get("action_id") == action.json()["id"] for row in other_timeline.json())
+
+    db = TestSessionLocal()
+    try:
+        received_row = db.query(CareActionOutcome).filter(CareActionOutcome.id == received.json()["id"]).one()
+        received_row.notes = "Attempted overwrite of the received result."
+        with pytest.raises(ValueError, match="append-only"):
+            db.commit()
+        db.rollback()
+    finally:
+        db.close()
+
+
+def test_appointment_workspace_update_is_idempotent(client):
+    test_client, owner, _ = client
+    headers = {'Authorization': 'Bearer ' + owner['access_token']}
+    created = test_client.post('/api/v1/appointment-workspaces', headers=headers, json={
+        'status': 'outcome_pending',
+        'idempotency_key': 'appointment-update-create-01',
+        'payload': {'attendanceStatus': 'not_recorded', 'caregiverReport': 'Initial note'},
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()['id']
+    update_body = {
+        'expected_version': 1,
+        'idempotency_key': 'appointment-update-retry-0001',
+        'status': 'outcome_pending',
+        'payload': {'attendanceStatus': 'attended', 'actualVisitAt': datetime.now(timezone.utc).isoformat(), 'caregiverReport': 'Updated note'},
+        'change_reason': 'Caregiver saved visit outcome',
+    }
+    first = test_client.patch('/api/v1/appointment-workspaces/' + record_id, headers=headers, json=update_body)
+    replay = test_client.patch('/api/v1/appointment-workspaces/' + record_id, headers=headers, json=update_body)
+    assert first.status_code == 200, first.text
+    assert replay.status_code == 200, replay.text
+    assert first.json()['version_number'] == 2
+    assert replay.json()['version_number'] == 2
+    changed = {**update_body, 'payload': {**update_body['payload'], 'caregiverReport': 'Different update'}}
+    conflict = test_client.patch('/api/v1/appointment-workspaces/' + record_id, headers=headers, json=changed)
+    assert conflict.status_code == 409, conflict.text
+    revisions = test_client.get('/api/v1/appointment-workspaces/' + record_id + '/revisions', headers=headers)
+    assert revisions.status_code == 200, revisions.text
+    assert len(revisions.json()['items']) == 2
+
+@pytest.mark.parametrize(
+    ("attendance", "expected_status"),
+    [
+        ("attended", "completed"),
+        ("cancelled", "cancelled"),
+        ("rescheduled", "rescheduled"),
+        ("missed", "missed"),
+    ],
+)
+def test_all_appointment_attendance_outcomes_update_the_scheduled_record(client, attendance, expected_status):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    original_time = datetime.now(timezone.utc) + timedelta(days=2)
+    appointment = Appointment(
+        person_id=owner["person"]["id"],
+        title="Attendance state verification",
+        scheduled_at=original_time,
+        provider="Care clinic",
+        status="scheduled",
+        created_by_caregiver_id=owner["caregiver"]["id"],
+    )
+    db = TestSessionLocal()
+    db.add(appointment)
+    db.commit()
+    appointment_id = appointment.id
+    db.close()
+
+    payload = {"attendanceStatus": attendance}
+    if attendance == "attended":
+        payload["actualVisitAt"] = datetime.now(timezone.utc).isoformat()
+    if attendance == "rescheduled":
+        new_time = datetime.now(timezone.utc) + timedelta(days=7)
+        payload["rescheduledAt"] = new_time.isoformat()
+
+    saved = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "appointment_id": appointment_id,
+        "status": "outcome_pending",
+        "idempotency_key": "attendance-state-" + attendance + "-0001",
+        "payload": payload,
+    })
+    assert saved.status_code == 201, saved.text
+
+    db = TestSessionLocal()
+    persisted = db.query(Appointment).filter(
+        Appointment.id == appointment_id,
+        Appointment.person_id == owner["person"]["id"],
+    ).one()
+    assert persisted.status == expected_status
+    if attendance == "attended":
+        assert persisted.completed_at is not None
+        assert persisted.resolved_at is None
+    elif attendance in {"cancelled", "missed"}:
+        assert persisted.completed_at is None
+        assert persisted.resolved_at is not None
+    else:
+        assert persisted.completed_at is None
+        assert persisted.resolved_at is None
+        assert persisted.scheduled_at.replace(tzinfo=timezone.utc).date() == new_time.date()
+    db.close()
