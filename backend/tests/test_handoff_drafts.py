@@ -906,3 +906,59 @@ def test_qwen_handoff_generation_rejects_unsupported_section_label(monkeypatch):
     )
     assert result["status"] == "validation_failed"
     assert result["sections"] == []
+
+
+def test_document_adapter_preserves_failed_ocr_without_claiming_extraction(client):
+    import hashlib
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    original = b"Scanned clinic document; OCR failed."
+    digest = hashlib.sha256(original).hexdigest()
+    db = TestSessionLocal()
+    try:
+        document = Evidence(
+            id="handoff-failed-ocr-document",
+            person_id=person_id,
+            type="document",
+            source_text="Uploaded document record",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="clinic/scanned-letter",
+        )
+        db.add(document)
+        db.flush()
+        db.add(EvidenceUpload(
+            evidence_id=document.id,
+            filename="scanned-letter.pdf",
+            mime_type="application/pdf",
+            content=original,
+            size_bytes=len(original),
+            sha256=digest,
+        ))
+        db.add(CaptureAnalysis(
+            id="handoff-failed-ocr-analysis",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_evidence_id=document.id,
+            source_text="",
+            extraction_status="failed",
+            candidates={"kind": "document_extraction_v1", "binary_sha256": digest},
+            review_history=[],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_statuses"]["documents"]["status"] == "available"
+    original_ref = next(row for row in body["source_references"] if row["source_id"] == "handoff-failed-ocr-document")
+    assert original_ref["details"]["extraction_status"] == "failed"
+    assert not any(row["source_type"] == "document_extracted_text" for row in body["source_references"])
+    assert body["generation_status"] != "generated"
