@@ -359,6 +359,118 @@ def _validate_draft_quotes(content: dict, source_snapshot: dict) -> bool:
     return True
 
 
+
+
+def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
+    """Compare every persisted source fingerprint with the immutable draft snapshot."""
+    snapshot = draft.source_snapshot if isinstance(draft.source_snapshot, dict) else {}
+    source_records = snapshot.get("source_records", [])
+    stale = []
+    unknown = []
+    try:
+        bind = db.get_bind()
+        inspector = inspect(bind)
+        metadata = MetaData()
+        for item in source_records:
+            if not isinstance(item, dict):
+                unknown.append("malformed_source_reference")
+                continue
+            source_table = item.get("source_table")
+            source_id = str(item.get("source_id") or "")
+            expected = item.get("source_fingerprint")
+            if not source_table or not source_id or not expected:
+                unknown.append(f"{source_table or 'unknown'}:{source_id or 'unknown'}")
+                continue
+            current = None
+            if item.get("source_type") == "daily_care_observation":
+                event = db.query(CareEvent).filter(
+                    CareEvent.id == source_id,
+                    CareEvent.person_id == draft.person_id,
+                    CareEvent.event_type.in_(DAILY_CARE_EVENT_TYPES),
+                ).first()
+                if event is None:
+                    stale.append(f"{source_table}:{source_id}")
+                    continue
+                evidence_ids = [str(value) for value in (event.evidence_ids or []) if isinstance(value, str)]
+                evidence_rows = db.query(Evidence).filter(
+                    Evidence.person_id == draft.person_id,
+                    Evidence.id.in_(evidence_ids),
+                ).all() if evidence_ids else []
+                evidence_by_id = {str(row.id): row for row in evidence_rows}
+                linked = [evidence_by_id[value] for value in evidence_ids if value in evidence_by_id]
+                current = _fingerprint(_daily_care_fingerprint_payload(event, linked))
+            elif item.get("source_type") == "document_extracted_text":
+                extraction = db.query(CaptureAnalysis).filter(
+                    CaptureAnalysis.id == source_id,
+                    CaptureAnalysis.person_id == draft.person_id,
+                    CaptureAnalysis.caregiver_id == draft.caregiver_id,
+                    CaptureAnalysis.extraction_status == "available",
+                ).first()
+                document_id = (item.get("details") or {}).get("document_id")
+                upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == document_id).first() if document_id else None
+                if extraction is None or upload is None:
+                    stale.append(f"{source_table}:{source_id}")
+                    continue
+                current = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256))
+            elif item.get("source_type") == "uploaded_document":
+                document = db.query(Evidence).filter(
+                    Evidence.id == source_id,
+                    Evidence.person_id == draft.person_id,
+                    Evidence.uploaded_by_caregiver_id == draft.caregiver_id,
+                    Evidence.type == "document",
+                ).first()
+                upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == source_id).first()
+                if document is None or upload is None:
+                    stale.append(f"{source_table}:{source_id}")
+                    continue
+                binary = bytes(upload.content or b"")
+                if len(binary) != upload.size_bytes or hashlib.sha256(binary).hexdigest() != upload.sha256:
+                    stale.append(f"{source_table}:{source_id}")
+                    continue
+                current = _fingerprint(_document_upload_fingerprint_payload(document, upload))
+            else:
+                if source_table not in SOURCES or not inspector.has_table(source_table):
+                    unknown.append(f"{source_table}:{source_id}")
+                    continue
+                table = Table(source_table, metadata, autoload_with=bind)
+                selected_names = list(SOURCES[source_table]["fields"]) + ["evidence_ids", "source_evidence_id"]
+                selected = [table.c[name] for name in dict.fromkeys(selected_names) if name in table.c]
+                if not {"id", "person_id"}.issubset(set(table.c.keys())) or not selected:
+                    unknown.append(f"{source_table}:{source_id}")
+                    continue
+                query = select(*selected).where(
+                    table.c.id == source_id,
+                    table.c.person_id == draft.person_id,
+                )
+                if SOURCES[source_table].get("require_caregiver_owned_evidence"):
+                    evidence_link_column = SOURCES[source_table].get("evidence_link_column", "source_evidence_id")
+                    if not inspector.has_table("evidence"):
+                        unknown.append(f"{source_table}:{source_id}")
+                        continue
+                    evidence_table = Table("evidence", metadata, autoload_with=bind)
+                    query = query.join(
+                        evidence_table,
+                        table.c[evidence_link_column] == evidence_table.c.id,
+                    ).where(
+                        evidence_table.c.person_id == draft.person_id,
+                        evidence_table.c.uploaded_by_caregiver_id == draft.caregiver_id,
+                    )
+                row = db.execute(query).mappings().first()
+                if row is None:
+                    stale.append(f"{source_table}:{source_id}")
+                    continue
+                current = _fingerprint(dict(row))
+            if current != expected:
+                stale.append(f"{source_table}:{source_id}")
+        if stale:
+            return {"status": "stale", "stale_source_count": len(stale), "unknown_source_count": len(unknown)}
+        if unknown:
+            return {"status": "unknown", "stale_source_count": 0, "unknown_source_count": len(unknown)}
+        return {"status": "current", "stale_source_count": 0, "unknown_source_count": 0}
+    except Exception:
+        logger.exception("Handoff draft source revision check failed")
+        return {"status": "unknown", "reason": "source_revision_check_failed", "stale_source_count": len(stale), "unknown_source_count": len(unknown) + 1}
+
 @router.get("/{draft_id}")
 def get_handoff_draft(draft_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_identity(request, db)
@@ -383,7 +495,7 @@ def get_handoff_draft(draft_id: str, request: Request, db: Session = Depends(get
             "created_at": _iso(row.created_at),
             "created_by_caregiver_id": row.created_by_caregiver_id,
         } for row in revisions],
-        "source_freshness": "revision_recheck_not_yet_available",
+        "source_freshness": _draft_source_freshness(db, draft),
     }
 
 
@@ -462,6 +574,9 @@ def approve_handoff_draft(
     ).with_for_update().first()
     if draft is None:
         raise HTTPException(status_code=404, detail="Handoff draft not found")
+    freshness = _draft_source_freshness(db, draft)
+    if freshness.get("status") != "current":
+        raise HTTPException(status_code=409, detail="The draft source snapshot is stale or cannot be revalidated; prepare a new draft before approval")
     if draft.generation_status != "generated" or draft.validation_status != "exact_quote_reference_validation_passed":
         raise HTTPException(status_code=409, detail="A validated Qwen-grounded draft is required before approval")
     if not _validate_draft_quotes(draft.structured_content or {}, draft.source_snapshot or {}):
