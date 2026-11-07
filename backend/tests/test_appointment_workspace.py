@@ -237,6 +237,35 @@ def test_appointment_workspace_persists_versions_and_revision_history(client):
     assert items[1]["payload"]["clinician_findings"].startswith("Clinician statement")
 
 
+
+def test_appointment_workspace_rejects_invalid_lifecycle_transition(client):
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "preparation",
+        "payload": {"visit_purpose": "Discuss recent changes"},
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    invalid = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json={
+            "expected_version": 1,
+            "status": "closed_with_outstanding_items",
+            "payload": {"visit_purpose": "Discuss recent changes"},
+            "change_reason": "Invalid direct closure",
+        },
+    )
+    assert invalid.status_code == 409, invalid.text
+    assert invalid.json()["detail"]["code"] == "invalid_appointment_workspace_transition"
+
+    unchanged = test_client.get(f"/api/v1/appointment-workspaces/{record_id}", headers=headers)
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["status"] == "preparation"
+    assert unchanged.json()["version_number"] == 1
+
 def test_appointment_workspace_cannot_be_read_or_changed_across_people(client):
     test_client, owner, other = client
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
