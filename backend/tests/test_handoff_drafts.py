@@ -637,6 +637,12 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     draft_id = prepared.json()["draft_id"]
     assert prepared.json()["generation_status"] == "generated"
     assert prepared.json()["validation_status"] == "exact_quote_reference_validation_passed"
+    listed = test_client.get(
+        "/api/v1/handoff-drafts?limit=10",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert listed.status_code == 200, listed.text
+    assert any(item["draft_id"] == draft_id for item in listed.json()["items"])
 
     retried = test_client.post("/api/v1/handoff-drafts/prepare", headers=headers, json=payload)
     assert retried.status_code == 200, retried.text
