@@ -272,7 +272,7 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             assert body["source_assertion_ids"] == [accepted_assertion_id]
             assert body["written_to_lcr"] is False
             assert body["persistence"] == "conversation_only"
-            prompt = "\\n".join(
+            prompt = "\n".join(
                 item["content"]
                 for item in captured["messages"]
                 if item.get("role") in {"system", "user"}
