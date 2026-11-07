@@ -592,6 +592,19 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     known_daily = snapshot_ids_by_table.get("care_events", set())
                     if any(str(value) not in known_daily for value in new_daily):
                         stale.append("new_records:daily_care")
+            if inspector.has_table("capture_analyses"):
+                analysis_table = Table("capture_analyses", metadata, autoload_with=bind)
+                if {"id", "person_id", "caregiver_id", "source_evidence_id", "created_at"}.issubset(set(analysis_table.c.keys())):
+                    new_extractions = db.execute(
+                        select(analysis_table.c.id).where(
+                            analysis_table.c.person_id == draft.person_id,
+                            analysis_table.c.caregiver_id == draft.caregiver_id,
+                            analysis_table.c.created_at > created_after,
+                        )
+                    ).scalars().all()
+                    known_extractions = snapshot_ids_by_table.get("capture_analyses", set())
+                    if any(str(value) not in known_extractions for value in new_extractions):
+                        stale.append("new_records:document_extractions")
             if inspector.has_table("evidence"):
                 evidence_table = Table("evidence", metadata, autoload_with=bind)
                 if {"id", "person_id", "type", "uploaded_by_caregiver_id", "uploaded_at"}.issubset(set(evidence_table.c.keys())):
