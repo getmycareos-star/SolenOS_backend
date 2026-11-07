@@ -289,8 +289,8 @@ def extract_companion_care_candidates(source_text: str) -> dict:
                     "Do not classify greetings, ordinary conversation, general questions, advice requests, "
                     "hypotheticals, or discussion of a medical topic without a personal care observation. "
                     "Return JSON only in this exact shape: "
-                    '{"observations":[{"source_quote":"exact verbatim substring from the caregiver message"}]}. '
-                    "Every source_quote must be copied character-for-character from the message. "
+                    '{"observations":[{"source_quote":"exact verbatim substring from the caregiver message","event_time_quote":"exact verbatim time phrase from that quotation or empty string"}]}. '
+                    "Every source_quote and non-empty event_time_quote must be copied character-for-character from the message. "
                     "Do not paraphrase, summarize, infer, diagnose, infer causes, add dates or quantities, "
                     "or create clinical conclusions. Return an empty observations array when no meaningful "
                     "care information is explicitly reported. Do not use examples or fixed phrase matching."
@@ -316,8 +316,12 @@ def extract_companion_care_candidates(source_text: str) -> dict:
         quote = quote.strip()
         if len(quote) < 8 or quote not in source or quote in seen:
             continue
+        event_time_quote = item.get("event_time_quote") if isinstance(item.get("event_time_quote"), str) else ""
+        event_time_quote = event_time_quote.strip()
+        if event_time_quote and (event_time_quote not in quote or event_time_quote not in source):
+            event_time_quote = ""
         seen.add(quote)
-        observations.append({"source_quote": quote})
+        observations.append({"source_quote": quote, "event_time_quote": event_time_quote or None})
     return {"observations": observations}
 
 
