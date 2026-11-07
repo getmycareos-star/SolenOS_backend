@@ -53,6 +53,15 @@ def review(client, session, proposal_id, payload):
     )
 
 
+def pending(client, session):
+    response = client.get(
+        "/api/v1/companion/care-updates",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["items"]
+
+
 def test_postgres_companion_care_update_lifecycle(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
@@ -81,7 +90,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         response = send(client, first, original, first_turn)
         assert response.status_code == 200, response.text
         body = response.json()
-        proposal = body["care_update_candidates"][0]
+        proposal = pending(client, first)[0]
         assert proposal["status"] == "pending_authorization"
         assert proposal["source_message_id"]
         pending_list = client.get("/api/v1/companion/care-updates", headers=first_auth)
@@ -143,7 +152,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         )
         correction_turn = send(client, first, corrected_source, "companion-pg-correction-0003")
         assert correction_turn.status_code == 200, correction_turn.text
-        correction_proposal = correction_turn.json()["care_update_candidates"][0]
+        correction_proposal = pending(client, first)[0]
         corrected_text = "The caregiver recorded a clarified second observation during the visit."
         correction_context = "Caregiver clarification: " + corrected_text
         corrected = review(client, first, correction_proposal["id"], {
@@ -184,7 +193,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         )
         rejected_turn = send(client, first, rejected_source, "companion-pg-reject-0004")
         assert rejected_turn.status_code == 200, rejected_turn.text
-        rejected_proposal = rejected_turn.json()["care_update_candidates"][0]
+        rejected_proposal = pending(client, first)[0]
         rejected = review(client, first, rejected_proposal["id"], {"decision": "reject"})
         assert rejected.status_code == 200 and rejected.json()["written_to_lcr"] is False
         rejection_history = client.get(
