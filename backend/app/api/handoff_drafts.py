@@ -929,11 +929,9 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
         ).all() if evidence_ids else []
         evidence_by_id = {str(row.id): row for row in evidence_rows}
         output = []
-        no_text_count = 0
         for event in events:
             text = " — ".join(part.strip() for part in (event.title, event.description or "") if part and part.strip())[:1200]
             if not text:
-                no_text_count += 1
                 continue
             linked_ids = [str(value) for value in (event.evidence_ids or []) if isinstance(value, str)]
             linked = [evidence_by_id[value] for value in linked_ids if value in evidence_by_id]
@@ -997,10 +995,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "text": text,
                 "stale_warning": _is_stale(event.occurred_at, now),
             })
-        return {
-            "status": "available", "label": "Daily Care observations", "count": len(events),
-            "reason": "some_persisted_records_have_no_text" if no_text_count else None,
-        }, output
+        return {"status": "available" if output else "empty", "label": "Daily Care observations", "count": len(output)}, output
     except Exception:
         logger.exception("Handoff Daily Care source retrieval failed")
         return {"status": "failed", "reason": "source_retrieval_failed", "label": "Daily Care observations", "count": 0}, []
@@ -1056,19 +1051,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 CaptureAnalysis.source_evidence_id == document.id,
             ).order_by(CaptureAnalysis.created_at.desc()).first()
             extraction_details = extraction.candidates if extraction and isinstance(extraction.candidates, dict) else {}
-            if not extraction:
-                effective_extraction_status = "not_extracted"
-            elif extraction.extraction_status != "available":
-                effective_extraction_status = str(extraction.extraction_status or "unknown")
-            elif extraction_details.get("kind") != "document_extraction_v1":
-                effective_extraction_status = "unsupported_extraction_record"
-            elif extraction_details.get("binary_sha256") != upload.sha256:
-                effective_extraction_status = "extraction_binary_checksum_mismatch"
-            elif not (extraction.source_text or "").strip():
-                effective_extraction_status = "extraction_text_empty"
-            else:
-                effective_extraction_status = "available"
-            if extraction and effective_extraction_status == "available":
+            if extraction and extraction.extraction_status == "available" and extraction_details.get("kind") == "document_extraction_v1" and extraction_details.get("binary_sha256") == upload.sha256:
                 extracted_text = (extraction.source_text or "").strip()
                 if extracted_text:
                     extraction_fingerprint = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256, assertion_snapshot))
@@ -1132,7 +1115,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                     "mime_type": upload.mime_type,
                     "binary_sha256": upload.sha256,
                     "file_size_bytes": upload.size_bytes,
-                    "extraction_status": effective_extraction_status,
+                    "extraction_status": extraction.extraction_status if extraction else "not_extracted",
                     "caregiver_review_status": "caregiver_reviewed_assertions_exist" if accepted_assertions else "not_reviewed",
                     "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
                     "assertion_references": assertion_references,
@@ -1521,7 +1504,6 @@ def prepare_handoff_draft(
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
         "sections": sections,
-        "generation": generated_document,
     }
     fingerprint_snapshot = {
         "source_statuses": statuses,
@@ -1552,6 +1534,7 @@ def prepare_handoff_draft(
         return _draft_response(existing)
 
     generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
+    structured_content["generation"] = generated_document
 
     # One durable identity binds the response, persisted draft, revision, and audit event.
     draft_id = str(uuid.uuid4())
