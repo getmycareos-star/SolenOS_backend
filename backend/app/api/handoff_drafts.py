@@ -1127,6 +1127,8 @@ def prepare_handoff_draft(
                 continue
 
             query = select(*selected).where(table.c.person_id == person_id)
+            if table_name == "care_events" and "event_type" in table.c:
+                query = query.where(table.c.event_type.notin_(DAILY_CARE_EVENT_TYPES))
             if spec.get("active_assessments_only"):
                 if "is_active" in table.c:
                     query = query.where(table.c.is_active.is_(True))
