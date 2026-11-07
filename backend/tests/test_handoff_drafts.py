@@ -419,3 +419,28 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     assert refs["handoff-freshness-policy"]["details"]["policy_version"] == "v1"
     assert body["source_statuses"]["evidence_freshness_assessments"]["status"] == "available"
     assert body["source_statuses"]["evidence_freshness_policies"]["status"] == "available"
+
+
+def test_preparation_response_and_audit_event_share_the_same_draft_id(client):
+    from app.models.privacy_delivery import AuditLogEvent
+
+    test_client, session = client
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    draft_id = response.json()["draft_id"]
+
+    db = TestSessionLocal()
+    try:
+        audit = db.query(AuditLogEvent).filter(
+            AuditLogEvent.action == "handoff_draft.prepare",
+            AuditLogEvent.target_type == "handoff_draft",
+            AuditLogEvent.target_id == draft_id,
+        ).one()
+        assert audit.person_id == session["person"]["id"]
+        assert audit.caregiver_id == session["caregiver"]["id"]
+    finally:
+        db.close()
