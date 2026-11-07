@@ -300,7 +300,9 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "audience": draft.audience,
         "window": snapshot.get("window"),
         "prepared_at": _iso(draft.created_at),
-        "read_only": False,
+        "read_only": True,
+        "draft_persisted": True,
+        "requires_caregiver_review": True,
         "creates_handoff": False,
         "updates_lcr": False,
         "generation_status": draft.generation_status,
@@ -773,7 +775,8 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         if not validated:
             return {"status": "validation_failed", "provider": "ollama", "model": model, "reason": "no_verifiable_exact_source_quotes", "sections": []}
         return {"status": "generated", "provider": "ollama", "model": model, "sections": validated}
-    except (HTTPException, ValueError, TypeError, KeyError):
+    except Exception:
+        logger.exception("Qwen handoff drafting or validation failed")
         return {"status": "unavailable", "provider": "ollama", "model": model, "reason": "inference_or_validation_failed", "sections": []}
 
 
@@ -992,8 +995,6 @@ def prepare_handoff_draft(
         if items:
             sections.append({"title": spec["label"], "items": items})
 
-    generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
-
     gaps = [
         {"source": name, "status": info["status"], "reason": info.get("reason")}
         for name, info in statuses.items()
@@ -1032,6 +1033,8 @@ def prepare_handoff_draft(
         if existing.request_fingerprint != request_fingerprint:
             raise HTTPException(status_code=409, detail="Draft request ID was already used for different source content")
         return _draft_response(existing)
+
+    generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
 
     # One durable identity must bind the response and its audit event.
     # This endpoint currently returns a structured preparation snapshot; the ID
