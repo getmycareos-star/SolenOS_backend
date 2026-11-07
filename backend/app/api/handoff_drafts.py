@@ -12,7 +12,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text as sql_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1641,7 +1641,7 @@ def prepare_handoff_draft(
             hashlib.sha256(f"handoff-draft:{person_id}:{caregiver_id}:{request_id}".encode("utf-8")).digest()[:8],
             byteorder="big", signed=True,
         )
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
     existing = db.query(HandoffDraft).filter(
         HandoffDraft.person_id == person_id,
         HandoffDraft.caregiver_id == caregiver_id,
