@@ -578,6 +578,8 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
                 "kind": "document_extraction_v1",
                 "binary_sha256": digest,
                 "extraction_method": "server_utf8_text",
+                "page_references": [1],
+                "source_quotations": [{"page": 1, "quote": "Follow-up appointment is scheduled for 12 December."}],
             },
             review_history=[],
         ))
@@ -604,6 +606,8 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
     assert extracted["source_type"] == "document_extracted_text"
     assert extracted["details"]["document_id"] == document.id
     assert extracted["details"]["binary_sha256"] == digest
+    assert extracted["details"]["page_references"] == [1]
+    assert extracted["details"]["source_quotations"][0]["page"] == 1
     assert extracted["epistemic_status"] == "unreviewed_document_extraction"
     assert extracted["record_status"] == "extracted_not_caregiver_reviewed"
     assert original_ref["source_type"] == "uploaded_document"
