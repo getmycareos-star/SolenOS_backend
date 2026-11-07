@@ -987,3 +987,36 @@ def test_failed_daily_care_adapter_is_not_reported_as_empty(client, monkeypatch)
     assert status["status"] == "failed"
     assert status["reason"] == "daily_care_adapter_failed"
     assert status["count"] == 0
+
+
+@pytest.mark.parametrize("failure", ["timeout", "authentication", "malformed"])
+def test_qwen_handoff_generation_reports_real_inference_failures(monkeypatch, failure):
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
+
+    def fail_inference(*args, **kwargs):
+        if failure == "timeout":
+            raise TimeoutError("simulated inference timeout")
+        if failure == "authentication":
+            raise PermissionError("simulated model authentication failure")
+        return "not-json"
+
+    monkeypatch.setattr(handoff_drafts, "qwen_chat", fail_inference)
+    result = handoff_drafts._generate_grounded_handoff(
+        [{
+            "source_table": "care_events",
+            "source_id": "real-event",
+            "source_type": "care_event",
+            "epistemic_status": "caregiver_reported",
+            "record_status": "recorded",
+            "event_at": None,
+            "recorded_at": None,
+            "text": "Caregiver reported a quiet morning.",
+        }],
+        "family_transition",
+        "family",
+    )
+    assert result["status"] == "unavailable"
+    assert result["sections"] == []
+    assert result["provider"] == "ollama"
