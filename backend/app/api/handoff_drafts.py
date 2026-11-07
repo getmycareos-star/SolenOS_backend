@@ -1424,6 +1424,8 @@ def prepare_handoff_draft(
                     continue
                 epistemic_value = next((row.get(k) for k in ("epistemic_status", "epistemic_state", "assertion_status") if row.get(k) is not None), None)
                 record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
+                if table_name == "uncertainty_assessments":
+                    record_status = "active" if row.get("is_active") else "superseded"
                 source_fingerprint = _fingerprint(row)
                 source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
                 records.append({
