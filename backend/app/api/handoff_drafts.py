@@ -475,7 +475,12 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 if extraction is None or upload is None:
                     stale.append(f"{source_table}:{source_id}")
                     continue
-                current = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256))
+                assertion_rows = db.query(CareAssertion).filter(CareAssertion.person_id == draft.person_id).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
+                assertion_snapshot = [{
+                    "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
+                    "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
+                } for row in assertion_rows if str(document_id) in [str(value) for value in (row.evidence_ids or [])]]
+                current = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256, assertion_snapshot))
             elif item.get("source_type") == "uploaded_document":
                 document = db.query(Evidence).filter(
                     Evidence.id == source_id,
@@ -491,7 +496,12 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 if len(binary) != upload.size_bytes or hashlib.sha256(binary).hexdigest() != upload.sha256:
                     stale.append(f"{source_table}:{source_id}")
                     continue
-                current = _fingerprint(_document_upload_fingerprint_payload(document, upload))
+                assertion_rows = db.query(CareAssertion).filter(CareAssertion.person_id == draft.person_id).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
+                assertion_snapshot = [{
+                    "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
+                    "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
+                } for row in assertion_rows if str(source_id) in [str(value) for value in (row.evidence_ids or [])]]
+                current = _fingerprint(_document_upload_fingerprint_payload(document, upload, assertion_snapshot))
             else:
                 if source_table not in SOURCES or not inspector.has_table(source_table):
                     unknown.append(f"{source_table}:{source_id}")
@@ -727,7 +737,7 @@ def _daily_care_fingerprint_payload(event, linked_evidence: list) -> dict:
     }
 
 
-def _document_upload_fingerprint_payload(document, upload) -> dict:
+def _document_upload_fingerprint_payload(document, upload, assertion_snapshot: list | None = None) -> dict:
     return {
         "evidence_id": document.id,
         "source_text_sha256": document.source_text_sha256,
@@ -738,10 +748,11 @@ def _document_upload_fingerprint_payload(document, upload) -> dict:
         "filename": upload.filename,
         "mime_type": upload.mime_type,
         "upload_created_at": upload.created_at,
+        "linked_assertions": assertion_snapshot or [],
     }
 
 
-def _document_extraction_fingerprint_payload(extraction, binary_sha256: str) -> dict:
+def _document_extraction_fingerprint_payload(extraction, binary_sha256: str, assertion_snapshot: list | None = None) -> dict:
     return {
         "id": extraction.id,
         "source_evidence_id": extraction.source_evidence_id,
@@ -752,6 +763,7 @@ def _document_extraction_fingerprint_payload(extraction, binary_sha256: str) -> 
         "created_at": extraction.created_at,
         "updated_at": extraction.updated_at,
         "binary_sha256": binary_sha256,
+        "linked_assertions": assertion_snapshot or [],
     }
 
 
@@ -869,6 +881,10 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 row for row in document_assertions
                 if row.assertion_status == "caregiver_reviewed"
             ]
+            assertion_snapshot = [{
+                "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
+                "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
+            } for row in document_assertions]
             assertion_references = [{
                 "assertion_id": row.id,
                 "status": row.assertion_status,
