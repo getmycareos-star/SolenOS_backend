@@ -420,6 +420,79 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     }
 
 
+@router.get("/{record_id}/outcome-draft")
+def get_appointment_outcome_draft(record_id: str, request: Request, db: Session = Depends(get_db)):
+    """Organize persisted appointment notes into a person-scoped, read-only outcome."""
+    person_id, _ = _scope(request, db)
+    row = db.query(AppointmentWorkspaceRecord).filter(
+        AppointmentWorkspaceRecord.id == record_id,
+        AppointmentWorkspaceRecord.person_id == person_id,
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Appointment workspace not found")
+
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    fields = {
+        "caregiver_report": ("caregiverReport", "What the caregiver reported"),
+        "professional_information": ("clinicianFindings", "What the caregiver recorded about the professional's words"),
+        "decisions": ("decisions", "Decisions recorded by the caregiver"),
+        "instructions": ("instructions", "Instructions recorded by the caregiver"),
+        "unanswered_questions": ("unanswered", "Questions still unanswered"),
+        "medication_information": ("medicationReconciliation", "Medication information and questions"),
+        "pending_results": ("pendingResults", "Results still expected"),
+        "family_summary": ("familySummary", "Information for the family"),
+    }
+    sections = {key: [] for key in fields}
+    missing_information = []
+    for key, (field, label) in fields.items():
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            sections[key].append({
+                "label": label, "text": value.strip(),
+                "source_type": "caregiver_recorded",
+                "source_record_id": row.id, "source_version": row.version_number,
+                "epistemic_status": "caregiver_reported",
+                "independently_verified": False,
+            })
+        else:
+            missing_information.append(label)
+
+    follow_ups = []
+    raw_follow_ups = payload.get("followUps")
+    if isinstance(raw_follow_ups, list):
+        for item in raw_follow_ups:
+            if not isinstance(item, dict):
+                continue
+            action = item.get("action")
+            if isinstance(action, str) and action.strip():
+                follow_ups.append({
+                    "text": action.strip(),
+                    "owner": item.get("owner") if isinstance(item.get("owner"), str) and item.get("owner").strip() else None,
+                    "due": item.get("due") if isinstance(item.get("due"), str) and item.get("due").strip() else None,
+                    "status": item.get("status") if isinstance(item.get("status"), str) and item.get("status").strip() else "not_recorded",
+                    "source_type": "caregiver_recorded",
+                    "source_record_id": row.id,
+                    "epistemic_status": "caregiver_reported",
+                })
+    sections["follow_ups"] = follow_ups
+    has_information = any(sections[key] for key in fields) or bool(follow_ups)
+    return {
+        "record_id": row.id, "appointment_id": row.appointment_id,
+        "record_version": row.version_number, "workspace_status": row.status,
+        "attendance_status": payload.get("attendanceStatus") or "not_recorded",
+        "actual_visit_date": payload.get("actualVisitDate") or None,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "ready_for_review" if has_information else "no_outcome_information",
+        "read_only": True, "updates_lcr": False,
+        "sections": sections, "missing_information": missing_information,
+        "limitations": [
+            "This view organizes only information already recorded in this appointment workspace.",
+            "Statements about a professional remain caregiver-reported unless an original professional record is separately reviewed.",
+            "Generating or viewing this draft does not change the Living Care Record.",
+        ],
+    }
+
+
 @router.get("/{record_id}")
 def get_appointment_workspace(record_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scope(request, db)
