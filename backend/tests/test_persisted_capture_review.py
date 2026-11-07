@@ -153,6 +153,63 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         db.close()
 
 
+def test_daily_capture_rejection_never_creates_lcr_assertion_or_allows_retry(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Rejected care recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+        "observations": [{
+            "subject": "sleep",
+            "observation": "Unverified generated suggestion.",
+            "source_quote": "Original caregiver wording.",
+            "review_status": "pending_review",
+        }],
+        "open_questions": [],
+        "possible_safety_flags": [],
+    })
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": "Original caregiver wording.",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    analysis_id = saved.json()["qwen_analysis_id"]
+
+    rejected = client.post(
+        f"/api/v1/capture/analyses/{analysis_id}/review",
+        headers=auth,
+        json={"candidate_index": 0, "decision": "reject"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["written_to_lcr"] is False
+    assert rejected.json()["candidate"]["review_status"] == "rejected_by_caregiver"
+    assert rejected.json()["assertion_id"] is None
+
+    for decision in ("accept", "reject"):
+        retry = client.post(
+            f"/api/v1/capture/analyses/{analysis_id}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": decision},
+        )
+        assert retry.status_code == 409, retry.text
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+        record = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+        assert record.candidates["observations"][0]["review_status"] == "rejected_by_caregiver"
+        assert len(record.review_history) == 1
+    finally:
+        db.close()
+
+
 def test_capture_review_rejects_foreign_analysis_and_invalid_candidate_index(monkeypatch):
     client = TestClient(app)
     first = create_session(client, "First care recipient")
