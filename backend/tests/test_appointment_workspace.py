@@ -1322,6 +1322,30 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
     assert next_proposal["proposed_change"]["source_quote"] == proposals[1]["proposed_change"]["source_quote"]
     assert next_proposal["proposed_change"]["asserted_value"] == "The clinician asked the family to call in three days."
 
+    correction_replay = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[1]['id']}/review",
+        headers=headers,
+        json={
+            "decision": "correct",
+            "corrected_text": "The clinician asked the family to call in three days.",
+            "correction_context": "Caregiver correction: The clinician asked the family to call in three days.",
+        },
+    )
+    assert correction_replay.status_code == 200, correction_replay.text
+    assert correction_replay.json()["corrected_proposal"]["id"] == next_proposal["id"]
+    assert correction_replay.json()["idempotent_replay"] is True
+
+    conflicting_correction = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[1]['id']}/review",
+        headers=headers,
+        json={
+            "decision": "correct",
+            "corrected_text": "A different corrected statement.",
+            "correction_context": "Caregiver correction: A different corrected statement.",
+        },
+    )
+    assert conflicting_correction.status_code == 409, conflicting_correction.text
+
     # Corrected proposal still requires a separate explicit acceptance.
     corrected_accept = test_client.post(
         f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{next_proposal['id']}/review",
@@ -1339,6 +1363,13 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
     )
     assert rejected.status_code == 200, rejected.text
     assert rejected.json()["written_to_lcr"] is False
+    rejected_replay = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[2]['id']}/review",
+        headers=headers,
+        json={"decision": "reject"},
+    )
+    assert rejected_replay.status_code == 200, rejected_replay.text
+    assert rejected_replay.json()["idempotent_replay"] is True
     db = TestSessionLocal()
     try:
         rejected_proposal = db.query(AIOutputLCRProposal).filter(
