@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.api.care_delta import _scoped_identity
 from app.core.database import get_db
 from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraftRevision
-from app.models.care import Evidence, CareEvent
+from app.models.care import Evidence, CareEvent, Caregiver
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceSourceRelationship
@@ -287,6 +287,8 @@ def _display_text(row: dict, fields: tuple[str, ...]) -> str:
 
 DAILY_CARE_EVENT_TYPES = {
     "structured_daily_capture", "quick_daily_checkin", "daily_care_entry",
+}
+
 
 def _draft_response(draft: HandoffDraft) -> dict:
     content = draft.structured_content if isinstance(draft.structured_content, dict) else {}
@@ -509,8 +511,6 @@ def approve_handoff_draft(
     db.commit()
     db.refresh(draft)
     return _draft_response(draft)
-
-}
 
 
 def _is_stale(value, now: datetime, days: int = 30) -> bool:
