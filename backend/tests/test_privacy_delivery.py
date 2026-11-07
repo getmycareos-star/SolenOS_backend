@@ -416,14 +416,17 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
         db.close()
 
     accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    # Both sender and every recipient must have current consent before sharing.
+    denied_until_recipient_consent = client.post(
+        "/api/v1/handoffs", headers=owner_headers, json=payload
+    )
+    assert denied_until_recipient_consent.status_code == 403
+
+    accept_required_consent(owner["person"]["id"], recipient_id)
     created = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
     assert created.status_code == 201, created.text
     handoff_id = created.json()["id"]
 
-    denied_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
-    assert denied_accept.status_code == 404
-
-    accept_required_consent(owner["person"]["id"], recipient_id)
     missing_summary_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert missing_summary_accept.status_code == 409
 
@@ -616,6 +619,7 @@ def test_handoff_rejects_spoofed_person_scope_and_invalid_expiry():
     assert wrong_person.status_code == 403
     accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
     recipient_id, _ = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
     expired = client.post(
         "/api/v1/handoffs",
         headers=headers,
