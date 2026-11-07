@@ -83,6 +83,12 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         proposal = body["care_update_candidates"][0]
         assert proposal["status"] == "pending_authorization"
         assert proposal["source_message_id"]
+        pending_list = client.get("/api/v1/companion/care-updates", headers=first_auth)
+        assert pending_list.status_code == 200, pending_list.text
+        assert [item["id"] for item in pending_list.json()["items"]] == [proposal["id"]]
+        before_accept = client.get("/api/v1/care-continuity/current-care", headers=first_auth)
+        assert before_accept.status_code == 200, before_accept.text
+        assert not any(item.get("id") == proposal["id"] for item in before_accept.json().get("items", []))
 
         replay = send(client, first, original, first_turn)
         assert replay.status_code == 200, replay.text
