@@ -605,11 +605,14 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
             if inspector.has_table("capture_analyses"):
                 analysis_table = Table("capture_analyses", metadata, autoload_with=bind)
                 if {"id", "person_id", "caregiver_id", "source_evidence_id", "created_at"}.issubset(set(analysis_table.c.keys())):
+                    extraction_changed = analysis_table.c.created_at > created_after
+                    if "updated_at" in analysis_table.c:
+                        extraction_changed = or_(extraction_changed, analysis_table.c.updated_at > created_after)
                     new_extractions = db.execute(
                         select(analysis_table.c.id).where(
                             analysis_table.c.person_id == draft.person_id,
                             analysis_table.c.caregiver_id == draft.caregiver_id,
-                            analysis_table.c.created_at > created_after,
+                            extraction_changed,
                         )
                     ).scalars().all()
                     known_extractions = snapshot_ids_by_table.get("capture_analyses", set())
@@ -1011,10 +1014,9 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 CaptureAnalysis.person_id == person_id,
                 CaptureAnalysis.caregiver_id == caregiver_id,
                 CaptureAnalysis.source_evidence_id == document.id,
-                CaptureAnalysis.extraction_status == "available",
             ).order_by(CaptureAnalysis.created_at.desc()).first()
             extraction_details = extraction.candidates if extraction and isinstance(extraction.candidates, dict) else {}
-            if extraction and extraction_details.get("kind") == "document_extraction_v1" and extraction_details.get("binary_sha256") == upload.sha256:
+            if extraction and extraction.extraction_status == "available" and extraction_details.get("kind") == "document_extraction_v1" and extraction_details.get("binary_sha256") == upload.sha256:
                 extracted_text = (extraction.source_text or "").strip()
                 if extracted_text:
                     extraction_fingerprint = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256))
