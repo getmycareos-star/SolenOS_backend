@@ -114,6 +114,16 @@ SOURCES = {
         "recorded_time_fields": ("recorded_at",),
         "detail_fields": ("subject_type", "subject_id", "field", "assertion_kind", "source_event_id", "assertion_status", "created_by_caregiver_id", "updated_by_caregiver_id"),
     },
+    "uncertainty_assessments": {
+        "label": "Recorded uncertainty and information gaps",
+        "kind": "information_gap",
+        "fields": ("id", "subject_type", "subject_id", "field", "epistemic_state", "confidence", "known_value", "gap_reason", "context", "evidence_ids", "temporal_precision", "assessed_at", "assessed_by_caregiver_id", "superseded_by_assessment_id", "is_active"),
+        "text_fields": ("field", "known_value", "gap_reason", "epistemic_state"),
+        "time_fields": ("assessed_at",),
+        "event_time_fields": (),
+        "recorded_time_fields": ("assessed_at",),
+        "detail_fields": ("subject_type", "subject_id", "epistemic_state", "confidence", "gap_reason", "temporal_precision", "superseded_by_assessment_id", "is_active", "context"),
+    },
     "care_decisions": {
         "label": "Care decisions",
         "kind": "care_decision",
