@@ -30,6 +30,7 @@ class RequestMetricsMiddleware:
             return
 
         request_id = uuid.uuid4().hex
+        scope.setdefault("state", {})["request_id"] = request_id
         started = time.perf_counter()
         status_code: int | None = None
         error_category: str | None = None
