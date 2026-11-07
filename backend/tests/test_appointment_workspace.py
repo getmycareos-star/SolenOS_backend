@@ -1423,3 +1423,82 @@ def test_fresh_companion_session_retrieves_only_accepted_appointment_assertions(
     assert "asked for help with dressing this morning" in prompt
     assert "mentioned a follow-up on Tuesday" not in prompt
     assert "plans to ask about transport arrangements" not in prompt
+
+
+
+def test_appointment_follow_up_uses_persistent_open_loop_and_requires_verified_closure(client):
+    test_client, owner, other = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    workspace = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={"status": "follow_up_pending", "payload": {"visit_purpose": "Review follow-up"}},
+    )
+    assert workspace.status_code == 201, workspace.text
+    record_id = workspace.json()["id"]
+    source_id = record_id + ":follow-up-1"
+    create_payload = {
+        "loop_type": "follow_up",
+        "title": "Call the clinic for the test result",
+        "description": "Caregiver-recorded appointment follow-up; result is not yet known.",
+        "source_type": "appointment_workspace",
+        "source_id": source_id,
+        "owner_role": "caregiver",
+        "owner_label": "Family caregiver",
+        "deadline_at": "2026-11-10T12:00:00+00:00",
+        "deadline_source": "explicit_user",
+        "idempotency_key": "appointment-follow-up:" + source_id,
+    }
+    created = test_client.post("/api/v1/open-loops", headers=headers, json=create_payload)
+    assert created.status_code == 201, created.text
+    loop = created.json()
+    assert loop["source_type"] == "appointment_workspace"
+    assert loop["source_id"] == source_id
+    assert loop["owner_label"] == "Family caregiver"
+    assert loop["status"] == "open"
+
+    replay = test_client.post("/api/v1/open-loops", headers=headers, json=create_payload)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == loop["id"]
+
+    updated = test_client.patch(
+        f"/api/v1/open-loops/{loop['id']}",
+        headers=headers,
+        json={
+            "title": "Call the clinic and ask for the result",
+            "description": "Caregiver updated the wording; the result remains unconfirmed.",
+            "owner_role": "caregiver",
+            "owner_label": "Family caregiver",
+            "deadline_at": "2026-11-11T12:00:00+00:00",
+            "deadline_source": "explicit_user",
+            "reason": "Caregiver updated appointment follow-up details",
+            "idempotency_key": "appointment-follow-up-update:" + source_id,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["title"] == "Call the clinic and ask for the result"
+
+    reported = test_client.post(
+        f"/api/v1/open-loops/{loop['id']}/outcomes",
+        headers=headers,
+        json={
+            "text": "Caregiver marked the task done; result has not been independently verified.",
+            "evidence": [],
+            "idempotency_key": "appointment-follow-up-done:" + source_id,
+        },
+    )
+    assert reported.status_code == 200, reported.text
+    assert reported.json()["outcome_status"] == "outcome_reported"
+    assert reported.json()["status"] not in {"closed", "cancelled"}
+
+    # A caregiver-reported completion cannot silently close an evidence-backed loop.
+    close = test_client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json={"text": "Close without evidence", "evidence": [], "idempotency_key": "close-without-evidence"},
+    )
+    assert close.status_code == 409, close.text
+
+    foreign_read = test_client.get(f"/api/v1/open-loops/{loop['id']}", headers=other_headers)
+    assert foreign_read.status_code == 404
