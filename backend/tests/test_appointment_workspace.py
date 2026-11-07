@@ -11,7 +11,8 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion
+from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -1217,3 +1218,139 @@ def test_empty_appointment_outcome_draft_does_not_invent_content(client):
     assert body["status"] == "no_outcome_information"
     assert all(not items for items in body["sections"].values())
     assert body["updates_lcr"] is False
+
+
+
+def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client):
+    test_client, owner, other = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "outcome_pending",
+        "payload": {
+            "caregiverReport": "Caregiver reports that sleep was interrupted twice last night.",
+            "clinicianFindings": "Caregiver recorded that the clinician recommended a follow-up call.",
+            "decisions": "Family decided to call the clinic on Monday.",
+            "actualVisitDate": "2026-11-07T10:30:00+01:00",
+            "followUps": [{"action": "Call the clinic", "owner": "Family caregiver", "status": "Open"}],
+        },
+        "change_reason": "Record appointment outcome",
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    prepared = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals",
+        headers=headers,
+    )
+    assert prepared.status_code == 200, prepared.text
+    body = prepared.json()
+    assert body["written_to_lcr"] is False
+    assert body["review_required"] is True
+    assert body["count"] == 3
+    proposals = body["items"]
+    assert all(item["status"] == "pending_authorization" for item in proposals)
+    assert all(item["proposed_change"]["epistemic_status"] == "caregiver_reported" for item in proposals)
+    assert all(item["proposed_change"]["independently_verified"] is False for item in proposals)
+
+    # Repeating candidate generation must return the same proposal IDs.
+    replay = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals",
+        headers=headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert [item["id"] for item in replay.json()["items"]] == [item["id"] for item in proposals]
+
+    # Other people cannot list or review the owner's proposals.
+    assert test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals",
+        headers=other_headers,
+    ).status_code == 404
+    assert test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[0]['id']}/review",
+        headers=other_headers,
+        json={"decision": "accept"},
+    ).status_code == 404
+
+    # Accept creates exactly one caregiver-reviewed assertion, not a clinical fact.
+    accepted = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[0]['id']}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_body = accepted.json()
+    assert accepted_body["written_to_lcr"] is True
+    assertion_id = accepted_body["assertion_id"]
+    db = TestSessionLocal()
+    try:
+        assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
+        assert assertion.assertion_status == "caregiver_reviewed"
+        assert assertion.created_by_caregiver_id == owner["caregiver"]["id"]
+        assert assertion.source_proposal_id == proposals[0]["id"]
+        assert assertion.source_conversation_id is None
+        assert assertion.source_message_id is None
+        assert assertion.observed_at is not None
+        assert db.query(CareAssertion).filter(CareAssertion.source_proposal_id == proposals[0]["id"]).count() == 1
+    finally:
+        db.close()
+
+    accepted_replay = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[0]['id']}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    assert accepted_replay.status_code == 200, accepted_replay.text
+    assert accepted_replay.json()["assertion_id"] == assertion_id
+    assert accepted_replay.json()["idempotent_replay"] is True
+
+    # Correction preserves the original proposal and creates a separate pending version.
+    corrected = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[1]['id']}/review",
+        headers=headers,
+        json={
+            "decision": "correct",
+            "corrected_text": "The clinician asked the family to call in three days.",
+            "correction_context": "Caregiver correction: The clinician asked the family to call in three days.",
+        },
+    )
+    assert corrected.status_code == 200, corrected.text
+    corrected_body = corrected.json()
+    assert corrected_body["proposal"]["status"] == "corrected"
+    next_proposal = corrected_body["corrected_proposal"]
+    assert next_proposal["status"] == "pending_authorization"
+    assert next_proposal["proposed_change"]["source_quote"] == proposals[1]["proposed_change"]["source_quote"]
+    assert next_proposal["proposed_change"]["asserted_value"] == "The clinician asked the family to call in three days."
+
+    # Corrected proposal still requires a separate explicit acceptance.
+    corrected_accept = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{next_proposal['id']}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    assert corrected_accept.status_code == 200, corrected_accept.text
+    assert corrected_accept.json()["written_to_lcr"] is True
+
+    # Rejection leaves an append-only decision and never creates an assertion.
+    rejected = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[2]['id']}/review",
+        headers=headers,
+        json={"decision": "reject"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["written_to_lcr"] is False
+    db = TestSessionLocal()
+    try:
+        rejected_proposal = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.id == proposals[2]["id"]
+        ).one()
+        assert rejected_proposal.status == "rejected"
+        assert db.query(CareAssertion).filter(
+            CareAssertion.source_proposal_id == proposals[2]["id"]
+        ).count() == 0
+        decisions = db.query(AIOutputLCRDecision).filter(
+            AIOutputLCRDecision.proposal_id.in_([proposals[0]["id"], proposals[1]["id"], proposals[2]["id"]])
+        ).all()
+        assert {item.decision for item in decisions} >= {"accepted", "corrected", "rejected"}
+    finally:
+        db.close()
