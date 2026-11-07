@@ -353,7 +353,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             scope_key = (
                 "documents" if str(source_type).startswith("document_") or source_type == "uploaded_document"
                 else "appointments" if source_type == "appointment"
-                else "open_loops" if source_type in {"care_action", "open_question", "information_gap"}
+                else "open_loops" if source_type in {"care_action", "care_action_outcome", "open_question", "information_gap"}
                 else "lcr_summary"
             )
             if scope_key not in payload.scope:
