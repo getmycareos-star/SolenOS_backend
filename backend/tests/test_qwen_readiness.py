@@ -30,49 +30,36 @@ def test_missing_installation_state_defaults_to_not_started(tmp_path, monkeypatc
     assert qwen_gateway.qwen_installation_status()["state"] == "not_started"
 
 
-def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
-    class Response:
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def read(self):
-            return b'{"models":[{"name":"qwen3.5:4b"}]}'
-
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 90.0))
-    monkeypatch.setenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "45")
-    monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "installed"})
-    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
-    calls = []
-    monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: calls.append((args, kwargs)) or "READY")
-    qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
-
-    result = qwen_gateway.qwen_readiness_status(force=True)
-    assert result["available"] is True
-    assert result["state"] == "ready"
-    assert len(calls) == 1
-    assert calls[0][1]["timeout"] == 45.0
-
-
-def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
-    class Response:
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def read(self):
-            return b'{"models":[{"name":"another-model"}]}'
-
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
-    monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "downloading"})
-    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
-    monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("inference must not run")))
+def test_readiness_reports_not_tested_after_restart_without_calling_runtime_or_inference(monkeypatch):
+    monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("health polling must not run inference")))
+    monkeypatch.setattr(qwen_gateway, "qwen_runtime_status", lambda: (_ for _ in ()).throw(AssertionError("readiness must not probe runtime inventory")))
     qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
 
     result = qwen_gateway.qwen_readiness_status(force=True)
     assert result["available"] is False
-    assert result["state"] == "model_not_installed"
-    assert result["failure_reason"] == "configured_model_missing"
+    assert result["state"] == "not_tested"
+    assert result["source"] == "actual_inference"
+    assert result["last_attempt_at"] is None
+
+
+def test_readiness_reports_last_actual_inference_and_marks_old_results_stale(monkeypatch):
+    import time
+
+    qwen_gateway._READINESS_CACHE.update({
+        "checked_at": time.monotonic() - 301,
+        "result": {
+            "available": True,
+            "state": "ready",
+            "model": "qwen3.5:4b",
+            "last_attempt_at": "2026-11-07T00:00:00+00:00",
+            "last_success_at": "2026-11-07T00:00:00+00:00",
+            "source": "actual_inference",
+        },
+    })
+    result = qwen_gateway.qwen_readiness_status()
+    assert result["available"] is False
+    assert result["state"] == "stale"
+    assert result["stale"] is True
 
 
 
