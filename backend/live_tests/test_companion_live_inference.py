@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import Base, get_db
 from app.models.care import CareEvent
 from app.models.collaboration import ConversationMessage
+from app.services.qwen_gateway import extract_companion_care_candidates
 from app.main import app
 import app.main as main_module
 
@@ -339,3 +340,30 @@ def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+
+def test_live_qwen_companion_care_update_identification_distinguishes_observation_from_conversation():
+    """Use the configured live Ollama gateway; no mocked model output is involved."""
+    meaningful = (
+        "During the morning routine, the caregiver observed that the person skipped "
+        "the usual meal on two consecutive days."
+    )
+    extracted = extract_companion_care_candidates(meaningful)
+    assert extracted["observations"], "Live Qwen did not identify an explicitly reported care observation."
+    for item in extracted["observations"]:
+        quote = item["source_quote"]
+        assert quote in meaningful, f"Qwen returned a quotation not present in the source: {quote!r}"
+
+    ordinary_messages = (
+        "Hello, how are you?",
+        "What is dementia?",
+        "What should I ask the doctor?",
+        "I read an article that mentioned medication.",
+    )
+    for message in ordinary_messages:
+        result = extract_companion_care_candidates(message)
+        assert result["observations"] == [], (
+            "Live Qwen converted ordinary conversation or a general question into a care proposal: "
+            f"{message!r} -> {result!r}"
+        )
