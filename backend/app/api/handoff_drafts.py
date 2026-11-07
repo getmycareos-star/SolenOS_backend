@@ -484,6 +484,11 @@ def prepare_handoff_draft(
         for name, info in statuses.items()
         if info["status"] in {"unavailable", "not_authorized"}
     ]
+    # One durable identity must bind the response and its audit event.
+    # This endpoint currently returns a structured preparation snapshot; the ID
+    # is correlation metadata, not a persisted editable draft identity.
+    draft_id = str(uuid.uuid4())
+
     # Durable, content-free audit event. Fail closed if audit persistence fails.
     try:
         db.add(AuditLogEvent(
@@ -494,7 +499,7 @@ def prepare_handoff_draft(
             caregiver_id=caregiver_id,
             action="handoff_draft.prepare",
             target_type="handoff_draft",
-            target_id=str(uuid.uuid4()),
+            target_id=draft_id,
             occurred_at=now,
             outcome="success",
             request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
@@ -513,7 +518,7 @@ def prepare_handoff_draft(
         raise HTTPException(status_code=503, detail="Draft audit could not be persisted; no draft was returned") from exc
 
     return {
-        "draft_id": str(uuid.uuid4()),
+        "draft_id": draft_id,
         "purpose": payload.purpose,
         "audience": payload.audience,
         "template_sections": _template_coverage(payload.audience, statuses),
