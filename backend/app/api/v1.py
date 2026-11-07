@@ -12,6 +12,7 @@ from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.models.anonymous_session import AnonymousSession
+from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
 from app.models.collaboration import ConsentRecord, EvidenceUpload
 from app.models.care_continuity import (
     EvidenceFreshnessAssessment,
@@ -602,6 +603,16 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 existing_event.evidence_ids = linked_evidence_ids
                 db.commit()
                 db.refresh(existing_event)
+            existing_analysis = (
+                db.query(CaptureAnalysisModel)
+                .filter(
+                    CaptureAnalysisModel.person_id == person_id,
+                    CaptureAnalysisModel.caregiver_id == caregiver_id,
+                    CaptureAnalysisModel.source_event_id == existing_event.id,
+                )
+                .order_by(CaptureAnalysisModel.created_at.desc())
+                .first()
+            )
             return {
                 "success": True,
                 "id": existing_event.id,
@@ -609,6 +620,15 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 "recorded_at": existing_event.recorded_at,
                 "evidence_ids": linked_evidence_ids,
                 "idempotent_replay": True,
+                "qwen_extraction_status": existing_analysis.extraction_status if existing_analysis else "unavailable",
+                "qwen_candidates": existing_analysis.candidates if existing_analysis else None,
+                "qwen_analysis_id": existing_analysis.id if existing_analysis else None,
+                "qwen_review_required": bool(
+                    existing_analysis
+                    and existing_analysis.extraction_status == "available"
+                    and isinstance(existing_analysis.candidates, dict)
+                ),
+                "qwen_written_to_lcr": False,
             }
         detail["capture_request_fingerprint"] = capture_request_fingerprint
     if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
