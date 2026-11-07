@@ -38,6 +38,8 @@ def _postgres_conversation_db():
     metadata = ConversationSession.metadata
     if "situations" not in metadata.tables:
         Table("situations", metadata, Column("id", String, primary_key=True))
+    if "ai_output_lcr_proposals" not in metadata.tables:
+        Table("ai_output_lcr_proposals", metadata, Column("id", String, primary_key=True))
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
     metadata.create_all(
         connection,
@@ -57,6 +59,8 @@ def _sqlite_retrieval_db():
     metadata = ConversationSession.metadata
     if "situations" not in metadata.tables:
         Table("situations", metadata, Column("id", String, primary_key=True))
+    if "ai_output_lcr_proposals" not in metadata.tables:
+        Table("ai_output_lcr_proposals", metadata, Column("id", String, primary_key=True))
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
     metadata.create_all(connection, tables=[
         Person.__table__, Caregiver.__table__, CareEvent.__table__,
