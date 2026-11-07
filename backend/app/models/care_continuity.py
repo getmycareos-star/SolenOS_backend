@@ -85,6 +85,7 @@ class CareAssertion(Base):
     source_conversation_id = Column(String, ForeignKey("conversation_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
     source_message_id = Column(String, ForeignKey("conversation_messages.id", ondelete="SET NULL"), nullable=True, index=True)
     source_proposal_id = Column(String, ForeignKey("ai_output_lcr_proposals.id", ondelete="SET NULL"), nullable=True, unique=True)
+    event_time_text = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=False, default=list)
     assertion_status = Column(String, nullable=False, default="reported")
     observed_at = Column(DateTime(timezone=True), nullable=True)
