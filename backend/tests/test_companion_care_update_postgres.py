@@ -11,8 +11,8 @@ from sqlalchemy.orm import sessionmaker
 DATABASE_URL = os.getenv("SOLENOS_COMPANION_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires isolated migrated PostgreSQL database")
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None
 from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
