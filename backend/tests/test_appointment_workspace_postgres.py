@@ -146,3 +146,113 @@ def test_postgres_appointment_workspace_create_update_retry_and_isolation(monkey
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
+
+
+def test_postgres_daily_capture_http_write_retry_and_isolation(monkeypatch):
+    """Benchmark the real authenticated Daily Capture POST using only disposable CI data."""
+    from app.models.care import CareEvent, Evidence
+    import app.api.v1 as api_v1
+
+    database_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_db():
+        db = TestSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestSessionLocal)
+
+    def unavailable_optional_extraction(*args, **kwargs):
+        raise RuntimeError("Optional model extraction is deliberately disabled for the write-path benchmark")
+
+    monkeypatch.setattr(api_v1, "extract_review_candidates", unavailable_optional_extraction)
+    suffix = uuid.uuid4().hex
+    sample_count = 20
+    write_ms: list[float] = []
+    replay_ms: list[float] = []
+    event_ids: list[str] = []
+
+    try:
+        with TestClient(app) as client:
+            owner = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Synthetic Daily Capture benchmark owner"})
+            other = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Synthetic Daily Capture benchmark other"})
+            assert owner.status_code == 201, owner.text
+            assert other.status_code == 201, other.text
+            headers = {"Authorization": "Bearer " + owner.json()["access_token"]}
+            other_headers = {"Authorization": "Bearer " + other.json()["access_token"]}
+            person_id = owner.json()["person"]["id"]
+            caregiver_id = owner.json()["caregiver"]["id"]
+
+            for index in range(sample_count):
+                payload = {
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "medications": [],
+                    "vitals": [],
+                    "scales": [],
+                    "notes": f"Synthetic caregiver Daily Capture benchmark note {index}.",
+                    "capture_idempotency_key": f"daily-capture-{suffix}-{index}",
+                }
+                started = time.perf_counter()
+                saved = client.post("/api/v1/daily/log", headers=headers, json=payload)
+                write_ms.append((time.perf_counter() - started) * 1000)
+                assert saved.status_code == 200, saved.text
+                receipt = saved.json()
+                assert receipt["success"] is True
+                assert receipt["idempotent_replay"] is False
+                assert receipt["qwen_extraction_status"] == "unavailable"
+                event_ids.append(receipt["id"])
+
+                started = time.perf_counter()
+                replay = client.post("/api/v1/daily/log", headers=headers, json=payload)
+                replay_ms.append((time.perf_counter() - started) * 1000)
+                assert replay.status_code == 200, replay.text
+                assert replay.json()["id"] == receipt["id"]
+                assert replay.json()["evidence_ids"] == receipt["evidence_ids"]
+                assert replay.json()["idempotent_replay"] is True
+
+                changed = client.post(
+                    "/api/v1/daily/log",
+                    headers=headers,
+                    json={**payload, "notes": "Changed content under the same synthetic key."},
+                )
+                assert changed.status_code == 409, changed.text
+
+            denied = client.post("/api/v1/daily/log", headers=other_headers, json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": "Cross-person write attempt",
+                "capture_idempotency_key": f"daily-capture-cross-person-{suffix}",
+            })
+            assert denied.status_code == 403, denied.text
+
+            with TestSessionLocal() as db:
+                events = db.query(CareEvent).filter(
+                    CareEvent.person_id == person_id,
+                    CareEvent.id.in_(event_ids),
+                    CareEvent.event_type == "structured_daily_capture",
+                ).all()
+                assert len(events) == sample_count
+                evidence = db.query(Evidence).filter(Evidence.person_id == person_id).all()
+                assert len(evidence) >= sample_count
+
+            print("POSTGRES_DAILY_CAPTURE_HTTP_BENCHMARK=" + json.dumps({
+                "sample_count": sample_count,
+                "write_post_duration_ms": _percentiles(write_ms),
+                "idempotent_replay_post_duration_ms": _percentiles(replay_ms),
+                "changed_payload_key_reuse": "409",
+                "cross_person_write": "403",
+                "optional_model_extraction": "disabled_to_isolate_durable_write_path",
+                "scope": "disposable_postgresql_ci_only",
+            }, separators=(",", ":")))
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
