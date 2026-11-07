@@ -43,7 +43,7 @@ def _postgres_conversation_db():
         connection,
         tables=[
             Person.__table__, Caregiver.__table__, CareEvent.__table__,
-            CareAssertion.__table__, CaptureAnalysis.__table__,
+            CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
         ],
     )
@@ -60,7 +60,7 @@ def _sqlite_retrieval_db():
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
     metadata.create_all(connection, tables=[
         Person.__table__, Caregiver.__table__, CareEvent.__table__,
-        CareAssertion.__table__, CaptureAnalysis.__table__,
+        CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
         ConversationSession.__table__, ConversationMessage.__table__,
     ])
     connection.commit()
