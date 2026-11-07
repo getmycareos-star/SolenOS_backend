@@ -34,6 +34,8 @@ ALLOWED_HANDOFF_SECTION_LABELS = {
     "Care recipient and handoff context",
     "Current care situation",
     "Recent observations and changes",
+    "Recent observations",
+    "What the caregiver reported",
     "Daily Care information",
     "Relevant care history",
     "Document-derived information",
@@ -1481,7 +1483,17 @@ def prepare_handoff_draft(
 
     # These modules are intentionally not represented as read when no verified
     # persistent, person-scoped adapter is available.
-    daily_status, daily_records = _verified_daily_care_source(db, person_id, cutoff, now)
+    try:
+        daily_status, daily_records = _verified_daily_care_source(db, person_id, cutoff, now)
+    except Exception:
+        logger.exception("Handoff Daily Care source retrieval failed")
+        daily_status = {
+            "status": "failed",
+            "reason": "daily_care_adapter_failed",
+            "label": "Daily Care entries",
+            "count": 0,
+        }
+        daily_records = []
     statuses["daily_care"] = daily_status
     records.extend(daily_records)
     document_status, document_records = _verified_document_source(db, person_id, caregiver_id)
