@@ -80,7 +80,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
     monkeypatch.setattr(
         care_updates,
         "extract_companion_care_candidates",
-        lambda source: {"observations": [{"source_quote": original, "event_time_quote": event_time_text}] if source == original else [],
+        lambda source: {"observations": ([{"source_quote": original, "event_time_quote": event_time_text}] if source == original else [])},
     )
     client = TestClient(app)
     try:
@@ -149,7 +149,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         monkeypatch.setattr(
             care_updates,
             "extract_companion_care_candidates",
-            lambda source: {"observations": [{"source_quote": corrected_source}] if source == corrected_source else [],
+            lambda source: {"observations": ([{"source_quote": corrected_source}] if source == corrected_source else [])},
         )
         correction_turn = send(client, first, corrected_source, "companion-pg-correction-0003")
         assert correction_turn.status_code == 200, correction_turn.text
@@ -190,7 +190,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         monkeypatch.setattr(
             care_updates,
             "extract_companion_care_candidates",
-            lambda source: {"observations": [{"source_quote": rejected_source}] if source == rejected_source else [],
+            lambda source: {"observations": ([{"source_quote": rejected_source}] if source == rejected_source else [])},
         )
         rejected_turn = send(client, first, rejected_source, "companion-pg-reject-0004")
         assert rejected_turn.status_code == 200, rejected_turn.text

@@ -550,6 +550,14 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
         assert upload.status_code == 201, upload.text
         evidence_id = upload.json()["evidence_id"]
 
+        extracted = client.post(
+            f"/api/v1/documents/{evidence_id}/extract",
+            headers=auth,
+            json={},
+        )
+        assert extracted.status_code == 201, extracted.text
+        assert extracted.json()["extraction_method"] == "server_utf8_text"
+
         response = client.post(
             "/api/v1/conversation/message",
             headers=auth,

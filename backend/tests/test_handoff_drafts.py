@@ -39,12 +39,17 @@ def client():
             CREATE TABLE IF NOT EXISTS care_facts (
                 id VARCHAR(36) PRIMARY KEY,
                 person_id VARCHAR(255) NOT NULL,
+                subject_type VARCHAR(80),
+                subject_id VARCHAR(255),
                 fact_type VARCHAR(100),
                 fact_value TEXT,
                 epistemic_status VARCHAR(40),
                 effective_at DATETIME,
+                recorded_at DATETIME,
                 created_at DATETIME,
                 updated_at DATETIME,
+                superseded_by_fact_id VARCHAR(36),
+                created_by_caregiver_id VARCHAR(255),
                 review_notes TEXT
             )
         """))
@@ -559,8 +564,9 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
         )
         db.add(document)
         db.flush()
+        document_id = str(document.id)
         db.add(EvidenceUpload(
-            evidence_id=document.id,
+            evidence_id=document_id,
             filename="clinic-letter.txt",
             mime_type="text/plain",
             content=original,
@@ -571,7 +577,7 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
             id="handoff-document-extraction",
             person_id=person_id,
             caregiver_id=caregiver_id,
-            source_evidence_id=document.id,
+            source_evidence_id=document_id,
             source_text=original.decode("utf-8"),
             extraction_status="available",
             candidates={
@@ -604,7 +610,7 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
         if row["source_id"] == "handoff-document-evidence"
     )
     assert extracted["source_type"] == "document_extracted_text"
-    assert extracted["details"]["document_id"] == document.id
+    assert extracted["details"]["document_id"] == document_id
     assert extracted["details"]["binary_sha256"] == digest
     assert extracted["details"]["page_references"] == [1]
     assert extracted["details"]["source_quotations"][0]["page"] == 1
@@ -627,6 +633,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         relationship="family",
         person_id=person_id,
     )
+    recipient_id = str(recipient.id)
     db = TestSessionLocal()
     try:
         db.add(recipient)
@@ -637,11 +644,13 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     with engine.begin() as connection:
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+                (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :subject_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
             {
                 "id": "persisted-handoff-fact",
                 "person_id": person_id,
+            "subject_type": "care_recipient",
+            "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports that she prefers tea.",
                 "epistemic_status": "reported",
@@ -719,7 +728,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         f"/api/v1/handoff-drafts/{draft_id}/approve",
         headers={"Authorization": f"Bearer {session['access_token']}"},
         json={
-            "recipient_caregiver_ids": [recipient.id],
+            "recipient_caregiver_ids": [recipient_id],
             "scope": ["lcr_summary"],
             "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
         },
@@ -727,7 +736,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     assert approved.status_code == 200, approved.text
     assert approved.json()["review_status"] == "approved_for_sharing"
     assert approved.json()["approval"]["approval_revision"] == 2
-    assert approved.json()["approval"]["approval_parameters"]["recipient_caregiver_ids"] == [recipient.id]
+    assert approved.json()["approval"]["approval_parameters"]["recipient_caregiver_ids"] == [recipient_id]
 
     db = TestSessionLocal()
     try:
@@ -752,11 +761,13 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
     with engine.begin() as connection:
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+                (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :subject_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
             {
                 "id": "stale-handoff-fact",
                 "person_id": person_id,
+            "subject_type": "care_recipient",
+            "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports a calm morning.",
                 "epistemic_status": "reported",
@@ -932,8 +943,9 @@ def test_document_adapter_preserves_failed_ocr_without_claiming_extraction(clien
         )
         db.add(document)
         db.flush()
+        document_id = str(document.id)
         db.add(EvidenceUpload(
-            evidence_id=document.id,
+            evidence_id=document_id,
             filename="scanned-letter.pdf",
             mime_type="application/pdf",
             content=original,
@@ -944,7 +956,7 @@ def test_document_adapter_preserves_failed_ocr_without_claiming_extraction(clien
             id="handoff-failed-ocr-analysis",
             person_id=person_id,
             caregiver_id=caregiver_id,
-            source_evidence_id=document.id,
+            source_evidence_id=document_id,
             source_text="",
             extraction_status="failed",
             candidates={"kind": "document_extraction_v1", "binary_sha256": digest},
@@ -1030,11 +1042,13 @@ def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkey
     with engine.begin() as connection:
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+                (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :subject_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
             {
                 "id": "handoff-before-new-source",
                 "person_id": person_id,
+            "subject_type": "care_recipient",
+            "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports a settled morning.",
                 "epistemic_status": "reported",
@@ -1068,11 +1082,13 @@ def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkey
     with engine.begin() as connection:
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
+                (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :subject_id, :fact_type, :fact_value, :epistemic_status, :created_at)"""),
             {
                 "id": "handoff-after-new-source",
                 "person_id": person_id,
+            "subject_type": "care_recipient",
+            "subject_id": person_id,
                 "fact_type": "caregiver_observation",
                 "fact_value": "Caregiver reports a changed afternoon routine.",
                 "epistemic_status": "reported",

@@ -18,6 +18,8 @@ on:
       - "backend/scripts/**"
       - ".github/workflows/postgres-migration-validation.yml"
 
+  workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -57,6 +59,14 @@ jobs:
       - name: Upgrade fresh PostgreSQL database to head
         working-directory: backend
         run: python -m alembic upgrade head
+
+      - name: Verify document review migration downgrade and re-upgrade
+        working-directory: backend
+        run: |
+          set -Eeuo pipefail
+          python -m alembic downgrade 20261107_01_companion_lcr_review
+          python -m alembic upgrade head
+          python -m alembic current
 
       - name: Verify LCR history schema columns, indexes and foreign keys
         working-directory: backend
