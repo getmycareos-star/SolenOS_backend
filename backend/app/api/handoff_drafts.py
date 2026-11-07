@@ -1509,9 +1509,7 @@ def prepare_handoff_draft(
 
     generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
 
-    # One durable identity must bind the response and its audit event.
-    # This endpoint currently returns a structured preparation snapshot; the ID
-    # is correlation metadata, not a persisted editable draft identity.
+    # One durable identity binds the response, persisted draft, revision, and audit event.
     draft_id = str(uuid.uuid4())
     content_canonical = json.dumps(structured_content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     content_sha256 = hashlib.sha256(content_canonical.encode("utf-8")).hexdigest()
