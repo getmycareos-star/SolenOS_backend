@@ -224,6 +224,14 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 source_text="Rejected assertion", evidence_ids=[], assertion_status="rejected",
                 observed_at=now - timedelta(days=1), created_by_caregiver_id="caregiver-a",
             )
+            caregiver_reviewed = CareAssertion(
+                id="caregiver-reviewed-assertion", person_id="person-a", subject_type="person",
+                subject_id="person-a", field="sleep_pattern", assertion_kind="caregiver_reviewed_daily_care_observation",
+                asserted_value="Caregiver reviewed interrupted sleep observation", source_label="Caregiver review",
+                source_text="Original daily care note and caregiver correction", evidence_ids=[],
+                assertion_status="caregiver_reviewed", observed_at=now - timedelta(days=1),
+                created_by_caregiver_id="caregiver-a",
+            )
             pending = CareAssertion(
                 id="pending-assertion", person_id="person-a", subject_type="person",
                 subject_id="person-a", field="sleep_pattern", assertion_kind="reported_state",
@@ -276,7 +284,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 id="other-caregiver-session", person_id="person-a", caregiver_id="caregiver-b", status="active"
             )
             db.add_all([
-                event, accepted, pending, rejected, extraction, other_caregiver_extraction,
+                event, accepted, pending, rejected, caregiver_reviewed, extraction, other_caregiver_extraction,
                 failed_extraction, other_person_event, other_person_assertion,
                 other_person_extraction, prior_session, other_caregiver_session, other_person_session,
             ])
@@ -309,7 +317,9 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         sources = context["sources"]
         assert {row["id"] for row in sources["events"]["items"]} >= {"daily-care-event"}
         assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-extraction"}
-        assert {row["id"] for row in sources["assertions"]["items"]} == {"accepted-assertion"}
+        assert {row["id"] for row in sources["assertions"]["items"]} == {
+            "accepted-assertion", "caregiver-reviewed-assertion"
+        }
         assert "pending-assertion" not in str(sources["assertions"])
         assert "rejected-assertion" not in str(sources["assertions"])
         assert "failed-document-extraction" not in str(sources["document_extractions"])
@@ -375,6 +385,14 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
                     "field": "sleep_pattern", "assertion_kind": "reported_state", "asserted_value": "Pending claim",
                     "source_label": "Model proposal", "source_text": "Unreviewed sleep claim", "evidence_ids": [],
                     "assertion_status": "reported", "observed_at": now - timedelta(days=1),
+                },
+                {
+                    "id": "caregiver-reviewed-local", "person_id": "person-local", "subject_type": "person", "subject_id": "person-local",
+                    "field": "sleep_pattern", "assertion_kind": "caregiver_reviewed_daily_care_observation",
+                    "asserted_value": "Caregiver reviewed sleep observation", "source_label": "Caregiver review",
+                    "source_text": "Original and corrected Daily Care values", "evidence_ids": [],
+                    "assertion_status": "caregiver_reviewed", "observed_at": now - timedelta(days=1),
+                    "created_by_caregiver_id": "caregiver-local",
                 },
             ])
             connection.execute(CaptureAnalysis.__table__.insert(), {
