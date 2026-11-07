@@ -1198,7 +1198,10 @@ def main():
                 and daily_replay.get("id") == daily_event_id
                 and daily_replay.get("evidence_ids") == [daily_evidence_id]
                 and daily_replay.get("idempotent_replay") is True
-                and daily_replay.get("qwen_analysis_id") == daily_analysis_id,
+                and daily_replay.get("qwen_analysis_id") == daily_analysis_id
+                and daily_replay.get("qwen_review_required") is False
+                and [item.get("review_status") for item in daily_replay.get("qwen_candidates", {}).get("observations", [])]
+                    == ["accepted_by_caregiver", "rejected_by_caregiver"],
                 f"Unchanged Daily Care retry must restore the persisted candidate analysis and original IDs: {status}: {daily_replay}")
 
         retry_db = SessionLocal()
