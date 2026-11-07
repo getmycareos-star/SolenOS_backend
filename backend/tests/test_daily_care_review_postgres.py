@@ -1,18 +1,24 @@
 """Real PostgreSQL integration coverage for Daily Care candidate review and LCR writes."""
+import hashlib
 import json
 import os
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.capture_review import review_capture_candidate
+from app.core.database import get_db
+from app.main import app
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.anonymous_session import AnonymousSession
 from app.models.care_continuity import CareAssertion
 from app.schemas.capture_review import CaptureCandidateReview
 from app.services.lcr_context import build_lcr_context
@@ -174,6 +180,49 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres():
             assert sum(item["id"] == assertion_id for item in assertion_items) == 1
             assert not any(item.get("asserted_value") == "Unconfirmed generated suggestion" for item in assertion_items)
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 1
+
+            # Retrieve through the authenticated HTTP projection using a newly
+            # issued bearer session, not the session that performed the review.
+            fresh_token = secrets.token_urlsafe(32)
+            foreign_token = secrets.token_urlsafe(32)
+            db.add_all([
+                AnonymousSession(
+                    id=f"daily-session-{suffix}", person_id=person_id, caregiver_id=caregiver_id,
+                    token_hash=hashlib.sha256(fresh_token.encode()).hexdigest(),
+                    expires_at=now + timedelta(days=1),
+                ),
+                AnonymousSession(
+                    id=f"daily-foreign-session-{suffix}", person_id=other_person_id,
+                    caregiver_id=other_caregiver_id,
+                    token_hash=hashlib.sha256(foreign_token.encode()).hexdigest(),
+                    expires_at=now + timedelta(days=1),
+                ),
+            ])
+            db.commit()
+            SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            def override_db():
+                request_db = SessionFactory()
+                try:
+                    yield request_db
+                finally:
+                    request_db.close()
+            app.dependency_overrides[get_db] = override_db
+            try:
+                with TestClient(app) as client:
+                    fresh_lcr = client.get(
+                        "/api/v1/care-continuity/current-care?limit_per_source=50",
+                        headers={"Authorization": f"Bearer {fresh_token}"},
+                    )
+                    assert fresh_lcr.status_code == 200, fresh_lcr.text
+                    assert sum(item.get("id") == assertion_id for item in fresh_lcr.json().get("items", [])) == 1
+                    foreign_lcr = client.get(
+                        "/api/v1/care-continuity/current-care?limit_per_source=50",
+                        headers={"Authorization": f"Bearer {foreign_token}"},
+                    )
+                    assert foreign_lcr.status_code == 200, foreign_lcr.text
+                    assert not any(item.get("id") == assertion_id for item in foreign_lcr.json().get("items", []))
+            finally:
+                app.dependency_overrides.pop(get_db, None)
 
             denied = False
             try:
