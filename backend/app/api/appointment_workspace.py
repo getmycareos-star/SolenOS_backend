@@ -192,7 +192,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "extraction_method": metadata.get("extraction_method"),
                 "extraction_status": extraction.extraction_status,
                 "extracted_text": (extraction.source_text or "")[:4000],
-                "source_text_sha256": __import__("hashlib").sha256(
+                "source_text_sha256": hashlib.sha256(
                     (extraction.source_text or "").encode("utf-8")
                 ).hexdigest(),
                 "recorded_at": _iso(extraction.created_at),
