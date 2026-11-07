@@ -809,7 +809,7 @@ def review_appointment_outcome_proposal(
             assertion = CareAssertion(
                 id=str(uuid.uuid4()),
                 person_id=person_id,
-                subject_type="care_recipient",
+                subject_type="person",
                 subject_id=person_id,
                 field=str(original.get("field") or "appointment_observation"),
                 assertion_kind="time_bound_observation",
