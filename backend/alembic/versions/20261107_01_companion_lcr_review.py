@@ -45,6 +45,7 @@ def upgrade():
         sa.Column("source_conversation_id", sa.String(), sa.ForeignKey("conversation_sessions.id", ondelete="SET NULL"), nullable=True),
         sa.Column("source_message_id", sa.String(), sa.ForeignKey("conversation_messages.id", ondelete="SET NULL"), nullable=True),
         sa.Column("source_proposal_id", sa.String(), sa.ForeignKey("ai_output_lcr_proposals.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("event_time_text", sa.Text(), nullable=True),
     ):
         if column.name not in assertion_columns:
             op.add_column("care_assertions", column)
