@@ -21,6 +21,9 @@ from pathlib import Path
 from app.core.database import SessionLocal
 from app.core.change_enums import SituationType, SituationState
 from app.models.change import Situation as SituationModel
+from app.models.capture_analysis import CaptureAnalysis
+from app.models.care import CareEvent
+from app.models.care_continuity import CareAssertion
 
 BASE_URL = "http://127.0.0.1:8012"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -1009,6 +1012,151 @@ def main():
                 and lcr_matches[0].get("source_label") == "Caregiver"
                 and lcr_matches[0].get("source_type") == "caregiver_report",
                 f"LCR did not reconcile the same authorized caregiver source: {lcr_matches}")
+
+        # Exercise the caregiver review lifecycle against this real PostgreSQL
+        # Daily Care event. Candidate generation is seeded as a persisted extraction
+        # so this test does not depend on an external Qwen model being available.
+        source_db = SessionLocal()
+        try:
+            source_event = source_db.query(CareEvent).filter_by(id=daily_event_id, person_id=person_a).one()
+            original_event_description = source_event.description
+            analysis = CaptureAnalysis(
+                person_id=person_a,
+                caregiver_id=caregiver_a,
+                source_event_id=daily_event_id,
+                source_evidence_id=daily_evidence_id,
+                source_text=original_event_description or daily_capture_payload["notes"],
+                extraction_status="available",
+                candidates={"observations": [
+                    {
+                        "subject": "sleep",
+                        "observation": "Generated suggestion: interrupted sleep.",
+                        "source_quote": daily_capture_payload["notes"],
+                        "review_status": "pending_review",
+                    },
+                    {
+                        "subject": "mood",
+                        "observation": "Generated suggestion that the caregiver did not confirm.",
+                        "source_quote": daily_capture_payload["notes"],
+                        "review_status": "pending_review",
+                    },
+                ]},
+                review_history=[],
+            )
+            source_db.add(analysis)
+            source_db.commit()
+            source_db.refresh(analysis)
+            daily_analysis_id = analysis.id
+        finally:
+            source_db.close()
+
+        status, corrected_review = request(
+            "POST",
+            f"/api/v1/capture/analyses/{daily_analysis_id}/review",
+            token=token_a,
+            body={
+                "candidate_index": 0,
+                "decision": "correct",
+                "corrected_subject": "sleep",
+                "corrected_observation": "Caregiver corrected the report: sleep was interrupted twice overnight.",
+            },
+        )
+        require(status == 200
+                and corrected_review.get("written_to_lcr") is False
+                and corrected_review.get("candidate", {}).get("review_status") == "corrected_pending_approval",
+                f"Daily Care correction must remain pending: {status}: {corrected_review}")
+        source_db = SessionLocal()
+        try:
+            require(source_db.query(CareAssertion).filter_by(person_id=person_a).count() == 0,
+                    "Corrected-but-unapproved Daily Care candidate must not create an LCR assertion")
+        finally:
+            source_db.close()
+
+        status, accepted_review = request(
+            "POST",
+            f"/api/v1/capture/analyses/{daily_analysis_id}/review",
+            token=token_a,
+            body={"candidate_index": 0, "decision": "accept"},
+        )
+        require(status == 200
+                and accepted_review.get("written_to_lcr") is True
+                and accepted_review.get("assertion_id"),
+                f"Explicit Daily Care acceptance must create an LCR assertion: {status}: {accepted_review}")
+        accepted_assertion_id = accepted_review["assertion_id"]
+
+        status, repeated_acceptance = request(
+            "POST",
+            f"/api/v1/capture/analyses/{daily_analysis_id}/review",
+            token=token_a,
+            body={"candidate_index": 0, "decision": "accept"},
+        )
+        require(status == 409, f"Repeated acceptance must not create a duplicate assertion: {status}: {repeated_acceptance}")
+
+        status, rejected_review = request(
+            "POST",
+            f"/api/v1/capture/analyses/{daily_analysis_id}/review",
+            token=token_a,
+            body={"candidate_index": 1, "decision": "reject"},
+        )
+        require(status == 200
+                and rejected_review.get("written_to_lcr") is False
+                and rejected_review.get("candidate", {}).get("review_status") == "rejected_by_caregiver",
+                f"Daily Care rejection must remain excluded from LCR: {status}: {rejected_review}")
+        status, rejected_retry = request(
+            "POST",
+            f"/api/v1/capture/analyses/{daily_analysis_id}/review",
+            token=token_a,
+            body={"candidate_index": 1, "decision": "accept"},
+        )
+        require(status == 409, f"Rejected candidate must remain final after retry: {status}: {rejected_retry}")
+
+        source_db = SessionLocal()
+        try:
+            assertions = source_db.query(CareAssertion).filter_by(
+                person_id=person_a, source_event_id=daily_event_id,
+            ).all()
+            require(len(assertions) == 1 and assertions[0].id == accepted_assertion_id,
+                    f"Exactly one source-linked assertion must persist: {[row.id for row in assertions]}")
+            assertion = assertions[0]
+            require(assertion.evidence_ids == [daily_evidence_id]
+                    and assertion.created_by_caregiver_id == caregiver_a
+                    and assertion.assertion_status == "caregiver_reviewed"
+                    and assertion.observed_at == source_event.occurred_at,
+                    "Accepted assertion lost evidence, caregiver attribution, review status or event time")
+            persisted_analysis = source_db.query(CaptureAnalysis).filter_by(id=daily_analysis_id).one()
+            require(len(persisted_analysis.review_history) == 3,
+                    "Correction, acceptance and rejection must all be preserved in review history")
+            require(persisted_analysis.review_history[0]["original_candidate"]["observation"] == "Generated suggestion: interrupted sleep.",
+                    "Correction history did not preserve the generated original candidate")
+            require(persisted_analysis.review_history[0]["reviewed_by_caregiver_id"] == caregiver_a,
+                    "Correction history lost caregiver attribution")
+            persisted_event = source_db.query(CareEvent).filter_by(id=daily_event_id).one()
+            require(persisted_event.description == original_event_description,
+                    "Caregiver review mutated the original Daily Care observation")
+        finally:
+            source_db.close()
+
+        status, reviewed_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
+        )
+        require(status == 200, f"Reviewed LCR read failed: {status}: {reviewed_lcr}")
+        reviewed_assertions = [
+            row for row in reviewed_lcr.get("items", [])
+            if row.get("id") == accepted_assertion_id
+        ]
+        require(len(reviewed_assertions) == 1,
+                f"Accepted Daily Care assertion was not returned by LCR retrieval: {reviewed_assertions}")
+
+        status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_a)
+        require(status == 200 and refreshed.get("access_token"),
+                f"Daily Care session refresh failed: {status}: {refreshed}")
+        token_a = refreshed["access_token"]
+        status, refreshed_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
+        )
+        require(status == 200 and any(
+            row.get("id") == accepted_assertion_id for row in refreshed_lcr.get("items", [])
+        ), "Accepted Daily Care assertion did not survive session refresh and retrieval")
 
         status, daily_evidence = request(
             "GET", f"/api/v1/evidence/{person_a}", token=token_a,
