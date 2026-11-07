@@ -302,6 +302,8 @@ def test_structured_daily_capture_retry_is_idempotent_and_changed_payload_confli
         assert replay_receipt["id"] == first_receipt["id"]
         assert replay_receipt["evidence_ids"] == first_receipt["evidence_ids"]
         assert replay_receipt["idempotent_replay"] is True
+        assert replay_receipt["qwen_analysis_id"] == first_receipt["qwen_analysis_id"]
+        assert replay_receipt["qwen_extraction_status"] == first_receipt["qwen_extraction_status"]
 
         changed = client.post(
             "/api/v1/daily/log",
