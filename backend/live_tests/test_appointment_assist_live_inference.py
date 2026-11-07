@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent, Evidence
-from app.models.collaboration import ConversationMessage
+from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
 from app.models.time_location import Appointment
 from app.main import app
@@ -116,11 +116,11 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
             assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
             assert db.query(ConversationMessage).join(
-                __import__("app.models.collaboration", fromlist=["ConversationSession"]).ConversationSession,
-                ConversationMessage.session_id == __import__("app.models.collaboration", fromlist=["ConversationSession"]).ConversationSession.id,
+                ConversationSession,
+                ConversationMessage.session_id == ConversationSession.id,
             ).filter(
-                __import__("app.models.collaboration", fromlist=["ConversationSession"]).ConversationSession.person_id == person_id,
-                __import__("app.models.collaboration", fromlist=["ConversationSession"]).ConversationSession.caregiver_id == caregiver_id,
+                ConversationSession.person_id == person_id,
+                ConversationSession.caregiver_id == caregiver_id,
             ).count() == 0
             persisted = db.query(Appointment).filter_by(id=appointment_id, person_id=person_id).one()
             assert persisted.status == "scheduled"
