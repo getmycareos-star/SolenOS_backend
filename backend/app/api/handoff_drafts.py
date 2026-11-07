@@ -319,6 +319,7 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "template_sections": content.get("template_sections", []),
         "sections": content.get("sections", []),
         "generation": content.get("generation", {}),
+        "caregiver_notes": content.get("caregiver_notes", []),
         "source_statuses": snapshot.get("source_statuses", {}),
         "source_references": [
             {key: item.get(key) for key in (
@@ -343,6 +344,18 @@ def _validate_draft_quotes(content: dict, source_snapshot: dict) -> bool:
     sections = generation.get("sections") if isinstance(generation, dict) else None
     if not isinstance(sections, list):
         return False
+    notes = content.get("caregiver_notes", []) if isinstance(content, dict) else []
+    if not isinstance(notes, list) or len(notes) > 20:
+        return False
+    for note in notes:
+        if (
+            not isinstance(note, dict)
+            or note.get("attribution") != "caregiver_authored_unverified"
+            or not isinstance(note.get("text"), str)
+            or not note["text"].strip()
+            or len(note["text"]) > 2000
+        ):
+            return False
     source_records = source_snapshot.get("source_records", [])
     source_by_ref = {
         f"{row.get('source_table')}:{row.get('source_id')}": row
@@ -515,12 +528,20 @@ def save_handoff_draft_revision(
     ).with_for_update().first()
     if draft is None:
         raise HTTPException(status_code=404, detail="Handoff draft not found")
-    serialized = json.dumps(payload.content, ensure_ascii=False, separators=(",", ":"), default=str)
+    edited_content = dict(payload.content)
+    raw_notes = edited_content.get("caregiver_notes", [])
+    if isinstance(raw_notes, list):
+        edited_content["caregiver_notes"] = [
+            {"text": note.strip(), "attribution": "caregiver_authored_unverified"}
+            if isinstance(note, str) else note
+            for note in raw_notes
+        ]
+    serialized = json.dumps(edited_content, ensure_ascii=False, separators=(",", ":"), default=str)
     if len(serialized) > 40000:
         raise HTTPException(status_code=413, detail="Draft content exceeds the supported size")
-    if not _validate_draft_quotes(payload.content, draft.source_snapshot or {}):
+    if not _validate_draft_quotes(edited_content, draft.source_snapshot or {}):
         raise HTTPException(status_code=422, detail="Draft contains unsupported text or source references; only exact retrieved quotations can be saved as grounded content")
-    content_hash = _draft_content_hash(payload.content)
+    content_hash = _draft_content_hash(edited_content)
     if content_hash == _draft_content_hash(draft.structured_content or {}):
         return _draft_response(draft)
     next_revision = int(draft.revision_number or 0) + 1
@@ -530,13 +551,13 @@ def save_handoff_draft_revision(
         person_id=person_id,
         caregiver_id=caregiver_id,
         revision_number=next_revision,
-        content=payload.content,
+        content=edited_content,
         source_snapshot=draft.source_snapshot,
         content_sha256=content_hash,
         change_type="caregiver_edit",
         created_by_caregiver_id=caregiver_id,
     )
-    draft.structured_content = payload.content
+    draft.structured_content = edited_content
     draft.revision_number = next_revision
     draft.review_status = "pending_review"
     draft.approved_at = None
