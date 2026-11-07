@@ -350,7 +350,7 @@ jobs:
   qwen-image-build:
     # The full model-image/inference check is only needed for Qwen-specific PRs.
     # Database and API changes should not wait on a heavyweight model build.
-    if: github.event_name == 'pull_request' && (contains(github.event.pull_request.title, 'qwen') || contains(github.event.pull_request.head.ref, 'qwen'))
+    if: (github.event_name == 'pull_request' && (contains(github.event.pull_request.title, 'qwen') || contains(github.event.pull_request.head.ref, 'qwen'))) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'handoff'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -469,6 +469,78 @@ jobs:
             -d "$daily_event_payload" \
             http://127.0.0.1:8080/api/v1/events)
           daily_event_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$daily_event")
+
+          echo "QWEN_E2E: persisted Care Handoff draft uses actual configured Qwen inference"
+          handoff_event_payload=$(python -c 'import json,sys; print(json.dumps({
+            "person_id":sys.argv[1],
+            "event_type":"structured_daily_capture",
+            "status":"recorded",
+            "occurred_at":"2026-11-07T08:00:00Z",
+            "occurred_at_timezone":"Africa/Lagos",
+            "title":"CI handoff Daily Care observation",
+            "description":"Caregiver reports that lunch was only partly eaten today. The reason has not been established.",
+            "created_by_caregiver_id":sys.argv[2],
+            "time_provenance":"caregiver_reported",
+            "tags":["daily_capture","handoff_qwen_e2e"]
+          }))' "$daily_person_id" "$daily_caregiver_id")
+          handoff_event=$(curl --fail --silent --show-error \
+            -H "$daily_auth_header" -H "Content-Type: application/json" \
+            -d "$handoff_event_payload" \
+            http://127.0.0.1:8080/api/v1/events)
+          handoff_event_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$handoff_event")
+          handoff_ready=0
+          for attempt in $(seq 1 3); do
+            handoff_request_id="qwen-handoff-e2e-$attempt"
+            handoff_status=$(curl --silent --show-error --output /tmp/qwen-handoff-draft.json --write-out '%{http_code}' --max-time 120 \
+              -H "$daily_auth_header" -H "X-Request-ID: $handoff_request_id" -H "Content-Type: application/json" \
+              -d '{"purpose":"family_transition","audience":"family","window_days":30}' \
+              http://127.0.0.1:8080/api/v1/handoff-drafts/prepare || true)
+            if [ "$handoff_status" = "200" ]; then
+              if HANDOFF_EVENT_ID="$handoff_event_id" python - <<'PY'
+          import json, os
+          d = json.load(open("/tmp/qwen-handoff-draft.json"))
+          assert d.get("generation_status") == "generated", d
+          generation = d.get("generation", {})
+          assert generation.get("status") == "generated", d
+          assert generation.get("provider") == "ollama", d
+          assert generation.get("model") == "qwen3.5:4b", d
+          assert d.get("source_statuses", {}).get("daily_care", {}).get("status") == "available", d
+          refs = {f"{item['source_table']}:{item['source_id']}": item for item in d.get("source_references", [])}
+          sources = {f"{item['source_table']}:{item['source_id']}": item for group in d.get("sections", []) for item in group.get("items", [])}
+          generated = generation.get("sections", [])
+          assert generated, d
+          assert any(item.get("source_ref") == f"care_events:{os.environ['HANDOFF_EVENT_ID']}" for item in generated), generated
+          for item in generated:
+              assert item["source_ref"] in refs, item
+              source = sources.get(item["source_ref"])
+              assert source and item["text"] in source.get("text", ""), item
+          print("LIVE_QWEN_HANDOFF_DRAFT=" + d["draft_id"])
+          PY
+              then
+                handoff_ready=1
+                break
+              fi
+            fi
+            echo "Live Qwen handoff draft failed validation (HTTP $handoff_status, attempt $attempt/3)." >&2
+            cat /tmp/qwen-handoff-draft.json >&2 || true
+            sleep 3
+          done
+          if [ "$handoff_ready" -ne 1 ]; then
+            echo "Actual Qwen did not produce a backend-validated persisted handoff draft." >&2
+            exit 1
+          fi
+          handoff_draft_id=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["draft_id"])' /tmp/qwen-handoff-draft.json)
+          curl --fail --silent --show-error -H "$daily_auth_header" \
+            "http://127.0.0.1:8080/api/v1/handoff-drafts/$handoff_draft_id" >/tmp/qwen-handoff-retrieved.json
+          python - <<'PY'
+          import json
+          d = json.load(open("/tmp/qwen-handoff-retrieved.json"))
+          assert d["draft_id"]
+          assert d["generation_status"] == "generated"
+          assert d["source_freshness"]["status"] == "current", d
+          assert len(d["revision_history"]) == 1, d
+          print("LIVE_QWEN_HANDOFF_PERSISTENCE=PASS")
+          PY
           daily_question=$(python -c 'import json,sys; print(json.dumps({
             "question":"What was recorded about breakfast intake? Cite the source ID and date, and say what remains unknown.",
             "history_query":"breakfast",
