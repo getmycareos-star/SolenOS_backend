@@ -388,8 +388,37 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         if not source_record_ids:
             raise HTTPException(status_code=422, detail="The approved draft has no server-resolvable source records")
         validated_source_records = _validate_summary_source_record_ids(db, person_id, source_record_ids)
+        source_statuses = source_snapshot.get("source_statuses", {})
+        scope_source_keys = {
+            "lcr_summary": set(source_statuses) - {"documents", "appointments", "actions", "open_questions", "information_gaps", "community", "evidence_lineage"},
+            "documents": {"documents"},
+            "appointments": {"appointments"},
+            "open_loops": {"actions", "open_questions", "information_gaps"},
+        }
+        included_source_keys = set().union(*(scope_source_keys.get(scope_key, set()) for scope_key in payload.scope))
+        source_coverage = {key: value for key, value in source_statuses.items() if key in included_source_keys}
+        source_limitations = [
+            item for item in source_snapshot.get("limitations", [])
+            if item.get("source") in included_source_keys
+        ]
+        source_references = [{
+            "source_ref": item.get("source_ref"),
+            "epistemic_status": item.get("epistemic_status"),
+            "record_status": item.get("record_status"),
+            "event_at": item.get("event_at"),
+            "recorded_at": item.get("recorded_at"),
+            "stale_warning": bool(item.get("stale_warning")),
+        } for item in generated_sections if item.get("source_ref") in source_by_ref and (
+            "documents" in payload.scope or not str(source_by_ref[item["source_ref"]].get("source_type", "")).startswith("document_")
+        )]
         snapshot = {
+            "purpose": approved_draft.purpose,
+            "audience": approved_draft.audience,
+            "window": source_snapshot.get("window"),
             "sections": summary_sections,
+            "source_coverage": source_coverage,
+            "limitations": source_limitations,
+            "source_references": source_references,
             "source_record_ids": source_record_ids,
             "source_record_tables": validated_source_records,
             "prepared_at": approved_draft.created_at.isoformat() if approved_draft.created_at else None,
