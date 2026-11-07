@@ -885,7 +885,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 "stale_warning": bool(document.occurred_at and document.occurred_at < datetime.now(timezone.utc) - timedelta(days=30)),
             })
         status = "available" if output else "unavailable" if missing_originals else "empty"
-        reason = "original_upload_bytes_unavailable" if missing_originals and not output else None
+        reason = "original_upload_bytes_unavailable" if missing_originals and not output else "some_original_uploads_unavailable" if missing_originals else None
         result = {"status": status, "label": "Uploaded documents and extracted text", "count": len(output)}
         if reason:
             result["reason"] = reason
@@ -1205,7 +1205,7 @@ def prepare_handoff_draft(
     gaps = [
         {"source": name, "status": info["status"], "reason": info.get("reason")}
         for name, info in statuses.items()
-        if info["status"] in {"unavailable", "not_authorized"}
+        if info["status"] in {"unavailable", "not_authorized", "failed"}
     ]
     # Persist the complete source snapshot and initial generated revision in the
     # same transaction as its audit event. A request ID makes network retries safe.
