@@ -343,6 +343,38 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             assert reported_done.json()["outcome_status"] == "outcome_reported"
             assert reported_done.json()["status"] == "open"
 
+            # Closing the appointment workspace with outstanding work must
+            # never close or erase the independently persisted Open Loop.
+            workspace_state = client.get(
+                f"/api/v1/appointment-workspaces/{record_id}",
+                headers=fresh_headers,
+            )
+            assert workspace_state.status_code == 200, workspace_state.text
+            workspace_version = workspace_state.json()["version_number"]
+            workspace_payload = workspace_state.json()["payload"]
+            for next_status, key in (
+                ("follow_up_pending", "pg-appointment-follow-up-stage"),
+                ("closed_with_outstanding_items", "pg-appointment-close-outstanding"),
+            ):
+                closed = client.patch(
+                    f"/api/v1/appointment-workspaces/{record_id}",
+                    headers=fresh_headers,
+                    json={
+                        "expected_version": workspace_version,
+                        "status": next_status,
+                        "payload": workspace_payload,
+                        "change_reason": "PostgreSQL acceptance: retain outstanding follow-up independently",
+                        "idempotency_key": key,
+                    },
+                )
+                assert closed.status_code == 200, closed.text
+                workspace_version = closed.json()["version_number"]
+                assert closed.json()["status"] == next_status
+
+            still_open = client.get(f"/api/v1/open-loops/{loop_id}", headers=fresh_headers)
+            assert still_open.status_code == 200, still_open.text
+            assert still_open.json()["loop"]["status"] == "open"
+
             foreign_follow_up = client.get(f"/api/v1/open-loops/{loop_id}", headers=other_headers)
             assert foreign_follow_up.status_code == 404, foreign_follow_up.text
 
