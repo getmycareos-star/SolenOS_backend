@@ -65,11 +65,12 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_chat)
 
-    original = "The caregiver recorded a change during the morning routine."
+    event_time_text = "2026-11-06T18:00:00+01:00"
+    original = "The caregiver recorded a change during the morning routine at " + event_time_text + "."
     monkeypatch.setattr(
         collaboration,
         "extract_companion_care_candidates",
-        lambda source: {"observations": [{"source_quote": original}] if source == original else [],
+        lambda source: {"observations": [{"source_quote": original, "event_time_quote": event_time_text}] if source == original else [],
     )
     client = TestClient(app)
     try:
@@ -106,6 +107,12 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         current = client.get("/api/v1/care-continuity/current-care", headers=first_auth)
         assert current.status_code == 200, current.text
         assert any(item.get("id") == assertion_id for item in current.json().get("items", []))
+        with TestingSessionLocal() as db:
+            assertion = db.query(CareAssertion).filter_by(id=assertion_id).one()
+            assert assertion.event_time_text == event_time_text
+            assert assertion.observed_at is not None
+            assert assertion.recorded_at is not None
+            assert assertion.observed_at != assertion.recorded_at
 
         # A later Companion turn must receive the accepted assertion through the shared retrieval path.
         monkeypatch.setattr(collaboration, "extract_companion_care_candidates", lambda source: {"observations": []})
