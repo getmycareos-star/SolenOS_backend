@@ -11,6 +11,7 @@ from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
+care_updates = importlib.import_module("app.services.companion_care_updates")
 app = main_module.app
 engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -30,7 +31,7 @@ def setup_client(monkeypatch, extraction):
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", lambda *a, **k: "I understand. I can help you keep the care information clear.")
-    monkeypatch.setattr(collaboration, "extract_companion_care_candidates", lambda source: extraction(source))
+    monkeypatch.setattr(care_updates, "extract_companion_care_candidates", lambda source: extraction(source))
     return TestClient(app)
 
 
