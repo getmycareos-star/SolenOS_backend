@@ -1020,6 +1020,7 @@ def main():
         try:
             source_event = source_db.query(CareEvent).filter_by(id=daily_event_id, person_id=person_a).one()
             original_event_description = source_event.description
+            original_event_occurred_at = source_event.occurred_at
             analysis = CaptureAnalysis(
                 person_id=person_a,
                 caregiver_id=caregiver_a,
@@ -1121,7 +1122,7 @@ def main():
             require(assertion.evidence_ids == [daily_evidence_id]
                     and assertion.created_by_caregiver_id == caregiver_a
                     and assertion.assertion_status == "caregiver_reviewed"
-                    and assertion.observed_at == source_event.occurred_at,
+                    and assertion.observed_at == original_event_occurred_at,
                     "Accepted assertion lost evidence, caregiver attribution, review status or event time")
             persisted_analysis = source_db.query(CaptureAnalysis).filter_by(id=daily_analysis_id).one()
             require(len(persisted_analysis.review_history) == 3,
@@ -1157,6 +1158,13 @@ def main():
         require(status == 200 and any(
             row.get("id") == accepted_assertion_id for row in refreshed_lcr.get("items", [])
         ), "Accepted Daily Care assertion did not survive session refresh and retrieval")
+
+        status, foreign_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_b,
+        )
+        require(status == 200 and not any(
+            row.get("id") == accepted_assertion_id for row in foreign_lcr.get("items", [])
+        ), "A different care recipient session received another person's accepted assertion")
 
         status, daily_evidence = request(
             "GET", f"/api/v1/evidence/{person_a}", token=token_a,
