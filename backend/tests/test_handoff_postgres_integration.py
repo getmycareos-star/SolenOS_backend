@@ -386,3 +386,18 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert revoked.status_code == 200, revoked.text
     blocked = client.get(f"/api/v1/handoffs/{handoff_id}/summary", headers=recipient_headers)
     assert blocked.status_code == 404
+
+    revoked_consent = client.post("/api/v1/consent", headers=owner_headers, json={
+        "person_id": owner["person"]["id"],
+        "caregiver_id": owner["caregiver"]["id"],
+        "action": "revoke",
+    })
+    assert revoked_consent.status_code == 200, revoked_consent.text
+    assert revoked_consent.json()["verified"] is False
+    denied_after_consent_revocation = client.post("/api/v1/handoffs", headers=owner_headers, json={
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [recipient_id],
+        "scope": ["lcr_summary"],
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+    })
+    assert denied_after_consent_revocation.status_code == 403, denied_after_consent_revocation.text
