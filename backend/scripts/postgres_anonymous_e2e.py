@@ -1197,8 +1197,9 @@ def main():
         require(status == 200
                 and daily_replay.get("id") == daily_event_id
                 and daily_replay.get("evidence_ids") == [daily_evidence_id]
-                and daily_replay.get("idempotent_replay") is True,
-                f"Unchanged Daily Care retry created a duplicate or changed its IDs: {status}: {daily_replay}")
+                and daily_replay.get("idempotent_replay") is True
+                and daily_replay.get("qwen_analysis_id") == daily_analysis_id,
+                f"Unchanged Daily Care retry must restore the persisted candidate analysis and original IDs: {status}: {daily_replay}")
 
         retry_db = SessionLocal()
         try:
