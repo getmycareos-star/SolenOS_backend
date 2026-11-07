@@ -874,13 +874,19 @@ jobs:
             echo "Expected populated legacy schema migration to fail closed."
             exit 1
           fi
-          grep -q "requires a reviewed identity mapping" /tmp/legacy-upgrade.log
-          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM caregivers WHERE id='legacy-caregiver-1'")" = "1"
-          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='caregivers' AND column_name='name'")" = "0"
+          cat /tmp/legacy-upgrade.log
+          grep -qi "requires a reviewed identity mapping" /tmp/legacy-upgrade.log
+          legacy_rows="$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM caregivers WHERE id='legacy-caregiver-1'")"
+          echo "Legacy caregiver rows preserved: $legacy_rows"
+          test "$legacy_rows" = "1"
+          added_name_column="$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='caregivers' AND column_name='name'")"
+          echo "Care-record name columns added to populated legacy table: $added_name_column"
+          test "$added_name_column" = "0"
           # Alembic may roll back its version table together with the failed upgrade transaction.
           version_table_exists="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.alembic_version') IS NOT NULL")"
           if [ "$version_table_exists" = "t" ]; then
             version="$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")"
+            echo "Alembic version after fail-closed migration: $version"
             test "$version" = "20261022_02"
           else
             echo "Alembic version table rolled back with failed upgrade transaction; legacy data and schema checks passed."
