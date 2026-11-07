@@ -22,7 +22,7 @@ from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraf
 from app.models.care import Evidence, CareEvent, Caregiver
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
-from app.models.care_continuity import EvidenceSourceRelationship
+from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
@@ -847,7 +847,26 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             return {"status": "empty", "label": "Uploaded documents and extracted text", "count": 0}, []
         output = []
         missing_originals = 0
+        assertion_rows = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+        ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
         for document in documents:
+            document_assertions = [
+                row for row in assertion_rows
+                if str(document.id) in [str(value) for value in (row.evidence_ids or [])]
+            ]
+            accepted_assertions = [
+                row for row in document_assertions
+                if row.assertion_status == "caregiver_reviewed"
+            ]
+            assertion_references = [{
+                "assertion_id": row.id,
+                "status": row.assertion_status,
+                "field": row.field,
+                "source_event_id": row.source_event_id,
+                "recorded_at": _iso(row.recorded_at),
+                "created_by_caregiver_id": row.created_by_caregiver_id,
+            } for row in document_assertions]
             upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == document.id).first()
             if upload is None:
                 missing_originals += 1
@@ -887,7 +906,9 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                             "extraction_status": extraction.extraction_status,
                             "extraction_method": extraction_details.get("extraction_method"),
                             "extraction_version": None,
-                            "caregiver_review_status": "not_reviewed",
+                            "caregiver_review_status": "caregiver_reviewed_assertions_exist" if accepted_assertions else "not_reviewed",
+                            "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
+                            "assertion_references": assertion_references,
                             "review_history_count": len(extraction.review_history or []),
                             "revision_status": "extraction_record_id_is_revision_reference",
                         },
@@ -926,7 +947,9 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                     "binary_sha256": upload.sha256,
                     "file_size_bytes": upload.size_bytes,
                     "extraction_status": extraction.extraction_status if extraction else "not_extracted",
-                    "caregiver_review_status": "not_reviewed",
+                    "caregiver_review_status": "caregiver_reviewed_assertions_exist" if accepted_assertions else "not_reviewed",
+                    "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
+                    "assertion_references": assertion_references,
                     "source_revision": None,
                     "revision_status": "revision_not_exposed_by_source",
                 },
