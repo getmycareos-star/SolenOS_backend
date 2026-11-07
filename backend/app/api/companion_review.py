@@ -73,6 +73,40 @@ def list_companion_care_updates(
     return {"items": [_proposal_json(item) for item in proposals]}
 
 
+@router.get("/{proposal_id}/history")
+def companion_care_update_history(
+    proposal_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    proposal = db.query(AIOutputLCRProposal).filter(
+        AIOutputLCRProposal.id == proposal_id,
+        AIOutputLCRProposal.person_id == person_id,
+        AIOutputLCRProposal.caregiver_id == caregiver_id,
+        AIOutputLCRProposal.proposal_type == "companion_care_observation",
+    ).first()
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Care-update proposal not found")
+    decisions = db.query(AIOutputLCRDecision).filter(
+        AIOutputLCRDecision.proposal_id == proposal.id,
+        AIOutputLCRDecision.person_id == person_id,
+    ).order_by(AIOutputLCRDecision.created_at.asc(), AIOutputLCRDecision.id.asc()).all()
+    return {
+        "proposal": _proposal_json(proposal),
+        "items": [{
+            "id": item.id,
+            "decision": item.decision,
+            "reviewer_caregiver_id": item.reviewer_caregiver_id,
+            "rationale": item.rationale,
+            "correction_context": item.clarification_request,
+            "resulting_lcr_revision_id": item.resulting_lcr_revision_id,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+        } for item in decisions],
+        "append_only": True,
+    }
+
+
 @router.post("/{proposal_id}/review")
 def review_companion_care_update(
     proposal_id: str,
