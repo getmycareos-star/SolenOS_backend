@@ -1019,7 +1019,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             if extraction and extraction.extraction_status == "available" and extraction_details.get("kind") == "document_extraction_v1" and extraction_details.get("binary_sha256") == upload.sha256:
                 extracted_text = (extraction.source_text or "").strip()
                 if extracted_text:
-                    extraction_fingerprint = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256))
+                    extraction_fingerprint = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256, assertion_snapshot))
                     output.append({
                         "source_type": "document_extracted_text",
                         "source_table": "capture_analyses",
@@ -1063,7 +1063,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                         "stale_warning": _is_stale(document.occurred_at, datetime.now(timezone.utc)),
                     })
             # Preserve the original upload as its own source node even when extraction is absent.
-            upload_fingerprint = _fingerprint(_document_upload_fingerprint_payload(document, upload))
+            upload_fingerprint = _fingerprint(_document_upload_fingerprint_payload(document, upload, assertion_snapshot))
             output.append({
                 "source_type": "uploaded_document",
                 "source_table": "evidence_uploads",
