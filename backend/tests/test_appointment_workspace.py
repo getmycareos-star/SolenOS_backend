@@ -243,6 +243,23 @@ def test_appointment_workspace_persists_versions_and_revision_history(client):
 def test_appointment_workspace_cannot_be_read_or_changed_across_people(client):
     test_client, owner, other = client
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    empty_saved = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "preparation",
+        "payload": {},
+        "change_reason": "Create an empty appointment workspace",
+        "idempotency_key": "appointment-outcome-draft-empty-001",
+    })
+    assert empty_saved.status_code == 201, empty_saved.text
+    empty_record_id = empty_saved.json()["id"]
+    empty_draft = test_client.get(
+        f"/api/v1/appointment-workspaces/{empty_record_id}/outcome-draft",
+        headers=headers,
+    )
+    assert empty_draft.status_code == 200, empty_draft.text
+    empty_body = empty_draft.json()
+    assert empty_body["status"] == "no_outcome_information"
+    assert all(not items for items in empty_body["sections"].values())
+    assert empty_body["updates_lcr"] is False
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
     created = test_client.post("/api/v1/appointment-workspaces", headers=owner_headers, json={
         "payload": {"private_note": "must not leak"}
