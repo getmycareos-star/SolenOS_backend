@@ -175,7 +175,10 @@ def test_postgres_daily_capture_http_write_retry_and_isolation(monkeypatch):
     sample_count = 20
     write_ms: list[float] = []
     replay_ms: list[float] = []
+    daily_care_write_ms: list[float] = []
+    daily_care_replay_ms: list[float] = []
     event_ids: list[str] = []
+    daily_care_event_ids: list[str] = []
 
     try:
         with TestClient(app) as client:
@@ -223,6 +226,39 @@ def test_postgres_daily_capture_http_write_retry_and_isolation(monkeypatch):
                 )
                 assert changed.status_code == 409, changed.text
 
+            for index in range(sample_count):
+                payload = {
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "medications": [],
+                    "vitals": [],
+                    "scales": [],
+                    "notes": f"Synthetic Daily Care entry benchmark note {index}.",
+                    "capture_idempotency_key": f"daily-care-entry-{suffix}-{index}",
+                }
+                started = time.perf_counter()
+                saved = client.post("/api/v1/daily-care/entries", headers=headers, json=payload)
+                daily_care_write_ms.append((time.perf_counter() - started) * 1000)
+                assert saved.status_code == 200, saved.text
+                receipt = saved.json()
+                assert receipt["success"] is True
+                assert receipt["idempotent_replay"] is False
+                daily_care_event_ids.append(receipt["id"])
+
+                started = time.perf_counter()
+                replay = client.post("/api/v1/daily-care/entries", headers=headers, json=payload)
+                daily_care_replay_ms.append((time.perf_counter() - started) * 1000)
+                assert replay.status_code == 200, replay.text
+                assert replay.json()["id"] == receipt["id"]
+                assert replay.json()["idempotent_replay"] is True
+
+                changed = client.post(
+                    "/api/v1/daily-care/entries",
+                    headers=headers,
+                    json={**payload, "notes": "Changed Daily Care entry under the same key."},
+                )
+                assert changed.status_code == 409, changed.text
+
             denied = client.post("/api/v1/daily/log", headers=other_headers, json={
                 "person_id": person_id,
                 "caregiver_id": caregiver_id,
@@ -233,6 +269,16 @@ def test_postgres_daily_capture_http_write_retry_and_isolation(monkeypatch):
                 "capture_idempotency_key": f"daily-capture-cross-person-{suffix}",
             })
             assert denied.status_code == 403, denied.text
+            denied_daily_care = client.post("/api/v1/daily-care/entries", headers=other_headers, json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": "Cross-person Daily Care write attempt",
+                "capture_idempotency_key": f"daily-care-cross-person-{suffix}",
+            })
+            assert denied_daily_care.status_code == 403, denied_daily_care.text
 
             with TestSessionLocal() as db:
                 events = db.query(CareEvent).filter(
@@ -241,13 +287,21 @@ def test_postgres_daily_capture_http_write_retry_and_isolation(monkeypatch):
                     CareEvent.event_type == "structured_daily_capture",
                 ).all()
                 assert len(events) == sample_count
+                daily_care_events = db.query(CareEvent).filter(
+                    CareEvent.person_id == person_id,
+                    CareEvent.id.in_(daily_care_event_ids),
+                    CareEvent.event_type == "daily_care_entry",
+                ).all()
+                assert len(daily_care_events) == sample_count
                 evidence = db.query(Evidence).filter(Evidence.person_id == person_id).all()
-                assert len(evidence) >= sample_count
+                assert len(evidence) >= sample_count * 2
 
             print("POSTGRES_DAILY_CAPTURE_HTTP_BENCHMARK=" + json.dumps({
                 "sample_count": sample_count,
-                "write_post_duration_ms": _percentiles(write_ms),
-                "idempotent_replay_post_duration_ms": _percentiles(replay_ms),
+                "daily_log_post_duration_ms": _percentiles(write_ms),
+                "daily_log_idempotent_replay_post_duration_ms": _percentiles(replay_ms),
+                "daily_care_entries_post_duration_ms": _percentiles(daily_care_write_ms),
+                "daily_care_entries_idempotent_replay_post_duration_ms": _percentiles(daily_care_replay_ms),
                 "changed_payload_key_reuse": "409",
                 "cross_person_write": "403",
                 "optional_model_extraction": "disabled_to_isolate_durable_write_path",
