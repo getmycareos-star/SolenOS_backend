@@ -361,10 +361,11 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             record_status = str(item.get("record_status") or source.get("record_status") or "not_recorded")
             event_at = item.get("event_at") or source.get("event_at") or "not_recorded"
             recorded_at = item.get("recorded_at") or source.get("recorded_at") or "not_recorded"
+            historical_status = "historical_or_stale" if item.get("stale_warning") or source.get("stale_warning") else "not_flagged_stale"
             grouped_sections.setdefault(scope_key, []).append(
                 f"{item.get('section', 'Care information')}: {quote} "
                 f"[epistemic_status={epistemic_status}; record_status={record_status}; "
-                f"event_at={event_at}; recorded_at={recorded_at}; source={source_ref}]"
+                f"historical_status={historical_status}; event_at={event_at}; recorded_at={recorded_at}; source={source_ref}]"
             )
             if source.get("source_table") in allowed_source_tables:
                 source_ids.add(str(source.get("source_id")))
