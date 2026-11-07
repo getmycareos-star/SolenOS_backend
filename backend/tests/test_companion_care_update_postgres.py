@@ -107,10 +107,10 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
 
         with TestingSessionLocal() as db:
             source_message = db.query(ConversationMessage).filter_by(id=proposal["source_message_id"]).one()
-            pending = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
+            pending_proposal = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
             assert source_message.content == original
-            assert pending.source_message_id == source_message.id
-            assert pending.source_conversation_id == body["session_id"]
+            assert pending_proposal.source_message_id == source_message.id
+            assert pending_proposal.source_conversation_id == body["session_id"]
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
 
         accepted = review(client, first, proposal["id"], {"decision": "accept"})
