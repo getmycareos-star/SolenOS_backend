@@ -6,7 +6,7 @@ from app.core.database import Base
 
 class AppointmentWorkspaceRecord(Base):
     __tablename__ = "appointment_workspace_records"
-    __table_args__ = (UniqueConstraint("person_id", "idempotency_key", name="uq_appointment_workspace_person_idempotency"),)
+    __table_args__ = (UniqueConstraint("person_id", "created_by_caregiver_id", "idempotency_key", name="uq_appointment_workspace_person_caregiver_idempotency"),)
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String(36), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     appointment_id = Column(String(36), ForeignKey("appointments.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -24,7 +24,7 @@ class AppointmentWorkspaceRecord(Base):
 
 class AppointmentWorkspaceRevision(Base):
     __tablename__ = "appointment_workspace_revisions"
-    __table_args__ = (UniqueConstraint("record_id", "idempotency_key", name="uq_appointment_workspace_revision_idempotency"),)
+    __table_args__ = (UniqueConstraint("record_id", "changed_by_caregiver_id", "idempotency_key", name="uq_appointment_workspace_revision_caregiver_idempotency"),)
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     record_id = Column(String(36), ForeignKey("appointment_workspace_records.id", ondelete="CASCADE"), nullable=False, index=True)
     person_id = Column(String(36), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
