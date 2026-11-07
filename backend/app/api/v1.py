@@ -613,6 +613,18 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 .order_by(CaptureAnalysisModel.created_at.desc())
                 .first()
             )
+            existing_observations = (
+                existing_analysis.candidates.get("observations", [])
+                if existing_analysis and isinstance(existing_analysis.candidates, dict)
+                else []
+            )
+            reviewable_candidates = [
+                item for item in existing_observations
+                if isinstance(item, dict)
+                and item.get("review_status", "pending_review") in {
+                    "pending_review", "corrected_pending_approval", "corrected_by_caregiver",
+                }
+            ]
             return {
                 "success": True,
                 "id": existing_event.id,
@@ -626,7 +638,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 "qwen_review_required": bool(
                     existing_analysis
                     and existing_analysis.extraction_status == "available"
-                    and isinstance(existing_analysis.candidates, dict)
+                    and reviewable_candidates
                 ),
                 "qwen_written_to_lcr": False,
             }
