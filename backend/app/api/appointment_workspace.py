@@ -433,19 +433,19 @@ def get_appointment_outcome_draft(record_id: str, request: Request, db: Session 
 
     payload = row.payload if isinstance(row.payload, dict) else {}
     fields = {
-        "caregiver_report": ("caregiverReport", "What the caregiver reported"),
-        "professional_information": ("clinicianFindings", "What the caregiver recorded about the professional's words"),
-        "decisions": ("decisions", "Decisions recorded by the caregiver"),
-        "instructions": ("instructions", "Instructions recorded by the caregiver"),
-        "unanswered_questions": ("unanswered", "Questions still unanswered"),
-        "medication_information": ("medicationReconciliation", "Medication information and questions"),
-        "pending_results": ("pendingResults", "Results still expected"),
-        "family_summary": ("familySummary", "Information for the family"),
+        "caregiver_report": (("caregiverReport", "caregiver_report"), "What the caregiver reported"),
+        "professional_information": (("clinicianFindings", "clinician_findings"), "What the caregiver recorded about the professional's words"),
+        "decisions": (("decisions",), "Decisions recorded by the caregiver"),
+        "instructions": (("instructions",), "Instructions recorded by the caregiver"),
+        "unanswered_questions": (("unanswered", "unanswered_questions"), "Questions still unanswered"),
+        "medication_information": (("medicationReconciliation", "medication_reconciliation"), "Medication information and questions"),
+        "pending_results": (("pendingResults", "pending_results"), "Results still expected"),
+        "family_summary": (("familySummary", "family_summary"), "Information for the family"),
     }
     sections = {key: [] for key in fields}
     missing_information = []
-    for key, (field, label) in fields.items():
-        value = payload.get(field)
+    for key, (field_names, label) in fields.items():
+        value = next((payload.get(field) for field in field_names if isinstance(payload.get(field), str) and payload.get(field).strip()), None)
         if isinstance(value, str) and value.strip():
             sections[key].append({
                 "label": label, "text": value.strip(),
@@ -458,7 +458,7 @@ def get_appointment_outcome_draft(record_id: str, request: Request, db: Session 
             missing_information.append(label)
 
     follow_ups = []
-    raw_follow_ups = payload.get("followUps")
+    raw_follow_ups = payload.get("followUps", payload.get("follow_ups"))
     if isinstance(raw_follow_ups, list):
         for item in raw_follow_ups:
             if not isinstance(item, dict):
