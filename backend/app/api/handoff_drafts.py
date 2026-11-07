@@ -582,7 +582,17 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 if row is None:
                     stale.append(f"{source_table}:{source_id}")
                     continue
-                current = _fingerprint(dict(row))
+                fingerprint_row = dict(row)
+                # Reflected SQLAlchemy tables see JSONList columns as text, while
+                # ORM-created snapshots contain Python lists. Normalize before hashing.
+                if isinstance(fingerprint_row.get("evidence_ids"), str):
+                    try:
+                        parsed_evidence_ids = json.loads(fingerprint_row["evidence_ids"])
+                        if isinstance(parsed_evidence_ids, list):
+                            fingerprint_row["evidence_ids"] = parsed_evidence_ids
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+                current = _fingerprint(fingerprint_row)
             if current != expected:
                 stale.append(f"{source_table}:{source_id}")
         snapshot_ids_by_table = {}
@@ -884,8 +894,20 @@ def approve_handoff_draft(
     return _draft_response(draft)
 
 
+def _normalize_fingerprint_value(value):
+    """Canonicalize database values across PostgreSQL and SQLite representations."""
+    if isinstance(value, datetime):
+        normalized = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return normalized.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _normalize_fingerprint_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_fingerprint_value(item) for item in value]
+    return value
+
+
 def _fingerprint(value) -> str:
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    canonical = json.dumps(_normalize_fingerprint_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -1589,7 +1611,6 @@ def prepare_handoff_draft(
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
         "sections": sections,
-        "generation": generated_document,
     }
     fingerprint_snapshot = {
         "source_statuses": statuses,
@@ -1620,6 +1641,7 @@ def prepare_handoff_draft(
         return _draft_response(existing)
 
     generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
+    structured_content["generation"] = generated_document
 
     # One durable identity binds the response, persisted draft, revision, and audit event.
     draft_id = str(uuid.uuid4())
