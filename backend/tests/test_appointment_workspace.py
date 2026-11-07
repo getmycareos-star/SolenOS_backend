@@ -989,6 +989,32 @@ def test_current_care_hides_superseded_observation_but_retains_history(client):
 
 
 
+
+def test_appointment_preparation_brief_uses_stable_source_coverage_contract(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["person_scope_verified"] is True
+    assert body["read_only"] is True
+    assert body["updates_lcr"] is False
+    assert body["source_coverage"] == {
+        "care_facts": "empty",
+        "care_events": "empty",
+        "appointments": "empty",
+        "evidence_freshness_assessments": "empty",
+        "medications_and_allergies": "unavailable",
+        "documents": "unavailable",
+        "community": "not_authorized",
+    }
+
+    # The preparation brief must never disclose another person's care data.
+    other_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    assert "Other person private care detail" not in response.text
+
 def test_appointment_evidence_reference_parser_preserves_only_explicit_ids():
     from app.api.appointment_workspace import _evidence_ids_from_row
 
