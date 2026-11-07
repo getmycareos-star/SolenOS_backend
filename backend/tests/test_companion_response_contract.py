@@ -197,8 +197,10 @@ def test_companion_logs_distinct_retrieval_and_inference_durations_with_request_
                 events.append(json.loads(message.split(" ", 1)[1]))
         retrieval = next(event for event in events if event["event"] == "companion_retrieval_complete")
         inference = next(event for event in events if event["event"] == "companion_inference_complete")
-        assert retrieval["request_id"] == "companion-stage-test-001"
-        assert inference["request_id"] == "companion-stage-test-001"
+        server_request_id = response.headers["x-request-id"]
+        assert server_request_id
+        assert retrieval["request_id"] == server_request_id
+        assert inference["request_id"] == server_request_id
         assert isinstance(retrieval["duration_ms"], (int, float))
         assert isinstance(inference["duration_ms"], (int, float))
         assert inference["retrieval_duration_ms"] == retrieval["duration_ms"]
