@@ -164,7 +164,7 @@ class DraftEditRequest(BaseModel):
 class DraftApprovalRequest(BaseModel):
     recipient_caregiver_ids: list[str] = Field(min_length=1, max_length=10)
     scope: list[Literal["lcr_summary", "open_loops", "appointments", "documents"]] = Field(min_length=1)
-    expires_at: datetime | None = None
+    expires_at: datetime
 
 
 class DraftRequest(BaseModel):
@@ -479,8 +479,9 @@ def approve_handoff_draft(
     if expires_at is not None:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at <= datetime.now(timezone.utc):
-            raise HTTPException(status_code=422, detail="Handoff expiry must be in the future")
+        approval_now = datetime.now(timezone.utc)
+        if expires_at <= approval_now or expires_at > approval_now + timedelta(days=30):
+            raise HTTPException(status_code=422, detail="Handoff expiry must be within the next 30 days")
     scope = list(dict.fromkeys(payload.scope))
     if not scope:
         raise HTTPException(status_code=422, detail="At least one sharing scope is required")
@@ -492,7 +493,7 @@ def approve_handoff_draft(
     draft.approval_parameters = {
         "recipient_caregiver_ids": sorted(recipients),
         "scope": sorted(scope),
-        "expires_at": expires_at.isoformat() if expires_at else None,
+        "expires_at": expires_at.isoformat(),
     }
     draft.review_status = "approved_for_sharing"
     db.add(draft)
