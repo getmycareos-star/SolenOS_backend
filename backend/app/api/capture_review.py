@@ -1,6 +1,5 @@
 import copy
 import hashlib
-import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,7 +9,6 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Evidence as EvidenceModel
-from app.models.care_continuity import CareAssertion
 from app.schemas.capture_review import CaptureCandidateReview
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
@@ -104,15 +102,15 @@ def review_capture_candidate(
         if source_event is None:
             raise HTTPException(status_code=409, detail="The original Daily Care source could not be verified")
 
-        source_evidence = None
-        if analysis.source_evidence_id:
-            source_evidence = db.query(EvidenceModel).filter(
-                EvidenceModel.id == analysis.source_evidence_id,
-                EvidenceModel.person_id == person_id,
-                EvidenceModel.reported_by_caregiver_id == caregiver_id,
-            ).first()
-            if source_evidence is None:
-                raise HTTPException(status_code=409, detail="The Daily Care source evidence could not be verified")
+        if not analysis.source_evidence_id or analysis.source_evidence_id not in (source_event.evidence_ids or []):
+            raise HTTPException(status_code=409, detail="The candidate is missing its original Daily Care evidence link")
+        source_evidence = db.query(EvidenceModel).filter(
+            EvidenceModel.id == analysis.source_evidence_id,
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.reported_by_caregiver_id == caregiver_id,
+        ).first()
+        if source_evidence is None:
+            raise HTTPException(status_code=409, detail="The Daily Care source evidence could not be verified")
 
         subject = str(candidate.get("subject") or "").strip()
         observation = str(candidate.get("observation") or "").strip()
@@ -131,7 +129,7 @@ def review_capture_candidate(
                 source_event_id=source_event.id,
                 source_label="Caregiver-reported Daily Care observation; explicitly reviewed",
                 source_text=analysis.source_text,
-                evidence_ids=[source_evidence.id] if source_evidence else [],
+                evidence_ids=[source_evidence.id],
                 observed_at=source_event.occurred_at,
                 created_by_caregiver_id=caregiver_id,
             ),
