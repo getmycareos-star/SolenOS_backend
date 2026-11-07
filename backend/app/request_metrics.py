@@ -30,6 +30,8 @@ class RequestMetricsMiddleware:
             return
 
         request_id = uuid.uuid4().hex
+        # Share the same opaque request ID with endpoint-level stage telemetry.
+        scope.setdefault("state", {})["request_id"] = request_id
         started = time.perf_counter()
         status_code: int | None = None
         error_category: str | None = None
