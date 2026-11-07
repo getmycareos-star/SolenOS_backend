@@ -855,8 +855,20 @@ def approve_handoff_draft(
     return _draft_response(draft)
 
 
+def _normalize_fingerprint_value(value):
+    """Canonicalize database values across PostgreSQL and SQLite representations."""
+    if isinstance(value, datetime):
+        normalized = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+        return normalized.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _normalize_fingerprint_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_fingerprint_value(item) for item in value]
+    return value
+
+
 def _fingerprint(value) -> str:
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    canonical = json.dumps(_normalize_fingerprint_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
