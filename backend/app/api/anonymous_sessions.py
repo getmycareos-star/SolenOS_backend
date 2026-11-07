@@ -93,13 +93,35 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
 def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
     """Rotate a still-valid anonymous capability without changing record ownership."""
     session_id = getattr(request.state, "anonymous_session_id", None)
-    if not session_id:
-        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
-    session = (
-        db.query(AnonymousSession)
-        .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
-        .first()
-    )
+    now = datetime.now(timezone.utc)
+    if session_id:
+        session = (
+            db.query(AnonymousSession)
+            .filter(
+                AnonymousSession.id == session_id,
+                AnonymousSession.revoked_at.is_(None),
+                AnonymousSession.expires_at > now,
+            )
+            .first()
+        )
+    else:
+        # Resolve the bearer capability directly as a defensive fallback. The
+        # refresh route must not depend exclusively on ASGI request.state being
+        # propagated through middleware/test-client boundaries.
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+        token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+        session = (
+            db.query(AnonymousSession)
+            .filter(
+                AnonymousSession.token_hash == token_hash,
+                AnonymousSession.revoked_at.is_(None),
+                AnonymousSession.expires_at > now,
+            )
+            .first()
+        )
     if not session:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid")
     caregiver_profile = ensure_caregiver_profile_for_session(
