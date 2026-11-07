@@ -1504,7 +1504,6 @@ def prepare_handoff_draft(
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
         "sections": sections,
-        "generation": generated_document,
     }
     fingerprint_snapshot = {
         "source_statuses": statuses,
@@ -1535,6 +1534,7 @@ def prepare_handoff_draft(
         return _draft_response(existing)
 
     generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
+    structured_content["generation"] = generated_document
 
     # One durable identity binds the response, persisted draft, revision, and audit event.
     draft_id = str(uuid.uuid4())
