@@ -995,6 +995,13 @@ def prepare_handoff_draft(
         if items:
             sections.append({"title": spec["label"], "items": items})
 
+    daily_items = [item for item in records if item["source_table"] == "care_events" and item["source_type"] == "daily_care_observation"]
+    if daily_items:
+        sections.append({"title": "Daily Care observations", "items": daily_items})
+    document_items = [item for item in records if item["source_table"] in {"capture_analyses", "evidence_uploads"}]
+    if document_items:
+        sections.append({"title": "Uploaded documents and extracted text", "items": document_items})
+
     gaps = [
         {"source": name, "status": info["status"], "reason": info.get("reason")}
         for name, info in statuses.items()
