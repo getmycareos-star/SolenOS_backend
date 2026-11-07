@@ -12,7 +12,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text as sql_text
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1077,7 +1077,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     else "referenced_sources_unavailable" if linked_ids
                     else "no_evidence_linked"
                 ),
-                "text": text,
+                "text": display_text,
                 "stale_warning": _is_stale(event.occurred_at, now),
             })
         return {
@@ -1438,7 +1438,7 @@ def prepare_handoff_draft(
                 event_time = next((row.get(k) for k in spec.get("event_time_fields", ()) if row.get(k) is not None), None)
                 recorded_time = next((row.get(k) for k in spec.get("recorded_time_fields", spec["time_fields"]) if row.get(k) is not None), None)
                 due_time = next((row.get(k) for k in spec.get("due_time_fields", ()) if row.get(k) is not None), None)
-                text = _display_text(row, spec["text_fields"])
+                display_text = _display_text(row, spec["text_fields"])
                 details = {key: value for key in spec.get("detail_fields", ()) if (value := _detail_value(row.get(key))) is not None}
                 if row.get("superseded_by_fact_id"):
                     details["fact_lifecycle"] = "superseded"
@@ -1641,7 +1641,7 @@ def prepare_handoff_draft(
             hashlib.sha256(f"handoff-draft:{person_id}:{caregiver_id}:{request_id}".encode("utf-8")).digest()[:8],
             byteorder="big", signed=True,
         )
-        db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
     existing = db.query(HandoffDraft).filter(
         HandoffDraft.person_id == person_id,
         HandoffDraft.caregiver_id == caregiver_id,
