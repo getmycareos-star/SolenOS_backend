@@ -80,7 +80,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
     monkeypatch.setattr(
         care_updates,
         "extract_companion_care_candidates",
-        lambda source: {"observations": [{"source_quote": original, "event_time_quote": event_time_text}] if source == original else [],
+        lambda source: {"observations": ([{"source_quote": original, "event_time_quote": event_time_text}] if source == original else [])},
     )
     client = TestClient(app)
     try:
