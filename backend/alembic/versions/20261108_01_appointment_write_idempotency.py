@@ -30,7 +30,8 @@ def upgrade() -> None:
         op.add_column("appointment_workspace_revisions", sa.Column("idempotency_request_sha256", sa.String(64), nullable=True))
 
     indexes = {index["name"] for index in inspect(bind).get_indexes("appointment_workspace_records")}
-    if "uq_appointment_workspace_person_idempotency" not in indexes:
+    constraints = {item.get("name") for item in inspect(bind).get_unique_constraints("appointment_workspace_records")}
+    if "uq_appointment_workspace_person_idempotency" not in indexes | constraints:
         op.create_index(
             "uq_appointment_workspace_person_idempotency",
             "appointment_workspace_records",
@@ -39,7 +40,8 @@ def upgrade() -> None:
         )
 
     indexes = {index["name"] for index in inspect(bind).get_indexes("appointment_workspace_revisions")}
-    if "uq_appointment_workspace_revision_idempotency" not in indexes:
+    constraints = {item.get("name") for item in inspect(bind).get_unique_constraints("appointment_workspace_revisions")}
+    if "uq_appointment_workspace_revision_idempotency" not in indexes | constraints:
         op.create_index(
             "uq_appointment_workspace_revision_idempotency",
             "appointment_workspace_revisions",
@@ -51,19 +53,30 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = inspect(bind)
-    if inspector.has_table("appointment_workspace_revisions"):
-        indexes = {index["name"] for index in inspector.get_indexes("appointment_workspace_revisions")}
-        if "uq_appointment_workspace_revision_idempotency" in indexes:
-            op.drop_index("uq_appointment_workspace_revision_idempotency", table_name="appointment_workspace_revisions")
-        columns = {column["name"] for column in inspect(bind).get_columns("appointment_workspace_revisions")}
+    for table, constraint_name in (
+        ("appointment_workspace_revisions", "uq_appointment_workspace_revision_idempotency"),
+        ("appointment_workspace_records", "uq_appointment_workspace_person_idempotency"),
+    ):
+        if not inspector.has_table(table):
+            continue
+        columns = {column["name"] for column in inspect(bind).get_columns(table)}
+        if "idempotency_key" in columns:
+            used = bind.execute(
+                sa.text(f'SELECT COUNT(*) FROM "{table}" WHERE idempotency_key IS NOT NULL')
+            ).scalar_one()
+            if used:
+                raise RuntimeError(
+                    f"Refusing to remove {table} idempotency keys while persisted values are in use."
+                )
+        unique_constraints = {
+            item.get("name") for item in inspect(bind).get_unique_constraints(table)
+        }
+        indexes = {item.get("name") for item in inspect(bind).get_indexes(table)}
+        if constraint_name in unique_constraints:
+            op.drop_constraint(constraint_name, table, type_="unique")
+        elif constraint_name in indexes:
+            op.drop_index(constraint_name, table_name=table)
+        columns = {column["name"] for column in inspect(bind).get_columns(table)}
         for name in ("idempotency_request_sha256", "idempotency_key"):
             if name in columns:
-                op.drop_column("appointment_workspace_revisions", name)
-    if inspector.has_table("appointment_workspace_records"):
-        indexes = {index["name"] for index in inspect(bind).get_indexes("appointment_workspace_records")}
-        if "uq_appointment_workspace_person_idempotency" in indexes:
-            op.drop_index("uq_appointment_workspace_person_idempotency", table_name="appointment_workspace_records")
-        columns = {column["name"] for column in inspect(bind).get_columns("appointment_workspace_records")}
-        for name in ("idempotency_request_sha256", "idempotency_key"):
-            if name in columns:
-                op.drop_column("appointment_workspace_records", name)
+                op.drop_column(table, name)
