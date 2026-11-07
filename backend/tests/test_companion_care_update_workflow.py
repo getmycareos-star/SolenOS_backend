@@ -163,7 +163,9 @@ def test_rejection_never_creates_assertion_or_allows_later_acceptance(monkeypatc
     client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}] if text == source else []})
     try:
         session = create_session(client, "Caregiver rejection")
-        proposal = send(client, session, source).json()["care_update_candidates"][0]
+        send_response = send(client, session, source)
+        assert send_response.status_code == 200, send_response.text
+        proposal = pending(client, session)[0]
         rejected = review(client, session, proposal["id"], {"decision": "reject"})
         assert rejected.status_code == 200 and rejected.json()["written_to_lcr"] is False
         rejection_replay = review(client, session, proposal["id"], {"decision": "reject"})
