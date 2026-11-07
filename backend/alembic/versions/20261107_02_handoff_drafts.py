@@ -38,6 +38,7 @@ def upgrade():
             sa.Column("approved_by_caregiver_id", sa.String(255), nullable=True),
             sa.Column("approval_revision", sa.Integer(), nullable=True),
             sa.Column("approval_content_sha256", sa.String(64), nullable=True),
+            sa.Column("approval_parameters", sa.JSON(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.UniqueConstraint("person_id", "caregiver_id", "request_id", name="uq_handoff_drafts_request"),
