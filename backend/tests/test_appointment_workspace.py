@@ -1798,3 +1798,51 @@ def test_appointment_preparation_brief_includes_person_scoped_extracted_document
     assert private_response.json()["documents"] == []
     assert private_response.json()["source_coverage"]["documents"] == "empty"
     assert "Discharge summary" not in private_response.text
+
+
+
+def test_appointment_outcome_draft_is_read_only_and_person_scoped(client):
+    test_client, owner, other = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    saved = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "outcome_pending",
+        "payload": {
+            "attendanceStatus": "attended",
+            "actualVisitDate": "2026-11-07T10:30:00+00:00",
+            "caregiverReport": "The caregiver noticed increased night waking.",
+            "clinicianFindings": "The caregiver recorded that the clinician requested a sleep diary.",
+            "decisions": "The caregiver recorded that a review will be arranged.",
+            "instructions": "Keep the existing sleep diary for the next review.",
+            "unanswered": "The reason for the change remains unclear.",
+            "pendingResults": "A report is still expected.",
+            "followUps": [{"action": "Bring the sleep diary", "owner": "", "due": "", "status": "Not started"}],
+        },
+        "change_reason": "Save appointment outcome notes",
+        "idempotency_key": "appointment-outcome-draft-test-001",
+    })
+    assert saved.status_code == 201, saved.text
+    record_id = saved.json()["id"]
+
+    draft = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        headers=headers,
+    )
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert body["read_only"] is True
+    assert body["updates_lcr"] is False
+    assert body["record_id"] == record_id
+    assert body["attendance_status"] == "attended"
+    assert body["sections"]["caregiver_report"][0]["text"] == "The caregiver noticed increased night waking."
+    professional_item = body["sections"]["professional_information"][0]
+    assert professional_item["text"] == "The caregiver recorded that the clinician requested a sleep diary."
+    assert professional_item["epistemic_status"] == "caregiver_reported"
+    assert body["sections"]["follow_ups"][0]["text"] == "Bring the sleep diary"
+    assert "No appointment outcome has been recorded" not in draft.text
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    denied = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        headers=other_headers,
+    )
+    assert denied.status_code == 404
