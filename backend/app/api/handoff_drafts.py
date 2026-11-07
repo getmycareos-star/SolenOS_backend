@@ -1291,7 +1291,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         }, ensure_ascii=False)},
     ]
     try:
-        raw = qwen_chat(messages, timeout=30, response_format="json", options={"temperature": 0, "num_predict": 512})
+        raw = qwen_chat(messages, timeout=90, response_format="json", options={"temperature": 0, "num_predict": 256})
         parsed = json.loads(raw)
         items = parsed.get("items") if isinstance(parsed, dict) else None
         if not isinstance(items, list):
