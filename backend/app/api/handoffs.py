@@ -396,10 +396,10 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         )
         source_statuses = source_snapshot.get("source_statuses", {})
         scope_source_keys = {
-            "lcr_summary": set(source_statuses) - {"documents", "appointments", "actions", "care_action_outcomes", "open_questions", "information_gaps", "community", "evidence_lineage"},
+            "lcr_summary": set(source_statuses) - {"documents", "appointments", "actions", "care_action_outcomes", "open_questions", "information_gaps", "uncertainty_assessments", "community", "evidence_lineage"},
             "documents": {"documents"},
             "appointments": {"appointments"},
-            "open_loops": {"actions", "care_action_outcomes", "open_questions", "information_gaps"},
+            "open_loops": {"actions", "care_action_outcomes", "open_questions", "information_gaps", "uncertainty_assessments"},
         }
         included_source_keys = set().union(*(scope_source_keys.get(scope_key, set()) for scope_key in payload.scope))
         source_coverage = {key: value for key, value in source_statuses.items() if key in included_source_keys}
