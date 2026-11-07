@@ -1751,10 +1751,18 @@ def qwen_assistant_status():
     # Existing consumers receive operational truth, never inventory-only optimism.
     inventory = qwen_runtime_status()
     readiness = qwen_readiness_status()
+    runtime_available = bool(readiness.get("runtime_available"))
+    model_installed = bool(readiness.get("model_installed"))
+    inference_verified = bool(readiness.get("inference_verified"))
     return {
         **inventory,
-        "available": bool(readiness.get("available")),
-        "operational": bool(readiness.get("available")),
+        "available": runtime_available and model_installed,
+        # Runtime inventory is not proof of a successful model response.
+        "operational": inference_verified,
+        "runtime_available": runtime_available,
+        "model_installed": model_installed,
+        "inference_verified": inference_verified,
+        "inference_status": readiness.get("inference_status", "not_verified"),
         "readiness": readiness,
     }
 
