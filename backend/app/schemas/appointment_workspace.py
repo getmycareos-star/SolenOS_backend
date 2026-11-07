@@ -8,6 +8,7 @@ class AppointmentWorkspaceCreate(BaseModel):
     status: Literal["preparation", "during_visit", "outcome_pending", "follow_up_pending", "ready_for_review", "closed_with_outstanding_items"] = "preparation"
     payload: Dict[str, Any] = Field(default_factory=dict)
     change_reason: Optional[str] = Field(default="Initial appointment workspace save", max_length=2000)
+    idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
 class AppointmentWorkspaceUpdate(BaseModel):
@@ -15,6 +16,7 @@ class AppointmentWorkspaceUpdate(BaseModel):
     status: Optional[Literal["preparation", "during_visit", "outcome_pending", "follow_up_pending", "ready_for_review", "closed_with_outstanding_items"]] = None
     payload: Dict[str, Any]
     change_reason: str = Field(min_length=1, max_length=2000)
+    idempotency_key: Optional[str] = Field(default=None, min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
 class AppointmentWorkspaceRecordOut(BaseModel):
