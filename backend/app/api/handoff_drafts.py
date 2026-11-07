@@ -977,128 +977,141 @@ def prepare_handoff_draft(
     records = []
 
     for table_name, spec in SOURCES.items():
-        if not inspector.has_table(table_name):
-            statuses[table_name] = {
-                "status": "unavailable",
-                "reason": "source_schema_unavailable",
-                "label": spec["label"],
-                "count": 0,
-            }
-            continue
-        table = Table(table_name, metadata, autoload_with=bind)
-        # Refuse to query tables without server-side person scoping.
-        if "person_id" not in table.c or "id" not in table.c:
-            statuses[table_name] = {
-                "status": "unavailable",
-                "reason": "source_scope_not_verifiable",
-                "label": spec["label"],
-                "count": 0,
-            }
-            continue
-
-        if spec.get("require_caregiver_owned_evidence"):
-            if not inspector.has_table("evidence"):
+        source_record_start = len(records)
+        try:
+            if not inspector.has_table(table_name):
                 statuses[table_name] = {
                     "status": "unavailable",
-                    "reason": "evidence_scope_adapter_unavailable",
+                    "reason": "source_schema_unavailable",
                     "label": spec["label"],
                     "count": 0,
                 }
                 continue
-            evidence_table = Table("evidence", metadata, autoload_with=bind)
-            evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
-            if not {"id", "person_id", "uploaded_by_caregiver_id"}.issubset(set(evidence_table.c.keys())) or evidence_link_column not in table.c:
+            table = Table(table_name, metadata, autoload_with=bind)
+            # Refuse to query tables without server-side person scoping.
+            if "person_id" not in table.c or "id" not in table.c:
                 statuses[table_name] = {
                     "status": "unavailable",
-                    "reason": "evidence_scope_not_verifiable",
+                    "reason": "source_scope_not_verifiable",
                     "label": spec["label"],
                     "count": 0,
                 }
                 continue
 
-        # Add source-reference fields opportunistically when a canonical table has
-        # them; schema variants without these fields remain explicitly unlinked.
-        selected_names = list(spec["fields"]) + ["evidence_ids", "source_evidence_id"]
-        selected = [table.c[name] for name in dict.fromkeys(selected_names) if name in table.c]
-        if not selected:
+            if spec.get("require_caregiver_owned_evidence"):
+                if not inspector.has_table("evidence"):
+                    statuses[table_name] = {
+                        "status": "unavailable",
+                        "reason": "evidence_scope_adapter_unavailable",
+                        "label": spec["label"],
+                        "count": 0,
+                    }
+                    continue
+                evidence_table = Table("evidence", metadata, autoload_with=bind)
+                evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
+                if not {"id", "person_id", "uploaded_by_caregiver_id"}.issubset(set(evidence_table.c.keys())) or evidence_link_column not in table.c:
+                    statuses[table_name] = {
+                        "status": "unavailable",
+                        "reason": "evidence_scope_not_verifiable",
+                        "label": spec["label"],
+                        "count": 0,
+                    }
+                    continue
+
+            # Add source-reference fields opportunistically when a canonical table has
+            # them; schema variants without these fields remain explicitly unlinked.
+            selected_names = list(spec["fields"]) + ["evidence_ids", "source_evidence_id"]
+            selected = [table.c[name] for name in dict.fromkeys(selected_names) if name in table.c]
+            if not selected:
+                statuses[table_name] = {
+                    "status": "unavailable",
+                    "reason": "source_fields_unavailable",
+                    "label": spec["label"],
+                    "count": 0,
+                }
+                continue
+
+            query = select(*selected).where(table.c.person_id == person_id)
+            if spec.get("active_assessments_only"):
+                if "is_active" in table.c:
+                    query = query.where(table.c.is_active.is_(True))
+                if "superseded_by_assessment_id" in table.c:
+                    query = query.where(table.c.superseded_by_assessment_id.is_(None))
+            if spec.get("require_caregiver_owned_evidence"):
+                evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
+                query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
+                    evidence_table.c.person_id == person_id,
+                    evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
+                )
+            timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
+            if timestamp_columns:
+                # Include a row if any applicable time is within the window, or all
+                # its time fields are unknown. COALESCE would hide a recent update
+                # behind an older non-null creation timestamp.
+                in_window = or_(
+                    *[column >= cutoff for column in timestamp_columns],
+                    and_(*[column.is_(None) for column in timestamp_columns]),
+                )
+                if spec.get("include_active_outside_window") and "superseded_by_fact_id" in table.c:
+                    query = query.where(or_(table.c.superseded_by_fact_id.is_(None), in_window))
+                else:
+                    query = query.where(in_window)
+                query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
+            query = query.limit(MAX_ROWS_PER_SOURCE)
+            rows = [dict(row) for row in db.execute(query).mappings().all()]
+            source_status = "available" if rows else "empty"
             statuses[table_name] = {
-                "status": "unavailable",
-                "reason": "source_fields_unavailable",
+                "status": source_status,
+                "label": spec["label"],
+                "count": len(rows),
+            }
+            for row in rows:
+                source_id = row.get("id")
+                if not source_id:
+                    continue
+                event_time = next((row.get(k) for k in spec.get("event_time_fields", ()) if row.get(k) is not None), None)
+                recorded_time = next((row.get(k) for k in spec.get("recorded_time_fields", spec["time_fields"]) if row.get(k) is not None), None)
+                due_time = next((row.get(k) for k in spec.get("due_time_fields", ()) if row.get(k) is not None), None)
+                text = _display_text(row, spec["text_fields"])
+                details = {key: value for key in spec.get("detail_fields", ()) if (value := _detail_value(row.get(key))) is not None}
+                if row.get("superseded_by_fact_id"):
+                    details["fact_lifecycle"] = "superseded"
+                elif table_name == "care_facts":
+                    details["fact_lifecycle"] = "current_in_lcr"
+                if not text:
+                    continue
+                epistemic_value = next((row.get(k) for k in ("epistemic_status", "epistemic_state", "assertion_status") if row.get(k) is not None), None)
+                record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
+                source_fingerprint = _fingerprint(row)
+                source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
+                records.append({
+                    "source_type": spec["kind"],
+                    "source_table": table_name,
+                    "source_id": str(source_id),
+                    "source_fingerprint": source_fingerprint,
+                    "source_revision": _iso(source_revision_value),
+                    "source_revision_status": "timestamp_available" if source_revision_value is not None else "revision_unavailable",
+                    "event_at": _iso(event_time),
+                    "recorded_at": _iso(recorded_time),
+                    "due_at": _iso(due_time),
+                    "details": details,
+                    "epistemic_status": str(epistemic_value) if epistemic_value is not None else "not_recorded",
+                    "record_status": str(record_status) if record_status is not None else "not_recorded",
+                    "evidence_ids": _explicit_evidence_ids(row),
+                    "text": text,
+                    "stale_warning": bool(recorded_time is not None and _iso(recorded_time) < (now - timedelta(days=30)).isoformat()),
+                })
+
+
+        except Exception:
+            del records[source_record_start:]
+            logger.exception("Handoff LCR source retrieval failed table=%s", table_name)
+            statuses[table_name] = {
+                "status": "failed",
+                "reason": "source_retrieval_failed",
                 "label": spec["label"],
                 "count": 0,
             }
-            continue
-
-        query = select(*selected).where(table.c.person_id == person_id)
-        if spec.get("active_assessments_only"):
-            if "is_active" in table.c:
-                query = query.where(table.c.is_active.is_(True))
-            if "superseded_by_assessment_id" in table.c:
-                query = query.where(table.c.superseded_by_assessment_id.is_(None))
-        if spec.get("require_caregiver_owned_evidence"):
-            evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
-            query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
-                evidence_table.c.person_id == person_id,
-                evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
-            )
-        timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
-        if timestamp_columns:
-            # Include a row if any applicable time is within the window, or all
-            # its time fields are unknown. COALESCE would hide a recent update
-            # behind an older non-null creation timestamp.
-            in_window = or_(
-                *[column >= cutoff for column in timestamp_columns],
-                and_(*[column.is_(None) for column in timestamp_columns]),
-            )
-            if spec.get("include_active_outside_window") and "superseded_by_fact_id" in table.c:
-                query = query.where(or_(table.c.superseded_by_fact_id.is_(None), in_window))
-            else:
-                query = query.where(in_window)
-            query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
-        query = query.limit(MAX_ROWS_PER_SOURCE)
-        rows = [dict(row) for row in db.execute(query).mappings().all()]
-        source_status = "available" if rows else "empty"
-        statuses[table_name] = {
-            "status": source_status,
-            "label": spec["label"],
-            "count": len(rows),
-        }
-        for row in rows:
-            source_id = row.get("id")
-            if not source_id:
-                continue
-            event_time = next((row.get(k) for k in spec.get("event_time_fields", ()) if row.get(k) is not None), None)
-            recorded_time = next((row.get(k) for k in spec.get("recorded_time_fields", spec["time_fields"]) if row.get(k) is not None), None)
-            due_time = next((row.get(k) for k in spec.get("due_time_fields", ()) if row.get(k) is not None), None)
-            text = _display_text(row, spec["text_fields"])
-            details = {key: value for key in spec.get("detail_fields", ()) if (value := _detail_value(row.get(key))) is not None}
-            if row.get("superseded_by_fact_id"):
-                details["fact_lifecycle"] = "superseded"
-            elif table_name == "care_facts":
-                details["fact_lifecycle"] = "current_in_lcr"
-            if not text:
-                continue
-            epistemic_value = next((row.get(k) for k in ("epistemic_status", "epistemic_state", "assertion_status") if row.get(k) is not None), None)
-            record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
-            source_fingerprint = _fingerprint(row)
-            source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
-            records.append({
-                "source_type": spec["kind"],
-                "source_table": table_name,
-                "source_id": str(source_id),
-                "source_fingerprint": source_fingerprint,
-                "source_revision": _iso(source_revision_value),
-                "source_revision_status": "timestamp_available" if source_revision_value is not None else "revision_unavailable",
-                "event_at": _iso(event_time),
-                "recorded_at": _iso(recorded_time),
-                "due_at": _iso(due_time),
-                "details": details,
-                "epistemic_status": str(epistemic_value) if epistemic_value is not None else "not_recorded",
-                "record_status": str(record_status) if record_status is not None else "not_recorded",
-                "evidence_ids": _explicit_evidence_ids(row),
-                "text": text,
-                "stale_warning": bool(recorded_time is not None and _iso(recorded_time) < (now - timedelta(days=30)).isoformat()),
-            })
 
     # Resolve only explicitly linked evidence and keep author/reporter/uploader,
     # event time and ingestion time distinct. Missing or cross-person IDs are not
