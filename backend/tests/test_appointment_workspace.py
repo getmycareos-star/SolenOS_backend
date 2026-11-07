@@ -1287,4 +1287,8 @@ def test_appointment_workspace_explicit_attendance_updates_linked_appointment(cl
     with TestSessionLocal() as db:
         appointment = db.query(Appointment).filter_by(id=appointment_id).one()
         assert appointment.status == "completed"
-        assert appointment.completed_at == actual_visit_at
+        assert appointment.completed_at is not None
+        completed_at = appointment.completed_at
+        if completed_at.tzinfo is None:
+            completed_at = completed_at.replace(tzinfo=timezone.utc)
+        assert completed_at == actual_visit_at
