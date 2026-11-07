@@ -158,6 +158,16 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
             assert old.status == "corrected"
         accepted_correction = review(client, first, new_proposal["id"], {"decision": "accept"})
         assert accepted_correction.status_code == 200, accepted_correction.text
+        correction_history = client.get(
+            f"/api/v1/companion/care-updates/{correction_proposal['id']}/history",
+            headers=first_auth,
+        )
+        assert correction_history.status_code == 200, correction_history.text
+        assert correction_history.json()["append_only"] is True
+        correction_decision = correction_history.json()["items"][0]
+        assert correction_decision["decision"] == "corrected"
+        assert correction_decision["reviewer_caregiver_id"] == first["caregiver"]["id"]
+        assert correction_decision["correction_context"] == correction_context
         with TestingSessionLocal() as db:
             corrected_assertion = db.query(CareAssertion).filter_by(source_proposal_id=new_proposal["id"]).one()
             assert corrected_assertion.asserted_value == corrected_text
@@ -176,6 +186,12 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         rejected_proposal = rejected_turn.json()["care_update_candidates"][0]
         rejected = review(client, first, rejected_proposal["id"], {"decision": "reject"})
         assert rejected.status_code == 200 and rejected.json()["written_to_lcr"] is False
+        rejection_history = client.get(
+            f"/api/v1/companion/care-updates/{rejected_proposal['id']}/history",
+            headers=first_auth,
+        )
+        assert rejection_history.status_code == 200, rejection_history.text
+        assert rejection_history.json()["items"][0]["decision"] == "rejected"
         retry = review(client, first, rejected_proposal["id"], {"decision": "accept"})
         assert retry.status_code == 409
         with TestingSessionLocal() as db:
