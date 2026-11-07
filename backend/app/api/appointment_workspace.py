@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text, inspect
@@ -18,7 +19,8 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
+from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, CareAssertion
+from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 
@@ -490,6 +492,351 @@ def get_appointment_outcome_draft(record_id: str, request: Request, db: Session 
             "Statements about a professional remain caregiver-reported unless an original professional record is separately reviewed.",
             "Generating or viewing this draft does not change the Living Care Record.",
         ],
+    }
+
+
+
+class AppointmentOutcomeReview(BaseModel):
+    decision: str
+    corrected_text: Optional[str] = Field(default=None, min_length=1, max_length=4000)
+    correction_context: Optional[str] = Field(default=None, max_length=4000)
+
+
+def _appointment_proposal_json(proposal: AIOutputLCRProposal) -> dict:
+    return {
+        "id": proposal.id,
+        "status": proposal.status,
+        "proposal_type": proposal.proposal_type,
+        "proposed_change": proposal.proposed_change_json or {},
+        "candidate_index": proposal.candidate_index,
+        "proposal_version": proposal.proposal_version,
+        "created_at": _iso(proposal.created_at),
+    }
+
+
+def _appointment_proposal_id(record_id: str, revision: int, candidate_index: int, version: int) -> str:
+    return str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"solenos:appointment-workspace:{record_id}:revision:{revision}:candidate:{candidate_index}:version:{version}",
+    ))
+
+
+def _appointment_source_text(revision_payload: dict, pointer: dict) -> Optional[str]:
+    field_name = pointer.get("field_name")
+    if not isinstance(field_name, str):
+        return None
+    value = revision_payload.get(field_name)
+    if isinstance(value, str):
+        return value.strip() or None
+    return None
+
+
+def _parse_appointment_event_time(value: Optional[str]):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+@router.post("/{record_id}/outcome-proposals")
+def create_appointment_outcome_proposals(record_id: str, request: Request, db: Session = Depends(get_db)):
+    """Create idempotent, review-required LCR candidates from an immutable workspace revision."""
+    person_id, caregiver_id = _scope(request, db)
+    row = db.query(AppointmentWorkspaceRecord).filter(
+        AppointmentWorkspaceRecord.id == record_id,
+        AppointmentWorkspaceRecord.person_id == person_id,
+    ).with_for_update().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Appointment workspace not found")
+    revision = db.query(AppointmentWorkspaceRevision).filter(
+        AppointmentWorkspaceRevision.record_id == row.id,
+        AppointmentWorkspaceRevision.person_id == person_id,
+        AppointmentWorkspaceRevision.revision_number == row.version_number,
+    ).first()
+    if revision is None:
+        raise HTTPException(status_code=409, detail="The current appointment revision is unavailable for review")
+
+    payload = revision.payload if isinstance(revision.payload, dict) else {}
+    field_candidates = (
+        ("caregiverReport", "caregiver_report", "Caregiver report"),
+        ("clinicianFindings", "professional_information", "Professional information recorded by caregiver"),
+        ("decisions", "decision", "Decision recorded by caregiver"),
+        ("instructions", "instruction", "Instruction recorded by caregiver"),
+        ("medicationReconciliation", "medication_information", "Medication information recorded by caregiver"),
+        ("pendingResults", "pending_result", "Pending result recorded by caregiver"),
+    )
+    candidates = []
+    index = 0
+    for field_name, assertion_field, label in field_candidates:
+        value = payload.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        candidates.append({
+            "candidate_index": index,
+            "field": assertion_field,
+            "label": label,
+            "source_pointer": {"field_name": field_name},
+            "source_quote": value.strip(),
+        })
+        index += 1
+
+    created = []
+    for candidate in candidates:
+        proposal_id = _appointment_proposal_id(row.id, row.version_number, candidate["candidate_index"], 1)
+        proposal = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.id == proposal_id,
+            AIOutputLCRProposal.person_id == person_id,
+            AIOutputLCRProposal.caregiver_id == caregiver_id,
+        ).first()
+        if proposal is None:
+            proposal = AIOutputLCRProposal(
+                id=proposal_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                proposal_type="appointment_workspace_outcome",
+                proposed_change_json={
+                    "asserted_value": candidate["source_quote"],
+                    "source_quote": candidate["source_quote"],
+                    "source_record_id": row.id,
+                    "source_record_version": row.version_number,
+                    "source_pointer": candidate["source_pointer"],
+                    "field": candidate["field"],
+                    "label": candidate["label"],
+                    "event_time_text": payload.get("actualVisitDate") if isinstance(payload.get("actualVisitDate"), str) else None,
+                    "epistemic_status": "caregiver_reported",
+                    "independently_verified": False,
+                },
+                source_event_ids_json=[],
+                source_evidence_ids_json=[],
+                rationale="Extracted from a persisted appointment workspace revision. Caregiver review is required before adding a source-attributed assertion to the LCR.",
+                uncertainty_json={"semantic_grounding": "exact_workspace_field", "clinical_verification": "not_performed"},
+                source_conversation_id=None,
+                source_message_id=None,
+                candidate_index=candidate["candidate_index"],
+                proposal_version=1,
+                status="pending_authorization",
+            )
+            db.add(proposal)
+            db.flush()
+        created.append(_appointment_proposal_json(proposal))
+
+    db.commit()
+    return {
+        "record_id": row.id,
+        "source_record_version": row.version_number,
+        "items": created,
+        "count": len(created),
+        "written_to_lcr": False,
+        "review_required": True,
+        "limitations": [
+            "Candidates quote only persisted caregiver-entered workspace fields.",
+            "Professional statements remain caregiver-reported unless an original professional source is separately reviewed.",
+            "Acceptance creates a caregiver-reviewed assertion, not a clinically verified fact.",
+            "Follow-up actions and unanswered questions are not converted into care assertions.",
+        ],
+    }
+
+
+@router.get("/{record_id}/outcome-proposals")
+def list_appointment_outcome_proposals(record_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    row = db.query(AppointmentWorkspaceRecord.id).filter(
+        AppointmentWorkspaceRecord.id == record_id,
+        AppointmentWorkspaceRecord.person_id == person_id,
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Appointment workspace not found")
+    proposals = db.query(AIOutputLCRProposal).filter(
+        AIOutputLCRProposal.person_id == person_id,
+        AIOutputLCRProposal.caregiver_id == caregiver_id,
+        AIOutputLCRProposal.proposal_type == "appointment_workspace_outcome",
+        AIOutputLCRProposal.proposed_change_json["source_record_id"].as_string() == record_id,
+    ).order_by(AIOutputLCRProposal.candidate_index.asc(), AIOutputLCRProposal.proposal_version.asc()).limit(100).all()
+    return {"items": [_appointment_proposal_json(item) for item in proposals], "append_only_decisions": True}
+
+
+@router.post("/{record_id}/outcome-proposals/{proposal_id}/review")
+def review_appointment_outcome_proposal(
+    record_id: str,
+    proposal_id: str,
+    payload: AppointmentOutcomeReview,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    decision = (payload.decision or "").strip().lower()
+    if decision not in {"accept", "correct", "reject"}:
+        raise HTTPException(status_code=422, detail="Decision must be accept, correct, or reject")
+
+    record = db.query(AppointmentWorkspaceRecord).filter(
+        AppointmentWorkspaceRecord.id == record_id,
+        AppointmentWorkspaceRecord.person_id == person_id,
+    ).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Appointment workspace not found")
+    proposal = db.query(AIOutputLCRProposal).filter(
+        AIOutputLCRProposal.id == proposal_id,
+        AIOutputLCRProposal.person_id == person_id,
+        AIOutputLCRProposal.caregiver_id == caregiver_id,
+        AIOutputLCRProposal.proposal_type == "appointment_workspace_outcome",
+    ).with_for_update().first()
+    if proposal is None or (proposal.proposed_change_json or {}).get("source_record_id") != record_id:
+        raise HTTPException(status_code=404, detail="Appointment outcome proposal not found")
+
+    original = dict(proposal.proposed_change_json or {})
+    revision_number = original.get("source_record_version")
+    revision = db.query(AppointmentWorkspaceRevision).filter(
+        AppointmentWorkspaceRevision.record_id == record_id,
+        AppointmentWorkspaceRevision.person_id == person_id,
+        AppointmentWorkspaceRevision.revision_number == revision_number,
+    ).first()
+    if revision is None:
+        raise HTTPException(status_code=409, detail="The original appointment workspace revision is unavailable")
+    source_quote = original.get("source_quote")
+    actual_source = _appointment_source_text(
+        revision.payload if isinstance(revision.payload, dict) else {},
+        original.get("source_pointer") if isinstance(original.get("source_pointer"), dict) else {},
+    )
+    if not isinstance(source_quote, str) or not actual_source or source_quote != actual_source:
+        raise HTTPException(status_code=409, detail="The proposal no longer matches its persisted appointment source revision")
+
+    terminal = {"accept": "accepted", "correct": "corrected", "reject": "rejected"}[decision]
+    if proposal.status != "pending_authorization":
+        if proposal.status != terminal:
+            raise HTTPException(status_code=409, detail="This appointment outcome proposal already has a different review decision")
+        existing_assertion = db.query(CareAssertion).filter(
+            CareAssertion.source_proposal_id == proposal.id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        corrected_proposal = None
+        if decision == "correct":
+            next_id = _appointment_proposal_id(record_id, int(revision_number), int(proposal.candidate_index), int(proposal.proposal_version) + 1)
+            corrected_proposal = db.query(AIOutputLCRProposal).filter(AIOutputLCRProposal.id == next_id).first()
+        return {
+            "proposal": _appointment_proposal_json(proposal),
+            "corrected_proposal": _appointment_proposal_json(corrected_proposal) if corrected_proposal else None,
+            "decision": decision,
+            "assertion_id": existing_assertion.id if existing_assertion else None,
+            "written_to_lcr": bool(existing_assertion),
+            "idempotent_replay": True,
+        }
+
+    now = datetime.now(timezone.utc)
+    assertion_id = None
+    corrected_proposal = None
+    if decision == "reject":
+        proposal.status = "rejected"
+        db.add(AIOutputLCRDecision(
+            id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
+            reviewer_caregiver_id=caregiver_id, decision="rejected",
+            rationale="Caregiver rejected this appointment outcome candidate; no LCR assertion was created.",
+            created_at=now,
+        ))
+    elif decision == "correct":
+        corrected_text = (payload.corrected_text or "").strip()
+        correction_context = (payload.correction_context or "").strip()
+        if not corrected_text or not correction_context or corrected_text not in correction_context:
+            raise HTTPException(status_code=422, detail="Correction text must be explicitly included in the caregiver's correction context")
+        next_version = int(proposal.proposal_version or 1) + 1
+        next_id = _appointment_proposal_id(record_id, int(revision_number), int(proposal.candidate_index), next_version)
+        corrected_proposal = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.id == next_id,
+            AIOutputLCRProposal.person_id == person_id,
+            AIOutputLCRProposal.caregiver_id == caregiver_id,
+        ).first()
+        if corrected_proposal is None:
+            corrected_proposal = AIOutputLCRProposal(
+                id=next_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                proposal_type="appointment_workspace_outcome",
+                proposed_change_json={
+                    **original,
+                    "asserted_value": corrected_text,
+                    "correction_context": correction_context,
+                    "supersedes_proposal_id": proposal.id,
+                    "epistemic_status": "caregiver_reported",
+                    "independently_verified": False,
+                },
+                source_event_ids_json=list(proposal.source_event_ids_json or []),
+                source_evidence_ids_json=list(proposal.source_evidence_ids_json or []),
+                rationale="Caregiver correction preserved as a separate pending proposal; the original candidate and source revision remain unchanged.",
+                uncertainty_json={**(proposal.uncertainty_json or {}), "correction_grounding": "explicit_caregiver_context", "clinical_verification": "not_performed"},
+                source_conversation_id=None,
+                source_message_id=None,
+                candidate_index=proposal.candidate_index,
+                proposal_version=next_version,
+                status="pending_authorization",
+            )
+            db.add(corrected_proposal)
+        proposal.status = "corrected"
+        db.add(AIOutputLCRDecision(
+            id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
+            reviewer_caregiver_id=caregiver_id, decision="corrected",
+            rationale=corrected_text,
+            clarification_request=correction_context,
+            created_at=now,
+        ))
+    else:
+        accepted_value = (original.get("asserted_value") or "").strip()
+        correction_context = (original.get("correction_context") or "").strip()
+        if not accepted_value or (
+            accepted_value != source_quote
+            and (not correction_context or accepted_value not in correction_context)
+        ):
+            raise HTTPException(status_code=422, detail="Accepted text is not grounded in the persisted appointment source or caregiver correction context")
+        assertion = db.query(CareAssertion).filter(
+            CareAssertion.source_proposal_id == proposal.id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if assertion is None:
+            assertion = CareAssertion(
+                id=str(uuid.uuid4()),
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field=str(original.get("field") or "appointment_observation"),
+                assertion_kind="time_bound_observation",
+                asserted_value=accepted_value,
+                source_label="Caregiver-reviewed appointment workspace",
+                source_text=source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else ""),
+                source_proposal_id=proposal.id,
+                source_conversation_id=None,
+                source_message_id=None,
+                event_time_text=original.get("event_time_text"),
+                evidence_ids=[],
+                assertion_status="caregiver_reviewed",
+                observed_at=_parse_appointment_event_time(original.get("event_time_text")),
+                created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+            )
+            db.add(assertion)
+            db.flush()
+        assertion_id = assertion.id
+        proposal.status = "accepted"
+        db.add(AIOutputLCRDecision(
+            id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
+            reviewer_caregiver_id=caregiver_id, decision="accepted",
+            rationale="Caregiver explicitly accepted a source-attributed appointment report. This is not independent clinical verification.",
+            resulting_lcr_revision_id=assertion_id,
+            created_at=now,
+        ))
+
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    if corrected_proposal is not None:
+        db.refresh(corrected_proposal)
+    return {
+        "proposal": _appointment_proposal_json(proposal),
+        "corrected_proposal": _appointment_proposal_json(corrected_proposal) if corrected_proposal else None,
+        "decision": decision,
+        "assertion_id": assertion_id,
+        "written_to_lcr": bool(assertion_id),
+        "idempotent_replay": False,
     }
 
 
