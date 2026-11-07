@@ -1099,3 +1099,39 @@ def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkey
     retrieved = test_client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=headers)
     assert retrieved.status_code == 200, retrieved.text
     assert retrieved.json()["source_freshness"]["status"] == "stale"
+
+
+def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monkeypatch):
+    import json
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 30))
+    observed = {}
+
+    def capture_inference(messages, **kwargs):
+        observed.update(kwargs)
+        return json.dumps({"items": [{
+            "section": "Recent observations and changes",
+            "source_ref": "care_events:real-event",
+            "quote": "Caregiver reported a quiet morning.",
+        }]})
+
+    monkeypatch.setattr(handoff_drafts, "qwen_chat", capture_inference)
+    result = handoff_drafts._generate_grounded_handoff(
+        [{
+            "source_table": "care_events",
+            "source_id": "real-event",
+            "source_type": "care_event",
+            "epistemic_status": "caregiver_reported",
+            "record_status": "recorded",
+            "event_at": None,
+            "recorded_at": None,
+            "text": "Caregiver reported a quiet morning.",
+        }],
+        "family_transition",
+        "family",
+    )
+
+    assert result["status"] == "generated"
+    assert observed["timeout"] == 90
+    assert observed["options"]["num_predict"] == 256
