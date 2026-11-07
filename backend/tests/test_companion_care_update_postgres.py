@@ -215,7 +215,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
 
         # Candidate inference failure does not undo the persisted user message or Companion reply.
         monkeypatch.setattr(
-            collaboration,
+            care_updates,
             "extract_companion_care_candidates",
             lambda source: (_ for _ in ()).throw(RuntimeError("inference unavailable")),
         )
