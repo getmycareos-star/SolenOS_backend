@@ -37,8 +37,12 @@ def persist_companion_candidates(
     observations = extraction.get("observations") if isinstance(extraction, dict) else []
     for index, item in enumerate(observations or []):
         quote = item.get("source_quote") if isinstance(item, dict) else None
-        if not isinstance(quote, str) or quote not in source_text:
+        if not isinstance(quote, str) or len(quote.strip()) < 8 or quote not in source_text:
             continue
+        event_time_quote = item.get("event_time_quote") if isinstance(item.get("event_time_quote"), str) else None
+        event_time_quote = event_time_quote.strip() if event_time_quote else None
+        if event_time_quote and (event_time_quote not in quote or event_time_quote not in source_text):
+            event_time_quote = None
         existing = db.query(AIOutputLCRProposal).filter(
             AIOutputLCRProposal.person_id == person_id,
             AIOutputLCRProposal.caregiver_id == caregiver_id,
@@ -61,7 +65,7 @@ def persist_companion_candidates(
                 "assertion_kind": "time_bound_observation",
                 "asserted_value": quote,
                 "source_quote": quote,
-                "event_time_text": item.get("event_time_quote") if isinstance(item.get("event_time_quote"), str) else None,
+                "event_time_text": event_time_quote,
                 "source_message_id": message_id,
                 "source_conversation_id": conversation_id,
                 "information_status": "caregiver_reported_pending_review",
