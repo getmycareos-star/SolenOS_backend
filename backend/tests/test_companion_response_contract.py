@@ -1,5 +1,6 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -170,6 +171,42 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
     finally:
         teardown()
 
+
+
+def test_companion_logs_distinct_retrieval_and_inference_durations_with_request_id(monkeypatch, caplog):
+    client = setup_client(monkeypatch)
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(
+        collaboration,
+        "_ollama_chat",
+        lambda base, model, messages, options=None: "The available records do not establish a specific sleep pattern.",
+    )
+    try:
+        token, person_id, _ = create_session(client)
+        caplog.set_level("INFO", logger="app.api.collaboration")
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}", "X-Request-ID": "companion-stage-test-001"},
+            json={"person_id": person_id, "text": "What do the records say about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        events = []
+        for record in caplog.records:
+            message = record.getMessage()
+            if message.startswith("solenos_companion_stage "):
+                events.append(json.loads(message.split(" ", 1)[1]))
+        retrieval = next(event for event in events if event["event"] == "companion_retrieval_complete")
+        inference = next(event for event in events if event["event"] == "companion_inference_complete")
+        server_request_id = response.headers["x-request-id"]
+        assert server_request_id
+        assert retrieval["request_id"] == server_request_id
+        assert inference["request_id"] == server_request_id
+        assert isinstance(retrieval["duration_ms"], (int, float))
+        assert isinstance(inference["duration_ms"], (int, float))
+        assert inference["retrieval_duration_ms"] == retrieval["duration_ms"]
+        assert inference["outcome"] == "success"
+    finally:
+        teardown()
 
 
 def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch):

@@ -7,6 +7,7 @@ import math
 import os
 import re
 import secrets
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -1778,9 +1779,10 @@ def qwen_assistant_installation():
 
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
-    # Performs a bounded real inference when the cached probe is stale. Reusing
-    # the gateway cache prevents health polling from serially running 12-second
-    # CPU inference probes and competing with actual Companion requests.
+    # Inventory only: runtime reachability and configured-model installation
+    # are reported separately from successful inference. This path never calls
+    # qwen_chat; inference is measured on actual Companion requests or explicit
+    # evaluation workflows.
     return {
         **qwen_readiness_status(),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
@@ -2523,6 +2525,9 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        # Retrieval timing starts after request/session validation and excludes
+        # model execution. The model call is measured separately below.
+        retrieval_started = time.perf_counter()
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
         recent_events = (
@@ -2973,7 +2978,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             user_text, re.IGNORECASE,
         ))
         event_context = _filter_context_lines_to_query(
-            retrieval_query, _rank_context_lines(retrieval_query, event_context, 5)
+            retrieval_query, _rank_context_lines(retrieval_query, event_context, 10)
         )
         assertion_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 4)
@@ -3131,7 +3136,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
-        retrieval_duration_ms = round((time.perf_counter() - companion_request_started) * 1000, 2)
+        retrieval_duration_ms = round((time.perf_counter() - retrieval_started) * 1000, 2)
         logger.info(
             "solenos_companion_stage %s",
             json.dumps({
