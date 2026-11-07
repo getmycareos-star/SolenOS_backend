@@ -2493,6 +2493,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     evidence_context: list[str] = []
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
+    source_document_analysis_ids: list[str] = []
     source_appointment_ids: list[str] = []
     source_assertion_ids: list[str] = []
     source_lcr_context_ids: list[str] = []
@@ -2687,6 +2688,49 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     "source_text": (evidence.source_text or "")[:700],
                     "time_provenance": evidence.time_provenance,
                     "confidence": evidence.confidence,
+                }, ensure_ascii=False)
+            )
+        # Attach verified server-extracted text to the same person-scoped
+        # evidence context. Client OCR text is never read here: only a persisted
+        # CaptureAnalysis bound to the original upload and checksum is eligible.
+        from app.api.document_lifecycle import _verify_persisted_extraction
+        for evidence in evidence_rows:
+            if evidence.type != "document":
+                continue
+            analysis = db.query(CaptureAnalysis).filter(
+                CaptureAnalysis.person_id == person_id,
+                CaptureAnalysis.caregiver_id == caregiver_id,
+                CaptureAnalysis.source_evidence_id == evidence.id,
+                CaptureAnalysis.extraction_status == "available",
+            ).order_by(CaptureAnalysis.created_at.desc()).first()
+            if analysis is None:
+                continue
+            upload = db.query(EvidenceUpload).filter(
+                EvidenceUpload.evidence_id == evidence.id
+            ).first()
+            if upload is None:
+                continue
+            try:
+                _verify_persisted_extraction(analysis, upload, db)
+            except HTTPException as exc:
+                logger.warning(
+                    "Companion skipped a document extraction that failed integrity verification",
+                    extra={"person_id": person_id, "evidence_id": evidence.id, "analysis_id": analysis.id, "status_code": exc.status_code},
+                )
+                continue
+            extraction_metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+            source_document_analysis_ids.append(str(analysis.id))
+            evidence_context.append(
+                "Persisted server-extracted document evidence: "
+                + json.dumps({
+                    "document_extraction_id": str(analysis.id),
+                    "source_evidence_id": str(evidence.id),
+                    "filename": extraction_metadata.get("filename") or metadata.get("filename"),
+                    "extraction_status": analysis.extraction_status,
+                    "extraction_method": extraction_metadata.get("extraction_method"),
+                    "source_text": (analysis.source_text or "")[:1800],
+                    "source_text_sha256": extraction_metadata.get("source_text_sha256"),
+                    "interpretation_limit": "Server-extracted source text from the preserved original upload; not an accepted LCR assertion or independent clinical verification.",
                 }, ensure_ascii=False)
             )
         source_context.extend(evidence_context)
