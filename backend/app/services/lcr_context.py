@@ -226,7 +226,7 @@ SEARCH_FIELDS = {
     "evidence": ["type", "source_text", "source_type"],
     "evidence_observations": ["observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "context", "source_passage", "ambiguity_note"],
     "facts": ["subject_type", "fact_type", "fact_value", "review_notes"],
-    "assertions": ["subject_type", "field", "asserted_value", "source_label", "source_text", "assertion_status"],
+    "assertions": ["subject_type", "field", "asserted_value", "source_label", "source_text", "event_time_text", "assertion_status"],
     "document_extractions": ["source_text"],
     "decisions": ["title", "decision_text", "context", "decision_status"],
     "decision_outcomes": ["outcome_status", "description"],
