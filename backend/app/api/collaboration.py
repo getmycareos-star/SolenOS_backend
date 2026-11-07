@@ -53,6 +53,9 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
+from app.services.qwen_gateway import extract_companion_care_candidates
+from app.services.companion_care_updates import persist_companion_candidates, proposal_payload
+from app.models.ai_output_governance import AIOutputLCRProposal
 
 router = APIRouter(tags=["community and companion"])
 logger = logging.getLogger(__name__)
@@ -680,9 +683,20 @@ def _companion_replay_response(
         .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         .all()
     )
+    source_message_id = metadata.get("source_message_id")
+    care_update_candidates = []
+    if source_message_id:
+        proposals = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.person_id == person_id,
+            AIOutputLCRProposal.caregiver_id == caregiver_id,
+            AIOutputLCRProposal.source_message_id == source_message_id,
+            AIOutputLCRProposal.proposal_type == "companion_care_observation",
+        ).order_by(AIOutputLCRProposal.candidate_index.asc(), AIOutputLCRProposal.proposal_version.desc()).all()
+        care_update_candidates = [proposal_payload(item) for item in proposals if item.status == "pending_authorization"]
     return {
         "session_id": saved_session.id,
         "person_id": person_id,
+        "care_update_candidates": care_update_candidates,
         "reply": assistant.content,
         "guard_verdict": assistant.guard_verdict,
         "safety_note": assistant.safety_note,
@@ -3144,24 +3158,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "ai_generated": ai_generated,
     }
     turn_timestamp = datetime.now(timezone.utc)
-    assistant_row = ConversationMessage(
-        session_id=session.id, role="assistant", content=reply,
-        guard_verdict=verdict, safety_note=safety_note,
-        evidence_ids_json=json.dumps(evidence_ids),
-        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
-        client_turn_id=client_turn_id,
-        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False, default=str),
-        created_at=turn_timestamp + timedelta(microseconds=1),
+    user_row = ConversationMessage(
+        session_id=session.id, role="user", content=user_text,
+        guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        source_record_refs_json="[]", created_at=turn_timestamp,
     )
     try:
-        db.add(ConversationMessage(
-            session_id=session.id, role="user", content=user_text,
-            guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-            source_record_refs_json="[]",
-            created_at=turn_timestamp,
-        ))
+        # Persist the caregiver's original message before care-update extraction.
+        # Candidate inference is a later, failure-isolated operation.
+        db.add(user_row)
+        db.flush()
+        response_metadata["source_message_id"] = str(user_row.id)
+        assistant_row = ConversationMessage(
+            session_id=session.id, role="assistant", content=reply,
+            guard_verdict=verdict, safety_note=safety_note,
+            evidence_ids_json=json.dumps(evidence_ids),
+            source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+            client_turn_id=client_turn_id,
+            response_metadata_json=json.dumps(response_metadata, ensure_ascii=False, default=str),
+            created_at=turn_timestamp + timedelta(microseconds=1),
+        )
         db.add(assistant_row)
         db.commit()
+        db.refresh(user_row)
         db.refresh(assistant_row)
     except IntegrityError as exc:
         db.rollback()
@@ -3187,6 +3206,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
+    care_update_candidates = []
+    if not emergency:
+        try:
+            extraction = await asyncio.to_thread(extract_companion_care_candidates, user_text)
+            care_update_candidates = persist_companion_candidates(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                conversation_id=session.id,
+                message_id=str(user_row.id),
+                source_text=user_text,
+                extraction=extraction,
+            )
+        except Exception:
+            # A care-update extraction outage must never undo or hide the saved conversation.
+            db.rollback()
+            logger.exception("Companion care-update identification failed after message persistence")
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
@@ -3214,6 +3250,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "written_to_lcr": False,
         "persistence": "conversation_only",
         "idempotent_replay": False,
+        "care_update_candidates": care_update_candidates,
         "messages": [{
             "role": row.role,
             "text": row.content,

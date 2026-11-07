@@ -132,6 +132,7 @@ import app.models.improvement_training_example  # register consent-gated improve
 import app.models.privacy_delivery  # register privacy and handoff lifecycle tables
 import app.models.appointment_workspace  # register durable appointment workflow records before local schema bootstrap
 import app.models.open_loop  # register persistent open-loop tables without importing API routes
+import app.models.ai_output_governance  # register shared AI proposal and decision records
 
 
 # Metadata bootstrap is strictly a local SQLite convenience. Running Alembic

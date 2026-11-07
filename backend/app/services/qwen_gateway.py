@@ -272,6 +272,55 @@ def extract_review_candidates(
 
 
 
+
+
+def extract_companion_care_candidates(source_text: str) -> dict:
+    """Identify possible care observations; every returned candidate is an exact source quotation."""
+    source = (source_text or "").strip()[:4000]
+    if not source:
+        return {"observations": []}
+    raw = qwen_chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Identify whether the caregiver's own message contains meaningful new information "
+                    "about an actual person's care, condition, experience, or observed behaviour. "
+                    "Do not classify greetings, ordinary conversation, general questions, advice requests, "
+                    "hypotheticals, or discussion of a medical topic without a personal care observation. "
+                    "Return JSON only in this exact shape: "
+                    '{"observations":[{"source_quote":"exact verbatim substring from the caregiver message"}]}. '
+                    "Every source_quote must be copied character-for-character from the message. "
+                    "Do not paraphrase, summarize, infer, diagnose, infer causes, add dates or quantities, "
+                    "or create clinical conclusions. Return an empty observations array when no meaningful "
+                    "care information is explicitly reported. Do not use examples or fixed phrase matching."
+                ),
+            },
+            {"role": "user", "content": source},
+        ],
+        response_format="json",
+        options={"temperature": 0, "num_predict": 256},
+    )
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Care-update identification returned invalid structured output") from exc
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("observations"), list):
+        raise HTTPException(status_code=503, detail="Care-update identification returned an invalid structure")
+    observations = []
+    seen = set()
+    for item in parsed["observations"][:8]:
+        quote = item.get("source_quote") if isinstance(item, dict) else None
+        if not isinstance(quote, str):
+            continue
+        quote = quote.strip()
+        if len(quote) < 8 or quote not in source or quote in seen:
+            continue
+        seen.add(quote)
+        observations.append({"source_quote": quote})
+    return {"observations": observations}
+
+
 def _log_inference_result(model: str, started: float, timeout: float, error_category: str | None, failure_reason: str | None) -> None:
     """Emit metadata only. Never include prompts, replies, identifiers, or care content."""
     elapsed_ms = round((time.monotonic() - started) * 1000)

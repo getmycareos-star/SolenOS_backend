@@ -28,6 +28,7 @@ from app.api.registered_actions import router as registered_actions_router
 from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
 from app.api.daily_care_intelligence import router as daily_care_intelligence_router
+from app.api.companion_review import router as companion_review_router
 from app.api.handoff_drafts import router as handoff_drafts_router
 from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
@@ -223,6 +224,7 @@ app.include_router(appointment_workspace_router, prefix="/api/v1")
 app.include_router(open_loops_router, prefix="/api/v1")
 app.include_router(capture_review_router, prefix="/api/v1")
 app.include_router(daily_care_intelligence_router, prefix="/api/v1")
+app.include_router(companion_review_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
