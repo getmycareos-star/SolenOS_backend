@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
@@ -77,6 +77,14 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
     engine, connection, schema = _postgres_conversation_db()
     try:
         with Session(bind=connection) as db:
+            person = Person(id="person-a", name="Care recipient A")
+            db.add(person)
+            db.flush()
+            db.add_all([
+                Caregiver(id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"),
+                Caregiver(id="caregiver-b", name="Caregiver B", relationship="family", person_id="person-a"),
+            ])
+            db.flush()
             own = ConversationSession(
                 id="own-session", person_id="person-a", caregiver_id="caregiver-a", status="active"
             )
@@ -134,6 +142,13 @@ def test_companion_history_is_bounded_across_prior_sessions():
     engine, connection, schema = _postgres_conversation_db()
     try:
         with Session(bind=connection) as db:
+            person = Person(id="person-a", name="Care recipient A")
+            db.add(person)
+            db.flush()
+            db.add(Caregiver(
+                id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"
+            ))
+            db.flush()
             active = ConversationSession(
                 id="active-session", person_id="person-a",
                 caregiver_id="caregiver-a", status="active"
