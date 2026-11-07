@@ -711,6 +711,8 @@ def get_handoff_draft(draft_id: str, request: Request, db: Session = Depends(get
             "change_type": row.change_type,
             "created_at": _iso(row.created_at),
             "created_by_caregiver_id": row.created_by_caregiver_id,
+            "content": row.content,
+            "source_snapshot": row.source_snapshot,
         } for row in revisions],
         "source_freshness": _draft_source_freshness(db, draft),
     }
