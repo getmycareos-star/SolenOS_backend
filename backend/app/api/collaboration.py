@@ -53,8 +53,7 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.qwen_gateway import extract_companion_care_candidates
-from app.services.companion_care_updates import persist_companion_candidates, proposal_payload
+from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
 from app.models.ai_output_governance import AIOutputLCRProposal
 
 router = APIRouter(tags=["community and companion"])
@@ -2350,7 +2349,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 
 
 @router.post("/conversation/message")
-async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
+async def companion_message(payload: CompanionCreate, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
     person_id, caregiver_id = _scope(request, db)
     if payload.person_id != person_id:
@@ -3208,21 +3207,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ) from exc
     care_update_candidates = []
     if not emergency:
-        try:
-            extraction = await asyncio.to_thread(extract_companion_care_candidates, user_text)
-            care_update_candidates = persist_companion_candidates(
-                db,
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                conversation_id=session.id,
-                message_id=str(user_row.id),
-                source_text=user_text,
-                extraction=extraction,
-            )
-        except Exception:
-            # A care-update extraction outage must never undo or hide the saved conversation.
-            db.rollback()
-            logger.exception("Companion care-update identification failed after message persistence")
+        # FastAPI sends the validated conversation response before this background
+        # task performs the separate care-update inference. The original user and
+        # assistant messages are already committed and cannot be rolled back by it.
+        background_tasks.add_task(
+            process_companion_care_update_message,
+            db.get_bind(),
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            conversation_id=session.id,
+            message_id=str(user_row.id),
+            source_text=user_text,
+        )
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
