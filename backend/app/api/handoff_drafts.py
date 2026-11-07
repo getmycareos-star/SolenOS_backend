@@ -1192,7 +1192,8 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
     """Qwen may organize exact source quotations; backend validates every quote and reference."""
     try:
         _, model, _ = get_ollama_config()
-    except HTTPException as exc:
+    except Exception:
+        logger.exception("Qwen handoff configuration unavailable")
         return {"status": "unavailable", "provider": "ollama", "model": None, "reason": "qwen_configuration_unavailable", "sections": []}
     eligible = [
         {
