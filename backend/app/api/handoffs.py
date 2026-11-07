@@ -356,7 +356,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
                 else "lcr_summary"
             )
             if scope_key not in payload.scope:
-                raise HTTPException(status_code=403, detail="The approved sharing scope does not cover every generated handoff section")
+                continue
             epistemic_status = str(item.get("epistemic_status") or source.get("epistemic_status") or "not_recorded")
             record_status = str(item.get("record_status") or source.get("record_status") or "not_recorded")
             event_at = item.get("event_at") or source.get("event_at") or "not_recorded"
