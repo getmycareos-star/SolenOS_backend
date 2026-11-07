@@ -84,6 +84,16 @@ SOURCES = {
         "recorded_time_fields": ("created_at",),
         "detail_fields": ("contradiction_id", "actor_caregiver_id", "previous_status", "new_status", "evidence_ids"),
     },
+    "care_assertions": {
+        "label": "Caregiver-reviewed care assertions",
+        "kind": "care_assertion",
+        "fields": ("id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value", "source_event_id", "source_label", "source_text", "event_time_text", "evidence_ids", "assertion_status", "observed_at", "created_by_caregiver_id", "updated_by_caregiver_id", "recorded_at"),
+        "text_fields": ("field", "asserted_value", "source_label", "source_text", "event_time_text"),
+        "time_fields": ("observed_at", "recorded_at"),
+        "event_time_fields": ("observed_at",),
+        "recorded_time_fields": ("recorded_at",),
+        "detail_fields": ("subject_type", "subject_id", "field", "assertion_kind", "source_event_id", "assertion_status", "created_by_caregiver_id", "updated_by_caregiver_id"),
+    },
     "care_decisions": {
         "label": "Care decisions",
         "kind": "care_decision",
