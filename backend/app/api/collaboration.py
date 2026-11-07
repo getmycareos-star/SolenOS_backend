@@ -1899,7 +1899,7 @@ def evaluate_deployed_qwen(request: Request):
             })
 
     return {
-        "model": readiness.get("model"),
+        "model": inventory.get("model"),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
         "runtime": "deployed_railway_ollama",
         "synthetic_only": True,
