@@ -821,6 +821,18 @@ jobs:
             \$\$;
           "
 
+      - name: Run Companion-to-LCR lifecycle against a separately migrated PostgreSQL database
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_companion_review
+          SOLENOS_COMPANION_TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_companion_review
+        working-directory: backend
+        run: |
+          createdb -h localhost -U postgres solenos_companion_review
+          python -m alembic upgrade head
+          python -m pytest tests/test_companion_care_update_postgres.py -q
+          dropdb -h localhost -U postgres solenos_companion_review
+
       - name: Test populated legacy caregivers table fails closed without data loss
         env:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_legacy_populated
