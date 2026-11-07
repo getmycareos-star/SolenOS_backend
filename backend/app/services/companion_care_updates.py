@@ -61,6 +61,7 @@ def persist_companion_candidates(
                 "assertion_kind": "time_bound_observation",
                 "asserted_value": quote,
                 "source_quote": quote,
+                "event_time_text": item.get("event_time_quote") if isinstance(item.get("event_time_quote"), str) else None,
                 "source_message_id": message_id,
                 "source_conversation_id": conversation_id,
                 "information_status": "caregiver_reported_pending_review",
