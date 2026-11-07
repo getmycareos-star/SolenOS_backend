@@ -271,6 +271,12 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         raise HTTPException(status_code=422, detail="Unsupported handoff scope")
     if caregiver_id in payload.recipient_caregiver_ids:
         raise HTTPException(status_code=422, detail="The initiating caregiver cannot be a recipient")
+    # The client supplies a stable request ID so a lost HTTP response can be
+    # retried without creating duplicate handoffs or recipient notifications.
+    request_id = (request.headers.get("x-request-id") or "").strip() or None
+    if request_id and len(request_id) > 128:
+        raise HTTPException(status_code=422, detail="Handoff request ID must be 128 characters or fewer")
+
     recipients = db.query(Caregiver).filter(
         Caregiver.person_id == person_id,
         Caregiver.id.in_(payload.recipient_caregiver_ids),
@@ -278,11 +284,29 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     if {r.id for r in recipients} != set(payload.recipient_caregiver_ids):
         raise HTTPException(status_code=404, detail="One or more recipients are not linked to this care record")
 
-    # The client supplies a stable request ID so a lost HTTP response can be
-    # retried without creating duplicate handoffs or recipient notifications.
-    request_id = (request.headers.get("x-request-id") or "").strip() or None
-    if request_id and len(request_id) > 128:
-        raise HTTPException(status_code=422, detail="Handoff request ID must be 128 characters or fewer")
+    ineligible_recipients = [
+        recipient.id for recipient in recipients
+        if not _has_required_consent(db, person_id, recipient.id)
+    ]
+    if ineligible_recipients:
+        now = datetime.now(timezone.utc)
+        db.add(AuditLogEvent(
+            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+            person_id=person_id, caregiver_id=caregiver_id, action="handoff.create",
+            target_type="handoff_request", target_id=person_id, occurred_at=now,
+            outcome="denied",
+            request_id=request_id or str(uuid.uuid4()),
+            policy_version=POLICY_VERSION,
+            record_metadata={
+                "reason_code": "recipient_consent_missing",
+                "recipient_count": len(ineligible_recipients),
+            },
+        ))
+        db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Every receiving caregiver must accept the required privacy and safety consent before a handoff can be shared",
+        )
 
     approved_draft = None
     approved_summary = None
