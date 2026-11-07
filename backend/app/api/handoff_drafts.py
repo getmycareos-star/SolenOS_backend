@@ -12,7 +12,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
@@ -1235,6 +1236,12 @@ def prepare_handoff_draft(
         "window_days": payload.window_days,
         "source_snapshot_sha256": hashlib.sha256(canonical_snapshot.encode("utf-8")).hexdigest(),
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    if db.get_bind().dialect.name == "postgresql":
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"handoff-draft:{person_id}:{caregiver_id}:{request_id}".encode("utf-8")).digest()[:8],
+            byteorder="big", signed=True,
+        )
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
     existing = db.query(HandoffDraft).filter(
         HandoffDraft.person_id == person_id,
         HandoffDraft.caregiver_id == caregiver_id,
@@ -1318,9 +1325,19 @@ def prepare_handoff_draft(
             },
         ))
         db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.query(HandoffDraft).filter(
+            HandoffDraft.person_id == person_id,
+            HandoffDraft.caregiver_id == caregiver_id,
+            HandoffDraft.request_id == request_id,
+        ).first()
+        if existing is not None and existing.request_fingerprint == request_fingerprint:
+            return _draft_response(existing)
+        raise HTTPException(status_code=409, detail="A concurrent draft request used this idempotency key") from exc
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=503, detail="Draft audit could not be persisted; no draft was returned") from exc
+        raise HTTPException(status_code=503, detail="Draft persistence or audit could not be completed; no draft was returned") from exc
 
     db.refresh(persisted_draft)
     return {
