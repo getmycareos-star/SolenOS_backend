@@ -760,3 +760,71 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
         },
     )
     assert approval.status_code == 409, approval.text
+
+
+def test_qwen_handoff_generation_rejects_fabricated_source_and_quote(monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
+    monkeypatch.setattr(
+        handoff_drafts,
+        "qwen_chat",
+        lambda *args, **kwargs: __import__("json").dumps({
+            "items": [{
+                "section": "Recent observations",
+                "source_ref": "care_events:invented-id",
+                "quote": "A fabricated observation.",
+            }]
+        }),
+    )
+    result = handoff_drafts._generate_grounded_handoff(
+        [{
+            "source_table": "care_events",
+            "source_id": "real-event",
+            "source_type": "care_event",
+            "epistemic_status": "caregiver_reported",
+            "record_status": "recorded",
+            "event_at": None,
+            "recorded_at": None,
+            "text": "Caregiver reported a quiet morning.",
+        }],
+        "family_transition",
+        "family",
+    )
+    assert result["status"] == "validation_failed"
+    assert result["sections"] == []
+
+
+def test_qwen_handoff_generation_accepts_only_exact_source_quotation(monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
+    monkeypatch.setattr(
+        handoff_drafts,
+        "qwen_chat",
+        lambda *args, **kwargs: __import__("json").dumps({
+            "items": [{
+                "section": "Recent observations",
+                "source_ref": "care_events:real-event",
+                "quote": "Caregiver reported a quiet morning.",
+            }]
+        }),
+    )
+    result = handoff_drafts._generate_grounded_handoff(
+        [{
+            "source_table": "care_events",
+            "source_id": "real-event",
+            "source_type": "care_event",
+            "epistemic_status": "caregiver_reported",
+            "record_status": "recorded",
+            "event_at": "2026-11-07T08:00:00+00:00",
+            "recorded_at": "2026-11-07T08:05:00+00:00",
+            "text": "Caregiver reported a quiet morning.",
+        }],
+        "family_transition",
+        "family",
+    )
+    assert result["status"] == "generated"
+    assert result["provider"] == "ollama"
+    assert result["model"] == "qwen2.5:1.5b"
+    assert result["sections"][0]["text"] == "Caregiver reported a quiet morning."
