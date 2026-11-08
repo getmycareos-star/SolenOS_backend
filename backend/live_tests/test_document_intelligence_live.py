@@ -13,15 +13,15 @@ from app.models.care_continuity import CareAssertion
 from app.main import app
 import app.main as main_module
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1" or not POSTGRES_DATABASE,
-    reason="requires the dedicated live-Qwen workflow, PostgreSQL migrations, and a running Ollama model",
-)
-
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://"))
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if POSTGRES_DATABASE else None
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1" or not POSTGRES_DATABASE,
+    reason="requires the dedicated live-Qwen workflow, PostgreSQL migrations, and a running Ollama model",
+)
 
 
 def override_db():
@@ -33,7 +33,7 @@ def override_db():
 
 
 def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted(monkeypatch):
-        app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
     source = (
