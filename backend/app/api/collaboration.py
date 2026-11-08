@@ -1779,9 +1779,8 @@ def qwen_assistant_installation():
 
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
-    # Performs a bounded real inference when the cached probe is stale. Reusing
-    # the gateway cache prevents health polling from serially running 12-second
-    # CPU inference probes and competing with actual Companion requests.
+    # Inventory-only health signal: model installation and runtime reachability
+    # are reported separately from successful inference. Never run Qwen here.
     return {
         **qwen_readiness_status(),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
