@@ -988,3 +988,57 @@ def test_companion_returns_typed_document_extraction_and_original_evidence_refer
         assert "Clinic letter: sleep disturbance" in captured["messages"][-1]["content"]
     finally:
         teardown()
+
+
+def test_companion_worker_logs_request_correlated_inference_timing(monkeypatch, caplog):
+    import logging
+    from app.api import collaboration
+
+    monkeypatch.setattr(collaboration, "_ollama_chat", lambda *args, **kwargs: "synthetic reply")
+    caplog.set_level(logging.INFO, logger=collaboration.__name__)
+
+    reply = collaboration._run_companion_inference_with_metrics(
+        "request-correlation-test",
+        "qwen3.5:4b",
+        [{"role": "user", "content": "synthetic prompt"}],
+        {"num_predict": 32},
+        123.45,
+    )
+
+    assert reply == "synthetic reply"
+    output = "\\n".join(record.getMessage() for record in caplog.records)
+    assert '"event":"companion_inference_worker_complete"' in output
+    assert '"request_id":"request-correlation-test"' in output
+    assert '"retrieval_duration_ms":123.45' in output
+    assert '"outcome":"success"' in output
+    assert "synthetic prompt" not in output
+    assert "synthetic reply" not in output
+
+
+def test_companion_worker_logs_inference_failure_from_worker(monkeypatch, caplog):
+    import logging
+    import pytest
+    from app.api import collaboration
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("synthetic model failure")
+
+    monkeypatch.setattr(collaboration, "_ollama_chat", fail)
+    caplog.set_level(logging.WARNING, logger=collaboration.__name__)
+
+    with pytest.raises(RuntimeError, match="synthetic model failure"):
+        collaboration._run_companion_inference_with_metrics(
+            "request-correlation-failure",
+            "qwen3.5:4b",
+            [{"role": "user", "content": "synthetic private prompt"}],
+            {"num_predict": 32},
+            234.56,
+        )
+
+    output = "\\n".join(record.getMessage() for record in caplog.records)
+    assert '"event":"companion_inference_worker_complete"' in output
+    assert '"request_id":"request-correlation-failure"' in output
+    assert '"retrieval_duration_ms":234.56' in output
+    assert '"outcome":"error"' in output
+    assert "synthetic private prompt" not in output
+    assert "synthetic model failure" not in output
