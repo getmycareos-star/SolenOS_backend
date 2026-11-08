@@ -358,6 +358,22 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && (contains(github.event.pull_request.title, 'qwen') || contains(github.event.pull_request.head.ref, 'qwen'))) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'handoff'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_qwen_ci
+          POSTGRES_PASSWORD: solenos_qwen_ci
+          POSTGRES_DB: solenos_qwen_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_qwen_ci -d solenos_qwen_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg2://solenos_qwen_ci:solenos_qwen_ci@127.0.0.1:5432/solenos_qwen_ci
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -377,9 +393,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           docker run --detach --name solenos-qwen-e2e \
-            --publish 8080:8080 \
+            --network host \
             --env APP_ENV=ci \
-            --env DATABASE_URL=sqlite:////tmp/solenos-qwen-e2e.db \
+            --env DATABASE_URL="$DATABASE_URL" \
             --env SECRET_KEY=ci-only-secret \
             --env OLLAMA_MODEL=qwen3.5:4b \
             solenos-backend:qwen-ci
@@ -394,6 +410,21 @@ jobs:
             exit "$exit_code"
           }
           trap cleanup EXIT
+
+          core_started=0
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
+              core_started=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$core_started" -ne 1 ]; then
+            docker logs solenos-qwen-e2e
+            echo "Bundled Qwen/FastAPI image did not start." >&2
+            exit 1
+          fi
+          docker exec solenos-qwen-e2e alembic -c /app/alembic.ini upgrade head
 
           ready=0
           for attempt in $(seq 1 180); do
