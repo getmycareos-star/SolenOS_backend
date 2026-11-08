@@ -8,6 +8,7 @@ import math
 import os
 import re
 import secrets
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -1779,9 +1780,10 @@ def qwen_assistant_installation():
 
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
-    # Performs a bounded real inference when the cached probe is stale. Reusing
-    # the gateway cache prevents health polling from serially running 12-second
-    # CPU inference probes and competing with actual Companion requests.
+    # Inventory only: runtime reachability and configured-model installation
+    # are reported separately from successful inference. This path never calls
+    # qwen_chat; inference is measured on actual Companion requests or explicit
+    # evaluation workflows.
     return {
         **qwen_readiness_status(),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
