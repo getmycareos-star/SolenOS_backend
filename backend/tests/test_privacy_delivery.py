@@ -424,8 +424,17 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     handoff_id = created.json()["id"]
 
     revoke_required_consent(owner["person"]["id"], recipient_id)
+    from app.models.collaboration import ConsentRecord
+    db = TestSessionLocal()
+    try:
+        revoked_consent = db.query(ConsentRecord).filter_by(
+            person_id=owner["person"]["id"], caregiver_id=recipient_id
+        ).one()
+        assert revoked_consent.revoked_at is not None, "consent revocation must persist before handoff acceptance is attempted"
+    finally:
+        db.close()
     denied_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
-    assert denied_accept.status_code == 404
+    assert denied_accept.status_code == 404, denied_accept.text
 
     accept_required_consent(owner["person"]["id"], recipient_id)
     missing_summary_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
