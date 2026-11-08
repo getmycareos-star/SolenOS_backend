@@ -12,7 +12,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text as sql_text
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -338,20 +338,6 @@ def _explicit_evidence_ids(row: dict) -> list[str]:
     return list(dict.fromkeys(result))
 
 
-def _normalize_reflected_fingerprint_row(row: dict) -> dict:
-    """Canonicalize JSONList text before hashing reflected SQLAlchemy rows."""
-    normalized = dict(row)
-    evidence_ids = normalized.get("evidence_ids")
-    if isinstance(evidence_ids, str):
-        try:
-            parsed = json.loads(evidence_ids)
-            if isinstance(parsed, list):
-                normalized["evidence_ids"] = parsed
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    return normalized
-
-
 def _detail_value(value):
     if value is None or isinstance(value, dict):
         return None
@@ -598,8 +584,17 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 if row is None:
                     stale.append(f"{source_table}:{source_id}")
                     continue
-                # Use the same canonical JSONList representation as the snapshot writer.
-                current = _fingerprint(_normalize_reflected_fingerprint_row(dict(row)))
+                fingerprint_row = dict(row)
+                # Reflected SQLAlchemy tables see JSONList columns as text, while
+                # ORM-created snapshots contain Python lists. Normalize before hashing.
+                if isinstance(fingerprint_row.get("evidence_ids"), str):
+                    try:
+                        parsed_evidence_ids = json.loads(fingerprint_row["evidence_ids"])
+                        if isinstance(parsed_evidence_ids, list):
+                            fingerprint_row["evidence_ids"] = parsed_evidence_ids
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+                current = _fingerprint(fingerprint_row)
             if current != expected:
                 stale.append(f"{source_table}:{source_id}")
         snapshot_ids_by_table = {}
@@ -1049,7 +1044,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "original_source_reference": row.original_source_reference,
                 "source_text_sha256": row.source_text_sha256,
             } for row in linked]
-            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot}))
+            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked, analysis_snapshot))
             source_revision_value = event.updated_at or event.recorded_at
             output.append({
                 "source_type": "daily_care_observation",
@@ -1082,7 +1077,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     else "referenced_sources_unavailable" if linked_ids
                     else "no_evidence_linked"
                 ),
-                "text": text,
+                "text": display_text,
                 "stale_warning": _is_stale(event.occurred_at, now),
             })
         return {
@@ -1443,7 +1438,7 @@ def prepare_handoff_draft(
                 event_time = next((row.get(k) for k in spec.get("event_time_fields", ()) if row.get(k) is not None), None)
                 recorded_time = next((row.get(k) for k in spec.get("recorded_time_fields", spec["time_fields"]) if row.get(k) is not None), None)
                 due_time = next((row.get(k) for k in spec.get("due_time_fields", ()) if row.get(k) is not None), None)
-                text = _display_text(row, spec["text_fields"])
+                display_text = _display_text(row, spec["text_fields"])
                 details = {key: value for key in spec.get("detail_fields", ()) if (value := _detail_value(row.get(key))) is not None}
                 if row.get("superseded_by_fact_id"):
                     details["fact_lifecycle"] = "superseded"
@@ -1455,7 +1450,7 @@ def prepare_handoff_draft(
                 record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
                 if table_name == "uncertainty_assessments":
                     record_status = "active" if row.get("is_active") else "superseded"
-                source_fingerprint = _fingerprint(_normalize_reflected_fingerprint_row(row))
+                source_fingerprint = _fingerprint(row)
                 source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
                 records.append({
                     "source_type": spec["kind"],
@@ -1628,7 +1623,6 @@ def prepare_handoff_draft(
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
         "sections": sections,
-        "caregiver_notes": [],
     }
     fingerprint_snapshot = {
         "source_statuses": statuses,
@@ -1647,7 +1641,7 @@ def prepare_handoff_draft(
             hashlib.sha256(f"handoff-draft:{person_id}:{caregiver_id}:{request_id}".encode("utf-8")).digest()[:8],
             byteorder="big", signed=True,
         )
-        db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
     existing = db.query(HandoffDraft).filter(
         HandoffDraft.person_id == person_id,
         HandoffDraft.caregiver_id == caregiver_id,
