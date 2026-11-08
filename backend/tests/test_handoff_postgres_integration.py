@@ -410,6 +410,17 @@ def test_postgres_handoff_requires_api_consent_and_follows_recipient_acceptance_
     assert inbox.status_code == 200, inbox.text
     assert any(item["id"] == handoff_id for item in inbox.json()["items"])
 
+    summary = client.put(
+        f"/api/v1/handoffs/{handoff_id}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "Caregiver-reviewed synthetic handoff summary. Confirm details with the sending caregiver."},
+            "source_record_ids": [],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert summary.status_code == 200, summary.text
+
     accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["status"] in {"accepted", "active", "acknowledged"}
+    assert accepted.json()["status"] == "accepted"
