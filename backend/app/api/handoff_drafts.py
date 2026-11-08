@@ -1077,7 +1077,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     else "referenced_sources_unavailable" if linked_ids
                     else "no_evidence_linked"
                 ),
-                "text": display_text,
+                "text": text,
                 "stale_warning": _is_stale(event.occurred_at, now),
             })
         return {
