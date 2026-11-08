@@ -423,6 +423,7 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     assert created.status_code == 201, created.text
     handoff_id = created.json()["id"]
 
+    revoke_required_consent(owner["person"]["id"], recipient_id)
     denied_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert denied_accept.status_code == 404
 
