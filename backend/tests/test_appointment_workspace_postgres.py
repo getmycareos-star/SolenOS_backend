@@ -397,3 +397,102 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
+
+
+def test_postgres_daily_capture_http_write_latency_idempotency_and_isolation(monkeypatch):
+    """Benchmark the real Daily Capture write route with intelligence isolated.
+
+    Qwen extraction and Delta reconciliation are stubbed so this reports the
+    durable capture write path only. Synthetic records exist only in disposable
+    PostgreSQL CI; no production caregiver data is created.
+    """
+    from app.api import v1 as v1_module
+
+    database_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_db():
+        db = test_session_local()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", test_session_local)
+    monkeypatch.setattr(v1_module, "extract_review_candidates", lambda *args, **kwargs: {"observations": [], "open_questions": []})
+    monkeypatch.setattr(v1_module, "reconcile_person_change_intelligence", lambda *args, **kwargs: None)
+    suffix = uuid.uuid4().hex
+    sample_count = 20
+    write_ms: list[float] = []
+    event_ids: list[str] = []
+
+    try:
+        with TestClient(app) as client:
+            owner = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Synthetic Daily Capture benchmark owner"})
+            other = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Synthetic Daily Capture benchmark other"})
+            assert owner.status_code == 201, owner.text
+            assert other.status_code == 201, other.text
+            owner_headers = {"Authorization": "Bearer " + owner.json()["access_token"]}
+            other_headers = {"Authorization": "Bearer " + other.json()["access_token"]}
+            person_id = owner.json()["person"]["id"]
+            caregiver_id = owner.json()["caregiver"]["id"]
+
+            for index in range(sample_count):
+                payload = {
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "medications": [],
+                    "vitals": [],
+                    "scales": [],
+                    "notes": f"Synthetic Daily Capture benchmark observation {index} ({suffix}).",
+                    "capture_idempotency_key": f"daily-capture-{suffix}-{index}",
+                }
+                started = time.perf_counter()
+                response = client.post("/api/v1/daily/log", headers=owner_headers, json=payload)
+                write_ms.append((time.perf_counter() - started) * 1000)
+                assert response.status_code == 200, response.text
+                receipt = response.json()
+                assert receipt["success"] is True
+                assert receipt["idempotent_replay"] is False
+                assert receipt["qwen_written_to_lcr"] is False
+                event_ids.append(receipt["id"])
+
+            replay_payload = {
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": f"Synthetic Daily Capture benchmark observation 0 ({suffix}).",
+                "capture_idempotency_key": f"daily-capture-{suffix}-0",
+            }
+            replay = client.post("/api/v1/daily/log", headers=owner_headers, json=replay_payload)
+            assert replay.status_code == 200, replay.text
+            assert replay.json()["id"] == event_ids[0]
+            assert replay.json()["idempotent_replay"] is True
+
+            changed = client.post(
+                "/api/v1/daily/log",
+                headers=owner_headers,
+                json={**replay_payload, "notes": "Changed payload must not overwrite the original capture."},
+            )
+            assert changed.status_code == 409, changed.text
+
+            cross_person = client.get(f"/api/v1/events/{person_id}", headers=other_headers)
+            assert cross_person.status_code == 200, cross_person.text
+            assert not any(item.get("id") in event_ids for item in cross_person.json())
+
+            print("POSTGRES_DAILY_CAPTURE_HTTP_BENCHMARK=" + json.dumps({
+                "sample_count": sample_count,
+                "daily_log_post_duration_ms": _percentiles(write_ms),
+                "idempotent_replay": "PASS",
+                "changed_payload_key_reuse": "409",
+                "cross_person_visibility": "DENIED",
+                "qwen_and_delta": "stubbed_to_isolate_durable_write_path",
+                "scope": "disposable_postgresql_ci_only",
+            }, separators=(",", ":")))
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
