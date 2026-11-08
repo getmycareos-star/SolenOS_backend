@@ -227,7 +227,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     outsider_headers = {"Authorization": f"Bearer {outsider['access_token']}"}
     assert client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=outsider_headers).status_code == 404
     assert client.put(f"/api/v1/handoff-drafts/{draft_id}", headers=outsider_headers, json={"content": {}}).status_code == 404
-    assert client.post(f"/api/v1/handoff-drafts/{draft_id}/approve", headers=outsider_headers, json={"recipient_caregiver_ids": [], "scope": ["lcr_summary"], "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()}).status_code == 404
+    assert client.post(f"/api/v1/handoff-drafts/{draft_id}/approve", headers=outsider_headers, json={"recipient_caregiver_ids": [owner["caregiver"]["id"]], "scope": ["lcr_summary"], "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()}).status_code == 404
     assert prepared.json()["generation_status"] == "generated"
     assert prepared.json()["source_statuses"]["daily_care"]["status"] == "available"
     assert prepared.json()["source_statuses"]["documents"]["status"] == "available"
