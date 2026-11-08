@@ -1,7 +1,7 @@
 """Live Qwen evaluation through the actual Companion HTTP and database path.
 
 This suite is deliberately separate from mocked unit tests. It uses only synthetic
-records in an isolated SQLite database and a real Ollama model supplied by CI.
+records in an disposable PostgreSQL database and a real Ollama model supplied by CI.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database import Base, get_db
+from app.core.database import get_db
 from app.models.care import CareEvent
 from app.models.collaboration import ConversationMessage
 from app.services.qwen_gateway import extract_companion_care_candidates
@@ -22,16 +22,15 @@ import app.main as main_module
 
 
 pytestmark = pytest.mark.skipif(
-    os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1",
-    reason="requires the dedicated live-Qwen workflow and a running Ollama model",
+    os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1" or not POSTGRES_DATABASE,
+    reason="requires the dedicated live-Qwen workflow, PostgreSQL migrations, and a running Ollama model",
 )
 
 
-engine = create_engine(
-    "sqlite:////tmp/solenos-live-inference.db",
-    connect_args={"check_same_thread": False},
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://"))
+engine = create_engine(DATABASE_URL, pool_pre_ping=True) if POSTGRES_DATABASE else None
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None
 
 
 def override_db():
@@ -86,8 +85,7 @@ def _create_synthetic_record(client: TestClient):
 
 def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch):
     """Real model inference must pass a small, fixed, evidence-bounded evaluation."""
-    Base.metadata.create_all(bind=engine)
-    app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
     try:
@@ -255,13 +253,11 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
     finally:
         client.close()
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
 
 
 def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(monkeypatch):
     """Real Qwen must distinguish missing emergency information from confirmed absence."""
-    Base.metadata.create_all(bind=engine)
-    app.dependency_overrides[get_db] = override_db
+        app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
     try:
@@ -339,7 +335,6 @@ def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(
     finally:
         client.close()
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
 
 
 
