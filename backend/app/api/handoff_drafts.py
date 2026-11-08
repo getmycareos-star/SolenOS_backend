@@ -513,7 +513,7 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
                     "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
                 } for row in assertion_rows if str(row.source_event_id or "") == str(event.id) or any(str(value) in [str(evidence_id) for evidence_id in evidence_ids] for value in (row.evidence_ids or []))]
-                current = _fingerprint(_daily_care_fingerprint_payload(event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot}))
+                current = _fingerprint(_daily_care_fingerprint_payload(event, linked, analysis_snapshot))
             elif item.get("source_type") == "document_extracted_text":
                 extraction = db.query(CaptureAnalysis).filter(
                     CaptureAnalysis.id == source_id,
