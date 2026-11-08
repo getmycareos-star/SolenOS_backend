@@ -480,9 +480,12 @@ def test_postgres_daily_capture_http_write_latency_idempotency_and_isolation(mon
             )
             assert changed.status_code == 409, changed.text
 
-            cross_person = client.get(f"/api/v1/events/{person_id}", headers=other_headers)
-            assert cross_person.status_code == 200, cross_person.text
-            assert not any(item.get("id") in event_ids for item in cross_person.json())
+            cross_person = client.post(
+                "/api/v1/daily/log",
+                headers=other_headers,
+                json={**replay_payload, "capture_idempotency_key": f"cross-person-{suffix}"},
+            )
+            assert cross_person.status_code == 403, cross_person.text
 
             print("POSTGRES_DAILY_CAPTURE_HTTP_BENCHMARK=" + json.dumps({
                 "sample_count": sample_count,
