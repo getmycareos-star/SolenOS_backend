@@ -1,6 +1,6 @@
 """Authenticated appointment-assist acceptance against a real Qwen model.
 
-All synthetic identity and appointment rows live in an disposable PostgreSQL database.
+All synthetic identity and appointment rows live in a disposable PostgreSQL database.
 No production care record is read or written.
 """
 from __future__ import annotations
@@ -22,15 +22,15 @@ from app.models.time_location import Appointment
 from app.main import app
 import app.main as main_module
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL") != "1" or not POSTGRES_DATABASE,
-    reason="requires the dedicated live-Qwen appointment-assist workflow and migrated PostgreSQL",
-)
-
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://"))
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if POSTGRES_DATABASE else None
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL") != "1" or not POSTGRES_DATABASE,
+    reason="requires the dedicated live-Qwen appointment-assist workflow and migrated PostgreSQL",
+)
 
 
 def override_db():
@@ -43,7 +43,7 @@ def override_db():
 
 def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-        app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
     try:
