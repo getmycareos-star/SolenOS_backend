@@ -416,6 +416,9 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
         db.close()
 
     accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    still_denied = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
+    assert still_denied.status_code == 403, still_denied.text
+    accept_required_consent(owner["person"]["id"], recipient_id)
     created = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
     assert created.status_code == 201, created.text
     handoff_id = created.json()["id"]
@@ -616,6 +619,7 @@ def test_handoff_rejects_spoofed_person_scope_and_invalid_expiry():
     assert wrong_person.status_code == 403
     accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
     recipient_id, _ = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
     expired = client.post(
         "/api/v1/handoffs",
         headers=headers,
