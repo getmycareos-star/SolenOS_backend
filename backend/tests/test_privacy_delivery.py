@@ -416,12 +416,25 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
         db.close()
 
     accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    still_denied = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
+    assert still_denied.status_code == 403, still_denied.text
+    accept_required_consent(owner["person"]["id"], recipient_id)
     created = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
     assert created.status_code == 201, created.text
     handoff_id = created.json()["id"]
 
+    revoke_required_consent(owner["person"]["id"], recipient_id)
+    from app.models.collaboration import ConsentRecord
+    db = TestSessionLocal()
+    try:
+        revoked_consent = db.query(ConsentRecord).filter_by(
+            person_id=owner["person"]["id"], caregiver_id=recipient_id
+        ).one()
+        assert revoked_consent.revoked_at is not None, "consent revocation must persist before handoff acceptance is attempted"
+    finally:
+        db.close()
     denied_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
-    assert denied_accept.status_code == 404
+    assert denied_accept.status_code == 404, denied_accept.text
 
     accept_required_consent(owner["person"]["id"], recipient_id)
     missing_summary_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
@@ -616,6 +629,7 @@ def test_handoff_rejects_spoofed_person_scope_and_invalid_expiry():
     assert wrong_person.status_code == 403
     accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
     recipient_id, _ = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
     expired = client.post(
         "/api/v1/handoffs",
         headers=headers,
