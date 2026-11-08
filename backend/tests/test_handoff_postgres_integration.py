@@ -61,27 +61,23 @@ def _add_linked_recipient(person_id):
     return caregiver_id, token
 
 
-def _accept_consent(person_id, caregiver_id):
-    from app.models.collaboration import ConsentRecord
-
-    db = SessionLocal()
-    try:
-        consent = db.query(ConsentRecord).filter_by(
-            person_id=person_id, caregiver_id=caregiver_id,
-        ).first()
-        if consent is None:
-            consent = ConsentRecord(person_id=person_id, caregiver_id=caregiver_id)
-            db.add(consent)
-        consent.medical_disclaimer_acknowledged = True
-        consent.privacy_model_acknowledged = True
-        consent.multi_caregiver_acknowledged = True
-        consent.no_advertising_acknowledged = True
-        consent.accepted_terms_version = "2026-10"
-        consent.accepted_at = datetime.now(timezone.utc)
-        consent.revoked_at = None
-        db.commit()
-    finally:
-        db.close()
+def _accept_consent(client, person_id, caregiver_id, access_token):
+    response = client.post(
+        "/api/v1/consent",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": False,
+            "accepted_terms_version": "2026-10",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["verified"] is True
 
 
 def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(monkeypatch):
@@ -100,10 +96,25 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     client = TestClient(app)
     owner = _create_session(client, "PostgreSQL initiating caregiver")
     recipient_id, recipient_token = _add_linked_recipient(owner["person"]["id"])
-    _accept_consent(owner["person"]["id"], owner["caregiver"]["id"])
-    _accept_consent(owner["person"]["id"], recipient_id)
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+    expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    consent_gate_payload = {
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [recipient_id],
+        "scope": ["lcr_summary"],
+        "expires_at": expiry,
+    }
+    sender_without_consent = client.post("/api/v1/handoffs", headers=owner_headers, json=consent_gate_payload)
+    assert sender_without_consent.status_code == 403, sender_without_consent.text
+
+    _accept_consent(client, owner["person"]["id"], owner["caregiver"]["id"], owner["access_token"])
+    recipient_without_consent = client.post("/api/v1/handoffs", headers=owner_headers, json=consent_gate_payload)
+    assert recipient_without_consent.status_code == 403, recipient_without_consent.text
+    inbox_without_consent = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
+    assert inbox_without_consent.status_code == 403, inbox_without_consent.text
+
+    _accept_consent(client, owner["person"]["id"], recipient_id, recipient_token)
 
     observation = "Caregiver reports that lunch was only partly eaten."
     daily_evidence_id = str(uuid.uuid4())
@@ -216,7 +227,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     outsider_headers = {"Authorization": f"Bearer {outsider['access_token']}"}
     assert client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=outsider_headers).status_code == 404
     assert client.put(f"/api/v1/handoff-drafts/{draft_id}", headers=outsider_headers, json={"content": {}}).status_code == 404
-    assert client.post(f"/api/v1/handoff-drafts/{draft_id}/approve", headers=outsider_headers, json={"recipient_caregiver_ids": [owner["caregiver"]["id"]], "scope": ["lcr_summary"], "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()}).status_code == 404
+    assert client.post(f"/api/v1/handoff-drafts/{draft_id}/approve", headers=outsider_headers, json={"recipient_caregiver_ids": [], "scope": ["lcr_summary"], "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()}).status_code == 404
     assert prepared.json()["generation_status"] == "generated"
     assert prepared.json()["source_statuses"]["daily_care"]["status"] == "available"
     assert prepared.json()["source_statuses"]["documents"]["status"] == "available"
@@ -242,7 +253,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
 
     retrieved = client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=owner_headers)
     assert retrieved.status_code == 200, retrieved.text
-    assert retrieved.json()["source_freshness"]["status"] == "current", retrieved.json()["source_freshness"]
+    assert retrieved.json()["source_freshness"]["status"] == "current"
     edited_content = {
         "template_sections": retrieved.json()["template_sections"],
         "sections": retrieved.json()["sections"],
