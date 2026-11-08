@@ -355,3 +355,61 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert revoked.status_code == 200, revoked.text
     blocked = client.get(f"/api/v1/handoffs/{handoff_id}/summary", headers=recipient_headers)
     assert blocked.status_code == 404
+
+
+def test_postgres_handoff_requires_api_consent_and_follows_recipient_acceptance_flow():
+    """Verify consent is accepted through the caregiver API before sharing."""
+    client = TestClient(app)
+    owner = _create_session(client, "Consent API initiating caregiver")
+    recipient_id, recipient_token = _add_linked_recipient(owner["person"]["id"])
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    handoff_payload = {
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [recipient_id],
+        "scope": ["lcr_summary", "open_loops"],
+        "expires_at": expires_at,
+    }
+
+    denied = client.post("/api/v1/handoffs", headers=owner_headers, json=handoff_payload)
+    assert denied.status_code == 403, denied.text
+    assert "consent" in denied.text.casefold()
+
+    def accept_required_consent(headers, caregiver_id):
+        response = client.post("/api/v1/consent", headers=headers, json={
+            "person_id": owner["person"]["id"],
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": False,
+            "accepted_terms_version": "2026-10",
+        })
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    sender_consent = accept_required_consent(owner_headers, owner["caregiver"]["id"])
+    recipient_consent = accept_required_consent(recipient_headers, recipient_id)
+    assert sender_consent["verified"] is True
+    assert recipient_consent["verified"] is True
+
+    directory = client.get("/api/v1/handoffs/directory/recipients", headers=owner_headers)
+    assert directory.status_code == 200, directory.text
+    assert any(
+        item["caregiver_id"] == recipient_id and item["can_receive_handoff"] is True
+        for item in directory.json()["items"]
+    )
+
+    created = client.post("/api/v1/handoffs", headers=owner_headers, json=handoff_payload)
+    assert created.status_code == 201, created.text
+    handoff_id = created.json()["id"]
+
+    inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
+    assert inbox.status_code == 200, inbox.text
+    assert any(item["id"] == handoff_id for item in inbox.json()["items"])
+
+    accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] in {"accepted", "active", "acknowledged"}
