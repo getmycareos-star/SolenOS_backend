@@ -595,6 +595,45 @@ def _ollama_chat(
     return qwen_chat(messages, options=options)
 
 
+def _run_companion_inference_with_metrics(
+    request_id: str | None,
+    model: str,
+    messages: list[dict],
+    options: dict,
+    retrieval_duration_ms: float,
+) -> str:
+    """Log model-stage duration from the worker, even if the HTTP client disconnects."""
+    started = _time.perf_counter()
+    try:
+        reply = _ollama_chat("", model, messages, options)
+    except BaseException as exc:
+        logger.warning(
+            "solenos_companion_stage %s",
+            json.dumps({
+                "event": "companion_inference_worker_complete",
+                "request_id": request_id,
+                "duration_ms": round((_time.perf_counter() - started) * 1000, 2),
+                "retrieval_duration_ms": retrieval_duration_ms,
+                "model": model,
+                "outcome": "cancelled_or_error" if isinstance(exc, asyncio.CancelledError) else "error",
+                "error_type": type(exc).__name__,
+            }, separators=(",", ":")),
+        )
+        raise
+    logger.info(
+        "solenos_companion_stage %s",
+        json.dumps({
+            "event": "companion_inference_worker_complete",
+            "request_id": request_id,
+            "duration_ms": round((_time.perf_counter() - started) * 1000, 2),
+            "retrieval_duration_ms": retrieval_duration_ms,
+            "model": model,
+            "outcome": "success",
+        }, separators=(",", ":")),
+    )
+    return reply
+
+
 _CONTEXT_STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "was", "were", "are",
     "has", "have", "had", "you", "your", "about", "what", "when", "where",
@@ -1779,9 +1818,8 @@ def qwen_assistant_installation():
 
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
-    # Performs a bounded real inference when the cached probe is stale. Reusing
-    # the gateway cache prevents health polling from serially running 12-second
-    # CPU inference probes and competing with actual Companion requests.
+    # Inventory-only health signal: model installation and runtime reachability
+    # are reported separately from successful inference. Never run Qwen here.
     return {
         **qwen_readiness_status(),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
@@ -2567,6 +2605,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
+        retrieval_started = _time.perf_counter()
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -3173,7 +3212,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
-        retrieval_duration_ms = round((_time.perf_counter() - companion_request_started) * 1000, 2)
+        retrieval_duration_ms = round((_time.perf_counter() - retrieval_started) * 1000, 2)
         logger.info(
             "solenos_companion_stage %s",
             json.dumps({
@@ -3191,11 +3230,12 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         inference_started = _time.perf_counter()
         try:
             reply = await asyncio.to_thread(
-                _ollama_chat,
-                base,
+                _run_companion_inference_with_metrics,
+                companion_request_id,
                 model,
                 model_messages,
                 {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
+                retrieval_duration_ms,
             )
             logger.info(
                 "solenos_companion_stage %s",
