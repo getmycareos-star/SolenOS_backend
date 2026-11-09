@@ -250,6 +250,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
+    # Community remains disabled at the HTTP boundary, including any legacy route
+    # that may be registered through another router.
+    if path.startswith("/api/v1/community"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
     # The outer ASGI middleware already bounded and buffered this public bootstrap
