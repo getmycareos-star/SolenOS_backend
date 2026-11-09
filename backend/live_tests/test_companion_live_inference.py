@@ -5,6 +5,7 @@ created exclusively by the repository's Alembic migration chain.
 """
 from __future__ import annotations
 
+import json
 import os
 import uuid
 
@@ -138,9 +139,8 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
 
         before_approval = client.get("/api/v1/care-continuity/current-care", headers=auth)
         assert before_approval.status_code == 200, before_approval.text
-        assert not any(
-            item.get("source_proposal_id") == proposal["id"]
-            for item in before_approval.json().get("items", [])
+        assert proposal["proposed_change"]["source_quote"] not in json.dumps(
+            before_approval.json().get("items", [])
         ), before_approval.json()
 
         approval = client.post(
