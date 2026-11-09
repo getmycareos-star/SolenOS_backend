@@ -1,21 +1,7 @@
 name: Authenticated appointment-assist live Qwen acceptance
 
 on:
-  push:
-    branches: [main, "fix/appointment-status-grounding"]
-    paths:
-      - "backend/live_tests/test_appointment_assist_live_inference.py"
-      - ".github/workflows/appointment-assist-live-inference.yml"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/services/qwen_gateway.py"
-  pull_request:
-    paths:
-      - "backend/live_tests/test_appointment_assist_live_inference.py"
-      - ".github/workflows/appointment-assist-live-inference.yml"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/services/qwen_gateway.py"
   workflow_dispatch:
-
 permissions:
   contents: read
 
@@ -27,20 +13,6 @@ jobs:
   appointment-assist-live-inference:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: solenos_appointment_ci
-          POSTGRES_PASSWORD: solenos_appointment_ci
-          POSTGRES_DB: solenos_appointment_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U solenos_appointment_ci -d solenos_appointment_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
     env:
       OLLAMA_BASE_URL: http://127.0.0.1:11434
       OLLAMA_MODEL: qwen3.5:4b
@@ -51,7 +23,7 @@ jobs:
       OLLAMA_NUM_THREADS: "2"
       OLLAMA_SIDECAR_ENABLED: "true"
       SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL: "1"
-      DATABASE_URL: postgresql+psycopg2://solenos_appointment_ci:solenos_appointment_ci@127.0.0.1:5432/solenos_appointment_ci
+      DATABASE_URL: sqlite:////tmp/solenos-appointment-assist-live.db
       APP_ENV: test
     steps:
       - name: Check out repository
@@ -63,10 +35,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/pyproject.toml
       - name: Install backend and test dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx psycopg2-binary
-      - name: Apply reviewed PostgreSQL migrations
-        working-directory: backend
-        run: python -m alembic upgrade head
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
       - name: Start isolated Ollama runtime
         run: |
           docker run -d --name solenos-appointment-ollama -p 11434:11434 ollama/ollama:latest
