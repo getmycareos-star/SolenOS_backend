@@ -884,3 +884,52 @@ def test_quick_daily_checkin_rejects_cross_recipient_session_scope():
         db.close()
     finally:
         teardown_db()
+
+def test_legacy_event_write_requires_matching_server_session():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        db = TestingSessionLocal()
+        second_person = Person(id="person-daily-other", name="Other Person")
+        second_caregiver = Caregiver(
+            id="caregiver-daily-other",
+            name="Other Caregiver",
+            email="daily-other@example.invalid",
+            relationship="Family",
+            person_id=second_person.id,
+        )
+        db.add_all([second_person, second_caregiver])
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        payload = {
+            "person_id": "person-daily-test",
+            "event_type": "observation",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "title": "Unusual confusion",
+            "description": "Mum was unusually confused this afternoon.",
+            "created_by_caregiver_id": "caregiver-daily-test",
+        }
+
+        # The route previously accepted this write with no bearer token.
+        unauthenticated = client.post("/api/v1/events", json=payload)
+        assert unauthenticated.status_code == 401, unauthenticated.text
+
+        # A valid token for another care record must not authorize this write.
+        other_headers = session_headers("person-daily-other", "caregiver-daily-other")
+        cross_person = client.post(
+            "/api/v1/events",
+            headers=other_headers,
+            json=payload,
+        )
+        assert cross_person.status_code == 403, cross_person.text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareEvent).filter_by(person_id="person-daily-test").count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+

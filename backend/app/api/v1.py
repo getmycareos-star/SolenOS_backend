@@ -955,7 +955,10 @@ def create_daily_care_entry(payload: dict, request: Request, db: Session = Depen
 
 
 @router.post("/events", response_model=CareEventSchema)
-def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
+def create_event(event: CareEventCreate, request: Request, db: Session = Depends(get_db)):
+    # This legacy event-ingestion route is still reachable by clients. Bind it
+    # to the same server-issued person+caregiver capability as Daily Care.
+    _require_session_scope(request, db, event.person_id, event.created_by_caregiver_id)
     _require_person_and_linked_caregiver(
         db, event.person_id, event.created_by_caregiver_id
     )
