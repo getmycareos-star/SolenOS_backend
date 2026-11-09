@@ -158,7 +158,8 @@ jobs:
           set -Eeuo pipefail
           docker run --detach --name solenos-backend-ci --network host --env APP_ENV=ci --env DATABASE_URL="$DATABASE_URL" --env SECRET_KEY=ci-only-not-for-production --env OLLAMA_BASE_URL=http://127.0.0.1:9 --env OLLAMA_HOST=127.0.0.1:9 solenos-backend-ci:latest
           cleanup() {
-            docker logs --tail 200 solenos-backend-ci >&2 || true
+            docker inspect --format 'container={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' solenos-backend-ci >&2 || true
+            docker logs --tail 40 solenos-backend-ci >&2 || true
             docker rm --force solenos-backend-ci >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
