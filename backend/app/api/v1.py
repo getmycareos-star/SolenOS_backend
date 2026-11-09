@@ -1108,7 +1108,8 @@ def list_corrections(person_id: str, request: Request, db: Session = Depends(get
 
 
 @router.post("/observations", response_model=ObservationSchema)
-def create_observation(observation: ObservationCreate, db: Session = Depends(get_db)):
+def create_observation(observation: ObservationCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, observation.person_id, observation.caregiver_id)
     # Validate referential integrity before persisting an observation.
     person = db.query(PersonModel).filter(PersonModel.id == observation.person_id).first()
     if not person:
@@ -1158,7 +1159,8 @@ def create_observation(observation: ObservationCreate, db: Session = Depends(get
 
 
 @router.get("/observations/{person_id}", response_model=List[ObservationSchema])
-def list_observations(person_id: str, db: Session = Depends(get_db)):
+def list_observations(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(ObservationModel)
         .filter(ObservationModel.person_id == person_id)
@@ -1168,13 +1170,15 @@ def list_observations(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/observations/{person_id}/trends", response_model=List[ObservationTrend])
-def get_observation_trends(person_id: str, db: Session = Depends(get_db)):
+def get_observation_trends(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     engine = LearningEngine(db)
     return engine.get_observation_trends(person_id)
 
 
 @router.post("/reasoning-memory", response_model=ReasoningMemorySchema)
-def create_reasoning_memory(memory: ReasoningMemoryCreate, db: Session = Depends(get_db)):
+def create_reasoning_memory(memory: ReasoningMemoryCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, memory.person_id)
     db_memory = ReasoningMemoryModel(**memory.model_dump())
     db.add(db_memory)
     db.commit()
@@ -1183,7 +1187,8 @@ def create_reasoning_memory(memory: ReasoningMemoryCreate, db: Session = Depends
 
 
 @router.get("/reasoning-memory/{person_id}", response_model=List[ReasoningMemorySchema])
-def list_reasoning_memory(person_id: str, db: Session = Depends(get_db)):
+def list_reasoning_memory(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(ReasoningMemoryModel)
         .filter(
@@ -1196,13 +1201,15 @@ def list_reasoning_memory(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/reasoning/{person_id}/summary", response_model=ReasoningSummary)
-def get_reasoning_summary(person_id: str, db: Session = Depends(get_db)):
+def get_reasoning_summary(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     engine = LearningEngine(db)
     return engine.get_reasoning_summary(person_id)
 
 
 @router.get("/learning-events/{person_id}", response_model=List[LearningEventSchema])
-def list_learning_events(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
+def list_learning_events(person_id: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(LearningEventModel)
         .filter(LearningEventModel.person_id == person_id)

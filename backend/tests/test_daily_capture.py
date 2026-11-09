@@ -976,3 +976,47 @@ def test_legacy_insight_and_correction_routes_require_scoped_sessions():
     finally:
         teardown_db()
 
+def test_legacy_observation_and_reasoning_routes_require_scoped_sessions():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        client = TestClient(app)
+        now = datetime.now(timezone.utc).isoformat()
+        observation = {
+            "person_id": "person-daily-test",
+            "caregiver_id": "caregiver-daily-test",
+            "observed_at": now,
+            "original_text": "Caregiver reports a change in sleep.",
+        }
+        memory = {
+            "person_id": "person-daily-test",
+            "memory_type": "caregiver_report",
+            "key": "sleep_change",
+            "value": ["Caregiver reports a change in sleep."],
+            "source_evidence_ids": [],
+        }
+        protected_requests = [
+            ("post", "/api/v1/observations", observation),
+            ("get", "/api/v1/observations/person-daily-test", None),
+            ("get", "/api/v1/observations/person-daily-test/trends", None),
+            ("post", "/api/v1/reasoning-memory", memory),
+            ("get", "/api/v1/reasoning-memory/person-daily-test", None),
+            ("get", "/api/v1/reasoning/person-daily-test/summary", None),
+            ("get", "/api/v1/learning-events/person-daily-test", None),
+        ]
+        for method, path, payload in protected_requests:
+            response = getattr(client, method)(path, json=payload) if payload is not None else getattr(client, method)(path)
+            assert response.status_code == 401, (method, path, response.status_code, response.text)
+
+        foreign_headers = session_headers("person-other-test", "caregiver-other-test")
+        for method, path, payload in protected_requests:
+            response = (
+                getattr(client, method)(path, headers=foreign_headers, json=payload)
+                if payload is not None
+                else getattr(client, method)(path, headers=foreign_headers)
+            )
+            assert response.status_code == 403, (method, path, response.status_code, response.text)
+    finally:
+        teardown_db()
+
