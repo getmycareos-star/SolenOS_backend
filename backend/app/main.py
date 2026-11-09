@@ -338,6 +338,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             path.startswith("/api/v1/community")
             or path == "/api/v1/upload"
             or path.startswith("/api/v1/assistant/")
+            or path.startswith("/api/v1/companion/")
             or path.startswith("/api/v1/reminders")
             or path.startswith("/api/v1/care-continuity")
             or path.startswith("/api/v1/handoffs")
