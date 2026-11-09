@@ -126,10 +126,33 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     client = TestClient(app)
     owner = create_session(client, "Recipient")
     recipient_id, recipient_token = add_caregiver_session(owner["person"]["id"])
-    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
-    accept_required_consent(owner["person"]["id"], recipient_id)
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+
+    # Exercise the public consent API for both authenticated caregiver sessions;
+    # the second caregiver/session is a disposable database fixture because the
+    # product does not expose a caregiver-invitation endpoint in this workflow.
+    for consent_headers, caregiver_id in (
+        (owner_headers, owner["caregiver"]["id"]),
+        (recipient_headers, recipient_id),
+    ):
+        consent = client.post(
+            "/api/v1/consent",
+            headers=consent_headers,
+            json={
+                "person_id": owner["person"]["id"],
+                "caregiver_id": caregiver_id,
+                "medical_disclaimer_acknowledged": True,
+                "privacy_model_acknowledged": True,
+                "multi_caregiver_acknowledged": True,
+                "no_advertising_acknowledged": True,
+                "data_improvement_consent": False,
+                "accepted_terms_version": "2026-10",
+            },
+        )
+        assert consent.status_code == 200, consent.text
+        assert consent.json()["verified"] is True
+
     create_headers = {**owner_headers, "X-Request-ID": "ci-handoff-create-idempotency-0001"}
     create_payload = {
         "person_id": owner["person"]["id"],
