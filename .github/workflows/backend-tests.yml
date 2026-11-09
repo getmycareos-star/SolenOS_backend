@@ -841,5 +841,23 @@ jobs:
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"
 
+          echo "QWEN_E2E: persisted handoff draft using real Qwen + PostgreSQL"
+          handoff_request_id="ci-real-qwen-handoff-$RANDOM-$RANDOM"
+          handoff_status=$(curl --silent --show-error --output /tmp/qwen-handoff-draft.json --write-out '%{http_code}' --max-time 120 \
+            -H "$auth_header" -H "Content-Type: application/json" -H "X-Request-ID: $handoff_request_id" \
+            -d '{"purpose":"family_transition","audience":"family","window_days":30}' \
+            http://127.0.0.1:8080/api/v1/handoff-drafts/prepare || true)
+          if [ "$handoff_status" != "200" ]; then
+            cat /tmp/qwen-handoff-draft.json >&2 || true
+            echo "Real-Qwen handoff draft preparation failed (HTTP $handoff_status)." >&2
+            exit 1
+          fi
+          handoff_draft_id=$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("generation_status") == "generated", d; assert d.get("validation_status") == "exact_quote_reference_validation_passed", d; assert d.get("review_status") == "pending_review", d; assert d.get("draft_persisted") is True or bool(d.get("draft_id")), d; assert d.get("requires_caregiver_review") is True, d; assert d.get("creates_handoff") is False and d.get("updates_lcr") is False, d; g=d.get("generation") or {}; sections=g.get("sections") or []; assert sections, d; assert all(x.get("source_ref") and x.get("text") for x in sections), d; print(d["draft_id"])' /tmp/qwen-handoff-draft.json)
+          curl --fail --silent --show-error --max-time 30 -H "$auth_header" \
+            "http://127.0.0.1:8080/api/v1/handoff-drafts/$handoff_draft_id" > /tmp/qwen-handoff-draft-reloaded.json
+          python -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d.get("draft_id") == sys.argv[2], d; assert d.get("generation_status") == "generated", d; assert d.get("review_status") == "pending_review", d; assert d.get("revision_number") == 1, d; assert d.get("requires_caregiver_review") is True, d; assert d.get("creates_handoff") is False and d.get("updates_lcr") is False, d; assert d.get("generation",{}).get("sections"), d' /tmp/qwen-handoff-draft-reloaded.json "$handoff_draft_id"
+
+          echo "PASS: real Qwen generated source-quoted handoff content, persisted it in PostgreSQL, and reloaded the same pending-review draft."
+
           echo "PASS: real Qwen inference succeeded for Companion, all 38 enabled read-only care workflows, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
 
