@@ -1512,3 +1512,12 @@ def readiness_check(db: Session = Depends(get_db)):
         "continuity_schema": continuity_schema,
         "app": settings.app_name,
     }
+
+
+# Enforce the Community suspension against the final assembled FastAPI route table.
+# Filtering the source router alone is insufficient if another router registration
+# has already copied Community routes into the application.
+app.routes[:] = [
+    route for route in app.routes
+    if not getattr(route, "path", "").lower().startswith("/api/v1/community")
+]
