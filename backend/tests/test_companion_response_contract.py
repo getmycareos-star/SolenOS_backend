@@ -453,15 +453,24 @@ def test_trend_evidence_requires_two_distinct_dated_topic_observations():
     ) is False
 
 
-def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
+def test_referential_follow_up_uses_prior_caregiver_questions_not_assistant_wording():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
         SimpleNamespace(role="assistant", content="I can see one report of poor sleep, but no earlier comparison."),
     ]
     query = collaboration._context_query_with_history("What about that?", prior)
     assert "sleep" in query.casefold()
-    assert "poor sleep" in query.casefold()
+    assert "Has Mum's sleep been getting worse?" in query
+    assert "poor sleep" not in query.casefold()
     assert query.startswith("What about that?")
+
+
+def test_referential_follow_up_keeps_current_and_prior_user_terms_ahead_of_synonyms():
+    query = "What about that?\nHas Mum's sleep been getting worse?"
+    terms = collaboration._ordered_context_search_terms("What about that?", query)
+    assert "sleep" in terms
+    assert terms.index("sleep") < terms.index("awake")
+    assert terms.index("sleep") < terms.index("waking")
 
 
 def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval():
