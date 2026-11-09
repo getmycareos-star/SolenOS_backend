@@ -1006,7 +1006,8 @@ def list_events(person_id: str, request: Request, db: Session = Depends(get_db))
 
 
 @router.post("/insights", response_model=InsightSchema)
-def create_insight(insight: InsightCreate, db: Session = Depends(get_db)):
+def create_insight(insight: InsightCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, insight.person_id)
     person = db.query(PersonModel).filter(PersonModel.id == insight.person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -1045,7 +1046,8 @@ def create_insight(insight: InsightCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/insights/{person_id}", response_model=List[InsightSchema])
-def list_insights(person_id: str, db: Session = Depends(get_db)):
+def list_insights(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(InsightModel)
         .filter(InsightModel.person_id == person_id, InsightModel.is_active)
@@ -1055,7 +1057,8 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/corrections", response_model=CorrectionSchema)
-def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db)):
+def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)

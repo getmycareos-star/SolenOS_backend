@@ -932,3 +932,43 @@ def test_legacy_event_write_requires_matching_server_session():
     finally:
         teardown_db()
 
+def test_legacy_insight_and_correction_routes_require_scoped_sessions():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        client = TestClient(app)
+        insight = {
+            "person_id": "person-daily-test",
+            "title": "Reported change",
+            "description": "Caregiver-reported change awaiting review.",
+            "insight_type": "observation",
+            "confidence": 0.5,
+            "evidence_ids": ["not-used-before-auth"],
+        }
+        correction = {
+            "person_id": "person-daily-test",
+            "target_type": "care_event",
+            "target_id": "event-not-used-before-auth",
+            "original_text": "Original report",
+            "corrected_text": "Corrected report",
+            "caregiver_id": "caregiver-daily-test",
+        }
+
+        assert client.post("/api/v1/insights", json=insight).status_code == 401
+        assert client.get("/api/v1/insights/person-daily-test").status_code == 401
+        assert client.post("/api/v1/corrections", json=correction).status_code == 401
+
+        foreign_headers = session_headers("person-other-test", "caregiver-other-test")
+        assert client.post(
+            "/api/v1/insights", headers=foreign_headers, json=insight
+        ).status_code == 403
+        assert client.get(
+            "/api/v1/insights/person-daily-test", headers=foreign_headers
+        ).status_code == 403
+        assert client.post(
+            "/api/v1/corrections", headers=foreign_headers, json=correction
+        ).status_code == 403
+    finally:
+        teardown_db()
+
