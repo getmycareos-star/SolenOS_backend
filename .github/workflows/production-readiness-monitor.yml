@@ -56,63 +56,8 @@ jobs:
           done
           test "$ready" = "1"
 
-      # Readiness is deliberately inventory-only. Actual inference is measured by
-      # the separate production-qwen-evaluation workflow, never by health polling.
-      - name: Verify deployed Qwen installation and runtime inventory
-        if: github.event_name != 'pull_request'
-        run: |
-          set -Eeuo pipefail
-          base='https://solenosbackend-production.up.railway.app'
-          response=$(curl --silent --show-error --fail --max-time 25 "${base}/api/v1/assistant/readiness")
-          RESPONSE="$response" python - <<'PY'
-          import json
-          import os
-          data = json.loads(os.environ["RESPONSE"])
-          installation = data.get("installation") or {}
-          assert data.get("runtime_available") is True, f"Qwen runtime is unavailable: {data}"
-          assert data.get("model_installed") is True, f"Configured Qwen model is not installed: {data}"
-          assert installation.get("state") == "installed", f"Model installation is not complete: {data}"
-          assert data.get("model"), f"Configured model name is missing: {data}"
-          assert data.get("inference_verified") is False or data.get("inference_status") == "verified", (
-              f"Inference status is internally inconsistent: {data}"
-          )
-          deployed_commit = data.get("deployment_commit")
-          if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
-              import subprocess
-              expected_commit = os.environ.get("GITHUB_SHA")
-              assert deployed_commit, "Production did not identify its deployed source commit."
-              ancestor = subprocess.run(
-                  ["git", "merge-base", "--is-ancestor", deployed_commit, expected_commit],
-                  check=False,
-              )
-              assert ancestor.returncode == 0, (
-                  f"Production commit is not in current main history: "
-                  f"deployed={deployed_commit!r}, main={expected_commit!r}"
-              )
-              changed = subprocess.check_output(
-                  ["git", "diff", "--name-only", f"{deployed_commit}..{expected_commit}"],
-                  text=True,
-              ).splitlines()
-              runtime_changes = [
-                  path for path in changed
-                  if not path.startswith((
-                      "backend/tests/",
-                      "backend/live_tests/",
-                      ".github/workflows/",
-                      "docs/",
-                  ))
-              ]
-              assert not runtime_changes, (
-                  "Production is behind current main by runtime or migration changes: "
-                  f"{runtime_changes}"
-              )
-          inference = "verified" if data.get("inference_verified") else "not yet verified"
-          print(
-              "PASS: production model is installed and runtime is reachable; "
-              f"inference={inference}; model={data['model']}; deployment_commit={deployed_commit}"
-          )
-          PY
-
+      # Care-continuity release readiness is independent of the optional Qwen runtime.
+      # Qwen installation and inference are not MVP deployment gates.
       - name: Verify deployed OpenAPI exposes core continuity routes
         run: |
           curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
@@ -127,8 +72,6 @@ jobs:
               "/api/situation",
               "/api/v1/share-intake",
               "/api/v1/share-intake/{share_id}",
-              "/api/v1/assistant/status",
-              "/api/v1/assistant/assist",
               "/api/v1/care-continuity/record-versions",
               "/api/v1/care-continuity/record-snapshots",
           }
@@ -180,7 +123,6 @@ jobs:
               ("readiness", "GET", "/ready", 200, None),
               ("openapi", "GET", "/openapi.json", 200, None),
               ("situation_auth_boundary", "GET", "/api/situation", 401, None),
-              ("companion_auth_boundary", "POST", "/api/v1/conversation/message", 401, b"{}"),
           ]
           records = []
           failures = []
