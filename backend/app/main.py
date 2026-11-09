@@ -1510,5 +1510,7 @@ def readiness_check(db: Session = Depends(get_db)):
         "migration_state": migration_state,
         "migration_head": migration_head,
         "continuity_schema": continuity_schema,
+        # Railway injects this immutable source revision at build/deploy time.
+        "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
         "app": settings.app_name,
     }
