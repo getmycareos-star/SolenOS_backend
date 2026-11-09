@@ -56,6 +56,31 @@ jobs:
           done
           test "$ready" = "1"
 
+      # Source provenance is a core deployment gate, independent of Qwen.
+      # On main/scheduled runs, production must run the current main runtime code.
+      - name: Verify deployed source revision matches main runtime
+        if: github.event_name != 'pull_request'
+        run: |
+          set -Eeuo pipefail
+          curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json
+          deployed_commit=$(python -c 'import json; print(json.load(open("/tmp/solenos-ready.json")).get("deployment_commit") or "")')
+          if ! [[ "$deployed_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Production /ready did not expose a valid Railway source commit: '$deployed_commit'" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$deployed_commit" "$GITHUB_SHA" || {
+            echo "Production source commit is not an ancestor of main: deployed=$deployed_commit main=$GITHUB_SHA" >&2
+            exit 1
+          }
+          changed=$(git diff --name-only "$deployed_commit..$GITHUB_SHA")
+          runtime_changes=$(printf '%s\\n' "$changed" | grep -Ev '^(backend/tests/|backend/live_tests/|\\.github/workflows/|docs/)' || true)
+          if [ -n "$runtime_changes" ]; then
+            echo "Production is behind main by runtime or migration changes:" >&2
+            printf '%s\\n' "$runtime_changes" >&2
+            exit 1
+          fi
+          echo "PASS: deployed source revision $deployed_commit matches main runtime code."
+
       # Care-continuity release readiness is independent of the optional Qwen runtime.
       # Qwen installation and inference are not MVP deployment gates.
       - name: Verify deployed OpenAPI exposes core continuity routes
