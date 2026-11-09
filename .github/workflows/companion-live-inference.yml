@@ -1,13 +1,14 @@
 name: Companion live Qwen inference evaluation
+# CI-only acceptance run on the current PostgreSQL migration chain.
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'ci/**']
     paths:
       - "backend/app/services/qwen_gateway.py"
       - "backend/app/api/collaboration.py"
-      - "backend/app/api/companion_review.py"
-      - "backend/app/services/companion_care_updates.py"
+      - "backend/app/api/v1.py"
+      - "backend/app/api/handoff_drafts.py"
       - "backend/live_tests/test_companion_live_inference.py"
       - ".github/workflows/companion-live-inference.yml"
   pull_request:
@@ -28,7 +29,7 @@ concurrency:
 jobs:
   live-qwen-evaluation:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:17
@@ -44,6 +45,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
+      DATABASE_URL: postgresql+psycopg2://solenos_live_ci:solenos_live_ci@127.0.0.1:5432/solenos_live_ci
       OLLAMA_BASE_URL: http://127.0.0.1:11434
       OLLAMA_MODEL: qwen3.5:4b
       OLLAMA_TIMEOUT_SECONDS: "180"
@@ -51,7 +53,6 @@ jobs:
       OLLAMA_NUM_PREDICT: "96"
       OLLAMA_NUM_THREADS: "2"
       SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
-      DATABASE_URL: postgresql+psycopg2://solenos_live_ci:solenos_live_ci@127.0.0.1:5432/solenos_live_ci
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -61,9 +62,9 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
-      - name: Install backend and test dependencies
+      - name: Install backend and PostgreSQL test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx psycopg2-binary
-      - name: Apply reviewed PostgreSQL migrations
+      - name: Apply complete Alembic migration chain
         working-directory: backend
         run: python -m alembic upgrade head
       - name: Start isolated Ollama runtime
@@ -77,9 +78,9 @@ jobs:
           done
           docker logs solenos-live-ollama
           exit 1
-      - name: Download the default-model candidate under test
+      - name: Download the configured Qwen model
         run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
-      - name: Run live Companion inference evaluation
+      - name: Run real Qwen Companion, document and Daily Capture inference
         run: python -m pytest backend/live_tests/test_companion_live_inference.py backend/live_tests/test_document_intelligence_live.py backend/live_tests/test_daily_capture_live_inference.py -q -s
       - name: Stop isolated Ollama runtime
         if: always()
