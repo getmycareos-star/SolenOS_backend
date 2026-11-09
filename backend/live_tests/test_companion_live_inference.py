@@ -110,6 +110,64 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         ), missing_data
         assert missing_data.get("written_to_lcr") is False, missing_data
 
+        # Real inference must create a reviewable proposal; only explicit caregiver
+        # approval may persist it to the PostgreSQL Living Care Record.
+        new_observation = (
+            "I want to add this to the care record: this morning Mum left most "
+            "of her breakfast untouched and said she felt nauseated."
+        )
+        capture = _ask(client, caregiver, new_observation)
+        assert capture.status_code == 200, capture.text
+        assert capture.json().get("ai_generated") is True, capture.json()
+        assert capture.json().get("written_to_lcr") is False, capture.json()
+
+        auth = {"Authorization": f"Bearer {caregiver['access_token']}"}
+        proposals_response = client.get("/api/v1/companion/care-updates", headers=auth)
+        assert proposals_response.status_code == 200, proposals_response.text
+        proposals = proposals_response.json().get("items", [])
+        proposal = next(
+            (
+                item for item in proposals
+                if item.get("proposed_change", {}).get("source_quote")
+                and item["proposed_change"]["source_quote"] in new_observation
+            ),
+            None,
+        )
+        assert proposal is not None, proposals_response.json()
+        assert proposal["status"] == "pending_authorization", proposal
+
+        before_approval = client.get("/api/v1/care-continuity/current-care", headers=auth)
+        assert before_approval.status_code == 200, before_approval.text
+        assert not any(
+            item.get("source_proposal_id") == proposal["id"]
+            for item in before_approval.json().get("items", [])
+        ), before_approval.json()
+
+        approval = client.post(
+            f"/api/v1/companion/care-updates/{proposal['id']}/review",
+            headers=auth,
+            json={"decision": "accept"},
+        )
+        assert approval.status_code == 200, approval.text
+        assertion_id = approval.json().get("assertion_id")
+        assert assertion_id, approval.json()
+
+        after_approval = client.get("/api/v1/care-continuity/current-care", headers=auth)
+        assert after_approval.status_code == 200, after_approval.text
+        assert any(item.get("id") == assertion_id for item in after_approval.json().get("items", [])), after_approval.json()
+
+        recalled = _ask(
+            client,
+            caregiver,
+            "What did I tell you about breakfast this morning?",
+            capture.json().get("session_id"),
+        )
+        assert recalled.status_code == 200, recalled.text
+        recalled_data = recalled.json()
+        recalled_text = recalled_data.get("reply", "").casefold()
+        assert any(term in recalled_text for term in ("breakfast", "nauseated", "untouched", "left most")), recalled_data
+        assert recalled_data.get("written_to_lcr") is False, recalled_data
+
         other = _create_session(client, "Independent identity-isolation evaluator")
         isolated = _ask(client, other, "What did we record about sleep?")
         assert isolated.status_code == 200, isolated.text
