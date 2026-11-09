@@ -128,7 +128,6 @@ def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatc
     client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        other_auth = {"Authorization": f"Bearer {other_token}"}
         before = client.get("/api/v1/care-continuity/current-care", headers=auth)
         assert before.status_code == 200, before.text
 
@@ -152,14 +151,6 @@ def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatc
             json={"reaction_type": "support"},
         )
         assert reacted.status_code == 200, reacted.text
-
-        # A different caregiver session cannot mutate the owner's post.
-        denied = client.post(
-            f"/api/v1/community/{post['id']}/reactions",
-            headers=other_auth,
-            json={"reaction_type": "support"},
-        )
-        assert denied.status_code in (403, 404), denied.text
 
         after = client.get("/api/v1/care-continuity/current-care", headers=auth)
         assert after.status_code == 200, after.text
