@@ -46,13 +46,15 @@ jobs:
         run: pytest -q
 
   deployed-smoke:
-    if: github.event_name == 'workflow_dispatch'
+    needs: tests
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 16
     steps:
-      - name: Wait for deployed service health and database readiness
-        timeout-minutes: 16
+      - name: Wait for the exact main commit to be live and database-ready
         run: |
           base='https://solenosbackend-production.up.railway.app'
+          expected_commit="$GITHUB_SHA"
           ready=0
           for attempt in $(seq 1 48); do
             health=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/health" || true)
@@ -61,11 +63,13 @@ jobs:
             migration_state=""
             continuity_schema=""
             migration_head=""
+            deployment_commit=""
             if [ -n "$ready_json" ]; then
               status=200
               migration_state=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("migration_state",""))' 2>/dev/null || true)
               continuity_schema=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("continuity_schema",""))' 2>/dev/null || true)
               migration_head=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("migration_head",""))' 2>/dev/null || true)
+              deployment_commit=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("deployment_commit") or "")' 2>/dev/null || true)
             else
               status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/ready" || true)
             fi
@@ -75,10 +79,10 @@ jobs:
                printf '%s' "$openapi" | grep -q '/api/v1/care-continuity/record-snapshots'; then
               has_lcr_routes=1
             fi
-            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}; migration_state=${migration_state}; migration_head=${migration_head}; continuity_schema=${continuity_schema}; LCR version routes present: ${has_lcr_routes}"
-            # Do not accept a healthy old deployment: readiness must report that
-            # the current image's migration graph and reflected continuity tables are present.
-            if [ "$health" = "200" ] && [ "$status" = "200" ] && [ "$migration_state" = "current" ] && [ "$continuity_schema" = "verified" ] && [ -n "$migration_head" ] && [ "$has_lcr_routes" = "1" ]; then ready=1; break; fi
+            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}; migration_state=${migration_state}; migration_head=${migration_head}; continuity_schema=${continuity_schema}; deployment_commit=${deployment_commit}; expected_commit=${expected_commit}; LCR version routes present: ${has_lcr_routes}"
+            # Do not accept an older healthy service: the running process must
+            # identify the exact commit whose main-branch checks are executing.
+            if [ "$health" = "200" ] && [ "$status" = "200" ] && [ "$migration_state" = "current" ] && [ "$continuity_schema" = "verified" ] && [ -n "$migration_head" ] && [ "$has_lcr_routes" = "1" ] && [ "$deployment_commit" = "$expected_commit" ]; then ready=1; break; fi
             sleep 20
           done
           test "$ready" = "1"
@@ -127,7 +131,6 @@ jobs:
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
           echo "OPTIONS /api/situation returned HTTP $status"
           test "$status" = "200"
-
 
   container-build-smoke:
     runs-on: ubuntu-latest
