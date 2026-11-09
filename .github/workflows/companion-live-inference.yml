@@ -1,4 +1,5 @@
 name: Companion live Qwen inference evaluation
+# CI-only acceptance run rebased onto the current main baseline.
 
 on:
   push:
