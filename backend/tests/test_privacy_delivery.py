@@ -119,6 +119,36 @@ def revoke_required_consent(person_id, caregiver_id):
     finally:
         db.close()
 
+def accept_required_consent_via_api(client, headers, person_id, caregiver_id):
+    response = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": False,
+            "accepted_terms_version": "2026-10",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["verified"] is True
+    return response.json()
+
+
+def revoke_required_consent_via_api(client, headers, person_id, caregiver_id):
+    response = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={"person_id": person_id, "caregiver_id": caregiver_id, "action": "revoke"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["verified"] is False
+    return response.json()
+
 
 def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     from app.models.privacy_delivery import AuditLogEvent, HandoffAcknowledgement, HandoffAccessLog
@@ -438,15 +468,15 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     finally:
         db.close()
 
-    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    accept_required_consent_via_api(client, owner_headers, owner["person"]["id"], owner["caregiver"]["id"])
     still_denied = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
     assert still_denied.status_code == 403, still_denied.text
-    accept_required_consent(owner["person"]["id"], recipient_id)
+    accept_required_consent_via_api(client, recipient_headers, owner["person"]["id"], recipient_id)
     created = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
     assert created.status_code == 201, created.text
     handoff_id = created.json()["id"]
 
-    revoke_required_consent(owner["person"]["id"], recipient_id)
+    revoke_required_consent_via_api(client, recipient_headers, owner["person"]["id"], recipient_id)
     from app.models.collaboration import ConsentRecord
     db = TestSessionLocal()
     try:
@@ -492,7 +522,7 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
         },
     )
     assert second_handoff.status_code == 201, second_handoff.text
-    revoke_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    revoke_required_consent_via_api(client, owner_headers, owner["person"]["id"], owner["caregiver"]["id"])
     creator_revoked_accept = client.post(
         f"/api/v1/handoffs/{second_handoff.json()['id']}/accept",
         headers={"Authorization": f"Bearer {second_recipient_token}"},
