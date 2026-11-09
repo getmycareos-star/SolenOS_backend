@@ -82,6 +82,8 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
             assert receipt["qwen_written_to_lcr"] is False
             assert isinstance(receipt["qwen_candidates"], dict)
             assert set(receipt["qwen_candidates"]).issuperset({"observations", "open_questions"})
+            assert isinstance(receipt["qwen_candidates"]["observations"], list)
+            assert receipt["qwen_candidates"]["observations"], "real Qwen did not extract any caregiver-reported observation"
             assert receipt["evidence_ids"]
 
             with test_session_local() as db:
@@ -105,7 +107,7 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
                 ).one()
                 assert analysis.candidates == receipt["qwen_candidates"]
                 assert note in evidence.source_text
-                assert event.id in receipt["id"]
+                assert event.id == receipt["id"]
                 assert db.query(CareAssertion).filter(
                     CareAssertion.person_id == person_id
                 ).count() == 0
