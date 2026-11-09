@@ -51,10 +51,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 16
     steps:
-      - name: Wait for the exact main commit to be live and database-ready
+      - uses: actions/checkout@v4
+      - name: Wait for the latest deployable main source commit to be live and database-ready
         run: |
           base='https://solenosbackend-production.up.railway.app'
-          expected_commit="$GITHUB_SHA"
+          # Railway watches application and migration paths, not workflow-only commits.
+          # Compare readiness against the latest commit that changed deployable source.
+          expected_commit=$(git log -1 --format=%H -- Dockerfile backend/app backend/alembic backend/pyproject.toml backend/alembic.ini start-with-qwen.sh)
+          test -n "$expected_commit"
           ready=0
           for attempt in $(seq 1 48); do
             health=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/health" || true)
