@@ -73,12 +73,16 @@ jobs:
             exit 1
           }
           changed=$(git diff --name-only "$deployed_commit..$GITHUB_SHA")
-          runtime_changes=$(printf '%s\\n' "$changed" | grep -Ev '^(backend/tests/|backend/live_tests/|\\.github/workflows/|docs/)' || true)
-          if [ -n "$runtime_changes" ]; then
-            echo "Production is behind main by runtime or migration changes:" >&2
-            printf '%s\\n' "$runtime_changes" >&2
-            exit 1
-          fi
+          CHANGED_FILES="$changed" python - <<'PY'
+          import os
+          paths = os.environ["CHANGED_FILES"].splitlines()
+          ignored = ("backend/tests/", "backend/live_tests/", ".github/workflows/", "docs/")
+          runtime_changes = [path for path in paths if not path.startswith(ignored)]
+          if runtime_changes:
+              print("Production is behind main by runtime or migration changes:", file=__import__("sys").stderr)
+              print("\\n".join(runtime_changes), file=__import__("sys").stderr)
+              raise SystemExit(1)
+          PY
           echo "PASS: deployed source revision $deployed_commit matches main runtime code."
 
       # Care-continuity release readiness is independent of the optional Qwen runtime.
