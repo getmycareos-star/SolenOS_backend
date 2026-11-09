@@ -489,7 +489,7 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     denied_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert denied_accept.status_code == 404, denied_accept.text
 
-    accept_required_consent(owner["person"]["id"], recipient_id)
+    accept_required_consent_via_api(client, recipient_headers, owner["person"]["id"], recipient_id)
     missing_summary_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert missing_summary_accept.status_code == 409
 
@@ -511,7 +511,8 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     assert denied_read.status_code == 404
 
     second_recipient_id, second_recipient_token = add_caregiver_session(owner["person"]["id"])
-    accept_required_consent(owner["person"]["id"], second_recipient_id)
+    second_recipient_headers = {"Authorization": f"Bearer {second_recipient_token}"}
+    accept_required_consent_via_api(client, second_recipient_headers, owner["person"]["id"], second_recipient_id)
     second_handoff = client.post(
         "/api/v1/handoffs",
         headers=owner_headers,
@@ -525,7 +526,7 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     revoke_required_consent_via_api(client, owner_headers, owner["person"]["id"], owner["caregiver"]["id"])
     creator_revoked_accept = client.post(
         f"/api/v1/handoffs/{second_handoff.json()['id']}/accept",
-        headers={"Authorization": f"Bearer {second_recipient_token}"},
+        headers=second_recipient_headers,
     )
     assert creator_revoked_accept.status_code == 404
 
