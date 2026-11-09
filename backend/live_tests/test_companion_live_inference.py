@@ -61,7 +61,7 @@ def _ask(client: TestClient, session: dict, question: str, session_id: str | Non
     )
 
 
-def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_identity():
+def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_identity(caplog):
     """Genuine configured Qwen must answer from real workflow-created care evidence."""
     with TestClient(app) as client:
         caregiver = _create_session(client, "Live Qwen PostgreSQL evaluator")
@@ -155,7 +155,10 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         assert capture.json().get("written_to_lcr") is False, capture.json()
 
         auth = {"Authorization": f"Bearer {caregiver['access_token']}"}
-        proposals_response = client.get("/api/v1/companion/care-updates", headers=auth)
+        proposals_response = client.get(
+            f"/api/v1/companion/care-updates?person_id={caregiver['person']['id']}",
+            headers=auth,
+        )
         assert proposals_response.status_code == 200, proposals_response.text
         proposals = proposals_response.json().get("items", [])
         proposal = next(
