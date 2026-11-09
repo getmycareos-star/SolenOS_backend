@@ -63,6 +63,7 @@ def _ask(client: TestClient, session: dict, question: str, session_id: str | Non
 
 def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_identity(caplog):
     """Genuine configured Qwen must answer from real workflow-created care evidence."""
+    caplog.set_level(logging.INFO, logger="app.api.collaboration")
     with TestClient(app) as client:
         caregiver = _create_session(client, "Live Qwen PostgreSQL evaluator")
         event_id = _record_daily_care(
