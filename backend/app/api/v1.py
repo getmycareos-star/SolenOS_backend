@@ -1097,7 +1097,8 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
 
 
 @router.get("/corrections/{person_id}", response_model=List[CorrectionSchema])
-def list_corrections(person_id: str, db: Session = Depends(get_db)):
+def list_corrections(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(CorrectionModel)
         .filter(CorrectionModel.person_id == person_id)

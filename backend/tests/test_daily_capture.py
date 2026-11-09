@@ -958,6 +958,7 @@ def test_legacy_insight_and_correction_routes_require_scoped_sessions():
         assert client.post("/api/v1/insights", json=insight).status_code == 401
         assert client.get("/api/v1/insights/person-daily-test").status_code == 401
         assert client.post("/api/v1/corrections", json=correction).status_code == 401
+        assert client.get("/api/v1/corrections/person-daily-test").status_code == 401
 
         foreign_headers = session_headers("person-other-test", "caregiver-other-test")
         assert client.post(
@@ -968,6 +969,9 @@ def test_legacy_insight_and_correction_routes_require_scoped_sessions():
         ).status_code == 403
         assert client.post(
             "/api/v1/corrections", headers=foreign_headers, json=correction
+        ).status_code == 403
+        assert client.get(
+            "/api/v1/corrections/person-daily-test", headers=foreign_headers
         ).status_code == 403
     finally:
         teardown_db()
