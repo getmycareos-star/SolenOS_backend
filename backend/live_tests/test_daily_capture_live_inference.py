@@ -109,7 +109,8 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
                 assert note in evidence.source_text
                 assert event.id == receipt["id"]
                 assert db.query(CareAssertion).filter(
-                    CareAssertion.person_id == person_id
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
                 ).count() == 0
 
             print("LIVE_QWEN_DAILY_CAPTURE=" + json.dumps({
