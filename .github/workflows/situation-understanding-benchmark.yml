@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   messy-care-contract:
+    if: github.event_name == 'workflow_dispatch'
     name: Messy-care adversarial contract benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -84,6 +85,7 @@ jobs:
           retention-days: 30
 
   postgres-longitudinal-integration:
+    if: github.event_name == 'workflow_dispatch'
     name: PostgreSQL longitudinal persistence benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 90

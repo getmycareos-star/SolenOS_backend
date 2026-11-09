@@ -132,26 +132,50 @@ jobs:
   container-build-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_container_ci
+          POSTGRES_PASSWORD: solenos_container_ci
+          POSTGRES_DB: solenos_container_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_container_ci -d solenos_container_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg2://solenos_container_ci:solenos_container_ci@127.0.0.1:5432/solenos_container_ci
     steps:
       - uses: actions/checkout@v4
       - name: Build production Docker image
         run: docker build --tag solenos-backend-ci:latest .
-      - name: Verify core API starts without network or model download
+      - name: Verify core API starts against PostgreSQL without model download
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker run --detach --name solenos-backend-ci --network bridge --publish 127.0.0.1:18080:8080 --env APP_ENV=development --env DATABASE_URL=sqlite:////tmp/solenos-ci.db --env SECRET_KEY=ci-only-not-for-production --env OLLAMA_BASE_URL=http://127.0.0.1:9 solenos-backend-ci:latest
+          docker run --detach --name solenos-backend-ci --network host --env APP_ENV=ci --env DATABASE_URL="$DATABASE_URL" --env SECRET_KEY=ci-only-not-for-production --env OLLAMA_BASE_URL=http://127.0.0.1:9 --env OLLAMA_HOST=127.0.0.1:9 solenos-backend-ci:latest
           cleanup() {
-            docker logs solenos-backend-ci || true
+            docker logs --tail 200 solenos-backend-ci >&2 || true
             docker rm --force solenos-backend-ci >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
           for attempt in $(seq 1 45); do
-            if curl --silent --fail --max-time 2 http://127.0.0.1:18080/health >/dev/null; then
-              echo "PASS: production image serves /health without external network access."
-              exit 0
+            if curl --silent --fail --max-time 2 http://127.0.0.1:8080/health >/dev/null; then
+              docker exec solenos-backend-ci alembic -c /app/alembic.ini upgrade head
+              for ready_attempt in $(seq 1 45); do
+                if curl --silent --fail --max-time 10 http://127.0.0.1:8080/ready >/dev/null; then
+                  echo "PASS: production image serves /ready against migrated PostgreSQL."
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "FAIL: production image did not become ready against PostgreSQL." >&2
+              exit 1
             fi
             sleep 2
           done
-          echo "FAIL: production image did not start the core API without network access." >&2
+          echo "FAIL: production image did not start the core API against PostgreSQL." >&2
           exit 1

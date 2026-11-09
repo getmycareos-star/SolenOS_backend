@@ -1741,6 +1741,10 @@ def prepare_handoff_draft(
             return _draft_response(existing)
         raise HTTPException(status_code=409, detail="A concurrent draft request used this idempotency key") from exc
     except Exception as exc:
+        logger.exception(
+            "Handoff draft persistence or audit transaction failed",
+            extra={"request_id": request_id, "person_scope_present": bool(person_id), "source_record_count": len(records)},
+        )
         db.rollback()
         raise HTTPException(status_code=503, detail="Draft persistence or audit could not be completed; no draft was returned") from exc
 

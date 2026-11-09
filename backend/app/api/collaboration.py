@@ -999,7 +999,12 @@ def _humanize_model_context_line(line: str) -> str:
 
 
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
-    """Use recent dialogue to resolve short/referential follow-ups for retrieval."""
+    """Resolve referential follow-ups from prior caregiver questions, never model replies.
+
+    Assistant-generated text is not a source of care intent. Feeding it back into
+    retrieval creates a self-reinforcing path where a model's earlier wording can
+    determine which care records the next answer sees.
+    """
     current = (current_text or "").strip()
     if not prior_messages:
         return current
@@ -1012,12 +1017,43 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
     if not referential and word_count > 8:
         return current
-    recent = [
-        f"{message.role}: {(message.content or '')[:500]}"
-        for message in reversed(prior_messages[:4])
-        if getattr(message, "role", None) in {"user", "assistant"}
-    ]
-    return "\n".join([current, *recent]) if recent else current
+    current_key = current.casefold()
+    recent_user_questions = [
+        (message.content or "").strip()[:500]
+        for message in reversed(prior_messages[:12])
+        if getattr(message, "role", None) == "user"
+        and (message.content or "").strip()
+        and (message.content or "").strip().casefold() != current_key
+    ][-3:]
+    return "\n".join([current, *recent_user_questions]) if recent_user_questions else current
+
+
+def _ordered_context_search_terms(current_text: str, retrieval_query: str, limit: int = 24) -> list[str]:
+    """Preserve current-question and prior-user intent before adding care-topic synonyms."""
+    stopwords = _CONTEXT_STOPWORDS | {
+        "we", "record", "records", "recorded", "care", "caregiver", "caregivers",
+        "person", "people", "observation", "observations", "note", "notes",
+        "current", "recent", "history", "information", "does", "did",
+    }
+
+    def ordered_terms(value: str) -> list[str]:
+        return [
+            token for token in re.findall(r"[a-z0-9']{3,}", (value or "").casefold())
+            if token not in stopwords
+        ]
+
+    ordered = list(dict.fromkeys([
+        *ordered_terms(current_text),
+        *ordered_terms(retrieval_query),
+    ]))
+    selected = set(ordered)
+    for group in _CONTEXT_SYNONYM_GROUPS:
+        if selected.intersection(group):
+            for term in sorted(group):
+                if term not in selected:
+                    ordered.append(term)
+                    selected.add(term)
+    return ordered[:max(1, min(int(limit), 48))]
 
 
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
@@ -2854,7 +2890,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             if term not in retrieval_stopwords
         ))[:12]
         synonym_terms = sorted(_expanded_context_terms(retrieval_query) - set(ranking_terms))[:12]
-        retrieval_terms = sorted(_expanded_context_terms(retrieval_query) - retrieval_stopwords)[:24]
+        retrieval_terms = _ordered_context_search_terms(user_text, retrieval_query, limit=24)
         existing_event_ids = {str(event.id) for event in recent_events}
         if retrieval_terms:
             matching_events = (
