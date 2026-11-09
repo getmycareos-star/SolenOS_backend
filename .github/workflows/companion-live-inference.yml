@@ -1,7 +1,8 @@
 name: Companion live Qwen inference evaluation
 # CI-only acceptance run rebased onto the current main baseline.
 
-on:  workflow_dispatch:
+on:
+  workflow_dispatch:
 permissions:
   contents: read
 
