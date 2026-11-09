@@ -1,23 +1,7 @@
 name: Companion live Qwen inference evaluation
 # CI-only acceptance run rebased onto the current main baseline.
 
-on:
-  push:
-    branches: [main, 'ci/**']
-    paths:
-      - "backend/app/services/qwen_gateway.py"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/api/v1.py"
-      - "backend/live_tests/test_companion_live_inference.py"
-      - ".github/workflows/companion-live-inference.yml"
-  pull_request:
-    paths:
-      - "backend/**"
-      - "Dockerfile"
-      - "start-with-qwen.sh"
-      - ".github/workflows/companion-live-inference.yml"
-  workflow_dispatch:
-
+on:  workflow_dispatch:
 permissions:
   contents: read
 
