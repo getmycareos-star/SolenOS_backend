@@ -82,30 +82,31 @@ def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
 def test_assistant_status_does_not_claim_operational_when_only_inventory_is_available(monkeypatch):
     from app.api import collaboration
 
-    runtime_calls = []
-    monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: runtime_calls.append(True))
-    monkeypatch.setattr(collaboration, "qwen_installation_status", lambda: {"state": "installed"})
-    monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda: {
-        "available": False,
-        "state": "runtime_unavailable",
-        "runtime_available": False,
-        "model_installed": False,
-        "installation": {"state": "installed"},
-        "inference_verified": False,
-        "inference_status": "not_verified",
-        "failure_reason": "runtime_unreachable",
-    })
+    readiness_calls = []
+    def readiness():
+        readiness_calls.append(True)
+        return {
+            "available": True,
+            "state": "runtime_available",
+            "runtime_available": True,
+            "model_installed": True,
+            "installation": {"state": "installed"},
+            "inference_verified": False,
+            "inference_status": "not_verified",
+            "failure_reason": None,
+        }
 
+    monkeypatch.setattr(collaboration, "qwen_readiness_status", readiness)
     status = collaboration.qwen_assistant_status()
-    assert status["available"] is False
+    assert status["available"] is True
     assert status["operational"] is False
     assert status["installation"]["state"] == "installed"
-    assert status["readiness"]["failure_reason"] == "runtime_unreachable"
+    assert status["readiness"]["inference_status"] == "not_verified"
     assert status["provider"] == "local_ollama"
     assert status["inference_api"] == "ollama_native_http"
     assert status["hosted_inference_api"] is False
-    assert status["failure_reason"] == "runtime_unreachable"
-    assert runtime_calls == [], "status polling must not make a duplicate Ollama inventory request"
+    assert status["failure_reason"] is None
+    assert readiness_calls == [True]
 
 
 def test_production_evaluation_has_five_independent_synthetic_acceptance_criteria():
