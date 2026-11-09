@@ -1,21 +1,6 @@
 name: Authenticated appointment-assist live Qwen acceptance
 
-on:
-  push:
-    branches: [main, "fix/appointment-status-grounding"]
-    paths:
-      - "backend/live_tests/test_appointment_assist_live_inference.py"
-      - ".github/workflows/appointment-assist-live-inference.yml"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/services/qwen_gateway.py"
-  pull_request:
-    paths:
-      - "backend/live_tests/test_appointment_assist_live_inference.py"
-      - ".github/workflows/appointment-assist-live-inference.yml"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/services/qwen_gateway.py"
-  workflow_dispatch:
-
+on:  workflow_dispatch:
 permissions:
   contents: read
 
