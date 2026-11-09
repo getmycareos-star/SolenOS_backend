@@ -17,7 +17,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import get_db
 from app.main import app
-from app.models.care import CareAssertion, CareEvent, Evidence
+from app.models.care import CareEvent, Evidence
+from app.models.care_continuity import CareAssertion
 from app.models.capture_analysis import CaptureAnalysis
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
