@@ -31,6 +31,7 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
+      SOLENOS_COMPANION_TEST_DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
       SOLENOS_TEST_POSTGRES_RESTART: "1"
     steps:
       - name: Check out repository
@@ -50,4 +51,4 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
       - name: Verify document lifecycle against real PostgreSQL
-        run: python -m pytest backend/tests/test_document_lifecycle_postgres.py backend/tests/test_document_lifecycle.py backend/tests/test_document_intelligence_lifecycle.py backend/tests/test_document_intelligence_postgres.py backend/tests/test_unified_lcr_retrieval.py backend/tests/test_daily_care_review_postgres.py backend/tests/test_handoff_postgres_integration.py backend/tests/test_community_disabled.py -q -s
+        run: python -m pytest backend/tests/test_document_lifecycle_postgres.py backend/tests/test_document_lifecycle.py backend/tests/test_document_intelligence_lifecycle.py backend/tests/test_document_intelligence_postgres.py backend/tests/test_unified_lcr_retrieval.py backend/tests/test_daily_care_review_postgres.py backend/tests/test_handoff_postgres_integration.py backend/tests/test_appointment_workspace_postgres.py backend/tests/test_companion_care_update_postgres.py backend/tests/test_community_disabled.py -q -s
