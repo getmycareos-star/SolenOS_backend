@@ -101,6 +101,10 @@ def test_assistant_status_does_not_claim_operational_when_only_inventory_is_avai
     assert status["operational"] is False
     assert status["installation"]["state"] == "installed"
     assert status["readiness"]["failure_reason"] == "runtime_unreachable"
+    assert status["provider"] == "local_ollama"
+    assert status["inference_api"] == "ollama_native_http"
+    assert status["hosted_inference_api"] is False
+    assert status["failure_reason"] == "runtime_unreachable"
     assert runtime_calls == [], "status polling must not make a duplicate Ollama inventory request"
 
 
