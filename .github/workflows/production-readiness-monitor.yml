@@ -80,7 +80,7 @@ jobs:
           runtime_changes = [path for path in paths if not path.startswith(ignored)]
           if runtime_changes:
               print("Production is behind main by runtime or migration changes:", file=__import__("sys").stderr)
-              print("\\n".join(runtime_changes), file=__import__("sys").stderr)
+              print("\n".join(runtime_changes), file=__import__("sys").stderr)
               raise SystemExit(1)
           PY
           echo "PASS: deployed source revision $deployed_commit matches main runtime code."
