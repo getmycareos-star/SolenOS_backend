@@ -5,7 +5,10 @@ created exclusively by the repository's Alembic migration chain.
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
+import time
 import uuid
 
 import pytest
@@ -58,7 +61,8 @@ def _ask(client: TestClient, session: dict, question: str, session_id: str | Non
     )
 
 
-def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_identity():
+def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_identity(caplog):
+    caplog.set_level(logging.INFO, logger="app.api.collaboration")
     """Genuine configured Qwen must answer from real workflow-created care evidence."""
     with TestClient(app) as client:
         caregiver = _create_session(client, "Live Qwen PostgreSQL evaluator")
@@ -68,9 +72,39 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
             "Caregiver reported waking several times overnight and restless sleep.",
         )
 
+        stage_log_start = len(caplog.records)
+        request_started = time.perf_counter()
         direct = _ask(client, caregiver, "What did we record about sleep?")
+        total_request_ms = round((time.perf_counter() - request_started) * 1000, 2)
         assert direct.status_code == 200, direct.text
         answer = direct.json()
+
+        stage_events = []
+        for record in caplog.records[stage_log_start:]:
+            if record.name != "app.api.collaboration":
+                continue
+            message = record.getMessage()
+            if not message.startswith("solenos_companion_stage "):
+                continue
+            try:
+                stage_events.append(json.loads(message.split(" ", 1)[1]))
+            except (TypeError, ValueError):
+                continue
+        retrieval = next((item for item in stage_events if item.get("event") == "companion_retrieval_complete"), None)
+        inference = next((item for item in stage_events if item.get("event") == "companion_inference_complete"), None)
+        assert retrieval is not None, stage_events
+        assert inference is not None, stage_events
+        assert retrieval.get("request_id") == inference.get("request_id"), stage_events
+        assert isinstance(retrieval.get("duration_ms"), (int, float)) and retrieval["duration_ms"] >= 0, retrieval
+        assert isinstance(inference.get("duration_ms"), (int, float)) and inference["duration_ms"] >= 0, inference
+        assert inference.get("retrieval_duration_ms") == retrieval["duration_ms"], stage_events
+        print("COMPANION_STAGE_TIMING=" + json.dumps({
+            "request_id": retrieval["request_id"],
+            "retrieval_ms": retrieval["duration_ms"],
+            "inference_ms": inference["duration_ms"],
+            "total_http_ms": total_request_ms,
+            "scope": "disposable_postgresql_live_qwen_ci",
+        }, separators=(",", ":")))
         assert answer.get("ai_generated") is True, answer
         assert event_id in answer.get("source_event_ids", []), answer
         assert any(
