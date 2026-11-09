@@ -155,10 +155,7 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         assert capture.json().get("written_to_lcr") is False, capture.json()
 
         auth = {"Authorization": f"Bearer {caregiver['access_token']}"}
-        proposals_response = client.get(
-            f"/api/v1/companion/care-updates?person_id={caregiver['person']['id']}",
-            headers=auth,
-        )
+        proposals_response = client.get("/api/v1/companion/care-updates", headers=auth)
         assert proposals_response.status_code == 200, proposals_response.text
         proposals = proposals_response.json().get("items", [])
         proposal = next(
@@ -204,6 +201,10 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         assert recalled_data.get("written_to_lcr") is False, recalled_data
 
         other = _create_session(client, "Independent identity-isolation evaluator")
+        other_auth = {"Authorization": f"Bearer {other['access_token']}"}
+        other_proposals = client.get("/api/v1/companion/care-updates", headers=other_auth)
+        assert other_proposals.status_code == 200, other_proposals.text
+        assert other_proposals.json().get("items") == [], other_proposals.json()
         isolated = _ask(client, other, "What did we record about sleep?")
         assert isolated.status_code == 200, isolated.text
         isolated_data = isolated.json()
