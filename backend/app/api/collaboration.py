@@ -1830,7 +1830,7 @@ def qwen_assistant_status():
     runtime_available = bool(readiness.get("runtime_available"))
     model_installed = bool(readiness.get("model_installed"))
     inference_verified = bool(readiness.get("inference_verified"))
-    installation = readiness.get("installation") or qwen_installation_status()
+    installation = readiness.get("installation") or {"state": "unknown"}
     return {
         "available": runtime_available and model_installed,
         "operational": inference_verified,
