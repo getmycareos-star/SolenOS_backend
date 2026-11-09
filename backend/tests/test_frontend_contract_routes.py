@@ -123,30 +123,49 @@ def test_cors_allows_netlify_preflight_and_rejects_unknown_origin():
 
 
 def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatch):
-    # Community is intentionally disabled. A valid session must not expose feed,
-    # post creation, or reaction endpoints; the feature's implementation remains
-    # in source but is not registered on the active API.
+    # Community is a separate peer-experience stream. It must persist its own
+    # posts/reactions without creating or modifying Living Care Record evidence.
     client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        routes = [
-            ("get", "/api/v1/community", None),
-            ("post", "/api/v1/community", {"post_type": "experience", "content": "must not publish"}),
-            ("post", "/api/v1/community/example-post/reactions", {"reaction_type": "support"}),
-            ("get", "/api/v1/community/experience/summary", None),
-        ]
-        for method, path, payload in routes:
-            if payload is None:
-                response = getattr(client, method)(path, headers=auth)
-            else:
-                response = getattr(client, method)(path, headers=auth, json=payload)
-            assert response.status_code == 404, f"{method.upper()} {path}: {response.text}"
+        other_auth = {"Authorization": f"Bearer {other_token}"}
+        before = client.get("/api/v1/care-continuity/current-care", headers=auth)
+        assert before.status_code == 200, before.text
 
-        db = TestingSessionLocal()
-        try:
-            assert db.query(CommunityPost).count() == 0
-        finally:
-            db.close()
+        created = client.post(
+            "/api/v1/community",
+            headers=auth,
+            json={"content": "A caregiver experience kept separate from care facts.", "post_type": "experience"},
+        )
+        assert created.status_code == 201, created.text
+        post = created.json()
+        assert post["id"]
+        assert post["content"] == "A caregiver experience kept separate from care facts."
+
+        feed = client.get("/api/v1/community", headers=auth)
+        assert feed.status_code == 200, feed.text
+        assert any(item["id"] == post["id"] for item in feed.json().get("posts", []))
+
+        reacted = client.post(
+            f"/api/v1/community/{post['id']}/reactions",
+            headers=auth,
+            json={"reaction_type": "support"},
+        )
+        assert reacted.status_code == 200, reacted.text
+
+        # A different caregiver session cannot mutate the owner's post.
+        denied = client.post(
+            f"/api/v1/community/{post['id']}/reactions",
+            headers=other_auth,
+            json={"reaction_type": "support"},
+        )
+        assert denied.status_code in (403, 404), denied.text
+
+        after = client.get("/api/v1/care-continuity/current-care", headers=auth)
+        assert after.status_code == 200, after.text
+        before_ids = {item.get("id") for item in before.json().get("items", [])}
+        after_ids = {item.get("id") for item in after.json().get("items", [])}
+        assert after_ids == before_ids, "Community activity must not create LCR entries"
     finally:
         teardown()
 
