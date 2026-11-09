@@ -238,7 +238,8 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/persons/{person_id}", response_model=Person)
-def get_person(person_id: str, db: Session = Depends(get_db)):
+def get_person(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -273,7 +274,8 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema])
-def list_caregivers(person_id: str, db: Session = Depends(get_db)):
+def list_caregivers(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")

@@ -1020,3 +1020,26 @@ def test_legacy_observation_and_reasoning_routes_require_scoped_sessions():
     finally:
         teardown_db()
 
+def test_legacy_person_and_caregiver_reads_require_scoped_sessions():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        client = TestClient(app)
+        protected_paths = [
+            "/api/v1/persons/person-daily-test",
+            "/api/v1/caregivers/person-daily-test",
+        ]
+        for path in protected_paths:
+            assert client.get(path).status_code == 401
+        foreign_headers = session_headers("person-other-test", "caregiver-other-test")
+        for path in protected_paths:
+            response = client.get(path, headers=foreign_headers)
+            assert response.status_code == 403, (path, response.status_code, response.text)
+        own_headers = session_headers("person-daily-test", "caregiver-daily-test")
+        for path in protected_paths:
+            response = client.get(path, headers=own_headers)
+            assert response.status_code == 200, (path, response.status_code, response.text)
+    finally:
+        teardown_db()
+
