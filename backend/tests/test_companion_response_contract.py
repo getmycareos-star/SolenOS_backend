@@ -1042,3 +1042,17 @@ def test_companion_worker_logs_inference_failure_from_worker(monkeypatch, caplog
     assert '"outcome":"error"' in output
     assert "synthetic private prompt" not in output
     assert "synthetic model failure" not in output
+
+
+def test_companion_care_update_list_is_scoped_by_bearer_session(monkeypatch):
+    client = setup_client(monkeypatch)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.get(
+            "/api/v1/companion/care-updates",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["items"] == []
+    finally:
+        teardown()
