@@ -60,6 +60,8 @@ from app.models.ai_output_governance import AIOutputLCRProposal
 
 router = APIRouter(tags=["community and companion"])
 logger = logging.getLogger(__name__)
+# Emit the content-free Companion stage timing events to application logs.
+logger.setLevel(logging.INFO)
 
 
 _MEDICATION_EVENT_TERMS = (
