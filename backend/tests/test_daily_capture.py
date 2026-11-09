@@ -583,11 +583,10 @@ def test_event_write_rejects_caregiver_from_another_person():
                 "created_by_caregiver_id": "caregiver-other-test",
             },
         )
-        assert response.status_code == 403, response.text
-        assert response.json()["detail"] in {
-            "Caregiver is not linked to this care record",
-            "You are not a member of this care circle.",
-        }
+        # Authentication is checked before caregiver membership so this
+        # legacy write route never exposes record ownership to anonymous callers.
+        assert response.status_code == 401, response.text
+        assert response.json()["detail"] == "A valid SolenOS anonymous session is required"
     finally:
         teardown_db()
 
