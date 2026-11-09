@@ -6,6 +6,8 @@ records in a disposable PostgreSQL database and a real Ollama model supplied by 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
+import logging
 import os
 
 import pytest
@@ -82,8 +84,21 @@ def _create_synthetic_record(client: TestClient):
     return session, older_id
 
 
-def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch):
+def _stage_percentiles(values: list[float]) -> dict[str, float]:
+    ordered = sorted(values)
+    if not ordered:
+        return {"p50": 0.0, "p95": 0.0, "p99": 0.0}
+
+    def pick(percentile: float) -> float:
+        index = min(len(ordered) - 1, max(0, int((len(ordered) - 1) * percentile + 0.5)))
+        return round(ordered[index], 2)
+
+    return {"p50": pick(0.50), "p95": pick(0.95), "p99": pick(0.99)}
+
+
+def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeypatch, caplog):
     """Real model inference must pass a small, fixed, evidence-bounded evaluation."""
+    caplog.set_level(logging.INFO)
 
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
@@ -250,6 +265,49 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
             assert [row.role for row in saved] == ["user", "assistant"] * 6
         finally:
             db.close()
+
+        # The same request IDs link retrieval and model execution. Report both
+        # independently; total HTTP duration alone cannot identify the bottleneck.
+        stage_events = []
+        for record in caplog.records:
+            message = record.getMessage()
+            marker = "solenos_companion_stage "
+            if marker not in message:
+                continue
+            try:
+                event = json.loads(message.split(marker, 1)[1])
+            except (ValueError, TypeError):
+                continue
+            if event.get("event") in {"companion_retrieval_complete", "companion_inference_complete"}:
+                stage_events.append(event)
+
+        retrieval_by_request = {
+            item["request_id"]: float(item["duration_ms"])
+            for item in stage_events
+            if item.get("event") == "companion_retrieval_complete" and item.get("request_id")
+        }
+        inference_by_request = {
+            item["request_id"]: item
+            for item in stage_events
+            if item.get("event") == "companion_inference_complete" and item.get("request_id")
+        }
+        paired = [
+            (retrieval_by_request[request_id], float(item["duration_ms"]), item.get("outcome"))
+            for request_id, item in inference_by_request.items()
+            if request_id in retrieval_by_request
+        ]
+        successful = [item for item in paired if item[2] == "success"]
+        assert successful, "Live Qwen produced no paired successful retrieval/inference timing records."
+        print("COMPANION_STAGE_TIMINGS=" + json.dumps({
+            "paired_request_count": len(paired),
+            "successful_inference_count": len(successful),
+            "retrieval_ms": _stage_percentiles([item[0] for item in paired]),
+            "inference_ms": _stage_percentiles([item[1] for item in paired]),
+            "samples": [
+                {"retrieval_ms": round(item[0], 2), "inference_ms": round(item[1], 2), "outcome": item[2]}
+                for item in paired
+            ],
+        }, separators=(",", ":")))
     finally:
         client.close()
         app.dependency_overrides.clear()
