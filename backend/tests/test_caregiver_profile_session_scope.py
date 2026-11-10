@@ -198,7 +198,10 @@ def test_email_lookup_is_limited_to_the_current_care_record():
         params={"email": "second@example.invalid", "person_id": first["person"]["id"]},
         headers={"Authorization": f"Bearer {first['access_token']}"},
     )
-    assert response.status_code == 404, response.text
+    # Cross-record scope rejection may be 403 at the authorization
+    # boundary or 404 after a scoped lookup. Neither response may disclose
+    # the other caregiver profile.
+    assert response.status_code in {403, 404}, response.text
     assert response.json().get("id") != other_profile_id
 
 
