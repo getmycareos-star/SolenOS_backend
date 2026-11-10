@@ -1043,14 +1043,21 @@ def create_insight(insight: InsightCreate, request: Request, db: Session = Depen
     db.add(db_insight)
     db.commit()
     db.refresh(db_insight)
-    _log_and_learn(
-        db,
-        db_insight.person_id,
-        "insight_created",
-        f"Created insight: {insight.title}",
-        "insight",
-        source_id=db_insight.id,
-    )
+    try:
+        _log_and_learn(
+            db,
+            db_insight.person_id,
+            "insight_created",
+            f"Created insight: {insight.title}",
+            "insight",
+            source_id=db_insight.id,
+        )
+    except Exception:
+        # The insight is already committed. Secondary learning must not make
+        # the caller believe the write failed and retry it as a duplicate.
+        db.rollback()
+        logger.exception("Learning pipeline failed after durable insight %s", db_insight.id)
+    db.refresh(db_insight)
     return db_insight
 
 
@@ -1074,34 +1081,31 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
     db.commit()
     db.refresh(db_correction)
 
-    engine = LearningEngine(db)
-    engine.apply_correction(db_correction)
-    engine.record_learning_event(
-        db_correction.person_id,
-        "correction_applied",
-        f"Corrected {correction.target_type}: {correction.original_text} -> {correction.corrected_text}",
-        "correction",
-        source_id=db_correction.id,
-        caregiver_id=correction.caregiver_id,
-    )
-    engine.after_save(db_correction.person_id)
     try:
+        engine = LearningEngine(db)
+        engine.apply_correction(db_correction)
+        engine.record_learning_event(
+            db_correction.person_id,
+            "correction_applied",
+            f"Corrected {correction.target_type}: {correction.original_text} -> {correction.corrected_text}",
+            "correction",
+            source_id=db_correction.id,
+            caregiver_id=correction.caregiver_id,
+        )
+        engine.after_save(db_correction.person_id)
         reconcile_person_change_intelligence(db, db_correction.person_id)
         db.commit()
-    except Exception as exc:
+    except Exception:
+        # The correction itself was committed above. Learning and projection
+        # updates are secondary; returning an error would invite duplicate
+        # correction submissions after an ambiguous client retry.
         db.rollback()
         logger.exception(
-            "Change intelligence reconciliation failed after correction %s",
+            "Secondary correction processing failed after durable correction %s",
             db_correction.id,
         )
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "The correction was saved, but change-intelligence reassessment failed. "
-                f"Do not resubmit the correction; retry reassessment instead. Correction id: {db_correction.id}"
-            ),
-        ) from exc
 
+    db.refresh(db_correction)
     return db_correction
 
 

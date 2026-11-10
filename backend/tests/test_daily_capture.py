@@ -1091,3 +1091,92 @@ def test_legacy_event_receipt_survives_secondary_pipeline_failures(monkeypatch):
     finally:
         teardown_db()
 
+def test_insight_receipt_survives_learning_pipeline_failure(monkeypatch):
+    import app.api.v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        db = TestingSessionLocal()
+        evidence = Evidence(
+            id="insight-source-evidence",
+            person_id="person-daily-test",
+            type="note",
+            source_text="Caregiver reported unusual confusion.",
+            uploaded_by_caregiver_id="caregiver-daily-test",
+        )
+        db.add(evidence)
+        db.commit()
+        db.close()
+
+        def fail_learning(*args, **kwargs):
+            raise RuntimeError("injected learning failure")
+
+        monkeypatch.setattr(api_v1, "_log_and_learn", fail_learning)
+        response = TestClient(app).post(
+            "/api/v1/insights",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-daily-test",
+                "title": "Reported confusion",
+                "description": "Caregiver-reported observation.",
+                "insight_type": "observation",
+                "confidence": 0.5,
+                "evidence_ids": ["insight-source-evidence"],
+            },
+        )
+        assert response.status_code == 200, response.text
+        db = TestingSessionLocal()
+        try:
+            saved = db.query(Insight).filter_by(id=response.json()["id"]).one()
+            assert saved.person_id == "person-daily-test"
+            assert saved.evidence_ids == ["insight-source-evidence"]
+            assert db.query(Insight).count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
+    import app.api.v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+
+        def fail_apply(self, correction):
+            raise RuntimeError("injected correction learning failure")
+
+        monkeypatch.setattr(api_v1.LearningEngine, "apply_correction", fail_apply)
+        monkeypatch.setattr(
+            api_v1,
+            "reconcile_person_change_intelligence",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("injected reconciliation failure")),
+        )
+        response = TestClient(app).post(
+            "/api/v1/corrections",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-daily-test",
+                "target_type": "care_event",
+                "target_id": "event-source-1",
+                "original_text": "Mum was unusually confused.",
+                "corrected_text": "Mum was tired; confusion was not confirmed.",
+                "reason": "Caregiver correction",
+                "caregiver_id": "caregiver-daily-test",
+            },
+        )
+        assert response.status_code == 200, response.text
+        db = TestingSessionLocal()
+        try:
+            saved = db.query(Correction).filter_by(id=response.json()["id"]).one()
+            assert saved.person_id == "person-daily-test"
+            assert saved.original_text == "Mum was unusually confused."
+            assert saved.corrected_text == "Mum was tired; confusion was not confirmed."
+            assert db.query(Correction).count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
