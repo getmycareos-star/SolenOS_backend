@@ -968,31 +968,38 @@ def create_event(event: CareEventCreate, request: Request, db: Session = Depends
     db.add(db_event)
     db.commit()
     db.refresh(db_event)
-    _log_and_learn(
-        db,
-        db_event.person_id,
-        "event_recorded",
-        f"Recorded {event.event_type}: {event.title}",
-        "event",
-        source_id=db_event.id,
-        caregiver_id=event.created_by_caregiver_id,
-    )
+
+    # The care event is the user-requested write. Learning and reconciliation
+    # are secondary work and must not turn a committed event into an HTTP error:
+    # clients may otherwise retry and create a duplicate event.
+    try:
+        _log_and_learn(
+            db,
+            db_event.person_id,
+            "event_recorded",
+            f"Recorded {event.event_type}: {event.title}",
+            "event",
+            source_id=db_event.id,
+            caregiver_id=event.created_by_caregiver_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Learning pipeline failed after durable care event %s", db_event.id)
+
     try:
         reconcile_person_change_intelligence(db, db_event.person_id)
         db.commit()
-    except Exception as exc:
+    except Exception:
         db.rollback()
         logger.exception(
             "Change intelligence reconciliation failed after durable care event %s",
             db_event.id,
         )
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "The care event was saved, but change-intelligence reassessment failed. "
-                f"Do not resubmit the event; retry reassessment instead. Event id: {db_event.id}"
-            ),
-        ) from exc
+
+    # Refresh after any secondary rollback so response serialization reads the
+    # already-committed event, not an expired ORM instance.
+    db.refresh(db_event)
     return db_event
 
 

@@ -1045,3 +1045,49 @@ def test_legacy_person_and_caregiver_reads_require_scoped_sessions():
     finally:
         teardown_db()
 
+def test_legacy_event_receipt_survives_secondary_pipeline_failures(monkeypatch):
+    import app.api.v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+
+        def fail_learning(*args, **kwargs):
+            raise RuntimeError("injected learning pipeline failure")
+
+        def fail_reconciliation(*args, **kwargs):
+            raise RuntimeError("injected reconciliation failure")
+
+        monkeypatch.setattr(api_v1, "_log_and_learn", fail_learning)
+        monkeypatch.setattr(api_v1, "reconcile_person_change_intelligence", fail_reconciliation)
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/events",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "event_type": "observation",
+                "status": "recorded",
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "title": "Unusual confusion",
+                "description": "Mum was unusually confused this afternoon. She also refused lunch.",
+                "created_by_caregiver_id": "caregiver-daily-test",
+            },
+        )
+        assert response.status_code == 200, response.text
+        event_id = response.json()["id"]
+
+        db = TestingSessionLocal()
+        try:
+            saved = db.query(CareEvent).filter_by(id=event_id).one()
+            assert saved.description == "Mum was unusually confused this afternoon. She also refused lunch."
+            assert saved.person_id == "person-daily-test"
+            assert saved.created_by_caregiver_id == "caregiver-daily-test"
+            assert db.query(CareEvent).filter_by(person_id="person-daily-test").count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
