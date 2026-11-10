@@ -658,8 +658,10 @@ def test_insight_rejects_evidence_from_another_person():
         db.close()
 
         client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
         response = client.post(
             "/api/v1/insights",
+            headers=headers,
             json={
                 "person_id": "person-daily-test",
                 "title": "Cross-record evidence test",
