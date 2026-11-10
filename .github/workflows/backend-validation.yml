@@ -169,6 +169,7 @@ jobs:
             --env APP_ENV=ci \
             --env DATABASE_URL="$DATABASE_URL" \
             --env SECRET_KEY=ci-only-not-for-production \
+            --env OLLAMA_SIDECAR_ENABLED=false \
             --env OLLAMA_BASE_URL=http://127.0.0.1:9 \
             --env OLLAMA_HOST=127.0.0.1:9 \
             solenos-backend-ci:latest
