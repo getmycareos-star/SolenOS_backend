@@ -2,6 +2,15 @@ name: Companion live Qwen inference evaluation
 # CI-only acceptance run rebased onto the current main baseline.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/live_tests/test_companion_live_inference.py"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/api/v1.py"
+      - "backend/app/main.py"
+      - "backend/services/unified_lcr_retrieval.py"
+      - ".github/workflows/companion-live-inference.yml"
   workflow_dispatch:
 permissions:
   contents: read
