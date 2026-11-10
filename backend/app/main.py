@@ -165,6 +165,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
+# Community is out of scope for the MVP. Enforce the suspension at the ASGI
+# boundary as well as excluding its router, so no duplicate/legacy registration
+# can accidentally expose these endpoints.
+@app.middleware("http")
+async def reject_suspended_community(request: Request, call_next):
+    path = request.url.path.lower()
+    if path == "/api/v1/community" or path.startswith("/api/v1/community/"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    return await call_next(request)
+
 # CORS is configurable per deployment. The Netlify production site is the
 # default; additional origins must be explicitly listed in CORS_ORIGINS.
 # This is an origin allowlist, not a wildcard. Comma-separated values are
