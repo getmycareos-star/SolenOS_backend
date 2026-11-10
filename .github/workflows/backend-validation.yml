@@ -159,7 +159,7 @@ jobs:
           docker run --detach --name solenos-backend-ci --network host --env APP_ENV=ci --env DATABASE_URL="$DATABASE_URL" --env SECRET_KEY=ci-only-not-for-production --env OLLAMA_BASE_URL=http://127.0.0.1:9 --env OLLAMA_HOST=127.0.0.1:9 solenos-backend-ci:latest
           cleanup() {
             docker inspect --format 'container={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' solenos-backend-ci >&2 || true
-            docker logs --tail 40 solenos-backend-ci >&2 || true
+            docker logs --tail 40 solenos-backend-ci 2>&1 | tail -c 12000 >&2 || true
             docker rm --force solenos-backend-ci >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
@@ -167,13 +167,15 @@ jobs:
             if curl --silent --fail --max-time 2 http://127.0.0.1:8080/health >/dev/null; then
               docker exec solenos-backend-ci alembic -c /app/alembic.ini upgrade head
               for ready_attempt in $(seq 1 45); do
-                if curl --silent --fail --max-time 10 http://127.0.0.1:8080/ready >/dev/null; then
+                ready_status=$(curl --silent --show-error --output /tmp/solenos-ready-response --write-out '%{http_code}' --max-time 10 http://127.0.0.1:8080/ready || true)
+                if [ "$ready_status" = "200" ]; then
                   echo "PASS: production image serves /ready against migrated PostgreSQL."
                   exit 0
                 fi
                 sleep 2
               done
-              echo "FAIL: production image did not become ready against PostgreSQL." >&2
+              echo "FAIL: production image did not become ready against PostgreSQL; final HTTP ${ready_status}." >&2
+              cat /tmp/solenos-ready-response >&2 || true
               exit 1
             fi
             sleep 2
