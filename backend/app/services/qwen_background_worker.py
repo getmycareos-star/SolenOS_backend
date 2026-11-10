@@ -252,7 +252,9 @@ async def process_one_qwen_job() -> bool:
                     db.commit()
             except Exception:
                 db.rollback()
-        return True
+        # A failed poll before claiming a job is idle, so the outer loop
+        # backs off. A claimed job that was safely requeued/failed is work handled.
+        return job is not None
     finally:
         db.close()
 
