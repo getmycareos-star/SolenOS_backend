@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 
 engine = create_engine(
     "sqlite:///:memory:",
