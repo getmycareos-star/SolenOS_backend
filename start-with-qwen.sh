@@ -38,57 +38,67 @@ PY
 }
 
 write_qwen_state "not_started"
-ollama serve >/tmp/ollama-runtime.log 2>&1 &
-OLLAMA_PID=$!
+OLLAMA_PID=""
 UVICORN_PID=""
 
 cleanup() {
   if [[ -n "$UVICORN_PID" ]]; then kill "$UVICORN_PID" 2>/dev/null || true; fi
-  kill "$OLLAMA_PID" 2>/dev/null || true
-  wait "$OLLAMA_PID" 2>/dev/null || true
+  if [[ -n "$OLLAMA_PID" ]]; then
+    kill "$OLLAMA_PID" 2>/dev/null || true
+    wait "$OLLAMA_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
 
-# Bound sidecar startup to 10 seconds. FastAPI startup must not depend on it.
-OLLAMA_READY=0
-for attempt in $(seq 1 10); do
-  if curl -fsS "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1; then
-    OLLAMA_READY=1
-    break
-  fi
-  if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
-    echo "Optional Ollama sidecar did not start; core APIs will start without inference." >&2
-    break
-  fi
-  sleep 1
-done
+if [[ "${OLLAMA_SIDECAR_ENABLED,,}" == "true" ]]; then
+  ollama serve >/tmp/ollama-runtime.log 2>&1 &
+  OLLAMA_PID=$!
 
-# Model pull is deliberately asynchronous. A missing model may make Companion
-# inference unavailable temporarily, but must not block care-record operations.
-if [[ "$OLLAMA_READY" == "1" ]]; then
-  (
-    if ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
-      write_qwen_state "installed"
-    else
-      write_qwen_state "downloading"
-      if timeout "${OLLAMA_PULL_TIMEOUT_SECONDS:-1800}" ollama pull "$OLLAMA_MODEL"; then
-        if ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
-          write_qwen_state "installed"
-        else
-          write_qwen_state "failed" "model_missing_after_successful_pull"
-        fi
+  # Bound sidecar startup to 10 seconds. FastAPI startup must not depend on it.
+  OLLAMA_READY=0
+  for attempt in $(seq 1 10); do
+    if curl -fsS "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1; then
+      OLLAMA_READY=1
+      break
+    fi
+    if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
+      echo "Optional Ollama sidecar did not start; core APIs will start without inference." >&2
+      break
+    fi
+    sleep 1
+  done
+
+  # Model pull is deliberately asynchronous. A missing model may make Companion
+  # inference unavailable temporarily, but must not block care-record operations.
+  if [[ "$OLLAMA_READY" == "1" ]]; then
+    (
+      if ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
+        write_qwen_state "installed"
       else
-        pull_exit_code=$?
-        if [[ "$pull_exit_code" == "124" ]]; then
-          write_qwen_state "failed" "ollama_pull_timeout"
+        write_qwen_state "downloading"
+        if timeout "${OLLAMA_PULL_TIMEOUT_SECONDS:-1800}" ollama pull "$OLLAMA_MODEL"; then
+          if ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
+            write_qwen_state "installed"
+          else
+            write_qwen_state "failed" "model_missing_after_successful_pull"
+          fi
         else
-          write_qwen_state "failed" "ollama_pull_failed"
+          pull_exit_code=$?
+          if [[ "$pull_exit_code" == "124" ]]; then
+            write_qwen_state "failed" "ollama_pull_timeout"
+          else
+            write_qwen_state "failed" "ollama_pull_failed"
+          fi
         fi
       fi
-    fi
-  ) >/tmp/qwen-model-pull.log 2>&1 &
+    ) >/tmp/qwen-model-pull.log 2>&1 &
+  else
+    write_qwen_state "failed" "ollama_runtime_not_ready"
+  fi
 else
-  write_qwen_state "failed" "ollama_runtime_not_ready"
+  # Explicitly disabled in CI or deployments that intentionally run core care
+  # APIs without the optional local inference sidecar.
+  write_qwen_state "failed" "ollama_sidecar_disabled"
 fi
 
 python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" &
