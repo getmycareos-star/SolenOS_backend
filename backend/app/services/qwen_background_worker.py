@@ -252,7 +252,10 @@ async def process_one_qwen_job() -> bool:
                     db.commit()
             except Exception:
                 db.rollback()
-        return True
+        # A failed poll is not work completed. Returning True here made the
+        # outer loop immediately query again, busy-spinning when migrations
+        # had not yet created qwen_background_jobs (and starving ASGI health).
+        return False
     finally:
         db.close()
 
