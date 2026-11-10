@@ -348,6 +348,9 @@ jobs:
           APP_ENV: test
         run: python backend/scripts/postgres_anonymous_e2e.py
 
+      - name: Run unified LCR and Companion retrieval integration against PostgreSQL
+        run: python -m pytest backend/tests/test_unified_lcr_retrieval.py -q -vv
+
       - name: Run persisted change-pattern lifecycle tests against PostgreSQL
         run: python -m pytest backend/tests/test_pattern_postgres_integration.py -q -vv
 
