@@ -72,6 +72,20 @@ def _date_from_excerpt(excerpt: str) -> str | None:
     return None
 
 
+def _recorded_date_from_excerpt(excerpt: str) -> str | None:
+    match = re.search(
+        r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+(?:on\\s+)?(\\d{4}-\\d{2}-\\d{2})\\b",
+        excerpt,
+        re.I,
+    )
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(1)).isoformat()
+    except ValueError:
+        return None
+
+
 def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[str]:
     warnings: list[str] = []
     if field_type == "medication":
@@ -83,7 +97,10 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
     date_tokens = re.findall(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt)
     if date_tokens and _date_from_excerpt(excerpt) is None:
-        warnings.append("Date format is ambiguous or invalid; event_date remains missing until confirmed.")
+        if _recorded_date_from_excerpt(excerpt):
+            warnings.append("A document recording date is present, but the event date is not explicit; event_date remains missing.")
+        else:
+            warnings.append("Date format is ambiguous or invalid; event_date remains missing until confirmed.")
     if len(set(date_tokens)) > 1:
         warnings.append("Multiple dates appear in this passage; event_date remains unresolved until the relevant event date is confirmed.")
     if re.search(r"\b(previous|previously|prior|old|superseded|discontinued|replaced|no longer|do not use)\b", excerpt, re.I):
@@ -129,7 +146,8 @@ def canonical_candidate(
         "field_type": field_type,
         "extracted_value": observation or None,
         "event_date": None if len(set(re.findall(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt))) > 1 else _date_from_excerpt(excerpt),
-        "recorded_date": timestamp,
+        "recorded_date": _recorded_date_from_excerpt(excerpt),
+        "extracted_at": timestamp,
         "confidence": None,
         "review_status": "Pending",
         "warnings": warnings,
