@@ -248,3 +248,28 @@ def test_duplicate_upload_is_preserved_and_linked_to_original(client):
     assert duplicate.json()["duplicate_detected"] is True
     assert duplicate.json()["duplicate_of_evidence_id"] == original.json()["evidence_id"]
     assert duplicate.json()["evidence_id"] != original.json()["evidence_id"]
+
+
+
+def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_text(client, monkeypatch):
+    from app.api import document_lifecycle
+    from app.models.capture_analysis import CaptureAnalysis
+
+    test_client, session = client
+    image = Image.new("RGB", (240, 160), "#d0d0d0")
+    draw = ImageDraw.Draw(image)
+    draw.text((8, 8), "Medication 500 mg", fill="#b8b8b8", font=ImageFont.load_default(size=12))
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=8)
+    image.close()
+    evidence_id = persist_document(session, output.getvalue(), "poor-quality-photo.jpg", "image/jpeg")
+    monkeypatch.setattr(document_lifecycle.pytesseract, "image_to_string", lambda *args, **kwargs: "")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 422, response.text
+    assert "No readable text" in response.json()["detail"]
+
+    with TestSessionLocal() as db:
+        assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
+        assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
