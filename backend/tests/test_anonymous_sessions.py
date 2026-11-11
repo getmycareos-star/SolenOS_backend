@@ -910,6 +910,16 @@ def test_consent_survives_database_engine_restart_and_is_visible_to_another_inst
             ).one()
             assert row.revoked_at is not None
             assert row.data_improvement_consent is False
+            from app.models.privacy_delivery import AuditLogEvent
+            audit_actions = {
+                event.action
+                for event in db.query(AuditLogEvent).filter_by(
+                    target_type="caregiver_consent", target_id=row.id
+                ).all()
+            }
+            assert "consent.accepted" in audit_actions
+            assert "consent.data_improvement.update" in audit_actions
+            assert "consent.revoked" in audit_actions
         finally:
             db.close()
         engine_b.dispose()
