@@ -56,6 +56,7 @@ from app.services.qwen_gateway import (
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
+from app.services.claim_provenance import build_claim_provenance
 from app.models.ai_output_governance import AIOutputLCRProposal
 
 router = APIRouter(tags=["community and companion"])
@@ -774,6 +775,7 @@ def _companion_replay_response(
         "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
         "freshness_source_status": metadata.get("freshness_source_status", "not_recorded"),
         "source_record_refs": source_record_refs,
+        "claim_provenance": metadata.get("claim_provenance", {"coverage": "not_recorded", "claims": []}),
         "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
         "ai_generated": metadata.get("ai_generated", assistant.guard_verdict == "passed"),
         "written_to_lcr": False,
@@ -3499,6 +3501,64 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+
+    # Build claim-by-claim references from the exact records Qwen was allowed to
+    # use. A sentence is linked only when its wording appears in that source;
+    # paraphrases and unmatched statements are explicitly left unsupported.
+    claim_source_records = []
+    if source_event_ids:
+        for event in db.query(CareEvent).filter(
+            CareEvent.person_id == person_id,
+            CareEvent.id.in_(list(dict.fromkeys(source_event_ids))),
+        ).all():
+            claim_source_records.append({
+                "record_type": "care_event",
+                "record_id": str(event.id),
+                "label": "Care entry",
+                "source_text": " ".join(part for part in (event.title, event.description or "") if part),
+                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
+                "entered_by": "Caregiver who recorded this entry",
+                "record_status": event.status,
+                "related_evidence_ids": list(event.evidence_ids or []),
+            })
+    if source_evidence_ids:
+        for evidence in db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(list(dict.fromkeys(source_evidence_ids))),
+        ).all():
+            claim_source_records.append({
+                "record_type": "care_evidence",
+                "record_id": str(evidence.id),
+                "label": "Original note or document",
+                "source_text": evidence.source_text or "",
+                "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
+                "recorded_at": evidence.ingested_at.isoformat() if evidence.ingested_at else (
+                    evidence.uploaded_at.isoformat() if evidence.uploaded_at else None
+                ),
+                "reported_by": evidence.reported_by_label or evidence.original_author,
+                "entered_by": "Caregiver who added this source",
+                "record_status": evidence.epistemic_status or evidence.evidence_status,
+                "related_evidence_ids": [str(evidence.id)],
+            })
+    if source_assertion_ids:
+        for assertion in db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.id.in_(list(dict.fromkeys(source_assertion_ids))),
+        ).all():
+            claim_source_records.append({
+                "record_type": "care_assertion",
+                "record_id": str(assertion.id),
+                "label": "Caregiver-reviewed care statement",
+                "source_text": " ".join(part for part in (assertion.asserted_value, assertion.source_text or "") if part),
+                "occurred_at": assertion.observed_at.isoformat() if assertion.observed_at else assertion.event_time_text,
+                "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                "entered_by": "Caregiver who reviewed this statement",
+                "record_status": assertion.assertion_status,
+                "related_evidence_ids": list(assertion.evidence_ids or []),
+            })
+    claim_provenance = build_claim_provenance(reply, claim_source_records)
+
     response_metadata = {
         "request_sha256": request_sha256,
         "source_event_ids": source_event_ids,
@@ -3510,6 +3570,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         "freshness_source_status": freshness_source_status,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
+        "claim_provenance": claim_provenance,
     }
     turn_timestamp = datetime.now(timezone.utc)
     user_row = ConversationMessage(
@@ -3598,6 +3659,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         "source_freshness_assessment_ids": source_freshness_assessment_ids,
         "freshness_source_status": freshness_source_status,
         "source_record_refs": source_record_refs,
+        "claim_provenance": claim_provenance,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "written_to_lcr": False,
