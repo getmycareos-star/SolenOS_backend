@@ -12,9 +12,9 @@ permissions:
 
 jobs:
   document-lifecycle-postgres:
-    name: Document upload, extraction, retry and isolation
+    name: Care spine, documents, Daily Care and handoff on PostgreSQL
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
@@ -33,6 +33,8 @@ jobs:
       DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
       SOLENOS_COMPANION_TEST_DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
       SOLENOS_TEST_POSTGRES_RESTART: "1"
+      SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
+      APP_ENV: test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -44,11 +46,25 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Install local OCR engine
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
-
       - name: Install backend and PostgreSQL test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx psycopg2-binary
       - name: Apply reviewed PostgreSQL migrations
         working-directory: backend
         run: python -m alembic upgrade head
-      - name: Verify document lifecycle against real PostgreSQL
-        run: python -m pytest backend/tests/test_document_lifecycle_postgres.py backend/tests/test_document_lifecycle.py backend/tests/test_document_intelligence_lifecycle.py backend/tests/test_document_intelligence_postgres.py backend/tests/test_unified_lcr_retrieval.py backend/tests/test_daily_care_review_postgres.py backend/tests/test_handoff_postgres_integration.py backend/tests/test_appointment_workspace_postgres.py backend/tests/test_companion_care_update_postgres.py -q -s
+      - name: Verify unified care spine and PostgreSQL workflows
+        run: >-
+          python -m pytest
+          backend/tests/test_unified_care_spine_capture.py
+          backend/tests/test_document_lifecycle_postgres.py
+          backend/tests/test_document_lifecycle.py
+          backend/tests/test_document_intelligence_lifecycle.py
+          backend/tests/test_document_intelligence_postgres.py
+          backend/tests/test_unified_lcr_retrieval.py
+          backend/tests/test_daily_care_review_postgres.py
+          backend/tests/test_handoff_postgres_integration.py
+          backend/tests/test_appointment_workspace_postgres.py
+          backend/tests/test_companion_care_update_postgres.py
+          -q -s
+      - name: Verify authenticated identity and care persistence across real HTTP server restart
+        working-directory: backend
+        run: python scripts/postgres_anonymous_e2e.py
