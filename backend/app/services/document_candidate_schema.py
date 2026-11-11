@@ -58,6 +58,9 @@ def _date_from_excerpt(excerpt: str) -> str | None:
         match = pattern.search(excerpt)
         if not match:
             continue
+        prefix = excerpt[max(0, match.start() - 50):match.start()]
+        if re.search(r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+(?:on\\s+)?$", prefix, re.I):
+            continue
         try:
             if pattern is _DATE_PATTERNS[0]:
                 parsed = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
