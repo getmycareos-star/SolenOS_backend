@@ -29,7 +29,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
+from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, medication_details_for_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
@@ -547,15 +547,13 @@ def review_document_candidate(
             canonical["extracted_value"] = observation[:500]
             canonical["review_status"] = "Corrected"
             if candidate["field_type"] == "medication":
-                strength_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", observation, re.I)
-                dosage_match = re.search(
-                    r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
-                    observation,
-                    re.I,
+                details = medication_details_for_candidate(
+                    str(candidate.get("subject") or ""),
+                    str(candidate.get("source_quote") or ""),
                 )
                 canonical["medication_details"] = {
-                    "strength": strength_match.group(0).strip() if strength_match else None,
-                    "dosage_instructions": dosage_match.group(0).strip() if dosage_match else None,
+                    "strength": details["strength"],
+                    "dosage_instructions": details["dosage_instructions"],
                 }
             else:
                 canonical["medication_details"] = None
@@ -563,6 +561,7 @@ def review_document_candidate(
                 candidate["field_type"],
                 observation,
                 str(candidate.get("source_quote") or ""),
+                str(candidate.get("subject") or ""),
             )
             canonical["warnings"].append(
                 "Caregiver-corrected wording requires review against the original source passage."
