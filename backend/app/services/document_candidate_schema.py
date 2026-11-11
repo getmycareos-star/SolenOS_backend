@@ -96,11 +96,11 @@ def _recorded_date_from_excerpt(excerpt: str) -> str | None:
 def _date_tokens(excerpt: str) -> list[str]:
     tokens: list[str] = []
     recorded_prefix = re.compile(
-        r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+(?:on\\s+)?$",
+        r"\b(?:recorded|documented|entered|signed|authored|created)\s+(?:on\s+)?$",
         re.I,
     )
     numeric_pattern = re.compile(
-        r"\\b(?:\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}/\\d{1,2}/\\d{2,4})\\b"
+        r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b"
     )
     for match in numeric_pattern.finditer(excerpt):
         prefix = excerpt[max(0, match.start() - 60):match.start()]
