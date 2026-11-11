@@ -523,6 +523,32 @@ def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
     assert len(snapshots.json()) == 1
     assert hidden_versions.json() == []
 
+    historical = client.get(
+        "/api/v1/care-continuity/record-snapshots/as-of",
+        headers=first_headers,
+        params={"as_of": version["captured_at"]},
+    )
+    assert historical.status_code == 200, historical.text
+    historical_body = historical.json()
+    assert historical_body["snapshot_id"] == version["snapshot_id"]
+    assert historical_body["integrity_status"] == "verified"
+    assert historical_body["coverage_status"] == "saved_snapshot_only"
+    assert historical_body["state"]["person_id"] == first["person"]["id"]
+
+    hidden_historical = client.get(
+        "/api/v1/care-continuity/record-snapshots/as-of",
+        headers=second_headers,
+        params={"as_of": version["captured_at"]},
+    )
+    assert hidden_historical.status_code == 404, hidden_historical.text
+
+    no_earlier_snapshot = client.get(
+        "/api/v1/care-continuity/record-snapshots/as-of",
+        headers=first_headers,
+        params={"as_of": "2020-01-01T00:00:00Z"},
+    )
+    assert no_earlier_snapshot.status_code == 404, no_earlier_snapshot.text
+
     denied = client.post(
         "/api/v1/care-continuity/record-versions",
         headers=second_headers,
