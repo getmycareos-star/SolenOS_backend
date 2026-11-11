@@ -483,6 +483,15 @@ def review_document_candidate(
         candidate["accepted_assertion_id"] = assertion_id
         candidate["accepted_at"] = datetime.now(timezone.utc).isoformat()
 
+    canonical = candidate.get("canonical_candidate")
+    if isinstance(canonical, dict):
+        canonical["review_status"] = {
+            "accept": "Accepted",
+            "correct": "Corrected",
+            "reject": "Rejected",
+        }[payload.decision]
+        canonical["extracted_value"] = candidate.get("observation") or None
+
     reviewed_at = datetime.now(timezone.utc).isoformat()
     candidate["reviewed_at"] = reviewed_at
     candidate["reviewed_by_caregiver_id"] = caregiver_id
