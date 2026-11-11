@@ -25,7 +25,7 @@ from app.core.database import Base, get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
-from app.models.care import Correction, Insight, Evidence
+from app.models.care import Correction, Insight, Evidence, CareEvent
 from app.models.collaboration import EvidenceUpload, ConversationSession, ConversationMessage
 from app.models.privacy_export import PrivacyExportArtifact
 
@@ -46,7 +46,7 @@ class PrivacyRequestCreate(BaseModel):
     authority_basis: AuthorityBasis
     authority_attested: bool
     note: Optional[str] = Field(default=None, max_length=1000)
-    correction_target_type: Optional[Literal["insight"]] = None
+    correction_target_type: Optional[Literal["insight", "care_event_description"]] = None
     correction_target_id: Optional[str] = Field(default=None, max_length=255)
     correction_text: Optional[str] = Field(default=None, max_length=10000)
     correction_reason: Optional[str] = Field(default=None, max_length=2000)
@@ -677,22 +677,33 @@ def fulfil_approved_correction(
     correction_request = metadata.get("correction")
     if not isinstance(correction_request, dict):
         raise HTTPException(status_code=422, detail="Correction details were not supplied with the request")
-    if correction_request.get("target_type") != "insight":
-        raise HTTPException(status_code=422, detail="Only insight-description corrections are currently supported")
+    target_type = correction_request.get("target_type")
+    if target_type not in {"insight", "care_event_description"}:
+        raise HTTPException(status_code=422, detail="Supported correction targets are insight descriptions and care-event descriptions")
     target_id = str(correction_request.get("target_id") or "").strip()
     corrected_text = str(correction_request.get("corrected_text") or "").strip()
     if not target_id or not corrected_text:
         raise HTTPException(status_code=422, detail="Correction target and corrected text are required")
 
-    insight = (
-        db.query(Insight)
-        .filter(Insight.id == target_id, Insight.person_id == row.person_id)
-        .with_for_update()
-        .first()
-    )
-    if insight is None:
+    if target_type == "insight":
+        target = (
+            db.query(Insight)
+            .filter(Insight.id == target_id, Insight.person_id == row.person_id)
+            .with_for_update()
+            .first()
+        )
+        persisted_target_type = "insight"
+    else:
+        target = (
+            db.query(CareEvent)
+            .filter(CareEvent.id == target_id, CareEvent.person_id == row.person_id)
+            .with_for_update()
+            .first()
+        )
+        persisted_target_type = "care_event"
+    if target is None:
         raise HTTPException(status_code=404, detail="Correction target was not found in this care record")
-    original_text = insight.description
+    original_text = target.description
     if original_text == corrected_text:
         raise HTTPException(status_code=409, detail="The requested correction does not change the target")
 
@@ -700,24 +711,27 @@ def fulfil_approved_correction(
     correction = Correction(
         id=str(uuid.uuid4()),
         person_id=row.person_id,
-        target_type="insight",
-        target_id=insight.id,
-        original_text=original_text,
+        target_type=persisted_target_type,
+        target_id=target.id,
+        original_text=original_text or "",
         corrected_text=corrected_text,
         reason=str(correction_request.get("reason") or "Approved privacy correction request"),
         caregiver_id=row.caregiver_id,
     )
     db.add(correction)
-    insight.description = corrected_text
-    insight.updated_at = now
+    target.description = corrected_text
+    if isinstance(target, Insight):
+        target.updated_at = now
+    elif hasattr(target, "updated_at"):
+        target.updated_at = now
     row.request_status = "fulfilled"
     row.resolved_at = now
     row.resolution_code = "correction_fulfilled"
     fulfilment = {
         "operation": "correction",
         "correction_id": correction.id,
-        "target_type": "insight",
-        "target_id": insight.id,
+        "target_type": persisted_target_type,
+        "target_id": target.id,
         "fulfilled_at": now.isoformat(),
         "fulfilled_by": reviewer_id,
         "original_value_preserved_in_correction_record": True,
@@ -741,8 +755,8 @@ def fulfil_approved_correction(
         policy_version="privacy-correction-fulfilment-v1",
         record_metadata={
             "privacy_request_id": row.id,
-            "target_type": "insight",
-            "target_id": insight.id,
+            "target_type": persisted_target_type,
+            "target_id": target.id,
         },
     ))
     try:
