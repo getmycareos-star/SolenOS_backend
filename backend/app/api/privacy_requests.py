@@ -16,6 +16,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import inspect as sa_inspect, select, text
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -332,6 +333,16 @@ def _export_value(value):
     return value
 
 
+def _privacy_export_cipher():
+    key = os.getenv("SOLENOS_PRIVACY_EXPORT_ENCRYPTION_KEY", "").strip()
+    if not key:
+        raise HTTPException(status_code=503, detail="Privacy export encryption is not configured")
+    try:
+        return Fernet(key.encode("ascii"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Privacy export encryption key is invalid") from exc
+
+
 def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> tuple[bytes, dict]:
     """Build a deterministic export of person records and caregiver-attributed data."""
     archive_buffer = io.BytesIO()
@@ -362,7 +373,7 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
     with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for table in Base.metadata.sorted_tables:
             name = table.name
-            if name in {"privacy_export_artifacts", "community_posts", "community_reactions", "share_intakes"}:
+            if name in {"privacy_export_artifacts", "community_posts", "community_reactions", "share_intakes", "caregiver_accounts", "recovery_code_sets", "anonymous_sessions"}:
                 continue
             columns = set(table.c.keys())
             if name == "persons":
@@ -442,6 +453,8 @@ def fulfil_approved_export(
     if row.request_status not in {"approved_pending_fulfilment_assessment", "fulfilled"}:
         raise HTTPException(status_code=409, detail="Export request has not been approved")
     now = datetime.now(timezone.utc)
+    db.query(PrivacyExportArtifact).filter(PrivacyExportArtifact.expires_at <= now).delete(synchronize_session=False)
+    db.flush()
     existing = db.query(PrivacyExportArtifact).filter(
         PrivacyExportArtifact.request_id == row.id,
         PrivacyExportArtifact.person_id == row.person_id,
@@ -469,6 +482,7 @@ def fulfil_approved_export(
     expires_at = now + __import__("datetime").timedelta(hours=24)
     filename = f"solenos-privacy-export-{row.id}.zip"
     digest = hashlib.sha256(archive_bytes).hexdigest()
+    encrypted_archive = _privacy_export_cipher().encrypt(archive_bytes)
     if existing is None:
         existing = PrivacyExportArtifact(
             id=str(uuid.uuid4()),
@@ -476,14 +490,14 @@ def fulfil_approved_export(
             person_id=str(row.person_id),
             caregiver_id=str(row.caregiver_id),
             filename=filename,
-            content=archive_bytes,
+            content=encrypted_archive,
             size_bytes=len(archive_bytes),
             sha256=digest,
             expires_at=expires_at,
         )
         db.add(existing)
     else:
-        existing.content = archive_bytes
+        existing.content = encrypted_archive
         existing.filename = filename
         existing.size_bytes = len(archive_bytes)
         existing.sha256 = digest
@@ -565,8 +579,15 @@ def download_privacy_export(request_id: str, request: Request, db: Session = Dep
     if artifact_expiry is not None and artifact_expiry.tzinfo is None:
         artifact_expiry = artifact_expiry.replace(tzinfo=timezone.utc)
     if artifact is None or artifact_expiry <= now:
+        if artifact is not None:
+            db.delete(artifact)
+            db.commit()
         raise HTTPException(status_code=410, detail="Export archive is unavailable or has expired")
-    if len(artifact.content) != artifact.size_bytes or hashlib.sha256(artifact.content).hexdigest() != artifact.sha256:
+    try:
+        archive_bytes = _privacy_export_cipher().decrypt(bytes(artifact.content))
+    except (InvalidToken, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="Export archive could not be decrypted") from exc
+    if len(archive_bytes) != artifact.size_bytes or hashlib.sha256(archive_bytes).hexdigest() != artifact.sha256:
         raise HTTPException(status_code=500, detail="Export archive failed its integrity check")
     artifact.downloaded_at = now
     db.add(AuditLogEvent(
@@ -586,7 +607,7 @@ def download_privacy_export(request_id: str, request: Request, db: Session = Dep
     ))
     db.commit()
     return Response(
-        content=bytes(artifact.content),
+        content=archive_bytes,
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{artifact.filename}"',
