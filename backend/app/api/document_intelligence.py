@@ -110,10 +110,16 @@ def _document_assertion_field(candidate: dict) -> str:
 def _document_asserted_value(candidate: dict, subject: str, observation: str) -> str:
     canonical = candidate.get("canonical_candidate")
     canonical = canonical if isinstance(canonical, dict) else {}
-    warnings = canonical.get("warnings")
-    warnings = warnings if isinstance(warnings, list) else candidate.get("warnings", [])
+    canonical_warnings = canonical.get("warnings")
+    candidate_warnings_list = candidate.get("warnings")
+    warning_values = []
+    if isinstance(canonical_warnings, list):
+        warning_values.extend(str(value) for value in canonical_warnings if value)
+    if isinstance(candidate_warnings_list, list):
+        warning_values.extend(str(value) for value in candidate_warnings_list if value)
+    warnings = list(dict.fromkeys(warning_values))
     warning_text = (
-        "\nReview warnings: " + "; ".join(str(value) for value in warnings[:5])
+        "\nReview warnings: " + "; ".join(warnings[:5])
         if warnings else ""
     )
     if candidate.get("field_type") == "medication":
