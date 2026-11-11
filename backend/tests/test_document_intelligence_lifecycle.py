@@ -417,6 +417,9 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         assert "Dosage instructions:" in lcr_item["description"]
         assert "Conflicting medication instructions" in lcr_item["description"]
         assert "outdated or superseded" in lcr_item["description"]
+        assert "Event date: 2026-10-12" in lcr_item["description"]
+        assert "Source-recorded date: 2026-10-13" in lcr_item["description"]
+        assert lcr_item["occurred_at"] == "2026-10-12"
         assert lcr_item["source_label"].find("page 1") >= 0
         assert lcr_item["epistemic_status"] == "caregiver_reported"
     finally:
@@ -431,7 +434,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
-    quote = "Metformin 500 mg once daily."
+    quote = "Metformin 500 mg once daily. Event date 2026-10-12. Recorded on 2026-10-13."
     source = f"[Page 1]\nMedication reconciliation: {quote}"
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
