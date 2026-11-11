@@ -158,10 +158,10 @@ def medication_details_for_candidate(subject: str, excerpt: str) -> dict[str, st
     }
 
 
-def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[str]:
+def candidate_warnings(field_type: str, observation: str, excerpt: str, subject: str | None = None) -> list[str]:
     warnings: list[str] = []
     if field_type == "medication":
-        details = medication_details_for_candidate(observation, excerpt)
+        details = medication_details_for_candidate(subject or observation, excerpt)
         if not details["strength"]:
             warnings.append("Medication strength is missing or ambiguous for this medication row.")
         if details["strength_ambiguous"] == "true":
@@ -200,7 +200,7 @@ def canonical_candidate(
     observation = str(item.get("observation") or "")
     field_type = classify_field(subject, observation, excerpt)
     page_number = page_for_excerpt(source_text, excerpt)
-    warnings = candidate_warnings(field_type, observation, excerpt)
+    warnings = candidate_warnings(field_type, observation, excerpt, subject)
     if page_number is None:
         warnings.append("The exact excerpt could not be assigned to one unambiguous page.")
     timestamp = (recorded_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
