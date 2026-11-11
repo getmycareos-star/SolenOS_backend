@@ -103,7 +103,7 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
         assert data.get("persistence") == "read_only_assistance", data
         assert data.get("authority") == "solenos_care_record_and_caregiver", data
         assert not re.search(
-            r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
             data["reply"],
             re.IGNORECASE,
         ), f"{workflow} exposed an internal record identifier: {data['reply']!r}"
