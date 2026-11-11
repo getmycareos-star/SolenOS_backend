@@ -93,6 +93,15 @@ def _recorded_date_from_excerpt(excerpt: str) -> str | None:
         return None
 
 
+def _date_tokens(excerpt: str) -> list[str]:
+    tokens = re.findall(
+        r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b",
+        excerpt,
+    )
+    tokens.extend(_NATURAL_DATE_TOKEN.findall(excerpt))
+    return tokens
+
+
 def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[str]:
     warnings: list[str] = []
     if field_type == "medication":
@@ -102,8 +111,7 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[
             warnings.append("Medication administration instructions are not explicit; dosage remains missing.")
         if re.search(r"\b(?:increase|decrease|stop|discontinue|hold|restart|replace)\b", excerpt, re.I):
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
-    date_tokens = re.findall(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt)
-    date_tokens.extend(_NATURAL_DATE_TOKEN.findall(excerpt))
+    date_tokens = _date_tokens(excerpt)
     if date_tokens and _date_from_excerpt(excerpt) is None:
         if _recorded_date_from_excerpt(excerpt):
             warnings.append("A document recording date is present, but the event date is not explicit; event_date remains missing.")
@@ -153,7 +161,7 @@ def canonical_candidate(
         "source_excerpt": excerpt,
         "field_type": field_type,
         "extracted_value": observation or None,
-        "event_date": None if len(set(re.findall(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt))) > 1 else _date_from_excerpt(excerpt),
+        "event_date": None if len(set(_date_tokens(excerpt))) > 1 else _date_from_excerpt(excerpt),
         "recorded_date": _recorded_date_from_excerpt(excerpt),
         "extracted_at": timestamp,
         "confidence": None,
