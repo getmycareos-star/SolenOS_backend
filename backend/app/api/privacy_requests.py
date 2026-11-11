@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -27,6 +27,7 @@ from app.models.collaboration import EvidenceUpload, ConversationSession, Conver
 from app.models.privacy_export import PrivacyExportArtifact
 
 router = APIRouter(prefix="/privacy/requests", tags=["privacy requests"])
+MAX_PRIVACY_EXPORT_BYTES = 100 * 1024 * 1024
 
 RequestType = Literal["access", "export", "correction", "deletion"]
 AuthorityBasis = Literal[
@@ -215,6 +216,11 @@ def submit_privacy_request(
 @router.get("")
 def list_my_privacy_requests(request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    expired_count = db.query(PrivacyExportArtifact).filter(
+        PrivacyExportArtifact.expires_at <= datetime.now(timezone.utc)
+    ).delete(synchronize_session=False)
+    if expired_count:
+        db.commit()
     rows = (
         db.query(DataSubjectRequest)
         .filter(
@@ -422,6 +428,8 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
                 json.dumps(records, ensure_ascii=False, sort_keys=True, default=str),
             )
             manifest["record_sets"][name] = len(records)
+            if archive_buffer.tell() > MAX_PRIVACY_EXPORT_BYTES:
+                raise HTTPException(status_code=413, detail="Privacy export exceeds the 100 MiB archive limit")
 
         # Conversation messages do not carry person_id themselves; scope them
         # through the caregiver-owned conversation sessions.
@@ -464,6 +472,8 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
             if len(content) != upload.size_bytes or hashlib.sha256(content).hexdigest() != upload.sha256:
                 raise HTTPException(status_code=500, detail="A stored document failed its integrity check; export was not completed")
             archive.writestr(path, content)
+            if archive_buffer.tell() > MAX_PRIVACY_EXPORT_BYTES:
+                raise HTTPException(status_code=413, detail="Privacy export exceeds the 100 MiB archive limit")
             manifest["document_files"].append({
                 "evidence_id": evidence.id,
                 "filename": safe_name,
@@ -521,11 +531,12 @@ def fulfil_approved_export(
             "idempotent_replay": True,
         }
 
+    cipher = _privacy_export_cipher()
     archive_bytes, manifest = _build_caregiver_export(db, str(row.person_id), str(row.caregiver_id))
-    expires_at = now + __import__("datetime").timedelta(hours=24)
+    expires_at = now + timedelta(hours=24)
     filename = f"solenos-privacy-export-{row.id}.zip"
     digest = hashlib.sha256(archive_bytes).hexdigest()
-    encrypted_archive = _privacy_export_cipher().encrypt(archive_bytes)
+    encrypted_archive = cipher.encrypt(archive_bytes)
     if existing is None:
         existing = PrivacyExportArtifact(
             id=str(uuid.uuid4()),
