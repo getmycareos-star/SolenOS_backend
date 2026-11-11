@@ -789,7 +789,7 @@ def fulfil_approved_deletion(
     reviewer_id: str = Depends(_privacy_reviewer),
     db: Session = Depends(get_db),
 ):
-    """Erase a single-caregiver care record, failing closed on holds or shared access."""
+    """Erase a single-caregiver record after independent approval and backup-expiry review."""
     row = (
         db.query(DataSubjectRequest)
         .filter(DataSubjectRequest.id == request_id)
@@ -810,6 +810,13 @@ def fulfil_approved_deletion(
         }
     if row.request_status != "approved_pending_fulfilment_assessment":
         raise HTTPException(status_code=409, detail="Deletion request has not been approved")
+    review = metadata.get("review") if isinstance(metadata.get("review"), dict) else {}
+    approving_reviewer = str(review.get("reviewer_id") or "")
+    if not approving_reviewer or approving_reviewer == reviewer_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Deletion fulfilment requires a second reviewer independent of the approval decision.",
+        )
     if payload.backup_erasure_verified is not True:
         raise HTTPException(
             status_code=409,
