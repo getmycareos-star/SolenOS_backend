@@ -82,6 +82,29 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                 VALUES (:id, :name, 'family caregiver', :person_id, 'UTC')
             """), {"id": ids["other_caregiver"], "name": ids["other_caregiver_name"], "person_id": ids["other_person"]})
             connection.execute(text("""
+                INSERT INTO anonymous_sessions
+                    (id, person_id, caregiver_id, token_hash, expires_at)
+                VALUES (:id, :person_id, :caregiver_id, :token_hash, :expires_at)
+            """), {
+                "id": ids["session"], "person_id": ids["person"],
+                "caregiver_id": ids["caregiver"],
+                "token_hash": hashlib.sha256(("synthetic-token-" + ids["session"]).encode()).hexdigest(),
+                "expires_at": datetime(2030, 1, 1, tzinfo=timezone.utc),
+            })
+            connection.execute(text("""
+                INSERT INTO caregiver_consents
+                    (id, person_id, caregiver_id, medical_disclaimer_acknowledged,
+                     privacy_model_acknowledged, multi_caregiver_acknowledged,
+                     no_advertising_acknowledged, data_improvement_consent,
+                     accepted_terms_version, accepted_at)
+                VALUES (:id, :person_id, :caregiver_id, true, true, true, true, false,
+                        '2026-10', :accepted_at)
+            """), {
+                "id": ids["consent"], "person_id": ids["person"],
+                "caregiver_id": ids["caregiver"],
+                "accepted_at": datetime(2026, 11, 10, 8, 0, tzinfo=timezone.utc),
+            })
+            connection.execute(text("""
                 INSERT INTO evidence
                     (id, person_id, type, source_text, uploaded_by_caregiver_id,
                      original_author, reported_by_label, origin_channel, source_text_sha256)
@@ -159,6 +182,27 @@ def _assert_restored(database_url: str, ids: dict[str, str], document: bytes) ->
             assert caregiver["person_id"] == ids["person"]
             assert caregiver["name"] == ids["person_name"]
 
+            session = connection.execute(text("""
+                SELECT person_id, caregiver_id, token_hash, revoked_at
+                FROM anonymous_sessions WHERE id = :id
+            """), {"id": ids["session"]}).mappings().one()
+            assert session["person_id"] == ids["person"]
+            assert session["caregiver_id"] == ids["caregiver"]
+            assert session["token_hash"] == hashlib.sha256(("synthetic-token-" + ids["session"]).encode()).hexdigest()
+            assert session["revoked_at"] is None
+
+            consent = connection.execute(text("""
+                SELECT person_id, caregiver_id, privacy_model_acknowledged,
+                       medical_disclaimer_acknowledged, accepted_terms_version, accepted_at
+                FROM caregiver_consents WHERE id = :id
+            """), {"id": ids["consent"]}).mappings().one()
+            assert consent["person_id"] == ids["person"]
+            assert consent["caregiver_id"] == ids["caregiver"]
+            assert consent["privacy_model_acknowledged"] is True
+            assert consent["medical_disclaimer_acknowledged"] is True
+            assert consent["accepted_terms_version"] == "2026-10"
+            assert consent["accepted_at"] is not None
+
             evidence = connection.execute(text("""
                 SELECT id, person_id, uploaded_by_caregiver_id, source_text,
                        source_text_sha256
@@ -216,7 +260,7 @@ def _assert_restored(database_url: str, ids: dict[str, str], document: bytes) ->
             return {
                 "caregivers": connection.execute(text("SELECT count(*) FROM caregivers WHERE id IN (:a, :b)"), {"a": ids["caregiver"], "b": ids["other_caregiver"]}).scalar_one(),
                 "persons": connection.execute(text("SELECT count(*) FROM persons WHERE id IN (:a, :b)"), {"a": ids["person"], "b": ids["other_person"]}).scalar_one(),
-                "evidence": 1, "care_events": 1, "document_blobs": 1,
+                "anonymous_sessions": 1, "consent_records": 1,\n                "evidence": 1, "care_events": 1, "document_blobs": 1,
                 "corrections": 1, "lcr_revisions": 1,
             }
     finally:
