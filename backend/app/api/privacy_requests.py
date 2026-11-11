@@ -16,6 +16,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
+from sqlalchemy import inspect as sa_inspect, select, text
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -714,5 +715,205 @@ def fulfil_approved_correction(
             "reason": correction.reason,
             "created_at": correction.created_at.isoformat() if correction.created_at else now.isoformat(),
         },
+        "idempotent_replay": False,
+    }
+
+
+@router.post("/{request_id}/fulfil-deletion")
+def fulfil_approved_deletion(
+    request_id: str,
+    reviewer_id: str = Depends(_privacy_reviewer),
+    db: Session = Depends(get_db),
+):
+    """Erase a single-caregiver care record, failing closed on holds or shared access."""
+    row = (
+        db.query(DataSubjectRequest)
+        .filter(DataSubjectRequest.id == request_id)
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Privacy request not found")
+    if row.request_type != "deletion":
+        raise HTTPException(status_code=409, detail="This privacy request is not a deletion")
+    metadata = row.record_metadata if isinstance(row.record_metadata, dict) else {}
+    existing = metadata.get("fulfilment") if isinstance(metadata.get("fulfilment"), dict) else {}
+    if row.request_status == "fulfilled" and existing.get("operation") == "deletion":
+        return {
+            **_serialize(row),
+            "fulfilment": existing,
+            "idempotent_replay": True,
+        }
+    if row.request_status != "approved_pending_fulfilment_assessment":
+        raise HTTPException(status_code=409, detail="Deletion request has not been approved")
+    person_id = str(row.person_id or "")
+    caregiver_id = str(row.caregiver_id or "")
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=409, detail="Deletion scope is incomplete")
+
+    # A shared record contains other caregivers' personal data and contributions.
+    # Until mixed-subject erasure is separately assessed, fail closed rather than
+    # silently erase other caregivers' accounts or private material.
+    from app.models.care import Caregiver
+    linked_caregivers = db.query(Caregiver.id).filter(Caregiver.person_id == person_id).all()
+    if {str(item[0]) for item in linked_caregivers} != {caregiver_id}:
+        raise HTTPException(
+            status_code=409,
+            detail="This care record has multiple linked caregivers; mixed-caregiver deletion requires a separate scope assessment.",
+        )
+
+    bind = db.get_bind()
+    inspector = sa_inspect(bind)
+    if inspector.has_table("legal_holds"):
+        holds = db.execute(
+            text("SELECT hold_status FROM legal_holds WHERE subject_id = :subject_id"),
+            {"subject_id": person_id},
+        ).all()
+        terminal_hold_states = {"released", "expired", "closed", "cancelled", "inactive"}
+        blocking = [item[0] for item in holds if str(item[0] or "").strip().lower() not in terminal_hold_states]
+        if blocking:
+            raise HTTPException(
+                status_code=409,
+                detail="Deletion is blocked by an active or unclassified legal hold.",
+            )
+
+    # Build the directly scoped deletion set from registered ORM tables. The
+    # foreign-key closure also captures dependent rows without person_id columns
+    # (for example document bytes and conversation messages).
+    tables = list(Base.metadata.sorted_tables)
+    excluded_tables = {"data_subject_requests", "audit_log_events"}
+    scoped_ids: dict[str, set] = {}
+    direct_predicates = {}
+    owner_columns = (
+        "caregiver_id",
+        "created_by_caregiver_id",
+        "uploaded_by_caregiver_id",
+        "reported_by_caregiver_id",
+        "collected_by_caregiver_id",
+        "changed_by_caregiver_id",
+        "updated_by_caregiver_id",
+        "actor_id",
+        "requester_id",
+        "created_by",
+    )
+    for table in tables:
+        if table.name in excluded_tables or not table.primary_key.columns:
+            continue
+        columns = set(table.c.keys())
+        predicate = None
+        if table.name == "persons":
+            predicate = table.c.id == person_id
+        elif "person_id" in columns:
+            predicate = table.c.person_id == person_id
+        else:
+            owner = next((name for name in owner_columns if name in columns), None)
+            if owner:
+                predicate = table.c[owner] == caregiver_id
+        if predicate is None:
+            continue
+        direct_predicates[table.name] = predicate
+        primary_key = list(table.primary_key.columns)
+        if len(primary_key) == 1:
+            values = db.execute(
+                select(primary_key[0]).select_from(table).where(predicate)
+            ).scalars().all()
+            if values:
+                scoped_ids[table.name] = set(values)
+
+    changed = True
+    while changed:
+        changed = False
+        for child in tables:
+            if child.name in excluded_tables or not child.primary_key.columns:
+                continue
+            primary_key = list(child.primary_key.columns)
+            if len(primary_key) != 1:
+                continue
+            for foreign_key in child.foreign_keys:
+                parent_name = foreign_key.column.table.name
+                parent_ids = scoped_ids.get(parent_name, set())
+                if not parent_ids:
+                    continue
+                child_column = foreign_key.parent
+                values = db.execute(
+                    select(primary_key[0]).select_from(child).where(child_column.in_(parent_ids))
+                ).scalars().all()
+                if not values:
+                    continue
+                current = scoped_ids.setdefault(child.name, set())
+                before = len(current)
+                current.update(values)
+                if len(current) != before:
+                    changed = True
+
+    now = datetime.now(timezone.utc)
+    # Delete in reverse FK dependency order. Core deletes intentionally bypass
+    # append-only ORM listeners: erasure is an explicit, reviewed privacy action.
+    try:
+        for table in reversed(tables):
+            if table.name in excluded_tables:
+                continue
+            primary_key = list(table.primary_key.columns)
+            ids = scoped_ids.get(table.name, set())
+            if len(primary_key) == 1 and ids:
+                db.execute(table.delete().where(primary_key[0].in_(ids)))
+            elif table.name in direct_predicates:
+                db.execute(table.delete().where(direct_predicates[table.name]))
+
+        # Preserve only the privacy request receipt and redacted security audit.
+        db.execute(
+            text("""
+                UPDATE audit_log_events
+                SET actor_id = NULL, subject_id = NULL, person_id = NULL,
+                    caregiver_id = NULL, target_id = NULL, record_metadata = :metadata
+                WHERE person_id = :person_id
+            """),
+            {"metadata": json.dumps({"redacted_for_privacy_erasure": True}), "person_id": person_id},
+        )
+        pseudonym = "erased:" + hashlib.sha256(
+            f"{request_id}:{person_id}:{caregiver_id}".encode("utf-8")
+        ).hexdigest()
+        receipt_id = str(uuid.uuid4())
+        row.requester_id = pseudonym
+        row.actor_id = None
+        row.subject_id = None
+        row.person_id = None
+        row.caregiver_id = None
+        row.request_status = "fulfilled"
+        row.resolved_at = now
+        row.resolution_code = "deletion_fulfilled"
+        fulfilment = {
+            "operation": "deletion",
+            "receipt_id": receipt_id,
+            "fulfilled_at": now.isoformat(),
+            "fulfilled_by": reviewer_id,
+            "scope": "single-caregiver care record",
+            "verification": "registered person-scoped tables and foreign-key dependants removed; active legal holds rejected",
+        }
+        row.record_metadata = {"fulfilment": fulfilment}
+        db.add(AuditLogEvent(
+            actor_id=reviewer_id,
+            action="privacy_request.deletion_fulfilled",
+            target_type="privacy_deletion_receipt",
+            target_id=receipt_id,
+            occurred_at=now,
+            outcome="fulfilled",
+            request_id=row.request_id,
+            correlation_id=row.correlation_id,
+            policy_version="privacy-deletion-fulfilment-v1",
+            record_metadata={
+                "privacy_request_id": request_id,
+                "scope": "single-caregiver care record",
+                "redacted": True,
+            },
+        ))
+        db.commit()
+        db.refresh(row)
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        **_serialize(row),
+        "fulfilment": fulfilment,
         "idempotent_replay": False,
     }
