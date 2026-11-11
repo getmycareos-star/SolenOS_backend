@@ -23,6 +23,8 @@ from app.models.care import CareEvent, Evidence as EvidenceModel, Correction
 from app.models.time_location import Appointment
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 from app.services.qwen_gateway import qwen_chat
 from app.services.lcr_context import build_lcr_context
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
@@ -542,23 +544,27 @@ def review_daily_care_lcr_proposal(
         ).first()]
         if not event_ids and not evidence_ids:
             raise HTTPException(status_code=409, detail="The proposal has no source evidence in this care record")
-        db.add(CareAssertion(
-            person_id=person_id,
-            subject_type="person",
-            subject_id=person_id,
-            field=str(proposal.get("field") or "daily_care_observation")[:120],
-            assertion_kind="caregiver_reviewed_daily_care",
-            asserted_value=str(proposal.get("proposed_value") or "")[:4000],
-            source_event_id=event_ids[0] if event_ids else None,
-            source_label="Caregiver-reviewed Daily Care Qwen proposal",
-            source_text=json.dumps({"title": proposal.get("title"), "reason": proposal.get("reason"),
-                                    "uncertainty": proposal.get("uncertainty"), "proposal_analysis_id": analysis_id,
-                                    "proposal_index": proposal_index, "original_proposal": original}, ensure_ascii=False),
-            evidence_ids=evidence_ids,
-            assertion_status="caregiver_reviewed",
-            created_by_caregiver_id=caregiver_id,
-            updated_by_caregiver_id=caregiver_id,
-        ))
+        assertion = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field=str(proposal.get("field") or "daily_care_observation")[:120],
+                assertion_kind="caregiver_reviewed_daily_care",
+                asserted_value=str(proposal.get("proposed_value") or "")[:4000],
+                source_event_id=event_ids[0] if event_ids else None,
+                source_label="Caregiver-reviewed Daily Care Qwen proposal",
+                source_text=json.dumps({"title": proposal.get("title"), "reason": proposal.get("reason"),
+                                        "uncertainty": proposal.get("uncertainty"), "proposal_analysis_id": analysis_id,
+                                        "proposal_index": proposal_index, "original_proposal": original}, ensure_ascii=False),
+                evidence_ids=evidence_ids,
+                created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+            ),
+            commit=False,
+        )
+        assertion.assertion_status = "caregiver_reviewed"
         proposal["review_status"] = "accepted_by_caregiver"
         proposal["accepted_at"] = datetime.now(timezone.utc).isoformat()
         proposal["accepted_by_caregiver_id"] = caregiver_id
