@@ -536,9 +536,30 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
     if persist:
         try:
+            incoming_evidence_rows = (
+                db.query(Evidence).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(evidence_ids),
+                ).all()
+                if evidence_ids else []
+            )
+            incoming_persisted_evidence = [
+                evidence_record_to_uncertainty_item(row)
+                for row in incoming_evidence_rows
+            ]
             for domain in ("medications", "conditions", "symptoms"):
                 for item in result[domain]:
                     name = str(item.get("name", "")).strip()
+                    excerpt = str(item.get("evidence_excerpt") or "").strip()
+                    matching_finding_evidence = _match_finding_evidence(
+                        incoming_persisted_evidence, excerpt
+                    )
+                    finding_evidence_ids = [
+                        str(row["id"]) for row in matching_finding_evidence if row.get("id")
+                    ]
+                    finding_source_supported = bool(finding_evidence_ids) or bool(
+                        source_event_id and excerpt and _normalise(excerpt) in _normalise(content)
+                    )
                     current = item.get("current")
                     change_type = str(item.get("change_type") or "").casefold()
                     # A repeated unchanged report is useful in this run's audit
@@ -554,7 +575,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         or item.get("certainty") != "supported"
                         or not item.get("evidence_supported")
                         or not item.get("claim_supported")
-                        or not item.get("finding_source_supported", False)
+                        or not finding_source_supported
                     ):
                         continue
                     if domain == "medications":
