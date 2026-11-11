@@ -100,6 +100,33 @@ def _duplicate_of(evidence: Evidence) -> str | None:
     return str(value) if value else None
 
 
+def _document_assertion_field(candidate: dict) -> str:
+    field_type = str(candidate.get("field_type") or "observation")
+    if field_type not in {"medication", "allergy", "diagnosis", "appointment", "care_event", "observation"}:
+        field_type = "observation"
+    return f"document_{field_type}_statement"
+
+
+def _document_asserted_value(candidate: dict, subject: str, observation: str) -> str:
+    canonical = candidate.get("canonical_candidate")
+    canonical = canonical if isinstance(canonical, dict) else {}
+    if candidate.get("field_type") == "medication":
+        details = canonical.get("medication_details")
+        details = details if isinstance(details, dict) else {}
+        return (
+            f"Medication: {subject}\n"
+            f"Strength: {details.get('strength') or 'Not stated in source'}\n"
+            f"Dosage instructions: {details.get('dosage_instructions') or 'Not stated in source'}\n"
+            f"Source statement: {observation}"
+        )
+    return (
+        f"Subject: {subject}\n"
+        f"Statement: {observation}\n"
+        f"Event date: {candidate.get('event_date') or 'Not stated or unresolved'}\n"
+        f"Source-recorded date: {candidate.get('recorded_date') or 'Not stated in document'}"
+    )
+
+
 def _analysis_for_evidence(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
@@ -497,7 +524,8 @@ def review_document_candidate(
         observation = str(candidate.get("observation") or "").strip()
         if not subject or not observation:
             raise HTTPException(status_code=422, detail="The candidate is incomplete and cannot be accepted")
-        asserted_value = f"Subject: {subject}\nObservation: {observation}"
+        document_field = _document_assertion_field(candidate)
+        asserted_value = _document_asserted_value(candidate, subject, observation)
         duplicate_of_evidence_id = _duplicate_of(evidence)
         duplicate_label = f" · duplicate copy of evidence {duplicate_of_evidence_id}; not independent corroboration" if duplicate_of_evidence_id else ""
         source_label = f"Caregiver-reviewed document statement (not independently verified): {metadata.get('filename') or 'Uploaded document'} · page {candidate.get('page_number') or 'unresolved'}{duplicate_label}"
@@ -505,7 +533,7 @@ def review_document_candidate(
         # failed before the candidate review state was committed.
         existing = db.query(CareAssertion).filter(
             CareAssertion.person_id == person_id,
-            CareAssertion.field == "document_extracted_observation",
+            CareAssertion.field == document_field,
             CareAssertion.assertion_kind == "document_reviewed_observation",
             CareAssertion.source_text == quote,
             CareAssertion.created_by_caregiver_id == caregiver_id,
@@ -525,7 +553,7 @@ def review_document_candidate(
                     person_id=person_id,
                     subject_type="person",
                     subject_id=person_id,
-                    field="document_extracted_observation",
+                    field=document_field,
                     assertion_kind="document_reviewed_observation",
                     asserted_value=asserted_value,
                     source_label=source_label,
