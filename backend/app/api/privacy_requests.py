@@ -865,7 +865,7 @@ def fulfil_approved_deletion(
             text("""
                 UPDATE audit_log_events
                 SET actor_id = NULL, subject_id = NULL, person_id = NULL,
-                    caregiver_id = NULL, target_id = NULL, record_metadata = :metadata
+                    caregiver_id = NULL, target_id = NULL, metadata = :metadata
                 WHERE person_id = :person_id
             """),
             {"metadata": json.dumps({"redacted_for_privacy_erasure": True}), "person_id": person_id},
