@@ -155,7 +155,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
                 status_code=422,
                 detail="No readable text was found in the image. The original document remains preserved.",
             )
-        return f"[Page 1 OCR]\n{extracted}"[:MAX_EXTRACTED_CHARS], "server_tesseract_ocr_image"
+        return f"[Image OCR]\n[Page 1 OCR]\n{extracted}"[:MAX_EXTRACTED_CHARS], "server_tesseract_ocr_image"
 
     if mime.startswith("text/") or mime in {"application/json", "application/xml", "application/yaml"} or filename.endswith(
         (".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log")
@@ -166,7 +166,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
             raise HTTPException(status_code=415, detail="Saved text document is not UTF-8") from exc
         if not extracted:
             raise HTTPException(status_code=422, detail="The saved document contains no readable text")
-        return f"[Page 1]\n{extracted}"[:MAX_EXTRACTED_CHARS], "server_utf8_text"
+        return extracted[:MAX_EXTRACTED_CHARS], "server_utf8_text"
 
     raise HTTPException(
         status_code=415,
