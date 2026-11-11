@@ -23,6 +23,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: postgres-migration-validation-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   postgres-migrations:
     runs-on: ubuntu-latest

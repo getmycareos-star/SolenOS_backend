@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: document-lifecycle-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   document-lifecycle-postgres:
     name: Care spine, documents, Daily Care and handoff on PostgreSQL
