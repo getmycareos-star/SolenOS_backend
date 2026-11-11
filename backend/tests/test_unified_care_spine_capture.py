@@ -88,6 +88,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 json={
                     "person_id": person_id,
                     "caregiver_id": caregiver_id,
+                    "capture_idempotency_key": "daily-capture-" + suffix,
                     "general_notes": "Mum was unusually confused this afternoon and refused lunch.",
                 },
             )
@@ -97,6 +98,33 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             assert len(receipt["evidence_ids"]) == 1
             event_id = receipt["id"]
             evidence_id = receipt["evidence_ids"][0]
+
+            retry = client.post(
+                "/api/v1/daily-care/entries",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_idempotency_key": "daily-capture-" + suffix,
+                    "general_notes": "Mum was unusually confused this afternoon and refused lunch.",
+                },
+            )
+            assert retry.status_code == 200, retry.text
+            assert retry.json()["id"] == event_id
+            assert retry.json()["evidence_ids"] == [evidence_id]
+            assert retry.json()["idempotent_replay"] is True
+
+            conflicting_retry = client.post(
+                "/api/v1/daily-care/entries",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_idempotency_key": "daily-capture-" + suffix,
+                    "general_notes": "Different content with the same request key.",
+                },
+            )
+            assert conflicting_retry.status_code == 409, conflicting_retry.text
 
             # A separate database session must read the committed write.
             with SessionLocal() as db:
@@ -141,6 +169,22 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             ]
             assert len(lcr_matches) == 1
             assert lcr_matches[0]["evidence_ids"] == [evidence_id]
+
+            foreign_capture = client.post(
+                "/api/v1/daily-care/entries",
+                headers={"Authorization": "Bearer " + other_token},
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "general_notes": "Unauthorized cross-recipient write attempt.",
+                },
+            )
+            assert foreign_capture.status_code == 403, foreign_capture.text
+            foreign_history = client.get(
+                "/api/v1/events/" + person_id,
+                headers={"Authorization": "Bearer " + other_token},
+            )
+            assert foreign_history.status_code == 403, foreign_history.text
 
             # A different server-issued session cannot read this recipient's LCR.
             foreign = client.get(
