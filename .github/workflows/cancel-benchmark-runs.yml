@@ -1,6 +1,8 @@
 name: Cancel redundant benchmark runs
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   push:
     branches:
       - main
