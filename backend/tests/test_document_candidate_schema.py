@@ -109,4 +109,4 @@ def test_long_page_is_chunked_without_dropping_source_text():
     assert len(chunks) == 3
     assert all(page_number == 7 for page_number, _ in chunks)
     assert all(len(chunk) <= 8000 for _, chunk in chunks)
-    assert "".join(chunks[index][1] for index in range(len(chunks))) == page_text.replace("\n", "")
+    assert "".join(chunks[index][1] for index in range(len(chunks))) == page_text
