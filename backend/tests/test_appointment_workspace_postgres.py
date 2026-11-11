@@ -222,9 +222,11 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
                 provisional = db.query(CareAssertion).filter_by(person_id=person_id).all()
                 assert len(provisional) == 3
                 assert all(item.assertion_status == "caregiver_reported_unreviewed" for item in provisional)
+                provisional_ids = {item.id for item in provisional}
             initial_lcr = client.get("/api/v1/care-continuity/current-care?limit_per_source=50", headers=headers)
             assert initial_lcr.status_code == 200, initial_lcr.text
-            assert len([item for item in initial_lcr.json().get("items", []) if item.get("kind") == "assertion"]) >= 0
+            visible_ids = {item.get("id") for item in initial_lcr.json().get("items", [])}
+            assert provisional_ids.issubset(visible_ids)
 
             accepted = client.post(
                 f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[0]['id']}/review",
