@@ -176,6 +176,22 @@ def test_source_assertion_preserves_reported_status_evidence_and_event_time(revi
     assert created["evidence_ids"] == ["review-evidence-a"]
     assert created["observed_at"].startswith("2026-10-28T09:30:00")
 
+    db = SessionLocal()
+    try:
+        revisions = Base.metadata.tables["care_assertion_revisions"]
+        saved_revisions = db.execute(
+            revisions.select().where(
+                revisions.c.person_id == created["person_id"],
+                revisions.c.assertion_id == created["id"],
+            )
+        ).mappings().all()
+        assert len(saved_revisions) == 1
+        assert saved_revisions[0]["revision_number"] == 1
+        assert saved_revisions[0]["previous_payload"] is None
+        assert saved_revisions[0]["current_payload"]["asserted_value"] == "Caregiver reported attendance"
+    finally:
+        db.close()
+
     retrieved = client_a.get("/api/v1/care-continuity/assertions?limit=100")
     assert retrieved.status_code == 200, retrieved.text
     persisted = [item for item in retrieved.json() if item["id"] == created["id"]]
