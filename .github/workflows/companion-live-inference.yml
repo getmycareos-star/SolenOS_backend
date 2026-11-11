@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "backend/live_tests/test_companion_live_inference.py"
+      - "backend/live_tests/test_daily_capture_live_inference.py"
       - "backend/app/api/collaboration.py"
       - "backend/app/api/v1.py"
       - "backend/app/main.py"
@@ -75,6 +76,8 @@ jobs:
         run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
       - name: Run real Qwen Companion inference against PostgreSQL
         run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
+      - name: Run real Qwen Daily Capture extraction and persistence against PostgreSQL
+        run: python -m pytest backend/live_tests/test_daily_capture_live_inference.py -q -s
       - name: Stop isolated Ollama runtime
         if: always()
         run: docker rm -f solenos-live-ollama || true
