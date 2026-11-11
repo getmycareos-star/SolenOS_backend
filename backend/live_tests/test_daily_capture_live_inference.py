@@ -154,7 +154,8 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
                 "caregiver_evidence_persisted": True,
                 "review_analysis_persisted": True,
                 "qwen_candidates_written_to_lcr": False,
-                "care_assertions_created_without_review": 0,\n                "real_qwen_handoff_generated_and_reloaded": True,
+                "care_assertions_created_without_review": 0,
+                "real_qwen_handoff_generated_and_reloaded": True,
             }, separators=(",", ":")))
     finally:
         app.dependency_overrides.pop(get_db, None)
