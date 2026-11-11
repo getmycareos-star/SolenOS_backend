@@ -424,7 +424,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             ],
             timeout=timeout,
             response_format=DELTA_JSON_CONTRACT,
-            options={"temperature": 0},
+            options={"temperature": 0, "num_predict": 512},
         )
     except HTTPException as exc:
         if exc.status_code == 504:
