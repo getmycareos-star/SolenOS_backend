@@ -1086,3 +1086,92 @@ def test_deletion_fails_closed_when_legal_hold_is_active(monkeypatch):
         assert db.query(Person).filter(Person.id == session["person"]["id"]).count() == 1
     finally:
         db.close()
+
+
+
+def test_approved_care_event_correction_creates_lcr_revision(monkeypatch):
+    import json
+    from datetime import datetime, timezone
+    from app.models.care import CareEvent, Correction
+    from app.models.care_continuity import CareStateRevision
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "j" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Care event correction recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {
+        **caregiver_headers,
+        "X-SolenOS-Privacy-Reviewer-Token": "j" * 40,
+    }
+    db = TestSessionLocal()
+    try:
+        event = CareEvent(
+            person_id=session["person"]["id"],
+            event_type="mobility_observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Mobility observation",
+            description="Caregiver recorded the observation on Monday.",
+            evidence_ids=[],
+            created_by_caregiver_id=session["caregiver"]["id"],
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        event_id = event.id
+        original_updated_at = event.updated_at.isoformat() if event.updated_at else None
+    finally:
+        db.close()
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": "correction",
+            "authority_basis": "self",
+            "authority_attested": True,
+            "correction_target_type": "care_event_description",
+            "correction_target_id": event_id,
+            "correction_text": "Caregiver recorded the observation on Tuesday.",
+            "correction_reason": "The weekday was entered incorrectly.",
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed identity and authority evidence.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    fulfilled = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
+        headers=reviewer_headers,
+    )
+    assert fulfilled.status_code == 200, fulfilled.text
+    assert fulfilled.json()["correction"]["target_type"] == "care_event"
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(CareEvent).filter(CareEvent.id == event_id).one()
+        assert persisted.description == "Caregiver recorded the observation on Tuesday."
+        revisions = db.query(CareStateRevision).filter(
+            CareStateRevision.target_type == "care_events",
+            CareStateRevision.target_id == event_id,
+        ).order_by(CareStateRevision.revision_number.asc()).all()
+        assert len(revisions) == 2
+        assert revisions[1].change_kind == "updated"
+        before = json.loads(revisions[1].before_state)
+        after = json.loads(revisions[1].after_state)
+        assert before["description"] == "Caregiver recorded the observation on Monday."
+        assert after["description"] == persisted.description
+        correction = db.query(Correction).filter(
+            Correction.id == fulfilled.json()["fulfilment"]["correction_id"]
+        ).one()
+        assert correction.original_text == before["description"]
+    finally:
+        db.close()
