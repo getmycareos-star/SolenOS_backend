@@ -31,6 +31,11 @@ def _database_name(url: str) -> str:
     return str(make_url(url).database or "").lower()
 
 
+def _libpq_url(url: str) -> str:
+    # PostgreSQL CLI tools accept libpq URIs, not SQLAlchemy driver-qualified URLs.
+    return make_url(url).set(drivername="postgresql").render_as_string(hide_password=False)
+
+
 def _validate_database_urls(source_url: str, restore_url: str) -> None:
     source = make_url(source_url)
     restore = make_url(restore_url)
@@ -95,7 +100,7 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                      evidence_ids, created_by_caregiver_id)
                 VALUES
                     (:id, :person_id, 'observation', 'recorded', :occurred_at, :title,
-                     :description, CAST(:evidence_ids AS json), :caregiver_id)
+                     :description, CAST(:evidence_ids), :caregiver_id)
             """), {
                 "id": ids["event"], "person_id": ids["person"],
                 "occurred_at": datetime(2026, 11, 10, 8, 30, tzinfo=timezone.utc),
@@ -252,9 +257,9 @@ def main() -> int:
         seeded_at = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="solenos-backup-restore-") as directory:
             dump_path = str(Path(directory) / "solenos-recovery.dump")
-            _run(["pg_dump", "--format=custom", "--no-owner", "--no-acl", "--file", dump_path, source_url])
+            _run(["pg_dump", "--format=custom", "--no-owner", "--no-acl", "--file", dump_path, _libpq_url(source_url)])
             backup_seconds = time.monotonic() - seeded_at
-            _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error", "--dbname", restore_url, dump_path])
+            _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error", "--dbname", _libpq_url(restore_url), dump_path])
             restore_seconds = time.monotonic() - seeded_at - backup_seconds
         counts = _assert_restored(restore_url, ids, document)
         report = {
