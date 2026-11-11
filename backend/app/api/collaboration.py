@@ -1824,21 +1824,28 @@ def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
 
 @router.get("/assistant/status")
 def qwen_assistant_status():
-    # Existing consumers receive operational truth, never inventory-only optimism.
-    inventory = qwen_runtime_status()
+    # One bounded inventory check per cache window. Do not perform a second
+    # synchronous Ollama request in the status/health-polling path.
     readiness = qwen_readiness_status()
     runtime_available = bool(readiness.get("runtime_available"))
     model_installed = bool(readiness.get("model_installed"))
     inference_verified = bool(readiness.get("inference_verified"))
+    installation = readiness.get("installation") or {"state": "unknown"}
     return {
-        **inventory,
         "available": runtime_available and model_installed,
-        # Runtime inventory is not proof of a successful model response.
         "operational": inference_verified,
         "runtime_available": runtime_available,
         "model_installed": model_installed,
         "inference_verified": inference_verified,
         "inference_status": readiness.get("inference_status", "not_verified"),
+        "model": readiness.get("model"),
+        "provider": "local_ollama",
+        "inference_api": "ollama_native_http",
+        "hosted_inference_api": False,
+        "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service",
+        "error_category": readiness.get("error_category"),
+        "failure_reason": readiness.get("failure_reason"),
+        "installation": installation,
         "readiness": readiness,
     }
 
