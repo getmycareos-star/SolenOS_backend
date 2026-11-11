@@ -848,6 +848,10 @@ def review_appointment_outcome_proposal(
             CareAssertion.source_proposal_id == proposal.id,
             CareAssertion.person_id == person_id,
         ).first()
+        active_assertion = (
+            existing_assertion is not None
+            and existing_assertion.assertion_status not in {"rejected", "superseded"}
+        )
         corrected_proposal = None
         if decision == "correct":
             next_id = _appointment_proposal_id(record_id, int(revision_number), int(proposal.candidate_index), int(proposal.proposal_version) + 1)
@@ -864,8 +868,8 @@ def review_appointment_outcome_proposal(
             "proposal": _appointment_proposal_json(proposal),
             "corrected_proposal": _appointment_proposal_json(corrected_proposal) if corrected_proposal else None,
             "decision": decision,
-            "assertion_id": existing_assertion.id if existing_assertion else None,
-            "written_to_lcr": bool(existing_assertion),
+            "assertion_id": existing_assertion.id if active_assertion else None,
+            "written_to_lcr": bool(active_assertion),
             "idempotent_replay": True,
         }
 
