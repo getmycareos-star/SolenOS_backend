@@ -176,7 +176,7 @@ def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
     assert body["authority_verified_by_reviewer"] is True
     assert body["fulfilment_started"] is False
     assert body["resolved_at"] is None
-    assert "no data was exported" in body["message"].casefold().casefold()
+    assert "no data was exported" in body["message"].casefold()
 
     # Approval removes the request from the pending queue but does not mark it
     # fulfilled or resolved.
@@ -304,7 +304,7 @@ def test_privacy_review_rejection_is_audited_and_removed_from_pending(monkeypatc
     assert body["authority_verified_by_reviewer"] is False
     assert body["fulfilment_started"] is False
     assert body["resolved_at"] is not None
-    assert "no data was exported" in body["message"]
+    assert "no data was exported" in body["message"].casefold()
 
     duplicate_rejection = client.post(
         f"/api/v1/privacy/requests/{request_id}/review",
