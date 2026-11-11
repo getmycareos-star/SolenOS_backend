@@ -305,9 +305,9 @@ def main() -> int:
             dump_path = str(Path(directory) / "solenos-recovery.dump")
             _run(["pg_dump", "--format=custom", "--no-owner", "--no-acl", "--file", dump_path, _libpq_url(source_url)])
             backup_seconds = time.monotonic() - seeded_at
+            backup_bytes = Path(dump_path).stat().st_size
             _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error", "--dbname", _libpq_url(restore_url), dump_path])
             restore_seconds = time.monotonic() - seeded_at - backup_seconds
-        backup_bytes = Path(dump_path).stat().st_size if "dump_path" in locals() else None
         counts = _assert_restored(restore_url, ids, document)
         report = {
             "status": "PASS",
