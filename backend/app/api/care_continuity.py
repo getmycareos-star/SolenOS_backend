@@ -3684,6 +3684,10 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                     "after_value": _jsonable(dict(row)),
                 },
             )
+        if resource == "assertions":
+            # Assertions are inputs to change detection and must be reconciled
+            # before this write transaction is committed.
+            reconcile_person_change_intelligence(db, person_id)
         if resource == "living-records" and inspect(db.get_bind()).has_table("care_record_status_history"):
             status_history = _table(db, "care_record_status_history")
             db.execute(insert(status_history).values(
