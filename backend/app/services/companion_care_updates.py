@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 
 from app.models.ai_output_governance import AIOutputLCRProposal
+from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationMessage, ConversationSession
 from datetime import datetime, timezone
@@ -41,7 +42,12 @@ def persist_companion_candidates(
     source_text: str,
     extraction: dict,
 ) -> list[dict]:
-    """Persist only exact-source-quoted proposals; never create a CareAssertion here."""
+    """Persist exact-source-grounded disclosures as provisional LCR assertions.
+
+    The caregiver exact words enter the LCR immediately with an explicitly
+    unreviewed status. The proposal remains available for caregiver review;
+    model extraction never upgrades the report to a verified care fact.
+    """
     output = []
     observations = extraction.get("observations") if isinstance(extraction, dict) else []
     for index, item in enumerate(observations or []):
@@ -91,6 +97,30 @@ def persist_companion_candidates(
             status="pending_authorization",
         )
         db.add(proposal)
+        db.flush()
+
+        # Keep the caregiver's exact words visible in the LCR immediately.
+        # The assertion remains unreviewed until caregiver review; model output
+        # never upgrades the report to a verified care fact.
+        db.add(CareAssertion(
+            id=str(uuid.uuid4()),
+            person_id=person_id,
+            subject_type="person",
+            subject_id=person_id,
+            field="care_observation",
+            assertion_kind="time_bound_observation",
+            asserted_value=quote,
+            source_label="Caregiver-reported Companion disclosure (unreviewed)",
+            source_text=quote,
+            source_conversation_id=conversation_id,
+            source_message_id=message_id,
+            source_proposal_id=proposal.id,
+            event_time_text=event_time_quote,
+            evidence_ids=[],
+            assertion_status="caregiver_reported_unreviewed",
+            observed_at=None,
+            created_by_caregiver_id=caregiver_id,
+        ))
         db.flush()
         output.append(proposal_payload(proposal))
     if output:
