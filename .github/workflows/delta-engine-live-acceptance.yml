@@ -1,0 +1,88 @@
+name: Delta Engine live Qwen acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/delta-engine-live-acceptance.yml"
+      - "backend/app/services/delta_engine.py"
+      - "backend/app/api/care_delta.py"
+      - "backend/app/schemas/care_delta.py"
+      - "backend/live_tests/test_delta_engine_live.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/delta-engine-live-acceptance.yml"
+      - "backend/app/services/delta_engine.py"
+      - "backend/app/api/care_delta.py"
+      - "backend/app/schemas/care_delta.py"
+      - "backend/live_tests/test_delta_engine_live.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delta-engine-live-qwen-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  delta-engine-live-qwen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_delta
+          POSTGRES_PASSWORD: solenos_delta_ci
+          POSTGRES_DB: solenos_delta
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_delta -d solenos_delta"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://solenos_delta:solenos_delta_ci@localhost:5432/solenos_delta
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_MODEL: qwen3.5:4b
+      OLLAMA_TIMEOUT_SECONDS: "180"
+      OLLAMA_NUM_CTX: "1024"
+      OLLAMA_NUM_PREDICT: "96"
+      SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
+      SECRET_KEY: "ci-only-delta-live-test-secret-key"
+      APP_ENV: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and PostgreSQL test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx 'psycopg[binary]'
+      - name: Apply complete Alembic migration chain
+        working-directory: backend
+        run: python -m alembic upgrade head
+      - name: Start isolated Ollama runtime
+        run: |
+          docker run -d --name solenos-delta-live-ollama -p 11434:11434 ollama/ollama:latest
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs solenos-delta-live-ollama
+          exit 1
+      - name: Download configured Qwen model
+        run: docker exec solenos-delta-live-ollama ollama pull "$OLLAMA_MODEL"
+      - name: Exercise actual Delta Engine reconciliation endpoint with real Qwen
+        run: python -m pytest backend/live_tests/test_delta_engine_live.py -vv -s
+      - name: Stop isolated Ollama runtime
+        if: always()
+        run: docker rm -f solenos-delta-live-ollama || true
