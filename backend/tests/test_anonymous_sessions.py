@@ -83,6 +83,19 @@ def test_anonymous_session_bootstrap_creates_scoped_record_without_email():
         db.close()
 
 
+
+def test_same_session_can_read_its_person_identity():
+    client = TestClient(app)
+    created = create_session(client, "Care recipient identity read")
+    response = client.get(
+        f"/api/v1/persons/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == created["person"]["id"]
+    assert response.json()["name"] == "Care recipient identity read"
+
+
 def test_care_data_requires_server_issued_bearer_token():
     client = TestClient(app)
     created = create_session(client, "Care recipient")
