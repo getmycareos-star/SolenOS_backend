@@ -538,7 +538,7 @@ def review_document_candidate(
             if candidate["field_type"] == "medication":
                 details = medication_details_for_candidate(
                     str(candidate.get("subject") or ""),
-                    str(candidate.get("source_quote") or ""),
+                    observation,
                 )
                 canonical["medication_details"] = {
                     "strength": details["strength"],
