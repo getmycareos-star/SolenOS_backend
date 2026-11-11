@@ -1047,6 +1047,7 @@ def test_deletion_fails_closed_when_legal_hold_is_active(monkeypatch):
     reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "i" * 40}
     db = TestSessionLocal()
     try:
+        db.execute(text("DROP TABLE IF EXISTS legal_holds"))
         db.execute(text(
             "CREATE TABLE legal_holds (id VARCHAR PRIMARY KEY, subject_id VARCHAR, hold_status VARCHAR)"
         ))
@@ -1079,6 +1080,10 @@ def test_deletion_fails_closed_when_legal_hold_is_active(monkeypatch):
     denied = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
         headers=reviewer_headers,
+        json={
+            "backup_erasure_verified": True,
+            "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
+        },
     )
     assert denied.status_code == 409
     db = TestSessionLocal()
