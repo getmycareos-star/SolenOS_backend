@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -10,11 +12,17 @@ from app.main import app
 
 pytestmark = pytest.mark.session_security
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+# CI can run the session-security fixture against PostgreSQL. Local runs
+# retain in-memory SQLite unless TEST_POSTGRES_URL is explicitly set.
+_test_database_url = os.environ.get("TEST_POSTGRES_URL")
+if _test_database_url:
+    engine = create_engine(_test_database_url)
+else:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
