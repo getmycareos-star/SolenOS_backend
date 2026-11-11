@@ -16,6 +16,7 @@ on:
       - "backend/app/api/appointment_workspace.py"
       - "backend/app/api/handoff_drafts.py"
       - "backend/app/services/care_continuity.py"
+      - "backend/app/schemas/care_continuity.py"
       - "backend/app/api/v1.py"
       - "backend/app/main.py"
       - "backend/app/services/unified_lcr_retrieval.py"
