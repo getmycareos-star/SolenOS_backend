@@ -178,6 +178,15 @@ def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
     assert body["resolved_at"] is None
     assert "no data was exported" in body["message"]
 
+    # Approval removes the request from the pending queue but does not mark it
+    # fulfilled or resolved.
+    after_approval = client.get(
+        "/api/v1/privacy/requests/reviewer/pending",
+        headers=reviewer_headers,
+    )
+    assert after_approval.status_code == 200, after_approval.text
+    assert request_id not in [item["id"] for item in after_approval.json()["requests"]]
+
     duplicate = client.post(
         f"/api/v1/privacy/requests/{request_id}/review",
         headers=reviewer_headers,
@@ -328,3 +337,95 @@ def test_privacy_request_accepts_each_supported_request_type(monkeypatch):
         assert response.status_code == 201, response.text
         assert response.json()["request_type"] == request_type
         assert response.json()["fulfilment_started"] is False
+
+def test_privacy_review_rejects_invalid_reviewer_and_unknown_request(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "x" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Reviewer authorization recipient")
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "request_type": "access",
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+
+    payload = {
+        "decision": "approve",
+        "review_basis": "The request was reviewed.",
+        "authority_evidence_checked": "Identity evidence was checked.",
+    }
+    wrong_token = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers={"X-SolenOS-Privacy-Reviewer-Token": "wrong"},
+        json=payload,
+    )
+    assert wrong_token.status_code == 401, wrong_token.text
+
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "x" * 40}
+    unknown = client.post(
+        "/api/v1/privacy/requests/not-a-real-request/review",
+        headers=reviewer_headers,
+        json=payload,
+    )
+    assert unknown.status_code == 404, unknown.text
+
+    still_pending = client.get(
+        "/api/v1/privacy/requests/reviewer/pending",
+        headers=reviewer_headers,
+    )
+    assert still_pending.status_code == 200, still_pending.text
+    assert [item["id"] for item in still_pending.json()["requests"]] == [request_id]
+
+
+def test_privacy_reviewer_queue_excludes_request_notes_and_non_pending_items(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "y" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Reviewer queue privacy recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "y" * 40}
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": "correction",
+            "authority_basis": "self",
+            "authority_attested": True,
+            "note": "PRIVATE_REQUEST_NOTE_MUST_NOT_APPEAR_IN_REVIEW_QUEUE",
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+
+    pending = client.get(
+        "/api/v1/privacy/requests/reviewer/pending",
+        headers=reviewer_headers,
+    )
+    assert pending.status_code == 200, pending.text
+    assert request_id in [item["id"] for item in pending.json()["requests"]]
+    assert "PRIVATE_REQUEST_NOTE_MUST_NOT_APPEAR_IN_REVIEW_QUEUE" not in pending.text
+
+    rejected = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "reject",
+            "review_basis": "The submitted authority evidence was insufficient.",
+        },
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    after_rejection = client.get(
+        "/api/v1/privacy/requests/reviewer/pending",
+        headers=reviewer_headers,
+    )
+    assert after_rejection.status_code == 200, after_rejection.text
+    assert request_id not in [item["id"] for item in after_rejection.json()["requests"]]
+
