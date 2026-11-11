@@ -26,7 +26,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
 from app.models.care import Correction, Insight, Evidence
-from app.models.collaboration import EvidenceUpload
+from app.models.collaboration import EvidenceUpload, ConversationSession, ConversationMessage
 from app.models.privacy_export import PrivacyExportArtifact
 
 router = APIRouter(prefix="/privacy/requests", tags=["privacy requests"])
@@ -390,10 +390,12 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
                 owner_column = next((column for column in owner_columns if column in columns), None)
                 if owner_column:
                     predicate = predicate & (table.c[owner_column] == caregiver_id)
-            elif "caregiver_id" in columns:
-                predicate = table.c.caregiver_id == caregiver_id
             else:
-                continue
+                owner_column = next((column for column in owner_columns if column in columns), None)
+                if owner_column:
+                    predicate = table.c[owner_column] == caregiver_id
+                else:
+                    continue
             rows = db.execute(table.select().where(predicate)).mappings().all()
             if not rows:
                 continue
@@ -405,6 +407,27 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
                 json.dumps(records, ensure_ascii=False, sort_keys=True, default=str),
             )
             manifest["record_sets"][name] = len(records)
+
+        # Conversation messages do not carry person_id themselves; scope them
+        # through the caregiver-owned conversation sessions.
+        conversation_ids = [
+            item[0] for item in db.query(ConversationSession.id).filter(
+                ConversationSession.person_id == person_id,
+                ConversationSession.caregiver_id == caregiver_id,
+            ).all()
+        ]
+        if conversation_ids:
+            messages = db.query(ConversationMessage).filter(
+                ConversationMessage.session_id.in_(conversation_ids)
+            ).order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc()).all()
+            archive.writestr(
+                "records/conversation_messages.json",
+                json.dumps([
+                    {column.name: _export_value(getattr(message, column.name, None)) for column in ConversationMessage.__table__.columns}
+                    for message in messages
+                ], ensure_ascii=False, sort_keys=True, default=str),
+            )
+            manifest["record_sets"]["conversation_messages"] = len(messages)
 
         # Original binary documents are exported only when uploaded by this caregiver.
         uploads = (
