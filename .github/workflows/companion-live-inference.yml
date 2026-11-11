@@ -28,7 +28,6 @@ on:
       - "backend/app/api/v1.py"
       - "backend/app/main.py"
       - "backend/app/services/unified_lcr_retrieval.py"
-      - "backend/app/services/delta_engine.py"
       - "backend/tests/test_longitudinal_messy_care_benchmark.py"
   pull_request:
     paths:
