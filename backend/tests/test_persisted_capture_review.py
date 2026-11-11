@@ -9,6 +9,8 @@ import app.api.v1 as api_v1_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care import Evidence
+import app.services.care_execution as care_execution
 from app.models.care_continuity import CareAssertion
 
 pytestmark = pytest.mark.session_security
@@ -307,3 +309,68 @@ def test_capture_review_rejects_repeat_decisions_and_empty_corrections(monkeypat
         json={"candidate_index": 0, "decision": "reject"},
     )
     assert repeat.status_code == 409, repeat.text
+
+
+def test_daily_capture_uses_shared_execution_and_persisted_evidence(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Shared execution recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    generated = {
+        "observations": [{
+            "subject": "sleep",
+            "observation": "slept badly",
+            "source_quote": "slept badly",
+            "review_status": "pending_review",
+        }],
+        "open_questions": [],
+    }
+    extraction_sources = []
+    reconciled_people = []
+
+    def extract(source_text, *, source_event_id, source_evidence_id=None):
+        extraction_sources.append((source_text, source_event_id, source_evidence_id))
+        return generated
+
+    def reconcile(db, person_id):
+        reconciled_people.append(person_id)
+
+    monkeypatch.setattr(care_execution, "extract_review_candidates", extract)
+    monkeypatch.setattr(care_execution, "reconcile_person_change_intelligence", reconcile)
+
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": "Caregiver reported that Mum slept badly.",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["execution_status"] == {
+        "source_status": "source_preserved",
+        "evidence_status": "evidence_persisted",
+        "extraction_status": "extraction_available",
+        "assessment_status": "assessment_pending",
+        "review_status": "review_required",
+        "reconciliation_status": "reconciliation_completed",
+        "retrieval_status": "retrieval_available",
+    }
+    assert len(extraction_sources) == 1
+    assert reconciled_people == [session["person"]["id"]]
+
+    db = TestSessionLocal()
+    try:
+        analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
+        evidence = db.query(Evidence).filter_by(id=body["evidence_ids"][0]).one()
+        assert extraction_sources[0][0] == evidence.source_text
+        assert analysis.source_text == evidence.source_text
+        assert analysis.execution_status == body["execution_status"]
+        assert analysis.source_event_id == body["id"]
+        assert analysis.source_evidence_id == evidence.id
+    finally:
+        db.close()
