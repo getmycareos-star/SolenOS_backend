@@ -84,12 +84,12 @@ def test_device_registration_is_scoped_and_never_trusted_by_itself():
     assert revoked.json()["revoked"] is True
     assert revoked.json()["sessions_revoked"] == 1
     after_revoke = client.get(
-        f"/api/v1/evidence/{first["person"]["id"]}",
+        f"/api/v1/evidence/{first['person']['id']}",
         headers=first_auth,
     )
     assert after_revoke.status_code == 401, after_revoke.text
     second_still_works = client.get(
-        f"/api/v1/evidence/{second["person"]["id"]}",
+        f"/api/v1/evidence/{second['person']['id']}",
         headers=second_auth,
     )
     assert second_still_works.status_code == 200, second_still_works.text
