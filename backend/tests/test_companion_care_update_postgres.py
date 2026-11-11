@@ -102,6 +102,8 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
             provisional = db.query(CareAssertion).filter_by(source_proposal_id=proposal["id"]).one()
             assert provisional.assertion_status == "caregiver_reported_unreviewed"
             assert provisional.asserted_value == original
+            provisional_id = provisional.id
+        assert any(item.get("id") == provisional_id for item in before_accept.json().get("items", [])), before_accept.json()
 
         replay = send(client, first, original, first_turn)
         assert replay.status_code == 200, replay.text
