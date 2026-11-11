@@ -233,6 +233,8 @@ def _view(db: Session, handoff: HandoffRecord) -> dict:
         "person_id": handoff.person_id,
         "created_by": handoff.created_by,
         "status": handoff.handoff_status,
+        "delivery_status": (handoff.record_metadata or {}).get("delivery_status", "not_recorded"),
+        "delivery_recorded_at": (handoff.record_metadata or {}).get("delivery_recorded_at"),
         "scope": handoff.scope_snapshot or [],
         "created_at": handoff.created_at,
         "expires_at": handoff.expires_at,
@@ -511,7 +513,12 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         person_id=person_id, caregiver_id=caregiver_id, created_by=caregiver_id,
         handoff_status="pending", scope_snapshot=list(payload.scope), created_at=now,
         expires_at=expires_at, request_id=request_id, policy_version=POLICY_VERSION,
-        record_metadata={"scope_version": 1, "request_fingerprint": request_fingerprint},
+        record_metadata={
+            "scope_version": 1,
+            "request_fingerprint": request_fingerprint,
+            "delivery_status": "in_app_notification_pending_persist",
+            "delivery_recorded_at": now.isoformat(),
+        },
     )
     db.add(handoff)
     db.flush()
