@@ -774,3 +774,96 @@ def test_100_case_messy_care_temporal_scope_and_deduplication_benchmark(
         assert result["historical_count"] == expected_total - expected_current
         assert all(event.person_id == person.id for event in result["all_events"])
         assert all(event.event_type == event_type for event in result["all_events"])
+
+
+
+def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
+    """An unrelated document in the same request must not support a medication assertion."""
+    import json
+    from app.models.care import Evidence
+    from app.models.care_continuity import CareAssertion
+    from app.services import delta_engine
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "delta-finding-provenance")
+        excerpt = "Amlodipine 5 mg daily appears on the discharge medication list."
+        content_text = f"The discharge summary states: {excerpt}"
+        source_event = CareEvent(
+            id="ev-delta-provenance-source",
+            person_id=person.id,
+            event_type="document",
+            status="recorded",
+            occurred_at=NOW,
+            title="Synthetic discharge summary",
+            description=content_text,
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver.id,
+            time_provenance="document_date",
+        )
+        matching = Evidence(
+            id="evidence-delta-medication",
+            person_id=person.id,
+            type="document",
+            source_text=excerpt,
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        unrelated = Evidence(
+            id="evidence-delta-unrelated",
+            person_id=person.id,
+            type="note",
+            source_text="Sleep was poor on the previous night.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([source_event, matching, unrelated])
+        db.flush()
+
+        model_result = {
+            "event_summary": "A discharge medication list mentions amlodipine.",
+            "medications": [{
+                "change_type": "new",
+                "name": "Amlodipine",
+                "previous": None,
+                "current": "5 mg daily",
+                "evidence_excerpt": excerpt,
+                "certainty": "supported",
+            }],
+            "conditions": [],
+            "symptoms": [],
+            "tests": [],
+            "follow_ups": [],
+            "contradictions": [],
+            "clinical_gaps": [],
+            "caregiver_summary": "The document lists amlodipine 5 mg daily.",
+            "clinician_summary": "Amlodipine 5 mg daily is listed in the supplied discharge summary.",
+        }
+        monkeypatch.setattr(
+            delta_engine,
+            "_local_ollama_url",
+            lambda: ("http://127.0.0.1:11434", "synthetic-contract-model", 1.0),
+        )
+        monkeypatch.setattr(
+            delta_engine,
+            "qwen_chat",
+            lambda *args, **kwargs: json.dumps(model_result),
+        )
+
+        delta_engine.reconcile_event(
+            db,
+            person_id=person.id,
+            event_date=NOW,
+            source="synthetic discharge summary",
+            content=content_text,
+            source_event_id=source_event.id,
+            evidence_ids=[matching.id, unrelated.id],
+            persist=True,
+            created_by_caregiver_id=caregiver.id,
+        )
+
+        assertion = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id,
+            CareAssertion.subject_type == "medication",
+            CareAssertion.subject_id == "amlodipine",
+        ).one()
+        assert assertion.source_event_id == source_event.id
+        assert assertion.evidence_ids == [matching.id]
+        assert unrelated.id not in assertion.evidence_ids
