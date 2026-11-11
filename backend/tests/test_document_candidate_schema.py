@@ -5,6 +5,7 @@ from app.services.document_candidate_schema import (
     canonical_candidate,
     page_for_excerpt,
     split_document_pages,
+    unreadable_page_numbers,
 )
 
 
@@ -84,3 +85,17 @@ def test_outdated_instructions_and_multiple_dates_are_flagged():
     assert candidate["event_date"] is None
     assert any("Multiple dates" in warning for warning in candidate["warnings"])
     assert any("outdated or superseded" in warning for warning in candidate["warnings"])
+
+
+
+def test_unreadable_pages_are_reported_without_becoming_candidates():
+    source = (
+        "[Page 1]\nDischarge diagnosis: pneumonia\n\n"
+        "[Page 2 OCR]\n[No readable text detected on this page]\n\n"
+        "[Page 3 OCR]\nFollow up in 14 days."
+    )
+    assert unreadable_page_numbers(source) == [2]
+    assert split_document_pages(source) == [
+        (1, "Discharge diagnosis: pneumonia"),
+        (3, "Follow up in 14 days."),
+    ]
