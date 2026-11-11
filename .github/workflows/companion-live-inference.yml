@@ -25,6 +25,28 @@ on:
       - "backend/app/api/v1.py"
       - "backend/app/main.py"
       - "backend/app/services/unified_lcr_retrieval.py"
+  pull_request:
+    paths:
+      - ".github/workflows/companion-live-inference.yml"
+      - "backend/live_tests/test_companion_live_inference.py"
+      - "backend/live_tests/test_daily_capture_live_inference.py"
+      - "backend/live_tests/test_document_intelligence_live.py"
+      - "backend/live_tests/test_appointment_assist_live_inference.py"
+      - "backend/tests/test_appointment_workspace.py"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/api/companion_review.py"
+      - "backend/app/api/daily_care_intelligence.py"
+      - "backend/app/api/document_intelligence.py"
+      - "backend/app/api/appointment_workspace.py"
+      - "backend/app/api/handoff_drafts.py"
+      - "backend/app/api/handoffs.py"
+      - "backend/models/privacy_delivery.py"
+      - "backend/tests/test_privacy_delivery.py"
+      - "backend/app/services/care_continuity.py"
+      - "backend/app/schemas/care_continuity.py"
+      - "backend/app/api/v1.py"
+      - "backend/app/main.py"
+      - "backend/app/services/unified_lcr_retrieval.py"
   workflow_dispatch:
 permissions:
   contents: read
