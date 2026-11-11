@@ -59,7 +59,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
           python -m pip install --upgrade pip
-          python -m pip install -e ./backend
+          python -m pip install -e ./backend 'psycopg[binary]'
 
       - name: Apply current Alembic migration chain to synthetic source database
         working-directory: backend
