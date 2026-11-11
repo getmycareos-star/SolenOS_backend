@@ -13,6 +13,7 @@ on:
       - "backend/live_tests/test_appointment_assist_live_inference.py"
       - "backend/tests/test_appointment_workspace.py"
       - "backend/app/api/anonymous_sessions.py"
+      - "backend/app/api/anonymous_sessions.py"
       - "backend/app/api/collaboration.py"
       - "backend/app/api/companion_review.py"
       - "backend/app/api/daily_care_intelligence.py"
