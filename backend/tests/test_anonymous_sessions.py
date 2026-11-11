@@ -103,6 +103,29 @@ def test_care_data_requires_server_issued_bearer_token():
     assert response.status_code == 401, response.text
 
 
+def test_expired_anonymous_session_cannot_read_person_identity():
+    from datetime import datetime, timedelta, timezone
+    import hashlib
+    from app.models.anonymous_session import AnonymousSession
+
+    client = TestClient(app)
+    created = create_session(client, "Expired caregiver session")
+    db = TestSessionLocal()
+    try:
+        token_hash = hashlib.sha256(created["access_token"].encode()).hexdigest()
+        row = db.query(AnonymousSession).filter_by(token_hash=token_hash).one()
+        row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(
+        f"/api/v1/persons/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert response.status_code == 401, response.text
+
+
 def test_session_cannot_read_another_person_evidence():
     client = TestClient(app)
     first = create_session(client, "First person")
