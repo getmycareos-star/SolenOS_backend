@@ -156,11 +156,12 @@ def review_companion_care_update(
                     "idempotent_replay": True,
                 }
             assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
+            active_assertion = assertion is not None and assertion.assertion_status not in {"rejected", "superseded"}
             return {
                 "proposal": _proposal_json(proposal),
                 "decision": decision,
-                "assertion_id": assertion.id if assertion else None,
-                "written_to_lcr": bool(assertion),
+                "assertion_id": assertion.id if active_assertion else None,
+                "written_to_lcr": active_assertion,
                 "idempotent_replay": True,
             }
         raise HTTPException(status_code=409, detail="This proposal already has a review decision")
