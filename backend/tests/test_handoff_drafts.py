@@ -822,7 +822,7 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
     assert approval.status_code == 409, approval.text
 
 
-def test_qwen_handoff_generation_rejects_fabricated_source_and_quote(monkeypatch):
+def test_qwen_handoff_generation_rejects_fabricated_source_reference(monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
 
     monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
@@ -833,7 +833,6 @@ def test_qwen_handoff_generation_rejects_fabricated_source_and_quote(monkeypatch
             "items": [{
                 "section": "Recent observations and changes",
                 "source_ref": "care_events:invented-id",
-                "quote": "A fabricated observation.",
             }]
         }),
     )
@@ -855,7 +854,7 @@ def test_qwen_handoff_generation_rejects_fabricated_source_and_quote(monkeypatch
     assert result["sections"] == []
 
 
-def test_qwen_handoff_generation_accepts_only_exact_source_quotation(monkeypatch):
+def test_qwen_handoff_generation_attaches_exact_source_text_to_selected_reference(monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
 
     monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
@@ -866,7 +865,6 @@ def test_qwen_handoff_generation_accepts_only_exact_source_quotation(monkeypatch
             "items": [{
                 "section": "Recent observations",
                 "source_ref": "care_events:real-event",
-                "quote": "Caregiver reported a quiet morning.",
             }]
         }),
     )
@@ -901,7 +899,6 @@ def test_qwen_handoff_generation_rejects_unsupported_section_label(monkeypatch):
             "items": [{
                 "section": "Diagnosis",
                 "source_ref": "care_events:real-event",
-                "quote": "Caregiver reported a quiet morning.",
             }]
         }),
     )
@@ -1113,7 +1110,6 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
         return json.dumps({"items": [{
             "section": "Recent observations and changes",
             "source_ref": "care_events:real-event",
-            "quote": "Caregiver reported a quiet morning.",
         }]})
 
     monkeypatch.setattr(handoff_drafts, "qwen_chat", capture_inference)
@@ -1135,3 +1131,55 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
     assert result["status"] == "generated"
     assert observed["timeout"] == 90
     assert observed["options"]["num_predict"] == 256
+    prompt_sources = json.loads(observed["messages"][1]["content"])["sources"]
+    assert len(prompt_sources) == 1
+    assert len(prompt_sources[0]["excerpt"]) <= 240
+
+def test_qwen_handoff_generation_bounds_context_and_attaches_only_selected_source_text(monkeypatch):
+    import json
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 30))
+    observed = {}
+
+    def capture_inference(messages, **kwargs):
+        observed["messages"] = messages
+        observed.update(kwargs)
+        return json.dumps({
+            "items": [{
+                "section": "Recent observations and changes",
+                "source_ref": "care_events:event-9",
+            }]
+        })
+
+    monkeypatch.setattr(handoff_drafts, "qwen_chat", capture_inference)
+    records = [
+        {
+            "source_table": "care_events",
+            "source_id": f"event-{index}",
+            "source_type": "care_event",
+            "epistemic_status": "caregiver_reported",
+            "record_status": "recorded",
+            "event_at": f"2026-11-{index + 1:02d}T08:00:00+00:00",
+            "recorded_at": f"2026-11-{index + 1:02d}T08:05:00+00:00",
+            "text": f"Exact source text for event {index}. " * 40,
+        }
+        for index in range(10)
+    ]
+
+    result = handoff_drafts._generate_grounded_handoff(
+        records,
+        "professional_appointment",
+        "professional",
+    )
+
+    prompt_sources = json.loads(observed["messages"][1]["content"])["sources"]
+    assert result["status"] == "generated"
+    assert result["sources_available"] == 10
+    assert result["sources_considered"] == 6
+    assert len(prompt_sources) == 6
+    assert all(len(item["excerpt"]) <= 240 for item in prompt_sources)
+    assert prompt_sources[0]["source_ref"] == "care_events:event-9"
+    assert result["sections"][0]["source_ref"] == "care_events:event-9"
+    assert result["sections"][0]["text"] == records[9]["text"][:1200]
+
