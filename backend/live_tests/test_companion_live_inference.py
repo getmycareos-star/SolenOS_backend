@@ -186,6 +186,7 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         document_result = interpreted.json()
         assert document_result["intelligence_status"] == "available", document_result
         assert document_result["written_to_lcr"] is False, document_result
+        assert document_result["observations"], "Live Qwen returned no reviewable candidate for explicit source observations"
         assert all(
             item.get("review_status") == "pending_review"
             and item.get("source_quote") in document_text
