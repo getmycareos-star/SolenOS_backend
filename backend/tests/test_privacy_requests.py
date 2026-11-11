@@ -1,5 +1,6 @@
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -135,6 +136,7 @@ def test_privacy_request_rejects_unattested_authority():
 
 
 from app.models.privacy_delivery import AuditLogEvent
+from app.models.privacy_requests import DataSubjectRequest
 
 
 def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
@@ -362,6 +364,82 @@ def test_privacy_request_accepts_each_supported_request_type(monkeypatch):
         assert response.status_code == 201, response.text
         assert response.json()["request_type"] == request_type
         assert response.json()["fulfilment_started"] is False
+
+
+@pytest.mark.parametrize("request_type", ["export", "correction", "deletion"])
+def test_privacy_review_approval_does_not_claim_or_start_fulfilment(monkeypatch, request_type):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "z" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, f"{request_type} fulfilment boundary recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "z" * 40}
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": request_type,
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Verified the requester's identity and authority evidence.",
+            "authority_evidence_checked": "Identity evidence matched the care-record authority.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    body = approved.json()
+    assert body["request_type"] == request_type
+    assert body["status"] == "approved_pending_fulfilment_assessment"
+    assert body["authority_verified_by_reviewer"] is True
+    assert body["fulfilment_started"] is False
+    assert body["resolved_at"] is None
+    assert "no data was exported, corrected, or deleted" in body["message"].casefold()
+    for unavailable_field in (
+        "export_url",
+        "download_url",
+        "correction_result",
+        "amendment_id",
+        "deletion_job_id",
+        "erasure_status",
+        "deleted_at",
+        "fulfilled_at",
+    ):
+        assert unavailable_field not in body
+
+    db = TestSessionLocal()
+    try:
+        row = db.query(DataSubjectRequest).filter(DataSubjectRequest.id == request_id).one()
+        assert row.request_status == "approved_pending_fulfilment_assessment"
+        assert row.resolved_at is None
+        assert row.record_metadata["review"]["fulfilment_started"] is False
+        assert db.query(DataSubjectRequest).filter(
+            DataSubjectRequest.id == request_id,
+            DataSubjectRequest.person_id == session["person"]["id"],
+            DataSubjectRequest.caregiver_id == session["caregiver"]["id"],
+        ).count() == 1
+        audit = db.query(AuditLogEvent).filter(
+            AuditLogEvent.target_id == request_id,
+            AuditLogEvent.action == "privacy_request.reviewed",
+        ).one()
+        assert audit.actor_id == "privacy-reviewer"
+        assert audit.outcome == "approve"
+        assert audit.record_metadata == {
+            "request_type": request_type,
+            "fulfilment_started": False,
+        }
+        assert "authority_evidence_checked" not in str(audit.record_metadata)
+    finally:
+        db.close()
 
 def test_privacy_review_rejects_invalid_reviewer_and_unknown_request(monkeypatch):
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "x" * 40)
