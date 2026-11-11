@@ -811,6 +811,13 @@ def review_appointment_outcome_proposal(
     assertion_id = None
     corrected_proposal = None
     if decision == "reject":
+        provisional = db.query(CareAssertion).filter(
+            CareAssertion.source_proposal_id == proposal.id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if provisional is not None:
+            provisional.assertion_status = "caregiver_reported_rejected"
+            provisional.source_label = "Caregiver-rejected appointment outcome"
         proposal.status = "rejected"
         db.add(AIOutputLCRDecision(
             id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
@@ -855,6 +862,34 @@ def review_appointment_outcome_proposal(
                 status="pending_authorization",
             )
             db.add(corrected_proposal)
+        provisional = db.query(CareAssertion).filter(
+            CareAssertion.source_proposal_id == proposal.id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if provisional is not None:
+            provisional.assertion_status = "superseded_by_caregiver_correction"
+            provisional.source_label = "Superseded appointment outcome; caregiver supplied a correction"
+        db.flush()
+        corrected_assertion = db.query(CareAssertion).filter(
+            CareAssertion.source_proposal_id == corrected_proposal.id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if corrected_assertion is None:
+            corrected_assertion = CareAssertion(
+                id=str(uuid.uuid4()), person_id=person_id,
+                subject_type="person", subject_id=person_id,
+                field=str(original.get("field") or "appointment_observation"),
+                assertion_kind="time_bound_observation",
+                asserted_value=corrected_text,
+                source_label="Caregiver-corrected appointment outcome (unreviewed)",
+                source_text=source_quote + "\\nCaregiver correction context: " + correction_context,
+                source_proposal_id=corrected_proposal.id,
+                event_time_text=original.get("event_time_text"),
+                evidence_ids=[], assertion_status="caregiver_reported_unreviewed",
+                observed_at=None, created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+            )
+            db.add(corrected_assertion)
         proposal.status = "corrected"
         db.add(AIOutputLCRDecision(
             id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
@@ -898,6 +933,13 @@ def review_appointment_outcome_proposal(
             )
             db.add(assertion)
             db.flush()
+        else:
+            assertion.asserted_value = accepted_value
+            assertion.assertion_status = "caregiver_reviewed"
+            assertion.observed_at = _parse_appointment_event_time(original.get("event_time_text"))
+            assertion.source_label = "Caregiver-reviewed appointment workspace"
+            assertion.source_text = source_quote + (("\\nCaregiver correction context: " + correction_context) if correction_context else "")
+            assertion.updated_by_caregiver_id = caregiver_id
         assertion_id = assertion.id
         proposal.status = "accepted"
         db.add(AIOutputLCRDecision(
