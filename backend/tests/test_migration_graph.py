@@ -45,5 +45,5 @@ def test_handoff_draft_persistence_migration_is_reachable_from_canonical_head():
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
     assert len(heads) == 1
-    reachable = {revision.revision for revision in script.walk_revisions(heads[0])}
+    reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
     assert "20261107_05_appt_idempotency" in reachable
