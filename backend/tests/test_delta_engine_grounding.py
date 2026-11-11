@@ -1,6 +1,10 @@
 from types import SimpleNamespace
+import json
 
-from app.services.delta_engine import _match_source_references
+import pytest
+from fastapi import HTTPException
+
+from app.services.delta_engine import _match_source_references, _parse_model_json
 
 
 def test_new_event_excerpt_is_linked_only_to_the_persisted_event_id():
@@ -80,3 +84,27 @@ def test_historical_event_excerpt_links_to_the_exact_prior_event():
         "record_id": "event-matching",
         "match_basis": "exact_normalized_excerpt",
     }]
+
+
+def test_delta_json_parser_accepts_one_valid_object_after_model_preamble():
+    payload = {
+        "event_summary": "Caregiver observation recorded.",
+        "medications": [],
+        "conditions": [],
+        "symptoms": [],
+        "tests": [],
+        "follow_ups": [],
+        "contradictions": [],
+        "clinical_gaps": [],
+        "caregiver_summary": "Review the recorded observation.",
+        "clinician_summary": "Caregiver-reported observation; not independently verified.",
+    }
+    parsed = _parse_model_json("Structured result:\\n" + json.dumps(payload))
+    assert parsed == payload
+
+
+def test_delta_json_parser_rejects_truncated_output_without_persisting():
+    with pytest.raises(HTTPException) as exc:
+        _parse_model_json('{"event_summary":"unfinished"')
+    assert exc.value.status_code == 502
+    assert exc.value.detail["code"] == "delta_invalid_json"
