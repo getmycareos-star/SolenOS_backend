@@ -801,18 +801,28 @@ def test_revoking_anonymous_session_is_durable_audited_and_preserves_care_record
 
 
 def test_consent_survives_database_engine_restart_and_is_visible_to_another_instance(tmp_path):
-    """Exercise durable consent using two independent engines over the same database file.
+    """Exercise durable consent across independent engines on PostgreSQL in CI.
 
-    The production database is PostgreSQL; this regression test proves that consent
-    is stored in the database rather than process-local memory or a per-worker cache.
+    Local runs use a file-backed SQLite database. TEST_POSTGRES_URL switches the
+    exact same acceptance, preference, withdrawal, and audit assertions to PostgreSQL.
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from app.models.collaboration import ConsentRecord
 
-    database_path = tmp_path / "consent-restart.sqlite3"
-    database_url = f"sqlite:///{database_path}"
-    engine_a = create_engine(database_url, connect_args={"check_same_thread": False})
+    import os
+
+    # CI supplies a disposable PostgreSQL database. Local runs retain the
+    # file-backed SQLite fallback so the regression remains easy to execute.
+    database_url = os.environ.get("TEST_POSTGRES_URL")
+    if database_url:
+        engine_options = {}
+    else:
+        database_path = tmp_path / "consent-restart.sqlite3"
+        database_url = f"sqlite:///{database_path}"
+        engine_options = {"connect_args": {"check_same_thread": False}}
+
+    engine_a = create_engine(database_url, **engine_options)
     factory_a = sessionmaker(autocommit=False, autoflush=False, bind=engine_a)
     Base.metadata.create_all(bind=engine_a)
 
@@ -852,7 +862,7 @@ def test_consent_survives_database_engine_restart_and_is_visible_to_another_inst
         # Dispose the first engine and create a separate engine, modelling a new
         # application process/worker with no shared Python objects or in-memory state.
         engine_a.dispose()
-        engine_b = create_engine(database_url, connect_args={"check_same_thread": False})
+        engine_b = create_engine(database_url, **engine_options)
         factory_b = sessionmaker(autocommit=False, autoflush=False, bind=engine_b)
         active_factory["value"] = factory_b
         main_module.SessionLocal = factory_b
