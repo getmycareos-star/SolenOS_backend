@@ -1041,6 +1041,8 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
         "care_events": "empty",
         "appointments": "empty",
         "care_assertions": "empty",
+        "open_questions": "empty",
+        "contradictions": "empty",
         "evidence_freshness_assessments": "empty",
         "medications_and_allergies": "unavailable",
         "documents": "empty",
