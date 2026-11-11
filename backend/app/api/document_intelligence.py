@@ -183,6 +183,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     # Process each page independently so a long discharge packet cannot be
     # silently truncated to the first 12k characters by the Qwen gateway.
     raw_observations = []
+    all_open_questions = []
     page_inputs = split_document_pages(source_text)
     if not page_inputs:
         raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
@@ -196,9 +197,17 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         except HTTPException:
             db.rollback()
             raise
-        page_items = page_result.get("observations") if isinstance(page_result, dict) else []
-        if isinstance(page_items, list):
-            raw_observations.extend(page_items)
+        if isinstance(page_result, dict):
+            page_items = page_result.get("observations")
+            if isinstance(page_items, list):
+                raw_observations.extend(page_items)
+            page_questions = page_result.get("open_questions")
+            if isinstance(page_questions, list):
+                all_open_questions.extend(
+                    value.strip()[:300]
+                    for value in page_questions
+                    if isinstance(value, str) and value.strip()
+                )
     raw_observations = raw_observations[:60]
     grounded = []
     seen_quotes = set()
@@ -256,7 +265,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         "open_questions": [
             *[
                 value.strip()[:300]
-                for value in (extracted.get("open_questions") or [])[:3]
+                for value in all_open_questions[:3]
                 if isinstance(value, str) and value.strip()
             ],
             *(
