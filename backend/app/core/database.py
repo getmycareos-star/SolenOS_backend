@@ -39,6 +39,7 @@ import app.models.reminder  # noqa: E402, F401
 import app.models.capture_analysis  # noqa: E402, F401
 import app.models.privacy_delivery  # noqa: E402, F401
 import app.models.privacy_request  # noqa: E402, F401
+import app.models.privacy_export  # noqa: E402, F401
 
 
 def get_db():
