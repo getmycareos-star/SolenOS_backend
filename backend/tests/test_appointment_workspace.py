@@ -1357,7 +1357,7 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
     assert corrected_accept.status_code == 200, corrected_accept.text
     assert corrected_accept.json()["written_to_lcr"] is True
 
-    # Rejection leaves an append-only decision and never creates an assertion.
+    # Rejection leaves an append-only decision and marks the provisional assertion rejected.
     rejected = test_client.post(
         f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[2]['id']}/review",
         headers=headers,
