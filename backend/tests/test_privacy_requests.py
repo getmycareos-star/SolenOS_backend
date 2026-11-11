@@ -1120,7 +1120,6 @@ def test_approved_care_event_correction_creates_lcr_revision(monkeypatch):
         db.commit()
         db.refresh(event)
         event_id = event.id
-        original_updated_at = event.updated_at.isoformat() if event.updated_at else None
     finally:
         db.close()
 
