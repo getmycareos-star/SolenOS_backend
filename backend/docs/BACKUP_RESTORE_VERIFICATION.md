@@ -1,0 +1,67 @@
+# SolenOS PostgreSQL backup and recovery verification
+
+## Purpose
+
+This runbook verifies that a PostgreSQL logical backup can be restored into a separate database and that synthetic caregiver identity, care evidence, document bytes, care-event links, correction history and LCR revision history remain associated.
+
+A backup file, a successful `pg_dump`, or a successful `pg_restore` command alone is not a recovery pass.
+
+## Safety boundary
+
+- Use two dedicated PostgreSQL databases containing synthetic data only.
+- The source database name must contain `test` or `backup`; the restore database name must contain `test`, `restore` or `recovery`.
+- Never point either URL at production or a database containing real caregiver records.
+- The restore command uses `pg_restore --clean --if-exists`. It drops/recreates objects in the target database. Treat the target as disposable.
+- Do not place database URLs, passwords, dump files, or real care data in Git, CI logs, tickets, or this report.
+- The runner inserts uniquely named synthetic fixtures into the source database. Use a disposable source database that has already been migrated to the current Alembic head.
+
+## Prerequisites
+
+- PostgreSQL client tools (`pg_dump` and `pg_restore`) installed and compatible with the PostgreSQL server version.
+- Python dependencies installed from `backend`.
+- Both databases are reachable by the same operator.
+- The restore database is empty/disposable and the operator has permission to create/replace schema objects.
+- Both databases use the same supported PostgreSQL major version for this first recovery exercise.
+
+## Execute
+
+From `backend`:
+
+```powershell
+$env:SOLENOS_BACKUP_SOURCE_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:PORT/solenos_backup_test"
+$env:SOLENOS_BACKUP_RESTORE_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:PORT/solenos_recovery_test"
+python scripts/verify_backup_restore.py
+```
+
+Use actual credentials only in the local shell/session. Do not commit them or paste them into logs.
+
+The script:
+1. Rejects identical databases and production-named databases.
+2. Inserts a uniquely identified synthetic caregiver, care recipient, second caregiver/person, observation evidence, care event, binary document, correction and LCR state revision into the source database.
+3. Runs a real custom-format `pg_dump`.
+4. Restores that dump into the isolated restore database with `pg_restore`.
+5. Verifies caregiver/person ownership, evidence provenance/hash, event/evidence association, exact document bytes/size/SHA-256, correction history, LCR revision history and cross-caregiver isolation.
+6. Emits a machine-readable PASS/FAIL report with measured backup, restore and end-to-end durations.
+
+A non-zero exit code or any failed assertion is a failed recovery exercise. Preserve the sanitized report and investigate before retrying. Do not manually edit the restored data to make assertions pass.
+
+## What this check does not prove
+
+- It does not connect to or restore the live production database.
+- It does not verify a provider-managed automated backup schedule, retention policy, point-in-time recovery, WAL archiving, or cross-region copies.
+- It does not exercise the authenticated HTTP API against the restored database. The cross-caregiver check here is a relational ownership assertion, not a substitute for API authorization tests.
+- It does not verify object storage outside PostgreSQL. Current `EvidenceUpload` records store binary content in the `evidence_uploads.content` database column, and this runner verifies that binary payload. If any document path uses external object storage, add a separate synthetic object-store backup/restore test before claiming document recovery.
+- It does not establish a production RPO or RTO target. The report records observed backup/restore duration only. Define approved targets from the real backup cadence, data-loss tolerance and recovery operations, then test against those targets.
+
+## Release gate and evidence record
+
+Do not mark backup recovery as verified until a fresh run against disposable PostgreSQL databases reports PASS and the operator has reviewed:
+
+- source and restore database names (never credentials);
+- backup artifact format and size, stored outside the repository;
+- measured backup and restore durations;
+- fixture counts and all verification assertions;
+- PostgreSQL server/client versions and Alembic revision at the time of the run;
+- operator, run timestamp, sanitized logs and any deviations.
+
+Production readiness additionally requires a separate, authorized recovery exercise using the actual provider backup mechanism and a production-equivalent isolated target. Never perform that exercise by restoring over production.
