@@ -1429,6 +1429,11 @@ def current_care_projection(
             continue
         add("evidence_observations", row, "Structured evidence observation", 7)
     for row in (sources.get("assertions") or {}).get("items", []):
+        if row.get("assertion_kind") == "document_reviewed_observation":
+            row = {
+                **row,
+                "epistemic_status": row.get("epistemic_status") or "caregiver_reported",
+            }
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
         add("decisions", row, "Care decision", 9, require_open=True)
