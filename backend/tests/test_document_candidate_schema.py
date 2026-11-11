@@ -125,3 +125,17 @@ def test_recorded_date_is_not_mislabelled_as_event_date():
     assert candidate["recorded_date"] == "2026-10-15"
     assert candidate["extracted_at"] == "2026-11-11T00:00:00+00:00"
     assert any("document recording date" in warning for warning in candidate["warnings"])
+
+
+
+def test_twelve_page_discharge_summary_keeps_each_page_identity():
+    source = "\n\n".join(
+        f"[Page {number}]\nDischarge summary page {number}. Follow-up instruction {number}."
+        for number in range(1, 13)
+    )
+    pages = split_document_pages(source)
+    chunks = chunk_document_pages(pages)
+    assert len(pages) == 12
+    assert [page_number for page_number, _ in pages] == list(range(1, 13))
+    assert [page_number for page_number, _ in chunks] == list(range(1, 13))
+    assert all(f"page {number}" in text for number, text in chunks)
