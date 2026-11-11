@@ -54,3 +54,16 @@ class ResolutionMechanism(str, Enum):
     INFERENCE = "inference"
     TIME = "time"
     EXPLICIT_CLOSE = "explicit_close"
+
+
+class AssertionEpistemicState(str, Enum):
+    """What the record knows about an assertion, independent of its lifecycle."""
+    REPORTED = "reported"
+    OBSERVED = "observed"
+    VERIFIED = "verified"
+    INFERRED = "inferred"
+    UNCERTAIN = "uncertain"
+    CONFLICTING = "conflicting"
+    MISSING = "missing"
+    WITHDRAWN = "withdrawn"
+    CORRECTED = "corrected"
