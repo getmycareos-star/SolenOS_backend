@@ -521,7 +521,29 @@ def review_daily_care_lcr_proposal(
         raise HTTPException(status_code=404, detail="Proposal not found")
     proposal = proposals[proposal_index]
     if proposal.get("review_status") not in {"pending_review", "corrected_pending_approval"}:
-        raise HTTPException(status_code=409, detail="This proposal already has a final review decision")
+        if proposal.get("review_decision") != payload.decision:
+            raise HTTPException(status_code=409, detail="This proposal already has a different final review decision")
+        accepted_assertion = None
+        if payload.decision == "accept" and proposal.get("accepted_assertion_id"):
+            accepted_assertion = db.query(CareAssertion).filter(
+                CareAssertion.id == proposal.get("accepted_assertion_id"),
+                CareAssertion.person_id == person_id,
+                CareAssertion.created_by_caregiver_id == caregiver_id,
+            ).first()
+        active_assertion = (
+            accepted_assertion is not None
+            and accepted_assertion.assertion_status not in {"rejected", "superseded"}
+        )
+        return {
+            "analysis_id": analysis_id,
+            "change_intelligence_status": "not_recomputed",
+            "proposal": proposal,
+            "decision": payload.decision,
+            "assertion_id": accepted_assertion.id if active_assertion else None,
+            "review_history_count": len(analysis.review_history or []),
+            "written_to_lcr": bool(active_assertion),
+            "idempotent_replay": True,
+        }
 
     original = dict(proposal)
     if payload.decision == "reject":
@@ -568,7 +590,9 @@ def review_daily_care_lcr_proposal(
         proposal["review_status"] = "accepted_by_caregiver"
         proposal["accepted_at"] = datetime.now(timezone.utc).isoformat()
         proposal["accepted_by_caregiver_id"] = caregiver_id
+        proposal["accepted_assertion_id"] = str(assertion.id)
 
+    proposal["review_decision"] = payload.decision
     review_event = {
         "proposal_index": proposal_index,
         "decision": payload.decision,
@@ -605,7 +629,9 @@ def review_daily_care_lcr_proposal(
         "proposal": proposal,
         "decision": payload.decision,
         "review_history_count": len(history),
+        "assertion_id": proposal.get("accepted_assertion_id") if payload.decision == "accept" else None,
         "written_to_lcr": payload.decision == "accept",
+        "idempotent_replay": False,
         "message": (
             (
                 "Caregiver-approved proposal saved as a source-attributed LCR assertion. Original proposal and review history were preserved."
