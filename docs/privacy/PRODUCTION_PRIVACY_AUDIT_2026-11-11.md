@@ -122,3 +122,44 @@ The reviewer workflow tests have now passed against PostgreSQL in GitHub Actions
 - Backend unit/integration test job and PostgreSQL migration job: run [43091931400](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/43091931400) — both test jobs passed; the separate real-Qwen image/inference job was still running when this evidence entry was written.
 
 These results verify the tested source commit and synthetic CI fixtures only. They do not establish production deployment, live-user privacy fulfilment, legal authority verification, or availability of export, correction, or erasure workflows.
+
+
+## Remediation update — initial privacy fulfilment handlers (source only; CI pending)
+
+Backend `main` now contains initial fulfilment handlers. These are implementation claims from source inspection only; do not treat them as verified production controls until the current commit's CI, migration and operational checks pass.
+
+### Export
+
+- Reviewer-only `POST /api/v1/privacy/requests/{request_id}/fulfil-export` generates a ZIP after the request has been approved.
+- Caregiver-only `GET /api/v1/privacy/requests/{request_id}/export` downloads the archive through the authenticated bearer session. No public object URL is issued.
+- Archive bytes are encrypted with Fernet before storage in the PostgreSQL `privacy_export_artifacts` table. The deployment must provide `SOLENOS_PRIVACY_EXPORT_ENCRYPTION_KEY`; the handler fails closed with HTTP 503 when it is missing or invalid.
+- Archives expire after 24 hours. Expired archives are removed when privacy requests are listed, a new export is generated, or the expired archive is requested. This is request-driven cleanup, not a dedicated scheduled retention worker.
+- The ZIP includes person-scoped ORM records, caregiver-attributed records, requester-owned conversation messages, and original document bytes uploaded by that caregiver. It excludes other caregivers' attributed rows, authentication/session secrets, and suspended Community content. Archive size is limited to 100 MiB.
+- The exporter does not include provider backups, infrastructure logs, external processor data, or unregistered database tables. Completeness against every production data store remains unverified.
+
+### Correction
+
+- Correction intake can bind a request to an existing insight description or care-event description and snapshots the original value/version at submission.
+- Reviewer-only `POST /api/v1/privacy/requests/{request_id}/fulfil-correction` rejects stale targets, creates an append-only `corrections` record, applies the reviewed description change in one database transaction, and records an audit event.
+- Care-event changes pass through the existing care-state revision listener; the original source evidence remains immutable.
+- This first implementation supports only insight-description and care-event-description corrections. It does not yet support amendments to every evidence, assertion, document extraction, account, or third-party data category.
+
+### Deletion
+
+- Reviewer-only `POST /api/v1/privacy/requests/{request_id}/fulfil-deletion` requires an independent second reviewer, separate from the reviewer who approved the request.
+- The second reviewer must attest that backups containing the subject's data have expired or are otherwise irrecoverable and provide a written evidence reference. Only a hash of that evidence is retained in the fulfilment/audit receipt; the handler does not independently query the backup provider.
+- Any active or unclassified legal hold blocks fulfilment.
+- The current deletion handler is deliberately limited to a single-caregiver care record. It fails closed when multiple caregivers are linked rather than deleting their accounts or private contributions.
+- For the supported scope, the handler discovers person/caregiver-scoped ORM rows and foreign-key dependants, removes registered data and original document bytes, removes generic migration-created person/caregiver rows, and redacts prior request/audit metadata while retaining a minimal receipt.
+- This does not establish erasure from external processors, unregistered stores, infrastructure logs, caches, provider replicas, or any backup that the reviewer has not independently verified as expired/irrecoverable. Multi-caregiver erasure and a formal retention schedule remain unresolved.
+
+### Required release conditions
+
+1. Configure and rotate a unique `SOLENOS_PRIVACY_EXPORT_ENCRYPTION_KEY` in the deployment secret store; do not place it in source control.
+2. Verify the current migration and PostgreSQL test workflows, including export ZIP inspection, cross-caregiver denial, correction provenance, deletion dependency removal, legal-hold rejection and independent-review enforcement.
+3. Exercise export and correction with synthetic production-like data before real-user access.
+4. Establish a documented backup-retention schedule and a restore procedure that cannot reintroduce erased records. Backup expiry evidence must be independently checked, not accepted as an unchecked assertion.
+5. Trace all external processors, replicas, caches and unregistered stores before claiming complete erasure.
+6. Expand correction coverage and define mixed-caregiver/third-party data handling before claiming universal correction or deletion fulfilment.
+
+At the time this section was added, GitHub Actions runs for the new source commits were queued and had not produced test conclusions. No production deployment or production secret change was performed. These handlers are not a production-readiness certification.
