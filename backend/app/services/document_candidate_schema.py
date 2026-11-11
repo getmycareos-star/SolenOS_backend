@@ -76,6 +76,16 @@ def _date_from_excerpt(excerpt: str) -> str | None:
         except ValueError:
             # Invalid dates remain missing and are explicitly flagged below.
             return None
+    for match in _NATURAL_DATE_TOKEN.finditer(excerpt):
+        prefix = excerpt[max(0, match.start() - 60):match.start()]
+        if re.search(r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+on\\s+$", prefix, re.I):
+            continue
+        natural = match.group(0)
+        for date_format in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%B %d %Y", "%b %d, %Y", "%b %d %Y"):
+            try:
+                return datetime.strptime(natural, date_format).date().isoformat()
+            except ValueError:
+                continue
     return None
 
 
