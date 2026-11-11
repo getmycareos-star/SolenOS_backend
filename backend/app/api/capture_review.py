@@ -13,6 +13,7 @@ from app.schemas.capture_review import CaptureCandidateReview
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.services.lcr_context import build_lcr_context
 
 router = APIRouter(tags=["capture review"])
 
@@ -161,21 +162,60 @@ def review_capture_candidate(
         "source_evidence_id": analysis.source_evidence_id,
         "assertion_id": assertion_id,
     })
+    reviewable_candidates = [
+        item for item in observations
+        if isinstance(item, dict)
+        and item.get("review_status", "pending_review") in reviewable_statuses
+    ]
+    execution_status = dict(analysis.execution_status or {})
+    if not execution_status:
+        execution_status = {
+            "source_status": "source_preserved",
+            "evidence_status": "evidence_persisted",
+            "extraction_status": "extraction_available",
+            "assessment_status": "assessment_pending",
+            "review_status": "review_required",
+            "reconciliation_status": "reconciliation_pending",
+            "retrieval_status": "retrieval_unavailable",
+        }
+    execution_status["review_status"] = (
+        "review_required" if reviewable_candidates else "review_completed"
+    )
+
     analysis.candidates = candidates_payload
     analysis.review_history = history
+    change_intelligence_status = "not_required"
+
+    if payload.decision == "accept":
+        # The assertion, immutable review history, reconciliation and read-back
+        # share one transaction. Never commit an accepted review against a stale
+        # care record.
+        try:
+            reconcile_person_change_intelligence(db, person_id)
+            projection = build_lcr_context(
+                db,
+                person_id,
+                caregiver_id=caregiver_id,
+                limit_per_source=1,
+            )
+            execution_status["reconciliation_status"] = "reconciliation_completed"
+            execution_status["retrieval_status"] = (
+                "retrieval_available"
+                if not projection.get("missing_required_sources")
+                else "retrieval_unavailable"
+            )
+            change_intelligence_status = "available"
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=503,
+                detail="The care record could not be updated. The review was not saved. Please try again.",
+            ) from exc
+
+    analysis.execution_status = execution_status
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
-
-    change_intelligence_status = "not_required"
-    if payload.decision == "accept":
-        try:
-            reconcile_person_change_intelligence(db, person_id)
-            db.commit()
-            change_intelligence_status = "available"
-        except Exception:
-            db.rollback()
-            change_intelligence_status = "unavailable"
 
     return {
         "analysis_id": analysis.id,
@@ -184,7 +224,7 @@ def review_capture_candidate(
         "source_event_id": analysis.source_event_id,
         "source_evidence_id": analysis.source_evidence_id,
         "assertion_id": assertion_id,
-        "review_required": payload.decision != "accept" and payload.decision != "reject",
+        "review_required": bool(reviewable_candidates),
         "change_intelligence_status": change_intelligence_status,
         "written_to_lcr": payload.decision == "accept",
         "message": (
