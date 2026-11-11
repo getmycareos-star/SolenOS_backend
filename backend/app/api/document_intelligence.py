@@ -280,6 +280,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             "extracted_value": canonical["extracted_value"],
             "event_date": canonical["event_date"],
             "recorded_date": canonical["recorded_date"],
+            "extracted_at": canonical["extracted_at"],
             "confidence": canonical["confidence"],
             "warnings": canonical["warnings"],
             "canonical_candidate": canonical,
