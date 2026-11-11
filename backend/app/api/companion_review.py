@@ -161,7 +161,7 @@ def review_companion_care_update(
                 }
             assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
             active_assertion = assertion is not None and assertion.assertion_status not in {
-                "caregiver_reported_rejected", "superseded_by_caregiver_correction",
+                "rejected", "superseded",
             }
             return {
                 "proposal": _proposal_json(proposal),
@@ -285,21 +285,24 @@ def review_companion_care_update(
             raise HTTPException(status_code=422, detail="The accepted statement is not grounded in the original message or recorded correction context")
         existing_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
         if existing_assertion is None:
-            assertion = CareAssertion(
-                id=str(uuid.uuid4()), person_id=person_id, subject_type="person",
-                subject_id=person_id, field="care_observation",
-                assertion_kind="time_bound_observation", asserted_value=accepted_value,
-                source_label="Caregiver-reviewed Companion conversation",
-                source_text=(source_quote + (("\nCaregiver-supplied correction context: " + correction_context) if correction_context else "")),
-                source_conversation_id=session.id,
-                source_message_id=source_message.id,
-                source_proposal_id=proposal.id,
-                evidence_ids=[], assertion_status="caregiver_reviewed",
-                observed_at=_parse_explicit_event_time(original.get("event_time_text")), event_time_text=original.get("event_time_text"),
-                created_by_caregiver_id=caregiver_id,
+            assertion = create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person_id, subject_type="person", subject_id=person_id,
+                    field="care_observation", assertion_kind="time_bound_observation",
+                    asserted_value=accepted_value,
+                    source_label="Caregiver-reviewed Companion conversation",
+                    source_text=source_quote + (("\nCaregiver-supplied correction context: " + correction_context) if correction_context else ""),
+                    source_conversation_id=session.id, source_message_id=source_message.id,
+                    source_proposal_id=proposal.id, event_time_text=original.get("event_time_text"),
+                    evidence_ids=[],
+                    observed_at=_parse_explicit_event_time(original.get("event_time_text")),
+                    created_by_caregiver_id=caregiver_id,
+                    updated_by_caregiver_id=caregiver_id,
+                ),
+                commit=False,
             )
-            db.add(assertion)
-            db.flush()
+            assertion.assertion_status = "caregiver_reviewed"
             assertion_id = assertion.id
         else:
             existing_assertion.asserted_value = accepted_value
