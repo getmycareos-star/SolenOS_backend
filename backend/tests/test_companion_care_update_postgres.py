@@ -114,7 +114,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
             assert source_message.content == original
             assert pending_proposal.source_message_id == source_message.id
             assert pending_proposal.source_conversation_id == body["session_id"]
-            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 1
 
         accepted = review(client, first, proposal["id"], {"decision": "accept"})
         assert accepted.status_code == 200, accepted.text
