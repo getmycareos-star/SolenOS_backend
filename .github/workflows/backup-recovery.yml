@@ -96,9 +96,19 @@ jobs:
         env:
           SOLENOS_BACKUP_SOURCE_DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_backup_test
           SOLENOS_BACKUP_RESTORE_DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_recovery_test
+          SOLENOS_BACKUP_RESTORE_REPORT_PATH: /tmp/solenos-backup-recovery-report.json
         run: python backend/scripts/verify_backup_restore.py
 
       - name: Verify exact restored caregiver through authenticated APIs
         env:
           DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_recovery_test
         run: python backend/scripts/postgres_anonymous_e2e.py
+
+      - name: Upload sanitized backup and recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: solenos-backup-recovery-${{ github.run_id }}
+          path: /tmp/solenos-backup-recovery-report.json
+          if-no-files-found: warn
+          retention-days: 30
