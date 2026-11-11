@@ -208,6 +208,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     for value in page_questions
                     if isinstance(value, str) and value.strip()
                 )
+    candidate_overflow = len(raw_observations) > 60
     raw_observations = raw_observations[:60]
     grounded = []
     seen_quotes = set()
@@ -271,6 +272,10 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             *(
                 [f"Qwen processed {MAX_DOCUMENT_QWEN_PAGES} of {len(page_inputs)} readable pages. Remaining pages need a separate extraction pass."]
                 if len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES else []
+            ),
+            *(
+                ["The candidate review limit was reached; additional extracted candidates were not included and require a follow-up extraction."]
+                if candidate_overflow else []
             ),
         ],
         "processed_page_count": min(len(page_inputs), MAX_DOCUMENT_QWEN_PAGES),
