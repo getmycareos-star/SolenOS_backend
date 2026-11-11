@@ -114,6 +114,37 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
                     CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
                 ).count() == 0
 
+            handoff = client.post(
+                "/api/v1/handoff-drafts/prepare",
+                headers=headers,
+                json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+            )
+            assert handoff.status_code == 200, handoff.text
+            draft = handoff.json()
+            assert draft.get("generation_status") == "generated", draft
+            assert draft.get("validation_status") == "exact_quote_reference_validation_passed", draft
+            assert draft.get("review_status") == "pending_review", draft
+            assert draft.get("draft_id"), draft
+            assert draft.get("requires_caregiver_review") is True, draft
+            assert draft.get("creates_handoff") is False and draft.get("updates_lcr") is False, draft
+            generated = draft.get("generation") or {}
+            sections = generated.get("sections") or []
+            assert sections, draft
+            assert all(section.get("source_ref") and section.get("text") for section in sections), draft
+
+            reloaded = client.get(
+                f"/api/v1/handoff-drafts/{draft['draft_id']}",
+                headers=headers,
+            )
+            assert reloaded.status_code == 200, reloaded.text
+            reloaded_draft = reloaded.json()
+            assert reloaded_draft.get("draft_id") == draft["draft_id"], reloaded_draft
+            assert reloaded_draft.get("generation_status") == "generated", reloaded_draft
+            assert reloaded_draft.get("review_status") == "pending_review", reloaded_draft
+            assert reloaded_draft.get("revision_number") == 1, reloaded_draft
+            assert reloaded_draft.get("creates_handoff") is False
+            assert reloaded_draft.get("updates_lcr") is False
+
             print("LIVE_QWEN_DAILY_CAPTURE=" + json.dumps({
                 "status": "PASS",
                 "model_inference": "real_qwen",
@@ -123,7 +154,7 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
                 "caregiver_evidence_persisted": True,
                 "review_analysis_persisted": True,
                 "qwen_candidates_written_to_lcr": False,
-                "care_assertions_created_without_review": 0,
+                "care_assertions_created_without_review": 0,\n                "real_qwen_handoff_generated_and_reloaded": True,
             }, separators=(",", ":")))
     finally:
         app.dependency_overrides.pop(get_db, None)
