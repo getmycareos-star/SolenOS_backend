@@ -11,14 +11,13 @@ on:
       - "backend/app/api/v1.py"
       - "backend/app/main.py"
       - "backend/app/services/unified_lcr_retrieval.py"
-      - ".github/workflows/companion-live-inference.yml"
   workflow_dispatch:
 permissions:
   contents: read
 
 concurrency:
   group: companion-live-qwen-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   live-qwen-evaluation:
