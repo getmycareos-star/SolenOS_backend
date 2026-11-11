@@ -79,7 +79,7 @@ def test_outdated_instructions_and_multiple_dates_are_flagged():
     candidate = canonical_candidate(
         {"subject": "warfarin", "observation": excerpt, "source_quote": excerpt},
         document_id="doc-3",
-        source_text=f"[Page 2]\\n{excerpt}",
+        source_text=f"[Page 2]\n{excerpt}",
     )
     assert candidate["event_date"] is None
     assert any("Multiple dates" in warning for warning in candidate["warnings"])
