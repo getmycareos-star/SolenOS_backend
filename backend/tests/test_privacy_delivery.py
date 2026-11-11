@@ -141,6 +141,8 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert created.status_code == 201, created.text
     handoff = created.json()
     assert handoff["status"] == "pending"
+    assert handoff["delivery_status"] == "in_app_notification_enqueued"
+    assert handoff["delivery_recorded_at"]
     assert handoff["scope"] == ["lcr_summary", "open_loops"]
     assert handoff["recipients"][0]["status"] == "pending"
 
