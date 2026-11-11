@@ -31,6 +31,7 @@ from app.models.care_continuity import (
     CareAssertion,
     EvidenceFreshnessAssessment,
     EvidenceFreshnessPolicy,
+    EvidenceSourceRelationship,
 )
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.models.collaboration import (
@@ -3538,6 +3539,45 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         EvidenceModel.id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
     ).all()
     evidence_by_id = {str(item.id): item for item in evidence_rows}
+    relationship_rows = db.query(EvidenceSourceRelationship).filter(
+        EvidenceSourceRelationship.person_id == person_id,
+        or_(
+            EvidenceSourceRelationship.source_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
+            EvidenceSourceRelationship.related_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
+        ),
+    ).all()
+    relationship_status_by_evidence = {}
+    for relationship in relationship_rows:
+        for evidence_id in (str(relationship.source_evidence_id), str(relationship.related_evidence_id)):
+            relationship_status_by_evidence.setdefault(evidence_id, []).append(relationship.source_independence_status)
+
+    source_text_hashes = list(dict.fromkeys(
+        item.source_text_sha256 for item in evidence_rows if item.source_text_sha256
+    ))
+    duplicate_count_by_hash = {}
+    if source_text_hashes:
+        duplicate_rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.source_text_sha256.in_(source_text_hashes),
+        ).all()
+        for duplicate in duplicate_rows:
+            if duplicate.source_text_sha256:
+                duplicate_count_by_hash[duplicate.source_text_sha256] = (
+                    duplicate_count_by_hash.get(duplicate.source_text_sha256, 0) + 1
+                )
+
+    def _source_independence_status(evidence_id):
+        statuses = relationship_status_by_evidence.get(str(evidence_id), [])
+        if "shared_origin" in statuses or "copied_or_same_origin" in statuses:
+            return "shared_origin"
+        if "independent" in statuses or "independent_source" in statuses:
+            return "independent"
+        return "not_assessed"
+
+    def _exact_duplicate_count(evidence):
+        if not evidence.source_text_sha256:
+            return 0
+        return max(0, duplicate_count_by_hash.get(evidence.source_text_sha256, 1) - 1)
 
     attribution_ids = {
         str(event.created_by_caregiver_id)
@@ -3581,6 +3621,8 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             ),
             "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
             "record_status": evidence.epistemic_status or evidence.evidence_status,
+            "source_independence_status": _source_independence_status(evidence.id),
+            "exact_wording_duplicate_count": _exact_duplicate_count(evidence),
         }
 
     for event in event_rows:
@@ -3616,6 +3658,8 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             "entered_by": caregiver_names.get(str(evidence.uploaded_by_caregiver_id), "Caregiver not identified"),
             "record_status": evidence.epistemic_status or evidence.evidence_status,
             "related_evidence_ids": [str(evidence.id)],
+            "source_independence_status": _source_independence_status(evidence.id),
+            "exact_wording_duplicate_count": _exact_duplicate_count(evidence),
         })
     if source_assertion_ids:
         for assertion in db.query(CareAssertion).filter(
