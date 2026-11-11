@@ -1321,12 +1321,39 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             "sources": model_sources,
         }, ensure_ascii=False)},
     ]
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 6,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "enum": sorted(ALLOWED_HANDOFF_SECTION_LABELS),
+                        },
+                        "source_ref": {
+                            "type": "string",
+                            "enum": [item["source_ref"] for item in model_sources],
+                        },
+                    },
+                    "required": ["section", "source_ref"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["items"],
+        "additionalProperties": False,
+    }
     try:
         raw = qwen_chat(
             messages,
             timeout=90,
-            response_format="json",
-            options={"temperature": 0, "num_predict": 256},
+            response_format=response_schema,
+            options={"temperature": 0, "num_predict": 384},
         )
         parsed = json.loads(raw)
         items = parsed.get("items") if isinstance(parsed, dict) else None
