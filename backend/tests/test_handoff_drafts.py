@@ -517,6 +517,37 @@ def test_daily_care_adapter_returns_only_persisted_person_scoped_caregiver_repor
                 created_by_caregiver_id=caregiver_id,
                 recorded_at=datetime.now(timezone.utc),
             ),
+            CareAssertion(
+                id="companion-reported-handoff-assertion",
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="swallowing_observation",
+                assertion_kind="time_bound_observation",
+                asserted_value="Caregiver reported new coughing during meals.",
+                source_label="Companion caregiver report",
+                source_text="I noticed new coughing during meals.",
+                evidence_ids=[evidence.id],
+                assertion_status="reported",
+                observed_at=event.occurred_at,
+                created_by_caregiver_id=caregiver_id,
+                recorded_at=datetime.now(timezone.utc),
+            ),
+            CareAssertion(
+                id="rejected-handoff-assertion",
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="incorrect_observation",
+                assertion_kind="time_bound_observation",
+                asserted_value="Rejected incorrect observation.",
+                source_label="Rejected report",
+                source_text="This was not accurate.",
+                evidence_ids=[],
+                assertion_status="rejected",
+                created_by_caregiver_id=caregiver_id,
+                recorded_at=datetime.now(timezone.utc),
+            ),
         ])
         db.commit()
     finally:
@@ -541,6 +572,12 @@ def test_daily_care_adapter_returns_only_persisted_person_scoped_caregiver_repor
     assert item["details"]["review_status"] == "caregiver_reviewed_assertion_exists"
     assert item["evidence_ids"] == ["daily-care-source-evidence"]
     assert item["details"]["accepted_assertion_references"] == ["daily-care-reviewed-assertion"]
+    assertion_refs = [row for row in body["source_references"] if row["source_table"] == "care_assertions"]
+    reported = next(row for row in assertion_refs if row["source_id"] == "companion-reported-handoff-assertion")
+    assert reported["epistemic_status"] == "reported"
+    assert reported["details"]["source_label"] == "Companion caregiver report"
+    assert reported["details"]["assertion_status"] == "reported"
+    assert all(row["source_id"] != "rejected-handoff-assertion" for row in assertion_refs)
     assert item["details"]["capture_analysis_review_history"][0][0]["reviewed_candidate"]["text"] == "Lunch was mostly eaten."
 
 
