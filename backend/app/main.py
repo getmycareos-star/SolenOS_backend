@@ -280,6 +280,18 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         return await call_next(request)
     if (path, method) in PUBLIC_V1_ENDPOINTS:
         return await call_next(request)
+    # Privacy reviewer operations use their own fail-closed reviewer credential.
+    # Do not require a caregiver bearer token for reviewer-only actions; the route
+    # dependency validates X-SolenOS-Privacy-Reviewer-Token before any operation.
+    reviewer_route = (
+        path == "/api/v1/privacy/requests/reviewer/pending"
+        or re.fullmatch(
+            r"/api/v1/privacy/requests/[^/]+/(?:review|fulfil-export|fulfil-correction|fulfil-deletion)",
+            path,
+        ) is not None
+    )
+    if reviewer_route:
+        return await call_next(request)
 
     authorization = request.headers.get("authorization", "")
     scheme, _, raw_token = authorization.partition(" ")
