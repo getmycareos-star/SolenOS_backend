@@ -28,9 +28,11 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
+from app.services.document_candidate_schema import canonical_candidate, split_document_pages, apply_medication_conflict_warnings
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
+MAX_DOCUMENT_QWEN_PAGES = 25
 
 
 class CandidateReview(BaseModel):
@@ -176,22 +178,29 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     source_text = (analysis.source_text or "").strip()
     if not source_text:
         raise HTTPException(status_code=422, detail="No persisted extracted text is available; no document interpretation was generated")
-    try:
-        extracted = extract_review_candidates(
-            source_text,
-            source_event_id="",
-            source_evidence_id=str(evidence.id),
-        )
-    except HTTPException:
-        db.rollback()
-        raise
-
-    raw_observations = extracted.get("observations") if isinstance(extracted, dict) else []
-    if not isinstance(raw_observations, list):
-        raw_observations = []
+    # Process each page independently so a long discharge packet cannot be
+    # silently truncated to the first 12k characters by the Qwen gateway.
+    raw_observations = []
+    page_inputs = split_document_pages(source_text)
+    if not page_inputs:
+        raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
+    for page_number, page_text in page_inputs[:MAX_DOCUMENT_QWEN_PAGES]:
+        try:
+            page_result = extract_review_candidates(
+                page_text,
+                source_event_id="",
+                source_evidence_id=str(evidence.id),
+            )
+        except HTTPException:
+            db.rollback()
+            raise
+        page_items = page_result.get("observations") if isinstance(page_result, dict) else []
+        if isinstance(page_items, list):
+            raw_observations.extend(page_items)
+    raw_observations = raw_observations[:60]
     grounded = []
     seen_quotes = set()
-    for item in raw_observations[:12]:
+    for item in raw_observations:
         if not isinstance(item, dict):
             continue
         quote = item.get("source_quote")
@@ -202,10 +211,14 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if quote not in source_text or quote in seen_quotes:
             continue
         # The model may identify the quote, but it may not paraphrase or extend it.
-        # Both the observation and its subject must be verbatim parts of that quote.
         if observation.strip() not in quote or subject.strip().casefold() not in quote.casefold():
             continue
         seen_quotes.add(quote)
+        canonical = canonical_candidate(
+            item,
+            document_id=str(evidence.id),
+            source_text=source_text,
+        )
         grounded.append({
             "subject": subject.strip()[:120],
             "observation": observation.strip()[:500],
@@ -213,7 +226,21 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             "source_evidence_id": str(evidence.id),
             "review_status": "pending_review",
             "extraction_method": str(item.get("extraction_method") or "qwen_verbatim_source_extraction"),
+            "page_number": canonical["page_number"],
+            "source_excerpt": canonical["source_excerpt"],
+            "field_type": canonical["field_type"],
+            "extracted_value": canonical["extracted_value"],
+            "event_date": canonical["event_date"],
+            "recorded_date": canonical["recorded_date"],
+            "confidence": canonical["confidence"],
+            "warnings": canonical["warnings"],
+            "canonical_candidate": canonical,
         })
+    apply_medication_conflict_warnings(grounded)
+    for candidate in grounded:
+        canonical = candidate["canonical_candidate"]
+        canonical["warnings"] = list(candidate.get("warnings") or canonical.get("warnings") or [])
+
 
     metadata = copy.deepcopy(metadata)
     metadata["document_intelligence"] = {
