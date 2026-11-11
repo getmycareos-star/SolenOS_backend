@@ -1,12 +1,15 @@
-"""Authenticated intake for care-record privacy rights requests.
+"""Authenticated intake and restricted human review for care-record privacy requests.
 
-Intake is not verification or fulfilment. No export or deletion is performed here.
+Review records an accountable decision only. It never exports, corrects, or deletes care data.
 """
+import hashlib
+import hmac
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -34,6 +37,12 @@ class PrivacyRequestCreate(BaseModel):
     note: Optional[str] = Field(default=None, max_length=1000)
 
 
+class PrivacyRequestReview(BaseModel):
+    decision: Literal["approve", "reject"]
+    review_basis: str = Field(min_length=10, max_length=1000)
+    authority_evidence_checked: Optional[str] = Field(default=None, max_length=1000)
+
+
 def _scope(request: Request, db: Session) -> tuple[str, str]:
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
@@ -44,7 +53,6 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(status_code=401, detail="A valid SolenOS session is required")
-    import hashlib
     token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
     session = (
         db.query(AnonymousSession)
@@ -58,6 +66,18 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     if session is None:
         raise HTTPException(status_code=401, detail="SolenOS session is invalid or expired")
     return str(session.person_id), str(session.caregiver_id)
+
+
+def _privacy_reviewer(
+    token: Optional[str] = Header(default=None, alias="X-SolenOS-Privacy-Reviewer-Token"),
+) -> str:
+    expected = os.getenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "").strip()
+    reviewer_id = os.getenv("SOLENOS_PRIVACY_REVIEWER_ID", "").strip()
+    if len(expected) < 32 or not reviewer_id or len(reviewer_id) > 120:
+        raise HTTPException(status_code=503, detail="Privacy reviewer access is not configured")
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid privacy reviewer credentials")
+    return reviewer_id
 
 
 def _serialize(item: DataSubjectRequest) -> dict:
@@ -153,3 +173,110 @@ def list_my_privacy_requests(request: Request, db: Session = Depends(get_db)):
         .all()
     )
     return {"requests": [_serialize(row) for row in rows]}
+
+
+@router.get("/reviewer/pending")
+def list_pending_privacy_reviews(
+    reviewer_id: str = Depends(_privacy_reviewer),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(DataSubjectRequest)
+        .filter(DataSubjectRequest.request_status == "received_pending_authority_review")
+        .order_by(DataSubjectRequest.requested_at.asc(), DataSubjectRequest.id.asc())
+        .limit(100)
+        .all()
+    )
+    # Return the minimum fields needed to identify and triage a request.
+    return {
+        "reviewer_id": reviewer_id,
+        "requests": [
+            {
+                "id": row.id,
+                "request_type": row.request_type,
+                "requested_at": row.requested_at.isoformat() if row.requested_at else None,
+                "person_id": row.person_id,
+                "requester_id": row.requester_id,
+                "authority_basis_claimed": (row.record_metadata or {}).get("authority_basis_claimed"),
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/{request_id}/review")
+def review_privacy_request(
+    request_id: str,
+    payload: PrivacyRequestReview,
+    reviewer_id: str = Depends(_privacy_reviewer),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(DataSubjectRequest)
+        .filter(DataSubjectRequest.id == request_id)
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Privacy request not found")
+    if row.request_status != "received_pending_authority_review":
+        raise HTTPException(status_code=409, detail="Privacy request is no longer awaiting review")
+
+    if payload.decision == "approve" and not (payload.authority_evidence_checked or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="An approval requires a description of the authority evidence checked.",
+        )
+
+    now = datetime.now(timezone.utc)
+    outcome = "approved_pending_fulfilment_assessment" if payload.decision == "approve" else "rejected"
+    row.request_status = outcome
+    row.resolved_at = now
+    row.resolution_code = "review_approved" if payload.decision == "approve" else "review_rejected"
+    row.record_metadata = {
+        **(row.record_metadata or {}),
+        "review": {
+            "reviewer_id": reviewer_id,
+            "decision": payload.decision,
+            "review_basis": payload.review_basis.strip(),
+            "authority_evidence_checked": (payload.authority_evidence_checked or "").strip() or None,
+            "reviewed_at": now.isoformat(),
+            "authority_verified_by_reviewer": payload.decision == "approve",
+            "fulfilment_started": False,
+        },
+    }
+    db.add(AuditLogEvent(
+        actor_id=reviewer_id,
+        subject_id=row.subject_id,
+        person_id=row.person_id,
+        caregiver_id=row.caregiver_id,
+        action="privacy_request.reviewed",
+        target_type="data_subject_request",
+        target_id=row.id,
+        occurred_at=now,
+        outcome=payload.decision,
+        request_id=row.request_id,
+        correlation_id=row.correlation_id,
+        policy_version="privacy-request-review-v1",
+        record_metadata={
+            "request_type": row.request_type,
+            "fulfilment_started": False,
+        },
+    ))
+    try:
+        db.commit()
+        db.refresh(row)
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        **_serialize(row),
+        "reviewer_id": reviewer_id,
+        "authority_verified_by_reviewer": payload.decision == "approve",
+        "fulfilment_started": False,
+        "message": (
+            "Review approved. A separate fulfilment assessment is still required; no data was exported, corrected, or deleted."
+            if payload.decision == "approve"
+            else "Review rejected. No data was exported, corrected, or deleted."
+        ),
+    }
