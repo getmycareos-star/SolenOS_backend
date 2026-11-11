@@ -70,45 +70,46 @@ def _record_fixture(client: TestClient, session: dict) -> str:
     return str(event_id)
 
 
-def test_every_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_output():
+def test_enabled_workflow_contract_is_complete():
     assert len(ENABLED_WORKFLOWS) == 39, ENABLED_WORKFLOWS
     assert set(WORKFLOW_REQUESTS) == set(ENABLED_WORKFLOWS)
 
+
+@pytest.mark.parametrize("workflow", ENABLED_WORKFLOWS)
+def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_output(workflow):
     with TestClient(app) as client:
         session = _new_session(client)
         event_id = _record_fixture(client, session)
         headers = {"Authorization": f"Bearer {session['access_token']}"}
-
-        for workflow in ENABLED_WORKFLOWS:
-            response = client.post(
-                "/api/v1/assistant/assist",
-                headers=headers,
-                json={
-                    "workflow": workflow,
-                    "text": WORKFLOW_REQUESTS[workflow],
-                },
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={
+                "workflow": workflow,
+                "text": WORKFLOW_REQUESTS[workflow],
+            },
+        )
+        assert response.status_code == 200, (
+            f"Real Qwen inference failed for {workflow}: "
+            f"HTTP {response.status_code} {response.text}"
+        )
+        data = response.json()
+        assert data.get("workflow") == workflow, data
+        assert data.get("ai_generated") is True, data
+        assert data.get("provider_status") == "available", data
+        assert isinstance(data.get("reply"), str) and data["reply"].strip(), data
+        assert data.get("review_required") is True, data
+        assert data.get("written_to_lcr") is False, data
+        assert data.get("persistence") == "read_only_assistance", data
+        assert data.get("authority") == "solenos_care_record_and_caregiver", data
+        assert not re.search(
+            r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
+            data["reply"],
+            re.IGNORECASE,
+        ), f"{workflow} exposed an internal record identifier: {data['reply']!r}"
+        assert isinstance(data.get("source_event_ids"), list), data
+        assert isinstance(data.get("source_evidence_ids"), list), data
+        if workflow in EVENT_WORKFLOWS:
+            assert event_id in data["source_event_ids"], (
+                f"{workflow} did not retrieve the authorized fixture event: {data}"
             )
-            assert response.status_code == 200, (
-                f"Real Qwen inference failed for {workflow}: "
-                f"HTTP {response.status_code} {response.text}"
-            )
-            data = response.json()
-            assert data.get("workflow") == workflow, data
-            assert data.get("ai_generated") is True, data
-            assert data.get("provider_status") == "available", data
-            assert isinstance(data.get("reply"), str) and data["reply"].strip(), data
-            assert data.get("review_required") is True, data
-            assert data.get("written_to_lcr") is False, data
-            assert data.get("persistence") == "read_only_assistance", data
-            assert data.get("authority") == "solenos_care_record_and_caregiver", data
-            assert not re.search(
-                r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
-                data["reply"],
-                re.IGNORECASE,
-            ), f"{workflow} exposed an internal record identifier: {data['reply']!r}"
-            assert isinstance(data.get("source_event_ids"), list), data
-            assert isinstance(data.get("source_evidence_ids"), list), data
-            if workflow in EVENT_WORKFLOWS:
-                assert event_id in data["source_event_ids"], (
-                    f"{workflow} did not retrieve the authorized fixture event: {data}"
-                )
