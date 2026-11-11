@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
 from app.models.care import CareEvent, Evidence
+from app.models.ai_output_governance import AIOutputLCRProposal
+from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority
@@ -42,6 +44,32 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
         found = {row[0] for row in evidence_rows}
         if found != set(payload.evidence_ids):
             raise HTTPException(status_code=422, detail="Every evidence ID must exist and belong to the same care record")
+    if payload.source_proposal_id:
+        proposal = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.id == payload.source_proposal_id,
+            AIOutputLCRProposal.person_id == payload.person_id,
+            AIOutputLCRProposal.caregiver_id == payload.created_by_caregiver_id,
+        ).first()
+        if proposal is None:
+            raise HTTPException(status_code=422, detail="source_proposal_id must belong to the same caregiver and care record")
+    if payload.source_conversation_id:
+        conversation = db.query(ConversationSession).filter(
+            ConversationSession.id == payload.source_conversation_id,
+            ConversationSession.person_id == payload.person_id,
+            ConversationSession.caregiver_id == payload.created_by_caregiver_id,
+        ).first()
+        if conversation is None:
+            raise HTTPException(status_code=422, detail="source_conversation_id must belong to the same caregiver and care record")
+    if payload.source_message_id:
+        if not payload.source_conversation_id:
+            raise HTTPException(status_code=422, detail="source_message_id requires a validated source_conversation_id")
+        message = db.query(ConversationMessage).filter(
+            ConversationMessage.id == payload.source_message_id,
+            ConversationMessage.session_id == payload.source_conversation_id,
+            ConversationMessage.role == "user",
+        ).first()
+        if message is None:
+            raise HTTPException(status_code=422, detail="source_message_id must be a caregiver message in the validated conversation")
     assertion.assertion_status = "reported"
     db.add(assertion)
     db.flush()
