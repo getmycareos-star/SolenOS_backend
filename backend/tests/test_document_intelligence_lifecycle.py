@@ -400,7 +400,7 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
                 person_id=caregiver["person"]["id"]
             ).one()
             assert f"page {body['observations'][0]['page_number']}" in assertion.source_label
-            assert "duplicate copy of evidence original-evidence-123" in assertion.source_label
+            assert "duplicate copy; not independent corroboration" in assertion.source_label
             assert assertion.field == "document_medication_statement"
             assert "Strength: 500 mg" in assertion.asserted_value
             assert "Dosage instructions:" in assertion.asserted_value
