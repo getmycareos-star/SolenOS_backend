@@ -798,12 +798,19 @@ def review_appointment_outcome_proposal(
                 or corrected_change.get("correction_context") != (payload.correction_context or "").strip()
             ):
                 raise HTTPException(status_code=409, detail="This proposal already has a different correction decision")
+            existing_assertion = db.query(CareAssertion).filter(
+                CareAssertion.source_proposal_id == corrected_proposal.id,
+                CareAssertion.person_id == person_id,
+            ).first()
+        active_assertion = existing_assertion is not None and existing_assertion.assertion_status not in {
+            "caregiver_reported_rejected", "superseded_by_caregiver_correction",
+        }
         return {
             "proposal": _appointment_proposal_json(proposal),
             "corrected_proposal": _appointment_proposal_json(corrected_proposal) if corrected_proposal else None,
             "decision": decision,
-            "assertion_id": existing_assertion.id if existing_assertion else None,
-            "written_to_lcr": bool(existing_assertion),
+            "assertion_id": existing_assertion.id if active_assertion else None,
+            "written_to_lcr": active_assertion,
             "idempotent_replay": True,
         }
 
