@@ -65,6 +65,24 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
         expires_at=expires_at,
     )
     db.add(session)
+    # Record creation without ever persisting or logging the bearer token.
+    db.add(AuditLogEvent(
+        actor_id=caregiver.id,
+        subject_id=person.id,
+        person_id=person.id,
+        caregiver_id=caregiver.id,
+        action="anonymous_session.created",
+        target_type="anonymous_session",
+        target_id=session.id,
+        occurred_at=datetime.now(timezone.utc),
+        outcome="success",
+        request_id=str(uuid.uuid4()),
+        policy_version="anonymous-session-lifecycle-v1",
+        record_metadata={
+            "expires_at": expires_at.isoformat(),
+            "token_storage": "sha256_digest_only",
+        },
+    ))
     db.commit()
     db.refresh(person)
     db.refresh(caregiver)
