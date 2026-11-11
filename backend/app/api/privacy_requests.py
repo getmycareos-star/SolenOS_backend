@@ -1,7 +1,4 @@
-"""Authenticated intake and restricted human review for care-record privacy requests.
-
-Review records an accountable decision only. It never exports, corrects, or deletes care data.
-"""
+"""Authenticated privacy request intake, review and guarded fulfilment workflows."""
 import base64
 import hashlib
 import hmac
@@ -137,6 +134,29 @@ def submit_privacy_request(
             detail="A correction request must include target type, target ID and corrected text.",
         )
 
+    correction_snapshot = None
+    if payload.request_type == "correction" and payload.correction_target_id:
+        if payload.correction_target_type == "insight":
+            target = db.query(Insight).filter(
+                Insight.id == payload.correction_target_id,
+                Insight.person_id == person_id,
+            ).first()
+        else:
+            target = db.query(CareEvent).filter(
+                CareEvent.id == payload.correction_target_id,
+                CareEvent.person_id == person_id,
+            ).first()
+        if target is None:
+            raise HTTPException(status_code=404, detail="Correction target was not found in this care record")
+        correction_snapshot = {
+            "target_type": payload.correction_target_type,
+            "target_id": target.id,
+            "corrected_text": payload.correction_text,
+            "reason": payload.correction_reason,
+            "original_value": target.description or "",
+            "target_updated_at": target.updated_at.isoformat() if getattr(target, "updated_at", None) else None,
+        }
+
     now = datetime.now(timezone.utc)
     request_id = str(uuid.uuid4())
     row = DataSubjectRequest(
@@ -156,12 +176,7 @@ def submit_privacy_request(
             "authority_basis_claimed": payload.authority_basis,
             "authority_verified": False,
             "request_note": payload.note,
-            "correction": ({
-                "target_type": payload.correction_target_type,
-                "target_id": payload.correction_target_id,
-                "corrected_text": payload.correction_text,
-                "reason": payload.correction_reason,
-            } if payload.request_type == "correction" and payload.correction_target_id else None),
+            "correction": correction_snapshot,
             "fulfilment_started": False,
         },
     )
@@ -703,7 +718,13 @@ def fulfil_approved_correction(
         persisted_target_type = "care_event"
     if target is None:
         raise HTTPException(status_code=404, detail="Correction target was not found in this care record")
-    original_text = target.description
+    original_text = target.description or ""
+    requested_original = str(correction_request.get("original_value") or "")
+    if original_text != requested_original:
+        raise HTTPException(
+            status_code=409,
+            detail="The correction target changed after submission; a fresh correction request and review are required.",
+        )
     if original_text == corrected_text:
         raise HTTPException(status_code=409, detail="The requested correction does not change the target")
 
