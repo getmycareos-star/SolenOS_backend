@@ -186,11 +186,12 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
 
 def _normalized_extraction_text(value: str) -> str:
     """Compare legacy unlabelled extractions with the newer page-labelled format."""
-    return re.sub(
-        r"(?m)^\[(?:Page\s+\d+(?:\s+OCR)?|Image OCR)\]\s*\n?",
+    without_labels = re.sub(
+        r"(?m)^\[(?:Page\s+\d+(?:\s+OCR)?|Image OCR|No readable text detected on this page)\]\s*\n?",
         "",
         value or "",
-    ).strip()
+    )
+    return re.sub(r"\s+", " ", without_labels).strip()
 
 
 def _verify_persisted_extraction(
