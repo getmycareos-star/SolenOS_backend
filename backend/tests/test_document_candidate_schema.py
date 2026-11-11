@@ -57,8 +57,8 @@ def test_missing_dosage_and_conflicting_instructions_are_flagged_not_inferred():
     assert first["medication_details"]["dosage_instructions"] is None
     assert any("dosage remains missing" in warning for warning in first["warnings"])
     candidates = [
-        {"subject": "Metformin", "observation": first["extracted_value"], "field_type": "medication", "warnings": first["warnings"]},
-        {"subject": "Metformin", "observation": second["extracted_value"], "field_type": "medication", "warnings": second["warnings"]},
+        {"subject": "Metformin 500 mg", "observation": first["extracted_value"], "source_quote": first["source_excerpt"], "field_type": "medication", "warnings": first["warnings"]},
+        {"subject": "Metformin", "observation": second["extracted_value"], "source_quote": second["source_excerpt"], "field_type": "medication", "warnings": second["warnings"]},
     ]
     apply_medication_conflict_warnings(candidates)
     assert all(any("Conflicting medication instructions" in warning for warning in row["warnings"]) for row in candidates)
