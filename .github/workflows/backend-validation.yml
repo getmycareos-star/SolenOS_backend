@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Build backend CI image with OCR and test dependencies
-        run: docker build -f ci/Dockerfile.backend-tests -t solenos-backend-ci-tests .
+        run: docker build -f ../ci/Dockerfile.backend-tests -t solenos-backend-ci-tests ..
       - name: Compile backend
         run: docker run --rm -v "$GITHUB_WORKSPACE:/workspace" -w /workspace/backend solenos-backend-ci-tests python -m compileall -q app
       - name: Smoke-test ASGI startup, health and backend tests
