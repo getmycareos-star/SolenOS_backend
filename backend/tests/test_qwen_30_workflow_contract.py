@@ -5,9 +5,11 @@ not claim live inference or durable background-job execution; those require
 separate integration tests.
 """
 import pytest
+from typing import get_args
 from pydantic import ValidationError
 
 from app.api.collaboration import QwenAssistRequest
+from app.services.qwen_background_worker import ENABLED_WORKFLOWS as WORKER_ENABLED_WORKFLOWS
 
 
 ENABLED_WORKFLOWS = (
@@ -24,6 +26,15 @@ ENABLED_WORKFLOWS = (
     "critical_information_completeness", "personal_preferences_distress_context",
     "caregiver_strain_support", "document_validity_renewal",
 )
+
+
+def test_api_and_background_worker_share_the_same_39_workflow_contract():
+    api_workflows = get_args(QwenAssistRequest.model_fields["workflow"].annotation)
+    assert len(ENABLED_WORKFLOWS) == 39
+    assert len(set(ENABLED_WORKFLOWS)) == 39
+    assert set(api_workflows) == set(ENABLED_WORKFLOWS)
+    assert set(WORKER_ENABLED_WORKFLOWS) == set(ENABLED_WORKFLOWS)
+    assert "community" not in ENABLED_WORKFLOWS
 
 
 @pytest.mark.parametrize("workflow", ENABLED_WORKFLOWS)
