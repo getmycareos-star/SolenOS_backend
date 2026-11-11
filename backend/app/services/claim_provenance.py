@@ -91,7 +91,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]]) -> 
         "unmatched_statement_count": unmatched,
         "matching_limit": (
             "A match means the statement wording appears in the saved source. "
-            "It does not establish source independence, authenticity, or clinical truth. "
+            "It does not establish that multiple records are independent corroboration, authenticity, or clinical truth. "
             "Paraphrases are left unmatched rather than assigned an unrelated source."
         ),
         "claims": claims,
