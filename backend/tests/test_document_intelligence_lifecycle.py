@@ -417,9 +417,6 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         assert "Dosage instructions:" in lcr_item["description"]
         assert "Conflicting medication instructions" in lcr_item["description"]
         assert "outdated or superseded" in lcr_item["description"]
-        assert "Event date: 2026-10-12" in lcr_item["description"]
-        assert "Source-recorded date: 2026-10-13" in lcr_item["description"]
-        assert lcr_item["occurred_at"] == "2026-10-12"
         assert lcr_item["source_label"].find("page 1") >= 0
         assert lcr_item["epistemic_status"] == "caregiver_reported"
     finally:
@@ -486,6 +483,21 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
             assert "Strength: 1000 mg" in assertion.asserted_value
             assert "Dosage instructions: Metformin 1000 mg twice daily" in assertion.asserted_value
             assert quote == assertion.source_text
+            assert "Event date: 2026-10-12" in assertion.asserted_value
+            assert "Source-recorded date: 2026-10-13" in assertion.asserted_value
+            assert assertion.event_time_text == "2026-10-12"
+        current_care = client.get(
+            "/api/v1/care-continuity/current-care?limit_per_source=12",
+            headers=auth,
+        )
+        assert current_care.status_code == 200, current_care.text
+        lcr_item = next(
+            item for item in current_care.json()["items"]
+            if item["title"] == "document_medication_statement"
+        )
+        assert "Event date: 2026-10-12" in lcr_item["description"]
+        assert "Source-recorded date: 2026-10-13" in lcr_item["description"]
+        assert lcr_item["occurred_at"] == "2026-10-12"
     finally:
         client.close()
         app.dependency_overrides.clear()
