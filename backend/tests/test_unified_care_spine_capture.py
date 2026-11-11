@@ -17,6 +17,8 @@ from app.core.database import get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.capture_analysis import CaptureAnalysis
+import app.api.daily_care_intelligence as daily_care_intelligence
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
 
@@ -29,7 +31,7 @@ def _postgres_url() -> str:
     return value
 
 
-def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_context():
+def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_context(monkeypatch):
     engine = create_engine(_postgres_url(), pool_pre_ping=True)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     suffix = uuid.uuid4().hex
@@ -56,9 +58,14 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 Person(id=other_person_id, name="Isolated PostgreSQL recipient"),
             ])
             db.flush()
+            same_person_peer_caregiver_id = f"unified-spine-peer-caregiver-{suffix}"
             db.add_all([
                 Caregiver(
                     id=caregiver_id, name="Family caregiver",
+                    relationship="Family", person_id=person_id,
+                ),
+                Caregiver(
+                    id=same_person_peer_caregiver_id, name="Other authorised caregiver",
                     relationship="Family", person_id=person_id,
                 ),
                 Caregiver(
@@ -67,6 +74,24 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 ),
             ])
             db.flush()
+            own_document_analysis = CaptureAnalysis(
+                person_id=person_id, caregiver_id=caregiver_id,
+                source_text="Current caregiver's uploaded care document.",
+                extraction_status="available",
+                candidates={"kind": "document_extraction_v1", "filename": "own.pdf"},
+                review_history=[],
+            )
+            peer_document_analysis = CaptureAnalysis(
+                person_id=person_id, caregiver_id=same_person_peer_caregiver_id,
+                source_text="Another caregiver's separately scoped uploaded document.",
+                extraction_status="available",
+                candidates={"kind": "document_extraction_v1", "filename": "peer.pdf"},
+                review_history=[],
+            )
+            db.add_all([own_document_analysis, peer_document_analysis])
+            db.flush()
+            own_document_analysis_id = own_document_analysis.id
+            peer_document_analysis_id = peer_document_analysis.id
             db.add_all([
                 AnonymousSession(
                     person_id=person_id, caregiver_id=caregiver_id,
@@ -80,6 +105,24 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 ),
             ])
             db.commit()
+
+        # Daily Care's history projection must apply the authenticated caregiver
+        # filter to document extractions, just as the direct evidence list does.
+        with SessionLocal() as db:
+            original_builder = daily_care_intelligence.build_lcr_context
+            observed_scopes = []
+
+            def scoped_builder(*args, **kwargs):
+                observed_scopes.append(kwargs.get("caregiver_id"))
+                return original_builder(*args, **kwargs)
+
+            monkeypatch.setattr(daily_care_intelligence, "build_lcr_context", scoped_builder)
+            daily_care_intelligence._history_bundle(db, person_id, caregiver_id)
+            assert observed_scopes == [caregiver_id]
+            scoped_context = original_builder(db, person_id, caregiver_id=caregiver_id, limit_per_source=50)
+            document_ids = {row["id"] for row in scoped_context["sources"]["document_extractions"]["items"]}
+            assert own_document_analysis_id in document_ids
+            assert peer_document_analysis_id not in document_ids
 
         with TestClient(app) as client:
             response = client.post(
