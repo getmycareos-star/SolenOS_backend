@@ -1613,6 +1613,8 @@ def test_appointment_workspace_create_and_revision_writes_are_idempotent(client)
 
 
 def test_appointment_preparation_brief_includes_source_attributed_lcr_assertions(client):
+    from app.models.uncertainty import Contradiction, OpenQuestion
+
     test_client, owner, other = client
     with TestSessionLocal() as db:
         db.add_all([
@@ -1644,6 +1646,28 @@ def test_appointment_preparation_brief_includes_source_attributed_lcr_assertions
                 evidence_ids=[],
                 created_by_caregiver_id=other["caregiver"]["id"],
             ),
+            OpenQuestion(
+                id="appointment-prep-open-question",
+                person_id=owner["person"]["id"],
+                question="Should the recent coughing during meals be assessed?",
+                subject_type="person",
+                subject_id=owner["person"]["id"],
+                intended_answerer_role="professional",
+                intended_answerer_label="Healthcare professional",
+                necessity="important",
+                status="open",
+            ),
+            Contradiction(
+                id="appointment-prep-open-conflict",
+                person_id=owner["person"]["id"],
+                subject_type="person",
+                subject_id=owner["person"]["id"],
+                field="mobility_status",
+                description="Two caregiver reports describe different mobility levels.",
+                resolution_status="unresolved",
+                source_assertion_ids=["appointment-prep-owner-assertion"],
+                evidence_ids=[],
+            ),
         ])
         db.commit()
 
@@ -1659,4 +1683,9 @@ def test_appointment_preparation_brief_includes_source_attributed_lcr_assertions
     assert assertion["assertion_status"] == "reported"
     assert assertion["source_label"] == "Companion caregiver report"
     assert "not independent clinical verification" in assertion["interpretation_limit"]
+    assert len(body["open_questions"]) == 1
+    assert body["open_questions"][0]["question"] == "Should the recent coughing during meals be assessed?"
+    assert body["open_questions"][0]["intended_answerer_label"] == "Healthcare professional"
+    assert len(body["contradictions"]) == 1
+    assert body["contradictions"][0]["resolution_status"] == "unresolved"
     assert "Other person's private care detail." not in response.text
