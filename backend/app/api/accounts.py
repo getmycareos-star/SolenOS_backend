@@ -257,6 +257,28 @@ def rotate_recovery_code(request: Request, db: Session = Depends(get_db)):
 def recover_account(payload: AccountRecover, request: Request, db: Session = Depends(get_db)):
     """Reset account credentials using the one-time offline recovery code."""
     email = _validate_email(payload.email)
+    ip = request.client.host if request.client else "unknown"
+    key_hash = hashlib.sha256(("recovery:" + ip + ":" + email).encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    limit = db.query(LoginAttemptLimit).filter(LoginAttemptLimit.key_hash == key_hash).first()
+    blocked_until = limit.blocked_until if limit else None
+    if blocked_until and blocked_until.tzinfo is None:
+        blocked_until = blocked_until.replace(tzinfo=timezone.utc)
+    if blocked_until and blocked_until > now:
+        raise HTTPException(status_code=429, detail="Too many recovery attempts. Try again later.")
+    if limit is None:
+        limit = LoginAttemptLimit(
+            key_hash=key_hash, attempts=0, window_started_at=now, updated_at=now
+        )
+        db.add(limit)
+        db.flush()
+    window_started = limit.window_started_at
+    if window_started and window_started.tzinfo is None:
+        window_started = window_started.replace(tzinfo=timezone.utc)
+    if not window_started or (now - window_started).total_seconds() > 900:
+        limit.window_started_at = now
+        limit.attempts = 0
+        limit.blocked_until = None
     account = db.query(CaregiverAccount).filter(
         CaregiverAccount.email_normalized == email
     ).first()
@@ -268,8 +290,20 @@ def recover_account(payload: AccountRecover, request: Request, db: Session = Dep
     # Same response for unknown email, unknown code, expired/reused code, or
     # a code belonging to a different account.
     if not account or not recovery or recovery.account_id != account.id:
+        limit.attempts = int(limit.attempts or 0) + 1
+        limit.updated_at = now
+        if limit.attempts >= 8:
+            limit.blocked_until = now.replace(microsecond=0) + timedelta(minutes=15)
+        db.add(AccountSecurityEvent(
+            account_id=account.id if account else None,
+            caregiver_id=account.caregiver_id if account else None,
+            event_type="recovery_failed",
+        ))
+        db.commit()
         raise HTTPException(status_code=401, detail="The account email or recovery code is incorrect.")
-    now = datetime.now(timezone.utc)
+    limit.attempts = 0
+    limit.blocked_until = None
+    limit.updated_at = now
     recovery.used_at = now
     account.password_hash = _hash_password(payload.new_password)
     db.query(AnonymousSession).filter(
