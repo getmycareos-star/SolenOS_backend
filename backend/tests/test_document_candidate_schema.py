@@ -164,3 +164,15 @@ def test_event_date_is_not_confused_with_separately_labelled_recorded_date():
     assert candidate["event_date"] == "2026-10-12"
     assert candidate["recorded_date"] == "2026-10-13"
     assert not any("Multiple dates" in warning for warning in candidate["warnings"])
+
+
+
+def test_unambiguous_month_name_event_date_is_normalized():
+    excerpt = "Discharged on 14 October 2026."
+    candidate = canonical_candidate(
+        {"subject": "discharge", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-month-name-date",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["event_date"] == "2026-10-14"
+    assert not any("Date format is ambiguous or invalid" in warning for warning in candidate["warnings"])
