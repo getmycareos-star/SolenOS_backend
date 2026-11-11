@@ -260,6 +260,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
+    # Community is deliberately disabled for the MVP. Return 404 before auth or handler execution.
+    if path.startswith("/api/v1/community"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
     # The outer ASGI middleware already bounded and buffered this public bootstrap
@@ -1524,3 +1527,11 @@ def readiness_check(db: Session = Depends(get_db)):
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
         "app": settings.app_name,
     }
+
+
+# Enforce the Community suspension against the final assembled FastAPI route table.
+# This also blocks routes accidentally registered through a second router.
+app.routes[:] = [
+    route for route in app.routes
+    if not getattr(route, "path", "").lower().startswith("/api/v1/community")
+]
