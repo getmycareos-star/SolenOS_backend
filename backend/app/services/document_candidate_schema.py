@@ -63,7 +63,7 @@ def _date_from_excerpt(excerpt: str) -> str | None:
         if not match:
             continue
         prefix = excerpt[max(0, match.start() - 50):match.start()]
-        if re.search(r"\b(?:recorded|documented|entered|signed|authored|created)\s+(?:on\s+)?$", prefix, re.I):
+        if re.search(r"\b(?:recorded|documented|entered|signed|authored|created)\s+on\s+$", prefix, re.I):
             continue
         try:
             if pattern is _DATE_PATTERNS[0]:
@@ -81,7 +81,7 @@ def _date_from_excerpt(excerpt: str) -> str | None:
 
 def _recorded_date_from_excerpt(excerpt: str) -> str | None:
     match = re.search(
-        r"\b(?:recorded|documented|entered|signed|authored|created)\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})\b",
+        r"\b(?:recorded|documented|entered|signed|authored|created)\s+on\s+(\d{4}-\d{2}-\d{2})\b",
         excerpt,
         re.I,
     )
@@ -96,7 +96,7 @@ def _recorded_date_from_excerpt(excerpt: str) -> str | None:
 def _date_tokens(excerpt: str) -> list[str]:
     tokens: list[str] = []
     recorded_prefix = re.compile(
-        r"\b(?:recorded|documented|entered|signed|authored|created)\s+(?:on\s+)?$",
+        r"\b(?:recorded|documented|entered|signed|authored|created)\s+on\s+$",
         re.I,
     )
     numeric_pattern = re.compile(
@@ -132,8 +132,11 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[
         if re.search(r"\b(?:increase|decrease|stop|discontinue|hold|restart|replace)\b", excerpt, re.I):
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
     date_tokens = _date_tokens(excerpt)
-    if date_tokens and _date_from_excerpt(excerpt) is None:
-        if _recorded_date_from_excerpt(excerpt):
+    recorded_date = _recorded_date_from_excerpt(excerpt)
+    if recorded_date and not date_tokens:
+        warnings.append("A document recording date is present, but the event date is not explicit; event_date remains missing.")
+    elif date_tokens and _date_from_excerpt(excerpt) is None:
+        if recorded_date:
             warnings.append("A document recording date is present, but the event date is not explicit; event_date remains missing.")
         else:
             warnings.append("Date format is ambiguous or invalid; event_date remains missing until confirmed.")
