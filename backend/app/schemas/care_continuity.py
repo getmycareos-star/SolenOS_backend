@@ -17,6 +17,11 @@ class CareAssertionCreate(BaseModel):
     observed_at: Optional[datetime] = None
     review_after_days: Optional[int] = Field(default=None, ge=1, le=3650)
     created_by_caregiver_id: Optional[str] = None
+    updated_by_caregiver_id: Optional[str] = None
+    source_conversation_id: Optional[str] = None
+    source_message_id: Optional[str] = None
+    source_proposal_id: Optional[str] = None
+    event_time_text: Optional[str] = Field(default=None, max_length=500)
 
 
 class CareAssertionResponse(BaseModel):
