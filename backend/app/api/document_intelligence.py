@@ -323,16 +323,28 @@ def review_document_candidate(
     if status in {"accepted_by_caregiver", "rejected_by_caregiver"}:
         prior = candidate.get("review_decision")
         if prior == payload.decision:
+            accepted_assertion = None
+            if prior == "accept" and candidate.get("accepted_assertion_id"):
+                accepted_assertion = db.query(CareAssertion).filter(
+                    CareAssertion.id == candidate.get("accepted_assertion_id"),
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.created_by_caregiver_id == caregiver_id,
+                ).first()
+            active_assertion = (
+                accepted_assertion is not None
+                and accepted_assertion.assertion_status not in {"rejected", "superseded"}
+            )
             return {
                 "analysis_id": analysis_id,
                 "candidate": candidate,
                 "review_decision": prior,
                 "source_record_ref": (
-                    {"record_type": "care_assertion", "record_id": candidate.get("accepted_assertion_id")}
-                    if prior == "accept" else None
+                    {"record_type": "care_assertion", "record_id": accepted_assertion.id}
+                    if active_assertion else None
                 ),
-                "written_to_lcr": prior == "accept",
+                "written_to_lcr": bool(active_assertion),
                 "review_required": False,
+                "idempotent_replay": True,
             }
         raise HTTPException(status_code=409, detail="This candidate already has a final caregiver decision")
     if status == "corrected_pending_approval" and payload.decision == "correct":
