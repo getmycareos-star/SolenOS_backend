@@ -1375,7 +1375,10 @@ async def post_situation(
             source_text=source_text,
             extraction_status=extraction_status,
             candidates=candidates if extraction_status == "available" else None,
+            commit=False,
         )
+        # This route owns the persistence boundary for the review candidate.
+        db.commit()
         response_payload["qwen_extraction_status"] = extraction_status
         response_payload["qwen_candidates"] = candidates
         response_payload["qwen_analysis_id"] = analysis.id
