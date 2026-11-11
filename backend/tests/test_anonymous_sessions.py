@@ -797,3 +797,123 @@ def test_revoking_anonymous_session_is_durable_audited_and_preserves_care_record
         assert event.record_metadata == {"reason": "self_service_revocation"}
     finally:
         db.close()
+
+
+
+def test_consent_survives_database_engine_restart_and_is_visible_to_another_instance(tmp_path):
+    """Exercise durable consent using two independent engines over the same database file.
+
+    The production database is PostgreSQL; this regression test proves that consent
+    is stored in the database rather than process-local memory or a per-worker cache.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.models.collaboration import ConsentRecord
+
+    database_path = tmp_path / "consent-restart.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    engine_a = create_engine(database_url, connect_args={"check_same_thread": False})
+    factory_a = sessionmaker(autocommit=False, autoflush=False, bind=engine_a)
+    Base.metadata.create_all(bind=engine_a)
+
+    original_factory = main_module.SessionLocal
+    active_factory = {"value": factory_a}
+
+    def override_restart_db():
+        db = active_factory["value"]()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_restart_db
+    main_module.SessionLocal = factory_a
+    try:
+        client = TestClient(app)
+        created = create_session(client, "Consent restart recipient")
+        headers = {"Authorization": f"Bearer {created['access_token']}"}
+        accepted = client.post(
+            "/api/v1/consent",
+            headers=headers,
+            json={
+                "person_id": created["person"]["id"],
+                "caregiver_id": created["caregiver"]["id"],
+                "medical_disclaimer_acknowledged": True,
+                "privacy_model_acknowledged": True,
+                "multi_caregiver_acknowledged": True,
+                "no_advertising_acknowledged": True,
+                "data_improvement_consent": True,
+                "accepted_terms_version": "2026-10",
+            },
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["verified"] is True
+
+        # Dispose the first engine and create a separate engine, modelling a new
+        # application process/worker with no shared Python objects or in-memory state.
+        engine_a.dispose()
+        engine_b = create_engine(database_url, connect_args={"check_same_thread": False})
+        factory_b = sessionmaker(autocommit=False, autoflush=False, bind=engine_b)
+        active_factory["value"] = factory_b
+        main_module.SessionLocal = factory_b
+
+        after_restart = client.get("/api/v1/consent", headers=headers)
+        assert after_restart.status_code == 200, after_restart.text
+        body = after_restart.json()
+        assert body["verified"] is True
+        assert body["profile"]["data_improvement_consent"] is True
+        assert body["consent"]["accepted_at"]
+
+        # A write through worker B must be immediately visible through worker A.
+        opted_out = client.post(
+            "/api/v1/consent",
+            headers=headers,
+            json={
+                "person_id": created["person"]["id"],
+                "caregiver_id": created["caregiver"]["id"],
+                "action": "update_data_improvement",
+                "data_improvement_consent": False,
+            },
+        )
+        assert opted_out.status_code == 200, opted_out.text
+        active_factory["value"] = factory_a
+        main_module.SessionLocal = factory_a
+        from_worker_a = client.get("/api/v1/consent", headers=headers)
+        assert from_worker_a.status_code == 200, from_worker_a.text
+        assert from_worker_a.json()["profile"]["data_improvement_consent"] is False
+
+        # Full withdrawal is durable and must disable both required and optional consent.
+        revoked = client.post(
+            "/api/v1/consent",
+            headers=headers,
+            json={
+                "person_id": created["person"]["id"],
+                "caregiver_id": created["caregiver"]["id"],
+                "action": "revoke",
+            },
+        )
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json()["verified"] is False
+        assert revoked.json()["profile"]["data_improvement_consent"] is False
+        active_factory["value"] = factory_b
+        main_module.SessionLocal = factory_b
+        after_revoke = client.get("/api/v1/consent", headers=headers)
+        assert after_revoke.status_code == 200, after_revoke.text
+        assert after_revoke.json()["verified"] is False
+        assert after_revoke.json()["consent"]["revoked_at"]
+
+        db = factory_b()
+        try:
+            row = db.query(ConsentRecord).filter_by(
+                person_id=created["person"]["id"],
+                caregiver_id=created["caregiver"]["id"],
+            ).one()
+            assert row.revoked_at is not None
+            assert row.data_improvement_consent is False
+        finally:
+            db.close()
+        engine_b.dispose()
+    finally:
+        app.dependency_overrides.clear()
+        main_module.SessionLocal = original_factory
+        engine_a.dispose()
