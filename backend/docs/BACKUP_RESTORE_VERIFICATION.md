@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This runbook verifies that a PostgreSQL logical backup can be restored into a separate database and that synthetic caregiver identity, care evidence, document bytes, care-event links, correction history and LCR revision history remain associated.
+This runbook verifies that a PostgreSQL logical backup can be restored into a separate database and that synthetic caregiver and anonymous-session identity, persisted consent, care evidence, document bytes, care-event links, correction history and LCR revision history remain associated.
 
 A backup file, a successful `pg_dump`, or a successful `pg_restore` command alone is not a recovery pass.
 
