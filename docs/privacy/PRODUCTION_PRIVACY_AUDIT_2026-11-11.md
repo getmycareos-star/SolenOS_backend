@@ -110,4 +110,15 @@ Backend `main` now includes a restricted review decision workflow for the initia
 
 **Important boundary:** this is a recorded reviewer decision, not a legal determination engine or fulfilment workflow. The evidence description is an accountable human attestation, not independent verification by the software. Approval does not export, correct, delete, or disclose data and does not bypass legal holds, retention requirements, scope checks, or the need for a separate fulfilment assessment. The initial single-reviewer arrangement also has no separation of duties; high-risk fulfilment should require an independent second reviewer before it is built.
 
-The reviewer header was added to the backend CORS allowlist. No production secrets were created or changed, no deployment was initiated, and no export/deletion handler was added. The new focused tests have been committed but have not yet been observed passing in CI.
+The reviewer header was added to the backend CORS allowlist. No production secrets were created or changed, no deployment was initiated, and no export/deletion handler was added.
+
+### Verification evidence — 2026-11-11
+
+The reviewer workflow tests have now passed against PostgreSQL in GitHub Actions on backend commit `dc80c4d7c2c666524821ff86d08b21544e879e4a`:
+- PostgreSQL migration validation: run [43091931655](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/43091931655) — passed, including the dedicated privacy request reviewer test step.
+- Backup and recovery verification: run [43091931385](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/43091931385) — passed, including restored identity, evidence, care-event/LCR source-context and document-byte retrieval through authenticated APIs.
+- Document lifecycle PostgreSQL integration: run [43091931421](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/43091931421) — passed.
+- Backend validation: run [43091931531](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/43091931531) — passed.
+- Backend unit/integration test job and PostgreSQL migration job: run [43091931400](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/43091931400) — both test jobs passed; the separate real-Qwen image/inference job was still running when this evidence entry was written.
+
+These results verify the tested source commit and synthetic CI fixtures only. They do not establish production deployment, live-user privacy fulfilment, legal authority verification, or availability of export, correction, or erasure workflows.
