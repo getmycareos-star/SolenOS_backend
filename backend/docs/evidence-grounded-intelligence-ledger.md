@@ -418,3 +418,15 @@ This slice does **not** close the full evidence capability map. Groups A–J and
 - [x] Permit a new question after the previous question has been answered; suppression is not permanent and does not erase answer history.
 - [x] Add an API regression test for duplicate suppression and re-asking after an attributed answer.
 - [ ] Verification pending on the exact latest main SHA. This is narrow duplicate suppression, not a completed automatic evidence-sufficiency or stale-answer engine.
+
+### W. Companion claim-by-claim source references — PARTIAL
+
+- [x] Add a versioned claim-provenance contract to Companion responses. Each displayed statement receives only the saved source records whose stored wording contains that statement; unmatched statements have no source references and are explicitly marked as not matched.
+- [x] Resolve matched care entries to their original linked notes/documents and expose event time, record time, reporter, and caregiver who entered the record when those details are available.
+- [x] Persist the claim/source snapshot with the assistant conversation message and return it through idempotent replay and conversation history.
+- [x] Connect the Companion UI to the backend response. The caregiver sees the source beside the particular statement, supporting notes/documents, event and recording times, and a plain-English warning for unmatched statements. Internal record IDs and generic source-ID lists are not displayed.
+- [x] Do not count duplicate source references as independent corroboration. The claim matcher makes no source-independence or truth assertion.
+- [x] Add focused tests for exact wording matches, unrelated-source exclusion, paraphrase abstention, duplicate-source handling, and preservation of linked original document details; add frontend contract assertions for the connected display.
+- [ ] Exact-current-main backend tests and frontend validation must pass before this slice is considered verified.
+- [ ] Exact wording matching is intentionally conservative. It does not prove semantic entailment for paraphrases or aggregate statements (for example, a count across multiple incidents); those statements remain unsupported until a stronger validated claim-to-source assessment is available.
+- [ ] Extend the same claim-level contract to appointment, handoff, professional summary, document Q&A, and other Qwen outputs; verify correction-triggered re-review and caregiver approval audit records across every workflow.
