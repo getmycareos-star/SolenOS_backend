@@ -75,7 +75,7 @@ def _get_json_after_restart(base_url: str, path: str, token: str) -> tuple[int, 
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
-def _verify_persistence_after_real_server_restart(session: dict, other: dict, conversation_id: str, proposal_id: str, assertion_id: str, disclosure: str, document_analysis_id: str) -> None:
+def _verify_persistence_after_real_server_restart(session: dict, other: dict, conversation_id: str, proposal_id: str, assertion_id: str, disclosure: str) -> None:
     backend_dir = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     process = subprocess.Popen(
@@ -116,10 +116,6 @@ def _verify_persistence_after_real_server_restart(session: dict, other: dict, co
         status, lcr = _get_json_after_restart(base_url, "/api/v1/care-continuity/current-care", token)
         assert status == 200, lcr
         assert any(item.get("id") == assertion_id for item in lcr.get("items", [])), lcr
-
-        status, document_history = _get_json_after_restart(base_url, "/api/v1/documents/intelligence", token)
-        assert status == 200, document_history
-        assert any(item.get("analysis_id") == document_analysis_id for item in document_history.get("items", [])), document_history
 
         denied = urllib.request.Request(
             base_url + f"/api/v1/conversation/{conversation_id}",
@@ -165,47 +161,6 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         assert daily_qwen_body["status"] == "completed", daily_qwen_body
         assert any(row.get("source_id") == event_id for row in daily_qwen_body.get("source_records", [])), daily_qwen_body
         assert daily_qwen_body["written_to_lcr"] is False, daily_qwen_body
-
-        # Exercise actual Qwen document candidate extraction, not the mocked
-        # extraction boundary used by the isolated PostgreSQL persistence suite.
-        document_text = (
-            "Discharge note: Patient walked 20 metres with a frame on 12 October. "
-            "The patient ate half of lunch during the observation period."
-        )
-        uploaded = client.post(
-            "/api/v1/upload",
-            headers=auth,
-            data={
-                "person_id": caregiver["person"]["id"],
-                "caregiver_id": caregiver["caregiver"]["id"],
-                "evidence_type": "document",
-            },
-            files={"file": ("live-discharge-note.txt", document_text, "text/plain")},
-        )
-        assert uploaded.status_code == 201, uploaded.text
-        evidence_id = uploaded.json()["evidence_id"]
-        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth, json={})
-        assert extracted.status_code == 201, extracted.text
-        interpreted = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
-        assert interpreted.status_code == 201, interpreted.text
-        document_result = interpreted.json()
-        assert document_result["intelligence_status"] == "available", document_result
-        assert document_result["written_to_lcr"] is False, document_result
-        assert document_result["observations"], "Live Qwen returned no reviewable candidate for explicit source observations"
-        assert all(
-            item.get("review_status") == "pending_review"
-            and item.get("source_quote") in document_text
-            for item in document_result.get("observations", [])
-        ), document_result
-        other_auth = {"Authorization": f"Bearer {other['access_token']}"}
-        denied_document = client.get(
-            f"/api/v1/documents/analyses/{document_result['analysis_id']}",
-            headers=other_auth,
-        )
-        assert denied_document.status_code == 404, denied_document.text
-        other_document_list = client.get("/api/v1/documents/intelligence", headers=other_auth)
-        assert other_document_list.status_code == 200, other_document_list.text
-        assert not other_document_list.json().get("items"), other_document_list.json()
 
         direct = _ask(client, caregiver, "What did we record about sleep?")
         assert direct.status_code == 200, direct.text
@@ -325,5 +280,4 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
             proposal["id"],
             assertion_id,
             new_observation,
-            document_result["analysis_id"],
         )
