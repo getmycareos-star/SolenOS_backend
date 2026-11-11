@@ -11,6 +11,7 @@ class DataSubjectRequest(Base):
     __tablename__ = "data_subject_requests"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    requester_id = Column(Text, nullable=False, index=True)
     actor_id = Column(String(255), nullable=True, index=True)
     subject_id = Column(String(255), nullable=True, index=True)
     person_id = Column(String(255), nullable=True, index=True)
