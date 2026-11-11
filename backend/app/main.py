@@ -203,7 +203,7 @@ app.add_middleware(
     allow_origin_regex=r"^https://[a-z0-9-]+--solenosai\.netlify\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-SolenOS-Privacy-Reviewer-Token"],
 )
 
 app.add_middleware(RequestBodySizeLimitMiddleware)
