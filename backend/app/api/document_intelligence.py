@@ -560,8 +560,12 @@ def review_document_candidate(
         document_field = _document_assertion_field(candidate)
         asserted_value = _document_asserted_value(candidate, subject, observation)
         duplicate_of_evidence_id = _duplicate_of(evidence)
-        duplicate_label = f" · duplicate copy of evidence {duplicate_of_evidence_id}; not independent corroboration" if duplicate_of_evidence_id else ""
-        source_label = f"Caregiver-reviewed document statement (not independently verified): {metadata.get('filename') or 'Uploaded document'} · page {candidate.get('page_number') or 'unresolved'}{duplicate_label}"
+        duplicate_label = " · duplicate copy; not independent corroboration" if duplicate_of_evidence_id else ""
+        page_label = str(candidate.get("page_number") or "unresolved")
+        source_prefix = "Caregiver-reviewed document (not independently verified): "
+        source_suffix = f" · page {page_label}{duplicate_label}"
+        filename = str(metadata.get("filename") or "Uploaded document")
+        source_label = source_prefix + filename[:max(0, 160 - len(source_prefix) - len(source_suffix))] + source_suffix
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
         existing = db.query(CareAssertion).filter(
