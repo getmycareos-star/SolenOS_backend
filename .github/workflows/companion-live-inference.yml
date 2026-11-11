@@ -8,6 +8,8 @@ on:
       - ".github/workflows/companion-live-inference.yml"
       - "backend/live_tests/test_companion_live_inference.py"
       - "backend/live_tests/test_daily_capture_live_inference.py"
+      - "backend/live_tests/test_document_intelligence_live.py"
+      - "backend/live_tests/test_appointment_assist_live_inference.py"
       - "backend/app/api/collaboration.py"
       - "backend/app/api/companion_review.py"
       - "backend/app/api/daily_care_intelligence.py"
@@ -52,6 +54,7 @@ jobs:
       OLLAMA_NUM_PREDICT: "96"
       OLLAMA_NUM_THREADS: "2"
       SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
+      SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -83,6 +86,10 @@ jobs:
         run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
       - name: Run real Qwen Daily Capture extraction and persistence against PostgreSQL
         run: python -m pytest backend/live_tests/test_daily_capture_live_inference.py -q -s
+      - name: Run real Qwen document extraction and review against PostgreSQL
+        run: python -m pytest backend/live_tests/test_document_intelligence_live.py -q -s
+      - name: Run real Qwen appointment assistance against PostgreSQL
+        run: python -m pytest backend/live_tests/test_appointment_assist_live_inference.py -q -s
       - name: Stop isolated Ollama runtime
         if: always()
         run: docker rm -f solenos-live-ollama || true
