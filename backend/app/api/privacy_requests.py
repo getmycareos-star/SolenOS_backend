@@ -927,14 +927,18 @@ def fulfil_approved_deletion(
             )
 
         # Preserve only the privacy request receipt and redacted security audit.
-        db.execute(
-            text("""
-                UPDATE audit_log_events
-                SET actor_id = NULL, subject_id = NULL, person_id = NULL,
-                    caregiver_id = NULL, target_id = NULL, metadata = :metadata
-                WHERE person_id = :person_id
-            """),
-            {"metadata": json.dumps({"redacted_for_privacy_erasure": True}), "person_id": person_id},
+        db.query(AuditLogEvent).filter(
+            AuditLogEvent.person_id == person_id
+        ).update(
+            {
+                AuditLogEvent.actor_id: None,
+                AuditLogEvent.subject_id: None,
+                AuditLogEvent.person_id: None,
+                AuditLogEvent.caregiver_id: None,
+                AuditLogEvent.target_id: None,
+                AuditLogEvent.record_metadata: {"redacted_for_privacy_erasure": True},
+            },
+            synchronize_session=False,
         )
         pseudonym = "erased:" + hashlib.sha256(
             f"{request_id}:{person_id}:{caregiver_id}".encode("utf-8")
