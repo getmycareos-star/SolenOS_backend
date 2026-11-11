@@ -58,6 +58,11 @@ class PrivacyRequestReview(BaseModel):
     authority_evidence_checked: Optional[str] = Field(default=None, max_length=1000)
 
 
+class PrivacyDeletionFulfilment(BaseModel):
+    backup_erasure_verified: bool
+    backup_retention_evidence: str = Field(min_length=20, max_length=2000)
+
+
 def _scope(request: Request, db: Session) -> tuple[str, str]:
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
@@ -743,6 +748,7 @@ def fulfil_approved_correction(
 @router.post("/{request_id}/fulfil-deletion")
 def fulfil_approved_deletion(
     request_id: str,
+    payload: PrivacyDeletionFulfilment,
     reviewer_id: str = Depends(_privacy_reviewer),
     db: Session = Depends(get_db),
 ):
@@ -767,6 +773,14 @@ def fulfil_approved_deletion(
         }
     if row.request_status != "approved_pending_fulfilment_assessment":
         raise HTTPException(status_code=409, detail="Deletion request has not been approved")
+    if payload.backup_erasure_verified is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="Primary deletion is blocked until backups containing this data are verified expired or otherwise irrecoverable.",
+        )
+    backup_evidence_hash = hashlib.sha256(
+        payload.backup_retention_evidence.strip().encode("utf-8")
+    ).hexdigest()
     person_id = str(row.person_id or "")
     caregiver_id = str(row.caregiver_id or "")
     if not person_id or not caregiver_id:
@@ -958,7 +972,9 @@ def fulfil_approved_deletion(
             "fulfilled_at": now.isoformat(),
             "fulfilled_by": reviewer_id,
             "scope": "single-caregiver care record",
-            "verification": "registered person-scoped tables and foreign-key dependants removed; active legal holds rejected",
+            "verification": "registered person-scoped tables and foreign-key dependants removed; active legal holds rejected; reviewer attested backups containing the data are expired or irrecoverable",
+            "backup_erasure_verified": True,
+            "backup_retention_evidence_sha256": backup_evidence_hash,
         }
         row.record_metadata = {"fulfilment": fulfilment}
         db.add(AuditLogEvent(
@@ -974,6 +990,8 @@ def fulfil_approved_deletion(
             record_metadata={
                 "privacy_request_id": request_id,
                 "scope": "single-caregiver care record",
+                "backup_erasure_verified": True,
+                "backup_retention_evidence_sha256": backup_evidence_hash,
                 "redacted": True,
             },
         ))
