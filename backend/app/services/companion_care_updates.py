@@ -8,7 +8,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 
 from app.models.ai_output_governance import AIOutputLCRProposal
-from app.models.care_continuity import CareAssertion
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationMessage, ConversationSession
 from datetime import datetime, timezone
@@ -102,26 +103,28 @@ def persist_companion_candidates(
         # Keep the caregiver's exact words visible in the LCR immediately.
         # The assertion remains unreviewed until caregiver review; model output
         # never upgrades the report to a verified care fact.
-        db.add(CareAssertion(
-            id=str(uuid.uuid4()),
-            person_id=person_id,
-            subject_type="person",
-            subject_id=person_id,
-            field="care_observation",
-            assertion_kind="time_bound_observation",
-            asserted_value=quote,
-            source_label="Caregiver-reported Companion disclosure (unreviewed)",
-            source_text=quote,
-            source_conversation_id=conversation_id,
-            source_message_id=message_id,
-            source_proposal_id=proposal.id,
-            event_time_text=event_time_quote,
-            evidence_ids=[],
-            assertion_status="caregiver_reported_unreviewed",
-            observed_at=None,
-            created_by_caregiver_id=caregiver_id,
-        ))
-        db.flush()
+        create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="care_observation",
+                assertion_kind="time_bound_observation",
+                asserted_value=quote,
+                source_label="Companion caregiver report",
+                source_text=quote,
+                source_conversation_id=conversation_id,
+                source_message_id=message_id,
+                source_proposal_id=proposal.id,
+                event_time_text=event_time_quote,
+                evidence_ids=[],
+                observed_at=None,
+                created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+            ),
+            commit=False,
+        )
         output.append(proposal_payload(proposal))
     if output:
         db.commit()
