@@ -65,5 +65,3 @@ class AssertionEpistemicState(str, Enum):
     UNCERTAIN = "uncertain"
     CONFLICTING = "conflicting"
     MISSING = "missing"
-    WITHDRAWN = "withdrawn"
-    CORRECTED = "corrected"
