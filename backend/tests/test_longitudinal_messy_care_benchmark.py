@@ -868,6 +868,55 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
         assert assertion.evidence_ids == [matching.id]
         assert unrelated.id not in assertion.evidence_ids
 
+        # A second document that merely lists a different dose must remain a
+        # reported mention; it must not create a new current medication assertion.
+        mention_excerpt = "Amlodipine 10 mg daily appears on the historical medication list."
+        mention_event = CareEvent(
+            id="ev-delta-medication-mention",
+            person_id=person.id,
+            event_type="document",
+            status="recorded",
+            occurred_at=NOW + timedelta(days=1),
+            title="Historical medication list",
+            description=mention_excerpt,
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver.id,
+            time_provenance="document_date",
+        )
+        mention_evidence = Evidence(
+            id="evidence-delta-medication-mention",
+            person_id=person.id,
+            type="document",
+            source_text=mention_excerpt,
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([mention_event, mention_evidence])
+        db.flush()
+        model_result["medications"] = [{
+            "change_type": "new",
+            "name": "Amlodipine",
+            "previous": None,
+            "current": "10 mg daily",
+            "evidence_excerpt": mention_excerpt,
+            "certainty": "supported",
+        }]
+        result = delta_engine.reconcile_event(
+            db,
+            person_id=person.id,
+            event_date=NOW + timedelta(days=1),
+            source="historical medication list",
+            content=mention_excerpt,
+            source_event_id=mention_event.id,
+            evidence_ids=[mention_evidence.id],
+            persist=True,
+            created_by_caregiver_id=caregiver.id,
+        )
+        assert result["medications"][0]["medication_mention_only"] is True
+        assert db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id,
+            CareAssertion.source_event_id == mention_event.id,
+        ).count() == 0
+
 
 def test_medication_mentions_do_not_count_as_prescribing_changes():
     from app.services.delta_engine import _medication_change_is_explicit
