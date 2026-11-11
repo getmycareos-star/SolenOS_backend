@@ -114,7 +114,7 @@ SOURCES = {
         "time_fields": ("observed_at", "recorded_at"),
         "event_time_fields": ("observed_at",),
         "recorded_time_fields": ("recorded_at",),
-        "detail_fields": ("subject_type", "subject_id", "field", "assertion_kind", "source_event_id", "source_conversation_id", "source_message_id", "source_proposal_id", "assertion_status", "created_by_caregiver_id", "updated_by_caregiver_id"),
+        "detail_fields": ("subject_type", "subject_id", "field", "assertion_kind", "source_label", "event_time_text", "source_event_id", "source_conversation_id", "source_message_id", "source_proposal_id", "assertion_status", "created_by_caregiver_id", "updated_by_caregiver_id"),
     },
     "uncertainty_assessments": {
         "label": "Recorded uncertainty and information gaps",
