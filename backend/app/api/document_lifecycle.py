@@ -184,6 +184,15 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
 
 
 
+def _normalized_extraction_text(value: str) -> str:
+    """Compare legacy unlabelled extractions with the newer page-labelled format."""
+    return re.sub(
+        r"(?m)^\\[(?:Page\\s+\\d+(?:\\s+OCR)?|Image OCR)\\]\\s*\\n?",
+        "",
+        value or "",
+    ).strip()
+
+
 def _verify_persisted_extraction(
     analysis: CaptureAnalysis,
     upload: EvidenceUpload,
@@ -207,7 +216,7 @@ def _verify_persisted_extraction(
         # Backfill the digest for older persisted rows exactly once. Re-run OCR
         # only for this legacy case, then persist the integrity marker.
         original_text, _ = _extract(upload, content)
-        if original_text.strip() != source_text:
+        if _normalized_extraction_text(original_text) != _normalized_extraction_text(source_text):
             raise HTTPException(status_code=409, detail="Persisted extraction text does not match the original uploaded document")
         metadata = dict(metadata)
         metadata["source_text_sha256"] = source_digest
