@@ -19,6 +19,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.database import TestingSessionLocal
+from app.models.care import Caregiver, Evidence
+from app.models.capture_analysis import CaptureAnalysis
+from app.models.care_continuity import CareAssertion
 
 
 pytestmark = pytest.mark.skipif(
@@ -291,3 +295,93 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
             assertion_id,
             new_observation,
         )
+
+
+def test_live_qwen_support_reads_shared_lcr_without_peer_document_leakage():
+    """The actual Qwen support route must use canonical LCR context and stay read-only."""
+    with TestClient(app) as client:
+        caregiver = _create_session(client, "Live Qwen shared-LCR caregiver")
+        person_id = caregiver["person"]["id"]
+        caregiver_id = caregiver["caregiver"]["id"]
+        peer_caregiver_id = str(uuid.uuid4())
+        peer_evidence_id = str(uuid.uuid4())
+        peer_analysis_id = str(uuid.uuid4())
+        assertion_id = str(uuid.uuid4())
+
+        db = TestingSessionLocal()
+        try:
+            db.add(Caregiver(
+                id=peer_caregiver_id,
+                name="Other caregiver on same care record",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.add(Evidence(
+                id=peer_evidence_id,
+                person_id=person_id,
+                type="document",
+                source_text="PRIVATE_PEER_DOCUMENT_TEXT: confidential note uploaded by another caregiver.",
+                uploaded_by_caregiver_id=peer_caregiver_id,
+                evidence_status="available",
+                source_type="document",
+            ))
+            db.add(CaptureAnalysis(
+                id=peer_analysis_id,
+                person_id=person_id,
+                caregiver_id=peer_caregiver_id,
+                source_evidence_id=peer_evidence_id,
+                source_text="PRIVATE_PEER_DOCUMENT_TEXT: confidential extracted document text.",
+                extraction_status="available",
+                candidates={"kind": "document_extraction_v1", "filename": "peer-note.pdf"},
+                review_history=[],
+            ))
+            db.add(CareAssertion(
+                id=assertion_id,
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="appetite",
+                assertion_kind="caregiver_reviewed_daily_care_observation",
+                asserted_value="Breakfast intake was lower than usual",
+                source_label="Caregiver review",
+                source_text="Caregiver reviewed the breakfast observation.",
+                evidence_ids=[],
+                assertion_status="accepted",
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+            assertion_count_before = db.query(CareAssertion).filter_by(person_id=person_id).count()
+        finally:
+            db.close()
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {caregiver['access_token']}"},
+            json={
+                "workflow": "living_care_record",
+                "text": "What is recorded about breakfast intake, and is any cause documented?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body.get("ai_generated") is True, body
+        assert body.get("model") == "qwen3.5:4b", body
+        assert body.get("authority") == "solenos_care_record_and_caregiver", body
+        assert body.get("review_required") is True, body
+        assert body.get("written_to_lcr") is False, body
+        assert body.get("persistence") == "read_only_assistance", body
+        assert body.get("provider_status") == "available", body
+        reply = body.get("reply", "").casefold()
+        assert "breakfast" in reply and any(term in reply for term in ("lower", "reduced", "less")), body
+        assert "private_peer_document_text" not in reply, body
+        assert "peer-note.pdf" not in reply, body
+        assert body.get("source_document_analysis_ids") == [], body
+        assert body.get("source_document_status") == "empty", body
+        assert peer_evidence_id not in body.get("source_evidence_ids", []), body
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == assertion_count_before
+            assert db.query(CareAssertion).filter_by(id=assertion_id).count() == 1
+        finally:
+            db.close()
