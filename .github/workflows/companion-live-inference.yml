@@ -1,5 +1,5 @@
 name: Companion live Qwen inference evaluation
-# CI-only acceptance run rebased onto the current main baseline.
+# CI-only live acceptance suite: Companion, Daily Capture, Documents and Appointments on main.
 
 on:
   push:
