@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from app.services.document_candidate_schema import (
     apply_medication_conflict_warnings,
     canonical_candidate,
+    chunk_document_pages,
     page_for_excerpt,
     split_document_pages,
     unreadable_page_numbers,
@@ -99,3 +100,13 @@ def test_unreadable_pages_are_reported_without_becoming_candidates():
         (1, "Discharge diagnosis: pneumonia"),
         (3, "Follow up in 14 days."),
     ]
+
+
+
+def test_long_page_is_chunked_without_dropping_source_text():
+    page_text = ("A" * 6000) + "\n" + ("B" * 6000) + "\n" + ("C" * 6000)
+    chunks = chunk_document_pages([(7, page_text)], max_chars=8000)
+    assert len(chunks) == 3
+    assert all(page_number == 7 for page_number, _ in chunks)
+    assert all(len(chunk) <= 8000 for _, chunk in chunks)
+    assert "".join(chunks[index][1] for index in range(len(chunks))) == page_text.replace("\n", "")
