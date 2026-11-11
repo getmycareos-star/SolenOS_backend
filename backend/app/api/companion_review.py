@@ -145,18 +145,27 @@ def review_companion_care_update(
                 ).first()
                 if corrected_proposal is None or (corrected_proposal.proposed_change_json or {}).get("asserted_value") != corrected_value:
                     raise HTTPException(status_code=409, detail="This proposal already has a different correction decision")
+                assertion = db.query(CareAssertion).filter_by(source_proposal_id=corrected_proposal.id).first()
+                active_assertion = assertion is not None and assertion.assertion_status not in {
+                    "caregiver_reported_rejected", "superseded_by_caregiver_correction",
+                }
                 return {
                     "proposal": _proposal_json(proposal),
                     "corrected_proposal": _proposal_json(corrected_proposal),
                     "decision": decision,
+                    "assertion_id": assertion.id if active_assertion else None,
+                    "written_to_lcr": active_assertion,
                     "idempotent_replay": True,
                 }
             assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
+            active_assertion = assertion is not None and assertion.assertion_status not in {
+                "caregiver_reported_rejected", "superseded_by_caregiver_correction",
+            }
             return {
                 "proposal": _proposal_json(proposal),
                 "decision": decision,
-                "assertion_id": assertion.id if assertion else None,
-                "written_to_lcr": bool(assertion),
+                "assertion_id": assertion.id if active_assertion else None,
+                "written_to_lcr": active_assertion,
                 "idempotent_replay": True,
             }
         raise HTTPException(status_code=409, detail="This proposal already has a review decision")
