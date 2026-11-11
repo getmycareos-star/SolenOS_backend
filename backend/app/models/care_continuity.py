@@ -88,6 +88,7 @@ class CareAssertion(Base):
     event_time_text = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=False, default=list)
     assertion_status = Column(String, nullable=False, default="reported")
+    epistemic_state = Column(String(32), nullable=False, default="reported", server_default="reported")
     observed_at = Column(DateTime(timezone=True), nullable=True)
     review_after_days = Column(Integer, nullable=True)
     created_by_caregiver_id = Column(String, nullable=True)
