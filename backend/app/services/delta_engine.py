@@ -454,7 +454,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             timeout=timeout,
-            response_format="json",
+            response_format=DELTA_JSON_CONTRACT,
             options={"temperature": 0, "num_ctx": 4096, "num_predict": 1024},
         )
     except HTTPException as exc:
