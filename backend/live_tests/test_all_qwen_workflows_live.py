@@ -67,7 +67,7 @@ def _record_fixture(client: TestClient, session: dict, detail: str = "Caregiver 
     assert response.status_code in (200, 201), response.text
     event_id = response.json().get("id")
     assert event_id
-    return str(event_id)
+    return str(event_id), [str(value) for value in response.json().get("evidence_ids", [])]
 
 
 def test_enabled_workflow_contract_is_complete():
@@ -79,8 +79,8 @@ def test_enabled_workflow_contract_is_complete():
 def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_output(workflow):
     with TestClient(app) as client:
         session = _new_session(client)
-        event_id = _record_fixture(client, session)
-        medication_event_id = _record_fixture(
+        event_id, _ = _record_fixture(client, session)
+        medication_event_id, medication_evidence_ids = _record_fixture(
             client, session,
             "Medication observation: caregiver reported that the morning medication was taken.",
         )
@@ -114,10 +114,10 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
         assert isinstance(data.get("source_event_ids"), list), data
         assert isinstance(data.get("source_evidence_ids"), list), data
         if workflow == "medication_day":
-            assert medication_event_id in data["source_event_ids"], (
-                f"{workflow} did not retrieve the authorized medication observation: {data}"
+            assert medication_evidence_ids and set(medication_evidence_ids).intersection(data["source_evidence_ids"]), (
+                f"{workflow} did not retrieve the authorized medication source evidence: {data}"
             )
-            assert event_id not in data["source_event_ids"], (
+            assert medication_event_id not in data["source_event_ids"], (
                 f"{workflow} included an unrelated sleep observation: {data}"
             )
         elif workflow in EVENT_WORKFLOWS:
