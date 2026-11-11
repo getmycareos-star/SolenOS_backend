@@ -94,18 +94,29 @@ def _date_from_excerpt(excerpt: str) -> str | None:
     return None
 
 def _recorded_date_from_excerpt(excerpt: str) -> str | None:
-    match = re.search(
-        r"\b(?:recorded|documented|entered|signed|authored|created)\s+on\s+(\d{4}-\d{2}-\d{2})\b",
-        excerpt,
+    label = re.compile(
+        r"\b(?:recorded|documented|entered|signed|authored|created)\s+on\s+$",
         re.I,
     )
-    if not match:
-        return None
-    try:
-        return date.fromisoformat(match.group(1)).isoformat()
-    except ValueError:
-        return None
-
+    for match in _DATE_PATTERNS[0].finditer(excerpt):
+        prefix = excerpt[max(0, match.start() - 60):match.start()]
+        if not label.search(prefix):
+            continue
+        try:
+            return date(int(match.group(1)), int(match.group(2)), int(match.group(3))).isoformat()
+        except ValueError:
+            return None
+    for match in _NATURAL_DATE_TOKEN.finditer(excerpt):
+        prefix = excerpt[max(0, match.start() - 60):match.start()]
+        if not label.search(prefix):
+            continue
+        natural = match.group(0)
+        for date_format in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%B %d %Y", "%b %d, %Y", "%b %d %Y"):
+            try:
+                return datetime.strptime(natural, date_format).date().isoformat()
+            except ValueError:
+                continue
+    return None
 
 def _date_tokens(excerpt: str) -> list[str]:
     tokens: list[str] = []
