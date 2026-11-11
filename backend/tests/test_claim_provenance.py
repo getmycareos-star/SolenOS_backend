@@ -79,3 +79,18 @@ def test_matched_event_keeps_its_original_supporting_document_details():
     reference = result["claims"][0]["source_references"][0]
     assert reference["related_evidence"][0]["record_id"] == "document-1"
     assert reference["related_evidence"][0]["label"] == "discharge-summary.pdf"
+
+def test_corrected_or_withdrawn_source_is_retained_as_history_not_current_support():
+    result = build_claim_provenance(
+        "She felt dizzy after lunch.",
+        [{
+            "record_type": "care_event",
+            "record_id": "corrected-event",
+            "source_text": "She felt dizzy after lunch.",
+            "record_status": "superseded",
+        }],
+    )
+    claim = result["claims"][0]
+    assert claim["support_status"] == "matched_historical_only"
+    assert claim["source_references"][0]["source_state_label"] == "Earlier or corrected record; not treated as current"
+    assert result["unmatched_statement_count"] == 1
