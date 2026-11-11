@@ -97,14 +97,14 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
 
 
 def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monkeypatch):
-    import app.api.v1 as api_v1
+    import app.services.care_execution as care_execution
 
     test_client, owner, _ = client
     # Prove the record write and projection do not depend on a live optional model.
     def unavailable_model(*args, **kwargs):
         raise RuntimeError("optional model unavailable")
 
-    monkeypatch.setattr(api_v1, "extract_review_candidates", unavailable_model)
+    monkeypatch.setattr(care_execution, "extract_review_candidates", unavailable_model)
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
     saved = test_client.post("/api/v1/daily/log", headers=headers, json={
         "person_id": owner["person"]["id"],
@@ -147,6 +147,7 @@ def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monke
 
 def test_daily_capture_receipt_survives_secondary_pipeline_failures(client, monkeypatch):
     import app.api.v1 as api_v1
+    import app.services.care_execution as care_execution
 
     test_client, owner, _ = client
 
@@ -154,8 +155,8 @@ def test_daily_capture_receipt_survives_secondary_pipeline_failures(client, monk
         raise RuntimeError("secondary pipeline unavailable")
 
     monkeypatch.setattr(api_v1, "_log_and_learn", fail_secondary)
-    monkeypatch.setattr(api_v1, "extract_review_candidates", fail_secondary)
-    monkeypatch.setattr(api_v1, "persist_capture_analysis", fail_secondary)
+    monkeypatch.setattr(care_execution, "extract_review_candidates", fail_secondary)
+    monkeypatch.setattr(care_execution, "persist_capture_analysis", fail_secondary)
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
     note = "Caregiver recorded a new overnight waking observation."
