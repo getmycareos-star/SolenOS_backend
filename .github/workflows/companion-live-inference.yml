@@ -13,6 +13,7 @@ on:
       - "backend/app/api/collaboration.py"
       - "backend/app/api/companion_review.py"
       - "backend/app/api/daily_care_intelligence.py"
+      - "backend/app/api/document_intelligence.py"
       - "backend/app/api/appointment_workspace.py"
       - "backend/app/api/handoff_drafts.py"
       - "backend/app/services/care_continuity.py"
