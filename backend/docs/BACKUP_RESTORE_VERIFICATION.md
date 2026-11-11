@@ -42,7 +42,7 @@ The script:
 4. Restores that dump into the isolated restore database with `pg_restore`.
 5. Verifies caregiver/person ownership, evidence provenance/hash, event/evidence association, exact document bytes/size/SHA-256, correction history, LCR revision history and cross-caregiver isolation.
 6. Emits a machine-readable PASS/FAIL report with measured backup, restore and end-to-end durations.
-7. In CI, runs the existing real-Uvicorn PostgreSQL anonymous-session E2E suite against the restored database, covering authenticated reads/writes, document upload/download bytes, LCR retrieval, token revocation/refresh and cross-caregiver denial.
+7. In CI, runs the existing real-Uvicorn PostgreSQL anonymous-session E2E suite against the restored database. It first discovers the exact synthetic caregiver fixture from the backup run and reads that caregiver's identity, evidence, care event, LCR projection and document bytes through authenticated APIs; it then covers authenticated reads/writes, token revocation/refresh, cross-caregiver denial and persistence across a Uvicorn restart.
 
 For a local full check, after the backup/restore script passes, point the application at the restored database and run the real HTTP/PostgreSQL E2E suite:
 
