@@ -1,3 +1,5 @@
+import os
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,11 +9,15 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+TEST_POSTGRES_URL = os.getenv("TEST_POSTGRES_URL")
+if TEST_POSTGRES_URL:
+    engine = create_engine(TEST_POSTGRES_URL, pool_pre_ping=True)
+else:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
