@@ -3,7 +3,7 @@ name: Cancel redundant benchmark runs
 on:
   push:
     branches:
-      - ops/cancel-benchmark-runs-20261111
+      - main
 
 permissions:
   actions: write
