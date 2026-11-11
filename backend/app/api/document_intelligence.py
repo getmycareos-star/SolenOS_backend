@@ -89,6 +89,16 @@ def _source(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     return evidence, upload
 
 
+def _duplicate_of(evidence: Evidence) -> str | None:
+    raw = evidence.extra_metadata
+    try:
+        details = raw if isinstance(raw, dict) else json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return None
+    value = details.get("duplicate_of_evidence_id") if isinstance(details, dict) else None
+    return str(value) if value else None
+
+
 def _analysis_for_evidence(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
@@ -174,6 +184,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     evidence, upload = _source(evidence_id, person_id, caregiver_id, db)
     analysis = _analysis_for_evidence(evidence_id, person_id, caregiver_id, db)
     metadata = _metadata(analysis)
+    duplicate_of_evidence_id = _duplicate_of(evidence)
     if metadata.get("binary_sha256") != upload.sha256:
         raise HTTPException(status_code=409, detail="The extraction does not match the preserved original file")
     _verify_persisted_extraction(analysis, upload, db)
@@ -239,6 +250,10 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             source_text=source_text,
         )
         extraction_method = str(metadata.get("extraction_method") or "")
+        if duplicate_of_evidence_id:
+            canonical["warnings"].append(
+                f"This upload is an exact binary duplicate of evidence {duplicate_of_evidence_id}; preserve the copy but do not count it as independent corroboration."
+            )
         if "server_pdf_text" in extraction_method:
             canonical["warnings"].append("PDF text extraction may flatten multi-column or table reading order; compare this passage with the original page.")
         if "tesseract" in extraction_method:
@@ -468,7 +483,9 @@ def review_document_candidate(
         if not subject or not observation:
             raise HTTPException(status_code=422, detail="The candidate is incomplete and cannot be accepted")
         asserted_value = f"Subject: {subject}\nObservation: {observation}"
-        source_label = f"Caregiver-reviewed document statement (not independently verified): {metadata.get('filename') or 'Uploaded document'} · page {candidate.get('page_number') or 'unresolved'}"
+        duplicate_of_evidence_id = _duplicate_of(evidence)
+        duplicate_label = f" · duplicate copy of evidence {duplicate_of_evidence_id}; not independent corroboration" if duplicate_of_evidence_id else ""
+        source_label = f"Caregiver-reviewed document statement (not independently verified): {metadata.get('filename') or 'Uploaded document'} · page {candidate.get('page_number') or 'unresolved'}{duplicate_label}"
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
         existing = db.query(CareAssertion).filter(
