@@ -134,3 +134,29 @@ def test_recovery_request_does_not_disclose_whether_account_exists():
         assert all(row.email_hash not in {"known@example.com", "unknown@example.com"} for row in rows)
     finally:
         db.close()
+
+
+
+def test_account_authenticated_device_is_marked_verified():
+    client = TestClient(app)
+    session = create_session(client, "Verified device owner")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = client.post(
+        "/api/v1/accounts",
+        headers=headers,
+        json={"email": "verified-device@example.test", "password": "long-enough-device-test-password"},
+    )
+    assert created.status_code == 201, created.text
+
+    registered = client.post(
+        "/api/v1/identity/devices",
+        headers=headers,
+        json={"installation_key": "verified-installation-key-123456789", "label": "Primary phone", "platform": "android"},
+    )
+    assert registered.status_code == 201, registered.text
+    assert registered.json()["device"]["trust_status"] == "verified"
+
+    listed = client.get("/api/v1/identity/devices", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["devices"][0]["trust_status"] == "verified"
+    assert listed.json()["devices"][0]["verified_at"] is not None
