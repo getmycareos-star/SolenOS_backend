@@ -81,8 +81,13 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[
             warnings.append("Medication administration instructions are not explicit; dosage remains missing.")
         if re.search(r"\b(?:increase|decrease|stop|discontinue|hold|restart|replace)\b", excerpt, re.I):
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
-    if re.search(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt) and _date_from_excerpt(excerpt) is None:
+    date_tokens = re.findall(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt)
+    if date_tokens and _date_from_excerpt(excerpt) is None:
         warnings.append("Date format is ambiguous or invalid; event_date remains missing until confirmed.")
+    if len(set(date_tokens)) > 1:
+        warnings.append("Multiple dates appear in this passage; event_date remains unresolved until the relevant event date is confirmed.")
+    if re.search(r"\b(previous|previously|prior|old|superseded|discontinued|replaced|no longer|do not use)\b", excerpt, re.I):
+        warnings.append("This may be an outdated or superseded instruction; reconcile it before treating it as current.")
     if not excerpt.strip():
         warnings.append("No readable source excerpt is available.")
     return warnings
@@ -123,7 +128,7 @@ def canonical_candidate(
         "source_excerpt": excerpt,
         "field_type": field_type,
         "extracted_value": observation or None,
-        "event_date": _date_from_excerpt(excerpt),
+        "event_date": None if len(set(re.findall(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt))) > 1 else _date_from_excerpt(excerpt),
         "recorded_date": timestamp,
         "confidence": None,
         "review_status": "Pending",
