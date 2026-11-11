@@ -2290,9 +2290,56 @@ def main():
         except urllib.error.URLError:
             pass
 
-        # Verify the same restored account and all its data after an actual server restart.
+        # Verify the exact Daily Care capture, source evidence, and LCR projection
+        # survive the same real Uvicorn restart using the original anonymous session.
         stop_server(server)
         server = start_server()
+        restarted_daily_history_status, restarted_daily_history = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_a,
+        )
+        restarted_daily_matches = [
+            row for row in (restarted_daily_history or [])
+            if row.get("id") == daily_event_id
+        ]
+        require(
+            restarted_daily_history_status == 200
+            and len(restarted_daily_matches) == 1
+            and restarted_daily_matches[0].get("evidence_ids") == [daily_evidence_id],
+            f"Daily Care event/evidence did not survive Uvicorn restart: {restarted_daily_history_status}: {restarted_daily_matches}",
+        )
+        restarted_daily_lcr_status, restarted_daily_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50",
+            token=token_a,
+        )
+        restarted_daily_lcr_matches = [
+            row for row in (restarted_daily_lcr or {}).get("items", [])
+            if row.get("id") == daily_event_id
+        ]
+        require(
+            restarted_daily_lcr_status == 200
+            and len(restarted_daily_lcr_matches) == 1
+            and restarted_daily_lcr_matches[0].get("evidence_ids") == [daily_evidence_id],
+            f"Daily Care source was not retrievable from LCR after Uvicorn restart: {restarted_daily_lcr_status}: {restarted_daily_lcr_matches}",
+        )
+        replay_status, replayed_daily_capture = request(
+            "POST", "/api/v1/daily/log", token=token_a, body=daily_capture_payload,
+        )
+        require(
+            replay_status == 200
+            and replayed_daily_capture.get("id") == daily_event_id
+            and replayed_daily_capture.get("evidence_ids") == [daily_evidence_id]
+            and replayed_daily_capture.get("idempotent_replay") is True,
+            f"Daily Care retry after restart created or returned a different record: {replay_status}: {replayed_daily_capture}",
+        )
+        foreign_daily_history_status, foreign_daily_history = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_b,
+        )
+        require(
+            foreign_daily_history_status == 403,
+            f"Foreign caregiver could read Daily Care history after restart: {foreign_daily_history_status}: {foreign_daily_history}",
+        )
+
+        # Verify the same restored account and all its data after an actual server restart.
         restarted_login_status, restarted_login = request(
             "POST", "/api/v1/accounts/login",
             body={"email": continuity_email, "password": continuity_password},
