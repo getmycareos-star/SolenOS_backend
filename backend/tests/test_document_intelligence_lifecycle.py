@@ -222,6 +222,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
             assert assertion.assertion_kind == "document_reviewed_observation"
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quotes[1]
+            assert "page 1" in assertion.source_label
             assert assertion.created_by_caregiver_id == first["caregiver"]["id"]
         finally:
             db.close()
