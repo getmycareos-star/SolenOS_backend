@@ -3539,13 +3539,15 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         EvidenceModel.id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
     ).all()
     evidence_by_id = {str(item.id): item for item in evidence_rows}
-    relationship_rows = db.query(EvidenceSourceRelationship).filter(
-        EvidenceSourceRelationship.person_id == person_id,
-        or_(
-            EvidenceSourceRelationship.source_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
-            EvidenceSourceRelationship.related_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
-        ),
-    ).all()
+    relationship_rows = []
+    if inspect(db.get_bind()).has_table("evidence_source_relationships"):
+        relationship_rows = db.query(EvidenceSourceRelationship).filter(
+            EvidenceSourceRelationship.person_id == person_id,
+            or_(
+                EvidenceSourceRelationship.source_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
+                EvidenceSourceRelationship.related_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
+            ),
+        ).all()
     relationship_status_by_evidence = {}
     for relationship in relationship_rows:
         for evidence_id in (str(relationship.source_evidence_id), str(relationship.related_evidence_id)):
