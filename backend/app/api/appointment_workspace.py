@@ -210,6 +210,19 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         Appointment.person_id == person_id,
     ).order_by(Appointment.scheduled_at.desc()).limit(15).all()
 
+    # Source-attributed observations and outcomes are part of the LCR even
+    # when they have not been promoted to caregiver-reviewed assertions.
+    try:
+        assertion_rows = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.assertion_status.in_(["reported", "review_required", "accepted", "caregiver_reviewed"]),
+        ).order_by(CareAssertion.recorded_at.desc()).limit(40).all()
+        assertion_source_status = "available" if assertion_rows else "empty"
+    except Exception:
+        db.rollback()
+        assertion_rows = None
+        assertion_source_status = "failed"
+
     # Document text is included only after it has been extracted from a
     # persisted, person-scoped upload. Raw upload metadata alone is not treated
     # as readable clinical content.
@@ -297,13 +310,35 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "preparation_notes": item.preparation_notes,
         "evidence_ids": item.evidence_ids or [],
     } for item in appointments]
+    assertion_items = [{
+        "source_table": "care_assertions",
+        "source_id": str(item.id),
+        "field": item.field,
+        "asserted_value": item.asserted_value,
+        "assertion_kind": item.assertion_kind,
+        "assertion_status": item.assertion_status,
+        "source_label": item.source_label,
+        "source_text": item.source_text,
+        "event_time_text": item.event_time_text,
+        "observed_at": _iso(item.observed_at),
+        "recorded_at": _iso(item.recorded_at),
+        "source_proposal_id": item.source_proposal_id,
+        "source_conversation_id": item.source_conversation_id,
+        "source_message_id": item.source_message_id,
+        "evidence_ids": item.evidence_ids or [],
+        "interpretation_limit": (
+            "Caregiver-attributed report; review status is preserved and this is not independent clinical verification."
+            if item.assertion_status in {"reported", "review_required"}
+            else "Caregiver-reviewed source report; this is not independent clinical verification."
+        ),
+    } for item in (assertion_rows or [])]
 
     # Attach provenance only for evidence IDs explicitly linked to this person's
     # preparation records. Author/uploader/reporter and event time stay separate.
     referenced_evidence_ids = set()
     for row in facts:
         referenced_evidence_ids.update(row.get("evidence_ids", []))
-    for row in event_items + appointment_items:
+    for row in event_items + appointment_items + assertion_items:
         referenced_evidence_ids.update(
             str(value) for value in row.get("evidence_ids", []) if isinstance(value, str)
         )
@@ -381,7 +416,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     for evidence_id, source in evidence_sources.items():
         source["freshness_assessments"] = freshness_by_evidence.get(str(evidence_id), [])
 
-    for row in facts + event_items + appointment_items:
+    for row in facts + event_items + appointment_items + assertion_items:
         row["freshness_assessments"] = [
             assessment
             for evidence_id in row.get("evidence_ids", [])
@@ -422,6 +457,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "facts": facts,
         "events": event_items,
         "appointments": appointment_items,
+        "assertions": assertion_items,
         "documents": documents,
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
@@ -447,6 +483,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             ),
             "care_events": "available" if event_items else "empty",
             "appointments": "available" if appointment_items else "empty",
+            "care_assertions": assertion_source_status,
             "evidence_freshness_assessments": (
                 "unavailable" if not freshness_schema_available
                 else "available" if freshness_assessments else "empty"
