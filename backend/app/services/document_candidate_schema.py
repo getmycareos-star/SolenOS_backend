@@ -15,6 +15,10 @@ _DATE_PATTERNS = (
     re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"),
     re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b"),
 )
+_NATURAL_DATE_TOKEN = re.compile(
+    r"\\b(?:\\d{1,2}\\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\\s+\\d{4})?|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2}(?:,?\\s+\\d{4})?)\\b",
+    re.I,
+)
 _MEDICATION_TERMS = re.compile(
     r"\b(mg|mcg|micrograms?|milligrams?|tablet|capsule|dose|dosage|"
     r"medication|medicine|take|twice daily|once daily|every\s+\d+\s+hours?)\b",
@@ -99,6 +103,7 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[
         if re.search(r"\b(?:increase|decrease|stop|discontinue|hold|restart|replace)\b", excerpt, re.I):
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
     date_tokens = re.findall(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt)
+    date_tokens.extend(_NATURAL_DATE_TOKEN.findall(excerpt))
     if date_tokens and _date_from_excerpt(excerpt) is None:
         if _recorded_date_from_excerpt(excerpt):
             warnings.append("A document recording date is present, but the event date is not explicit; event_date remains missing.")
