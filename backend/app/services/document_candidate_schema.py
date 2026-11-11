@@ -58,27 +58,32 @@ def classify_field(subject: str, observation: str, excerpt: str) -> str:
 
 
 def _date_from_excerpt(excerpt: str) -> str | None:
-    for pattern in _DATE_PATTERNS:
-        match = pattern.search(excerpt)
-        if not match:
-            continue
-        prefix = excerpt[max(0, match.start() - 50):match.start()]
-        if re.search(r"\b(?:recorded|documented|entered|signed|authored|created)\s+on\s+$", prefix, re.I):
+    recorded_prefix = re.compile(
+        r"\b(?:recorded|documented|entered|signed|authored|created)\s+on\s+$",
+        re.I,
+    )
+    # Prefer explicit ISO event dates. Skip separately labelled recording dates
+    # and continue searching for a later event date in the same source passage.
+    for match in _DATE_PATTERNS[0].finditer(excerpt):
+        prefix = excerpt[max(0, match.start() - 60):match.start()]
+        if recorded_prefix.search(prefix):
             continue
         try:
-            if pattern is _DATE_PATTERNS[0]:
-                parsed = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-            else:
-                # Slash-formatted dates are locale-ambiguous (MM/DD vs DD/MM).
-                # Preserve them as source text until a caregiver confirms the format.
-                return None
-            return parsed.isoformat()
+            return date(
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+            ).isoformat()
         except ValueError:
-            # Invalid dates remain missing and are explicitly flagged below.
+            return None
+    # Slash-formatted dates remain locale-ambiguous (MM/DD vs DD/MM).
+    for match in _DATE_PATTERNS[1].finditer(excerpt):
+        prefix = excerpt[max(0, match.start() - 60):match.start()]
+        if not recorded_prefix.search(prefix):
             return None
     for match in _NATURAL_DATE_TOKEN.finditer(excerpt):
         prefix = excerpt[max(0, match.start() - 60):match.start()]
-        if re.search(r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+on\\s+$", prefix, re.I):
+        if recorded_prefix.search(prefix):
             continue
         natural = match.group(0)
         for date_format in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%B %d %Y", "%b %d, %Y", "%b %d %Y"):
@@ -87,7 +92,6 @@ def _date_from_excerpt(excerpt: str) -> str | None:
             except ValueError:
                 continue
     return None
-
 
 def _recorded_date_from_excerpt(excerpt: str) -> str | None:
     match = re.search(
