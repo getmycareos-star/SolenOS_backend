@@ -165,17 +165,17 @@ def chunk_document_pages(
         remaining = page_text or ""
         while remaining:
             if len(remaining) <= max_chars:
-                chunk = remaining.strip()
-                if chunk:
-                    chunks.append((page_number, chunk))
+                chunks.append((page_number, remaining))
                 break
-            boundary = remaining.rfind("\\n", 0, max_chars)
+            boundary = remaining.rfind("\n", 0, max_chars)
             if boundary < max_chars // 2:
                 boundary = max_chars
-            chunk = remaining[:boundary].strip()
+            else:
+                boundary += 1
+            chunk = remaining[:boundary]
             if chunk:
                 chunks.append((page_number, chunk))
-            remaining = remaining[boundary:].lstrip()
+            remaining = remaining[boundary:]
     return chunks
 
 
