@@ -387,6 +387,19 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         )
         assert any("outdated or superseded" in warning for warning in body["observations"][0]["warnings"])
         assert body["written_to_lcr"] is False
+        accepted = client.post(
+            f"/api/v1/documents/intelligence/{body['analysis_id']}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["written_to_lcr"] is True
+        with Session() as db:
+            assertion = db.query(CareAssertion).filter_by(
+                person_id=caregiver["person"]["id"]
+            ).one()
+            assert f"page {body['observations'][0]['page_number']}" in assertion.source_label
+            assert "duplicate copy of evidence original-evidence-123" in assertion.source_label
     finally:
         client.close()
         app.dependency_overrides.clear()
