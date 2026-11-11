@@ -720,7 +720,9 @@ def fulfil_approved_correction(
         raise HTTPException(status_code=404, detail="Correction target was not found in this care record")
     original_text = target.description or ""
     requested_original = str(correction_request.get("original_value") or "")
-    if original_text != requested_original:
+    requested_updated_at = correction_request.get("target_updated_at")
+    current_updated_at = target.updated_at.isoformat() if getattr(target, "updated_at", None) else None
+    if original_text != requested_original or current_updated_at != requested_updated_at:
         raise HTTPException(
             status_code=409,
             detail="The correction target changed after submission; a fresh correction request and review are required.",
