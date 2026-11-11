@@ -1,104 +1,156 @@
-"""Regression test for the unified Daily Care -> LCR -> Companion retrieval spine.
+"""PostgreSQL HTTP integration for Daily Care -> LCR -> Companion retrieval.
 
-The capture is written through the public HTTP route, then read through a fresh
-SQLAlchemy session using the exact retrieval composition used by Companion.
+This test intentionally runs only against the migrated PostgreSQL service. It
+must not silently fall back to SQLite or a mocked persistence layer.
 """
 import hashlib
+import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base, get_db
+from app.core.database import get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
 
-def test_daily_capture_is_available_to_companion_from_a_fresh_database_session():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
+def _postgres_url() -> str:
+    value = os.environ.get("DATABASE_URL", "").strip()
+    if value.startswith("postgresql+psycopg://"):
+        value = value.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    if not value.startswith(("postgresql://", "postgresql+psycopg2://")):
+        pytest.skip("Unified care spine integration requires PostgreSQL DATABASE_URL")
+    return value
+
+
+def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_context():
+    engine = create_engine(_postgres_url(), pool_pre_ping=True)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    suffix = uuid.uuid4().hex
+    person_id = f"unified-spine-person-{suffix}"
+    caregiver_id = f"unified-spine-caregiver-{suffix}"
+    other_person_id = f"unified-spine-other-person-{suffix}"
+    other_caregiver_id = f"unified-spine-other-caregiver-{suffix}"
+    token = f"unified-spine-token-{suffix}"
+    other_token = f"unified-spine-other-token-{suffix}"
+    headers = {"Authorization": f"Bearer {token}"}
 
     def override_get_db():
-        db = TestingSessionLocal()
+        db = SessionLocal()
         try:
             yield db
         finally:
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    person_id = "unified-spine-person"
-    caregiver_id = "unified-spine-caregiver"
-    token = "unified-spine-test-token"
-    headers = {"Authorization": f"Bearer {token}"}
     try:
-        with TestingSessionLocal() as db:
-            person = Person(id=person_id, name="Unified spine test person")
-            caregiver = Caregiver(
-                id=caregiver_id,
-                name="Family caregiver",
-                email="unified-spine@example.invalid",
-                relationship="Family",
-                person_id=person_id,
-            )
-            db.add_all([person, caregiver])
+        with SessionLocal() as db:
+            db.add_all([
+                Person(id=person_id, name="PostgreSQL care spine recipient"),
+                Person(id=other_person_id, name="Isolated PostgreSQL recipient"),
+            ])
             db.flush()
-            db.add(AnonymousSession(
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-            ))
+            db.add_all([
+                Caregiver(
+                    id=caregiver_id, name="Family caregiver",
+                    relationship="Family", person_id=person_id,
+                ),
+                Caregiver(
+                    id=other_caregiver_id, name="Other caregiver",
+                    relationship="Family", person_id=other_person_id,
+                ),
+            ])
+            db.flush()
+            db.add_all([
+                AnonymousSession(
+                    person_id=person_id, caregiver_id=caregiver_id,
+                    token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                ),
+                AnonymousSession(
+                    person_id=other_person_id, caregiver_id=other_caregiver_id,
+                    token_hash=hashlib.sha256(other_token.encode()).hexdigest(),
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                ),
+            ])
             db.commit()
 
-        client = TestClient(app)
-        response = client.post(
-            "/api/v1/daily-care/entries",
-            headers=headers,
-            json={
-                "person_id": person_id,
-                "caregiver_id": caregiver_id,
-                "general_notes": "Mum was unusually confused this afternoon and refused lunch.",
-            },
-        )
-        assert response.status_code == 200, response.text
-        receipt = response.json()
-        assert receipt["success"] is True
-        assert len(receipt["evidence_ids"]) == 1
-
-        event_id = receipt["id"]
-        evidence_id = receipt["evidence_ids"][0]
-
-        # Close the write session and reconstruct retrieval from a new DB session.
-        with TestingSessionLocal() as db:
-            event = db.query(CareEvent).filter_by(id=event_id, person_id=person_id).one()
-            evidence = db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).one()
-            assert event.evidence_ids == [evidence_id]
-            assert evidence.reported_by_caregiver_id == caregiver_id
-            assert evidence.epistemic_status == "caregiver_reported"
-
-        with TestingSessionLocal() as db:
-            context = build_unified_lcr_context(
-                db, person_id, caregiver_id, limit_per_source=50
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/daily-care/entries",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "general_notes": "Mum was unusually confused this afternoon and refused lunch.",
+                },
             )
+            assert response.status_code == 200, response.text
+            receipt = response.json()
+            assert receipt["success"] is True
+            assert len(receipt["evidence_ids"]) == 1
+            event_id = receipt["id"]
+            evidence_id = receipt["evidence_ids"][0]
 
-        sources = context["sources"]
-        event_rows = [row for row in sources["events"]["items"] if row["id"] == event_id]
-        evidence_rows = [row for row in sources["evidence"]["items"] if row["id"] == evidence_id]
-        assert len(event_rows) == 1
-        assert len(evidence_rows) == 1
-        assert event_rows[0]["evidence_ids"] == [evidence_id]
-        assert evidence_rows[0]["epistemic_status"] == "caregiver_reported"
-        assert context["retrieval_contract"]["retrieval_strategy"] == "hybrid_lexical_semantic_temporal"
+            # A separate database session must read the committed write.
+            with SessionLocal() as db:
+                event = db.query(CareEvent).filter_by(
+                    id=event_id, person_id=person_id
+                ).one()
+                evidence = db.query(Evidence).filter_by(
+                    id=evidence_id, person_id=person_id
+                ).one()
+                assert event.evidence_ids == [evidence_id]
+                assert event.created_by_caregiver_id == caregiver_id
+                assert evidence.reported_by_caregiver_id == caregiver_id
+                assert evidence.epistemic_status == "caregiver_reported"
+
+                # Companion uses this shared retrieval composition. It must
+                # retrieve the same committed source IDs from a fresh session.
+                context = build_unified_lcr_context(
+                    db, person_id, caregiver_id, limit_per_source=50
+                )
+
+            event_rows = [
+                row for row in context["sources"]["events"]["items"]
+                if row["id"] == event_id
+            ]
+            evidence_rows = [
+                row for row in context["sources"]["evidence"]["items"]
+                if row["id"] == evidence_id
+            ]
+            assert len(event_rows) == 1
+            assert len(evidence_rows) == 1
+            assert event_rows[0]["evidence_ids"] == [evidence_id]
+            assert evidence_rows[0]["epistemic_status"] == "caregiver_reported"
+            assert context["retrieval_contract"]["caregiver_scope_applied"] is True
+
+            lcr = client.get(
+                "/api/v1/care-continuity/current-care?limit_per_source=50",
+                headers=headers,
+            )
+            assert lcr.status_code == 200, lcr.text
+            lcr_matches = [
+                item for item in lcr.json()["items"] if item["id"] == event_id
+            ]
+            assert len(lcr_matches) == 1
+            assert lcr_matches[0]["evidence_ids"] == [evidence_id]
+
+            # A different server-issued session cannot read this recipient's LCR.
+            foreign = client.get(
+                "/api/v1/care-continuity/current-care?limit_per_source=50",
+                headers={"Authorization": f"Bearer {other_token}"},
+            )
+            assert foreign.status_code == 200, foreign.text
+            assert not any(
+                item["id"] == event_id for item in foreign.json()["items"]
+            )
     finally:
-        app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
+        app.dependency_overrides.pop(get_db, None)
         engine.dispose()
