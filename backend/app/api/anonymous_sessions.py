@@ -65,6 +65,7 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
         expires_at=expires_at,
     )
     db.add(session)
+    db.flush()  # Materialize the generated session ID before linking its audit event.
     # Record creation without ever persisting or logging the bearer token.
     db.add(AuditLogEvent(
         actor_id=caregiver.id,
