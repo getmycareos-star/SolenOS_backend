@@ -22,6 +22,7 @@ from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, CareAssertion
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
+from app.models.uncertainty import Contradiction, OpenQuestion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 from app.schemas.care_continuity import CareAssertionCreate
@@ -332,13 +333,62 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             else "Caregiver-reviewed source report; this is not independent clinical verification."
         ),
     } for item in (assertion_rows or [])]
+    try:
+        question_rows = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person_id,
+            OpenQuestion.status.notin_(["answered", "closed", "resolved", "rejected"]),
+        ).order_by(OpenQuestion.asked_at.desc()).limit(30).all()
+        question_source_status = "available" if question_rows else "empty"
+    except Exception:
+        db.rollback()
+        question_rows = None
+        question_source_status = "failed"
+    question_items = [{
+        "source_id": str(item.id),
+        "question": item.question,
+        "subject_type": item.subject_type,
+        "subject_id": item.subject_id,
+        "intended_answerer_role": item.intended_answerer_role,
+        "intended_answerer_label": item.intended_answerer_label,
+        "necessity": item.necessity,
+        "necessity_rationale": item.necessity_rationale,
+        "priority": item.priority.value if hasattr(item.priority, "value") else str(item.priority),
+        "status": item.status,
+        "evidence_ids": item.evidence_ids or [],
+        "context": item.context or [],
+        "asked_at": _iso(item.asked_at),
+    } for item in (question_rows or [])]
+    try:
+        contradiction_rows = db.query(Contradiction).filter(
+            Contradiction.person_id == person_id,
+            Contradiction.resolution_status.notin_(["resolved", "dismissed", "rejected"]),
+        ).order_by(Contradiction.created_at.desc()).limit(30).all()
+        contradiction_source_status = "available" if contradiction_rows else "empty"
+    except Exception:
+        db.rollback()
+        contradiction_rows = None
+        contradiction_source_status = "failed"
+    contradiction_items = [{
+        "source_id": str(item.id),
+        "field": item.field,
+        "description": item.description,
+        "resolution_status": item.resolution_status,
+        "resolution_notes": item.resolution_notes,
+        "resolution_scope": item.resolution_scope,
+        "unresolved_remainder": item.unresolved_remainder,
+        "effective_from": _iso(item.effective_from),
+        "effective_to": _iso(item.effective_to),
+        "source_assertion_ids": item.source_assertion_ids or [],
+        "evidence_ids": item.evidence_ids or [],
+        "created_at": _iso(item.created_at),
+    } for item in (contradiction_rows or [])]
 
     # Attach provenance only for evidence IDs explicitly linked to this person's
     # preparation records. Author/uploader/reporter and event time stay separate.
     referenced_evidence_ids = set()
     for row in facts:
         referenced_evidence_ids.update(row.get("evidence_ids", []))
-    for row in event_items + appointment_items + assertion_items:
+    for row in event_items + appointment_items + assertion_items + question_items + contradiction_items:
         referenced_evidence_ids.update(
             str(value) for value in row.get("evidence_ids", []) if isinstance(value, str)
         )
@@ -416,7 +466,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     for evidence_id, source in evidence_sources.items():
         source["freshness_assessments"] = freshness_by_evidence.get(str(evidence_id), [])
 
-    for row in facts + event_items + appointment_items + assertion_items:
+    for row in facts + event_items + appointment_items + assertion_items + question_items + contradiction_items:
         row["freshness_assessments"] = [
             assessment
             for evidence_id in row.get("evidence_ids", [])
@@ -458,6 +508,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "events": event_items,
         "appointments": appointment_items,
         "assertions": assertion_items,
+        "open_questions": question_items,
+        "contradictions": contradiction_items,
         "documents": documents,
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
@@ -484,6 +536,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "care_events": "available" if event_items else "empty",
             "appointments": "available" if appointment_items else "empty",
             "care_assertions": assertion_source_status,
+            "open_questions": question_source_status,
+            "contradictions": contradiction_source_status,
             "evidence_freshness_assessments": (
                 "unavailable" if not freshness_schema_available
                 else "available" if freshness_assessments else "empty"
