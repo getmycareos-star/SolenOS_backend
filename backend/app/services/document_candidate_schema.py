@@ -132,12 +132,41 @@ def _date_tokens(excerpt: str) -> list[str]:
     return tokens
 
 
+def medication_details_for_candidate(subject: str, excerpt: str) -> dict[str, str | None]:
+    """Resolve strength/instructions from the subject's own row where possible."""
+    strength_pattern = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", re.I)
+    dosage_pattern = re.compile(
+        r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
+        re.I,
+    )
+    lines = [line.strip() for line in re.split(r"[\n;]+", excerpt) if line.strip()]
+    subject_lines = [
+        line for line in lines
+        if subject.strip() and re.search(re.escape(subject.strip()), line, re.I)
+    ]
+    selected = "\n".join(subject_lines) if subject_lines else excerpt
+    strengths = list(dict.fromkeys(match.group(0).strip() for match in strength_pattern.finditer(selected)))
+    all_strengths = list(dict.fromkeys(match.group(0).strip() for match in strength_pattern.finditer(excerpt)))
+    strength = strengths[0] if len(strengths) == 1 else None
+    if not subject_lines and len(all_strengths) == 1:
+        strength = all_strengths[0]
+    dosage_match = dosage_pattern.search(selected)
+    return {
+        "strength": strength,
+        "dosage_instructions": dosage_match.group(0).strip() if dosage_match else None,
+        "strength_ambiguous": "true" if len(strengths) > 1 or (not subject_lines and len(all_strengths) > 1) else "false",
+    }
+
+
 def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[str]:
     warnings: list[str] = []
     if field_type == "medication":
-        if not re.search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", excerpt, re.I):
-            warnings.append("Medication strength is not explicit in the quoted passage.")
-        if not re.search(r"\b(take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)\b", excerpt, re.I):
+        details = medication_details_for_candidate(observation, excerpt)
+        if not details["strength"]:
+            warnings.append("Medication strength is missing or ambiguous for this medication row.")
+        if details["strength_ambiguous"] == "true":
+            warnings.append("Multiple medication strengths appear in the quoted passage; verify the strength against this medication's original row.")
+        if not details["dosage_instructions"]:
             warnings.append("Medication administration instructions are not explicit; dosage remains missing.")
         if re.search(r"\b(?:increase|decrease|stop|discontinue|hold|restart|replace)\b", excerpt, re.I):
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
@@ -177,15 +206,10 @@ def canonical_candidate(
     timestamp = (recorded_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
     medication_details = None
     if field_type == "medication":
-        strength_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", excerpt, re.I)
-        dosage_match = re.search(
-            r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
-            excerpt,
-            re.I,
-        )
+        details = medication_details_for_candidate(subject, excerpt)
         medication_details = {
-            "strength": strength_match.group(0).strip() if strength_match else None,
-            "dosage_instructions": dosage_match.group(0).strip() if dosage_match else None,
+            "strength": details["strength"],
+            "dosage_instructions": details["dosage_instructions"],
         }
     return {
         "candidate_id": str(uuid.uuid4()),
