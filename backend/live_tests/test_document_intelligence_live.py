@@ -13,14 +13,12 @@ from app.models.care_continuity import CareAssertion
 from app.main import app
 import app.main as main_module
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1",
-    reason="requires the dedicated live-Qwen workflow and a running Ollama model",
-)
-
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-if not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
-    raise RuntimeError("Live document Qwen acceptance requires migrated PostgreSQL")
+POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://"))
+pytestmark = pytest.mark.skipif(
+    os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1" or not POSTGRES_DATABASE,
+    reason="requires the dedicated live-Qwen workflow, running Ollama model and migrated PostgreSQL",
+)
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
