@@ -219,6 +219,11 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             document_id=str(evidence.id),
             source_text=source_text,
         )
+        extraction_method = str(metadata.get("extraction_method") or "")
+        if "server_pdf_text" in extraction_method:
+            canonical["warnings"].append("PDF text extraction may flatten multi-column or table reading order; compare this passage with the original page.")
+        if "tesseract" in extraction_method:
+            canonical["warnings"].append("OCR text may misread names, dates, decimal points, strengths or dosage instructions; verify against the original page.")
         grounded.append({
             "subject": subject.strip()[:120],
             "observation": observation.strip()[:500],
@@ -248,10 +253,19 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         "status": "available",
         "observations": grounded,
         "open_questions": [
-            value.strip()[:300]
-            for value in (extracted.get("open_questions") or [])[:3]
-            if isinstance(value, str) and value.strip()
+            *[
+                value.strip()[:300]
+                for value in (extracted.get("open_questions") or [])[:3]
+                if isinstance(value, str) and value.strip()
+            ],
+            *(
+                [f"Qwen processed {MAX_DOCUMENT_QWEN_PAGES} of {len(page_inputs)} readable pages. Remaining pages need a separate extraction pass."]
+                if len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES else []
+            ),
         ],
+        "processed_page_count": min(len(page_inputs), MAX_DOCUMENT_QWEN_PAGES),
+        "total_readable_page_count": len(page_inputs),
+        "status": "partial" if len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES else "available",
         "model_authority": "review_only",
         "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
     }
