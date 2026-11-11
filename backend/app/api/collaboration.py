@@ -3519,20 +3519,37 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     # use. A sentence is linked only when its wording appears in that source;
     # paraphrases and unmatched statements are explicitly left unsupported.
     claim_source_records = []
-    attribution_ids = set()
-    if source_event_ids:
+    event_rows = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id,
+        CareEvent.id.in_(list(dict.fromkeys(source_event_ids)) or {"__no_matching_event__"}),
+    ).all()
+    linked_evidence_ids = {
+        str(evidence_id)
+        for event in event_rows
+        for evidence_id in (event.evidence_ids or [])
+        if evidence_id
+    }
+    all_claim_evidence_ids = list(dict.fromkeys([
+        *source_evidence_ids,
+        *sorted(linked_evidence_ids),
+    ]))
+    evidence_rows = db.query(EvidenceModel).filter(
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
+    ).all()
+    evidence_by_id = {str(item.id): item for item in evidence_rows}
+
+    attribution_ids = {
+        str(event.created_by_caregiver_id)
+        for event in event_rows if event.created_by_caregiver_id
+    }
+    for evidence in evidence_rows:
         attribution_ids.update(
-            str(value) for value in db.query(CareEvent.created_by_caregiver_id).filter(
-                CareEvent.person_id == person_id,
-                CareEvent.id.in_(list(dict.fromkeys(source_event_ids))),
-            ).all() if value and value[0]
+            str(value) for value in (
+                evidence.uploaded_by_caregiver_id,
+                evidence.reported_by_caregiver_id,
+            ) if value
         )
-    if source_evidence_ids:
-        for value in db.query(EvidenceModel.uploaded_by_caregiver_id, EvidenceModel.reported_by_caregiver_id).filter(
-            EvidenceModel.person_id == person_id,
-            EvidenceModel.id.in_(list(dict.fromkeys(source_evidence_ids))),
-        ).all():
-            attribution_ids.update(str(item) for item in value if item)
     if source_assertion_ids:
         attribution_ids.update(
             str(value) for value in db.query(CareAssertion.created_by_caregiver_id).filter(
@@ -3547,41 +3564,59 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             Caregiver.id.in_(attribution_ids or {"__no_matching_caregiver__"}),
         ).all()
     }
-    if source_event_ids:
-        for event in db.query(CareEvent).filter(
-            CareEvent.person_id == person_id,
-            CareEvent.id.in_(list(dict.fromkeys(source_event_ids))),
-        ).all():
-            claim_source_records.append({
-                "record_type": "care_event",
-                "record_id": str(event.id),
-                "label": "Care entry",
-                "source_text": " ".join(part for part in (event.title, event.description or "") if part),
-                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-                "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
-                "entered_by": caregiver_names.get(str(event.created_by_caregiver_id), "Caregiver not identified"),
-                "record_status": event.status,
-                "related_evidence_ids": list(event.evidence_ids or []),
-            })
-    if source_evidence_ids:
-        for evidence in db.query(EvidenceModel).filter(
-            EvidenceModel.person_id == person_id,
-            EvidenceModel.id.in_(list(dict.fromkeys(source_evidence_ids))),
-        ).all():
-            claim_source_records.append({
-                "record_type": "care_evidence",
-                "record_id": str(evidence.id),
-                "label": "Original note or document",
-                "source_text": evidence.source_text or "",
-                "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
-                "recorded_at": evidence.ingested_at.isoformat() if evidence.ingested_at else (
-                    evidence.uploaded_at.isoformat() if evidence.uploaded_at else None
-                ),
-                "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
-                "entered_by": caregiver_names.get(str(evidence.uploaded_by_caregiver_id), "Caregiver not identified"),
-                "record_status": evidence.epistemic_status or evidence.evidence_status,
-                "related_evidence_ids": [str(evidence.id)],
-            })
+
+    def _related_source_summary(evidence):
+        try:
+            metadata = json.loads(evidence.extra_metadata or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        filename = metadata.get("filename") if isinstance(metadata, dict) else None
+        return {
+            "label": str(filename or "Related note or document"),
+            "record_id": str(evidence.id),
+            "source_excerpt": (evidence.source_text or "")[:700],
+            "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
+            "recorded_at": evidence.ingested_at.isoformat() if evidence.ingested_at else (
+                evidence.uploaded_at.isoformat() if evidence.uploaded_at else None
+            ),
+            "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
+            "record_status": evidence.epistemic_status or evidence.evidence_status,
+        }
+
+    for event in event_rows:
+        claim_source_records.append({
+            "record_type": "care_event",
+            "record_id": str(event.id),
+            "label": "Care entry",
+            "source_text": " ".join(part for part in (event.title, event.description or "") if part),
+            "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+            "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
+            "entered_by": caregiver_names.get(str(event.created_by_caregiver_id), "Caregiver not identified"),
+            "record_status": event.status,
+            "related_evidence_ids": list(event.evidence_ids or []),
+            "related_evidence": [
+                _related_source_summary(evidence_by_id[str(evidence_id)])
+                for evidence_id in (event.evidence_ids or [])
+                if str(evidence_id) in evidence_by_id
+            ],
+        })
+    for evidence in evidence_rows:
+        if str(evidence.id) not in set(source_evidence_ids):
+            continue
+        claim_source_records.append({
+            "record_type": "care_evidence",
+            "record_id": str(evidence.id),
+            "label": "Original note or document",
+            "source_text": evidence.source_text or "",
+            "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
+            "recorded_at": evidence.ingested_at.isoformat() if evidence.ingested_at else (
+                evidence.uploaded_at.isoformat() if evidence.uploaded_at else None
+            ),
+            "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
+            "entered_by": caregiver_names.get(str(evidence.uploaded_by_caregiver_id), "Caregiver not identified"),
+            "record_status": evidence.epistemic_status or evidence.evidence_status,
+            "related_evidence_ids": [str(evidence.id)],
+        })
     if source_assertion_ids:
         for assertion in db.query(CareAssertion).filter(
             CareAssertion.person_id == person_id,
