@@ -2672,3 +2672,65 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         assert client.get(f"/api/v1/uncertainty/questions/{second_id}/review-history").json()[0]["decision"] == "rejected"
     finally:
         teardown_db()
+
+
+def test_answer_without_upload_saves_the_caregiver_report_as_source_evidence():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-answer-source", name="Answer Source Person")
+        caregiver = Caregiver(
+            id="caregiver-answer-source",
+            name="Answer Source Caregiver",
+            email="answer-source@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        created = client.post("/api/v1/uncertainty/questions", json={
+            "person_id": person.id,
+            "question": "Has her weight been measured recently?",
+            "subject_type": "person",
+            "subject_id": person.id,
+        })
+        assert created.status_code == 200, created.text
+        question_id = created.json()["id"]
+
+        answer_text = "Her weight was measured at the clinic this morning."
+        answer_source = "I was present when the nurse measured it."
+        answered = client.patch(f"/api/v1/uncertainty/questions/{question_id}", json={
+            "status": "answered",
+            "answer": answer_text,
+            "answer_provenance": answer_source,
+        })
+        assert answered.status_code == 200, answered.text
+        assert answered.json()["status"] == "answered"
+
+        history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
+        assert history.status_code == 200, history.text
+        answer_event = history.json()[0]
+        assert answer_event["answer"] == answer_text
+        assert answer_event["answer_provenance"] == answer_source
+        assert len(answer_event["evidence_ids"]) == 1
+
+        db = TestingSessionLocal()
+        try:
+            evidence = db.query(Evidence).filter(
+                Evidence.id == answer_event["evidence_ids"][0],
+                Evidence.person_id == person.id,
+            ).one()
+            assert evidence.evidence_kind == "caregiver_report"
+            assert evidence.epistemic_status == "caregiver_reported"
+            assert evidence.uploaded_by_caregiver_id == caregiver.id
+            assert evidence.source_text == f"Answer: {answer_text}\\n\\nProvided by: {answer_source}"
+        finally:
+            db.close()
+    finally:
+        teardown_db()

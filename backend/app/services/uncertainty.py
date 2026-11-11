@@ -3,6 +3,7 @@ import re
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import CareAssertion as CareAssertionModel
 from app.models.uncertainty import (
     InformationGap as InformationGapModel,
@@ -279,15 +280,42 @@ class UncertaintyEngine:
             or "evidence_ids" in update_data
         )
         if new_status == "answered" and answer_content_changed:
-            # An answer is not complete because a caregiver typed text. It must
-            # point to one or more persisted source records in this same care file.
-            if "evidence_ids" not in update_data:
-                raise ValueError("Answering or correcting a clarification answer requires linked source evidence IDs.")
-            answer_evidence_ids = self._validate_person_evidence(
-                db_question.person_id, update_data.get("evidence_ids")
-            )
+            supplied_evidence_ids = update_data.get("evidence_ids") or []
+            if supplied_evidence_ids:
+                answer_evidence_ids = self._validate_person_evidence(
+                    db_question.person_id, supplied_evidence_ids
+                )
+            else:
+                # A caregiver's answer is itself a source report. Save it as
+                # append-only evidence in the same transaction so the caregiver
+                # does not need to upload a separate document to answer a question.
+                if not self.caregiver_id:
+                    raise ValueError("Recording a clarification answer requires an authenticated caregiver identity.")
+                if not isinstance(answer, str) or not answer.strip():
+                    raise ValueError("An answered question requires a non-empty answer.")
+                if not isinstance(answer_provenance, str) or not answer_provenance.strip():
+                    raise ValueError("An answered question requires answer provenance.")
+                answer_evidence = EvidenceModel(
+                    person_id=db_question.person_id,
+                    type="note",
+                    evidence_kind="caregiver_report",
+                    epistemic_status="caregiver_reported",
+                    source_text=f"Answer: {answer.strip()}\n\nProvided by: {answer_provenance.strip()}",
+                    uploaded_by_caregiver_id=self.caregiver_id,
+                    reported_by_caregiver_id=self.caregiver_id,
+                    collected_by_caregiver_id=self.caregiver_id,
+                    reported_by_label="Caregiver",
+                    source_type="caregiver_report",
+                    origin_channel="clarification_answer",
+                    collection_method="caregiver_form",
+                    time_provenance="server_recorded_at",
+                    occurred_at=datetime.now(timezone.utc),
+                )
+                self.db.add(answer_evidence)
+                self.db.flush()
+                answer_evidence_ids = [answer_evidence.id]
             if not answer_evidence_ids:
-                raise ValueError("Answering a clarification question requires at least one persisted source evidence item.")
+                raise ValueError("A clarification answer must have a saved source report.")
             update_data["evidence_ids"] = list(dict.fromkeys([
                 *(db_question.evidence_ids or []),
                 *answer_evidence_ids,
