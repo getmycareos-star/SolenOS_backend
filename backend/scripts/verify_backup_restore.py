@@ -122,7 +122,7 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                     (id, person_id, event_type, status, occurred_at, title, description,
                      evidence_ids, created_by_caregiver_id)
                 VALUES
-                    (:id, :person_id, 'observation', 'recorded', :occurred_at, :title,
+                    (:id, :person_id, 'structured_daily_capture', 'recorded', :occurred_at, :title,
                      :description, CAST(:evidence_ids AS json), :caregiver_id)
             """), {
                 "id": ids["event"], "person_id": ids["person"],
