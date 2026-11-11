@@ -614,6 +614,7 @@ def review_document_candidate(
                     source_label=source_label,
                     source_text=quote,
                     evidence_ids=[evidence_id],
+                    event_time_text=candidate.get("event_date") or None,
                     created_by_caregiver_id=caregiver_id,
                     updated_by_caregiver_id=caregiver_id,
                 ),
