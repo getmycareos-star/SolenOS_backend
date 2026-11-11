@@ -116,6 +116,14 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert data["persistence"] == "conversation_only"
         assert event_id in data["source_event_ids"]
         assert {"record_type": "care_event", "record_id": event_id} in data["source_record_refs"]
+        assert "claim_provenance" in data
+        assert data["claim_provenance"]["statement_count"] >= 1
+        assert data["claim_provenance"]["unmatched_statement_count"] >= 1
+        assert all(
+            claim["source_references"] == []
+            for claim in data["claim_provenance"]["claims"]
+            if claim["support_status"] == "not_matched_to_saved_wording"
+        )
 
         system_prompt = captured["messages"][0]["content"]
         user_payload = captured["messages"][-1]["content"]
