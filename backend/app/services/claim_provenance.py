@@ -1,0 +1,81 @@
+"""Claim-level source matching for caregiver-facing Companion responses.
+
+Only exact saved wording is presented as a source match. Paraphrases and claims
+that cannot be matched to an exact source passage remain explicitly unsupported.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+
+def _normalise(value: str) -> str:
+    value = (value or "").casefold()
+    value = re.sub(r"\s+", " ", value).strip()
+    return value.strip(" \t\r\n.,;:!?\"'()[]{}")
+
+
+def split_response_claims(reply: str) -> list[str]:
+    """Split a response into displayable statements without inventing claims."""
+    statements = []
+    for line in (reply or "").splitlines():
+        cleaned = re.sub(r"^\s*(?:[-*•]+|\d+[.)])\s*", "", line).strip()
+        if not cleaned:
+            continue
+        statements.extend(
+            part.strip()
+            for part in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])", cleaned)
+            if part.strip()
+        )
+    return statements
+
+
+def build_claim_provenance(reply: str, source_records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Link only statements whose wording occurs in a saved source.
+
+    A match is not an independence assessment and does not establish clinical
+    truth. Duplicate records remain separate references and are not counted as
+    independent corroboration.
+    """
+    claims = []
+    for index, statement in enumerate(split_response_claims(reply)):
+        normalized_claim = _normalise(statement)
+        matches = []
+        if normalized_claim:
+            for source in source_records:
+                source_text = str(source.get("source_text") or "")
+                normalized_source = _normalise(source_text)
+                if normalized_claim and normalized_claim in normalized_source:
+                    matches.append({
+                        "record_type": source.get("record_type"),
+                        "record_id": str(source.get("record_id")),
+                        "label": source.get("label") or "Saved care record",
+                        "matched_passage": statement,
+                        "occurred_at": source.get("occurred_at"),
+                        "recorded_at": source.get("recorded_at"),
+                        "reported_by": source.get("reported_by"),
+                        "entered_by": source.get("entered_by"),
+                        "record_status": source.get("record_status"),
+                        "related_evidence_ids": list(source.get("related_evidence_ids") or []),
+                    })
+        claims.append({
+            "claim_id": f"statement-{index + 1}",
+            "text": statement,
+            "support_status": "matched_saved_wording" if matches else "not_matched_to_saved_wording",
+            "source_references": matches,
+        })
+    unmatched = sum(1 for claim in claims if claim["support_status"] != "matched_saved_wording")
+    return {
+        "version": "claim-provenance-v1",
+        "coverage": "all_statements_matched" if claims and unmatched == 0 else (
+            "some_statements_unmatched" if claims else "no_statements"
+        ),
+        "statement_count": len(claims),
+        "unmatched_statement_count": unmatched,
+        "matching_limit": (
+            "A match means the statement wording appears in the saved source. "
+            "It does not establish source independence, authenticity, or clinical truth. "
+            "Paraphrases are left unmatched rather than assigned an unrelated source."
+        ),
+        "claims": claims,
+    }
