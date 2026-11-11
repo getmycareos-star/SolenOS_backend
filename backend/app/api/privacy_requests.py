@@ -871,6 +871,43 @@ def fulfil_approved_deletion(
     # Delete in reverse FK dependency order. Core deletes intentionally bypass
     # append-only ORM listeners: erasure is an explicit, reviewed privacy action.
     try:
+        # Remove legacy lifecycle tables created by generic migrations but not
+        # represented by ORM models. Keep the canonical request, audit and legal
+        # hold records for explicit redaction/retention handling below.
+        known_tables = set(Base.metadata.tables)
+        protected_tables = {"data_subject_requests", "audit_log_events", "legal_holds"}
+        for raw_table_name in inspector.get_table_names():
+            if raw_table_name in known_tables or raw_table_name in protected_tables:
+                continue
+            safe_name = raw_table_name.replace('"', '""')
+            raw_columns = {item["name"] for item in inspector.get_columns(raw_table_name)}
+            if "person_id" in raw_columns:
+                db.execute(
+                    text(f'DELETE FROM "{safe_name}" WHERE person_id = :person_id'),
+                    {"person_id": person_id},
+                )
+            elif "caregiver_id" in raw_columns:
+                db.execute(
+                    text(f'DELETE FROM "{safe_name}" WHERE caregiver_id = :caregiver_id'),
+                    {"caregiver_id": caregiver_id},
+                )
+
+        # Redact any earlier requests for the same care record, retaining only
+        # request type, timestamps and a non-reversible per-request pseudonym.
+        prior_requests = db.query(DataSubjectRequest).filter(
+            DataSubjectRequest.person_id == person_id,
+            DataSubjectRequest.id != row.id,
+        ).all()
+        for prior in prior_requests:
+            prior.requester_id = "erased:" + hashlib.sha256(
+                f"{prior.id}:{person_id}".encode("utf-8")
+            ).hexdigest()
+            prior.actor_id = None
+            prior.subject_id = None
+            prior.person_id = None
+            prior.caregiver_id = None
+            prior.record_metadata = {"redacted_for_privacy_erasure": True}
+
         for table in reversed(tables):
             if table.name in excluded_tables:
                 continue
@@ -880,6 +917,14 @@ def fulfil_approved_deletion(
                 db.execute(table.delete().where(primary_key[0].in_(ids)))
             elif table.name in direct_predicates:
                 db.execute(table.delete().where(direct_predicates[table.name]))
+
+        # Released/expired holds are no longer a deletion blocker and must not
+        # retain the deleted subject identifier.
+        if inspector.has_table("legal_holds"):
+            db.execute(
+                text("DELETE FROM legal_holds WHERE subject_id = :subject_id"),
+                {"subject_id": person_id},
+            )
 
         # Preserve only the privacy request receipt and redacted security audit.
         db.execute(
