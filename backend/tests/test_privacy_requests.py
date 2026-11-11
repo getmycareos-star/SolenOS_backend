@@ -209,7 +209,15 @@ def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
             .one()
         )
         assert event.actor_id == "founder_privacy_reviewer"
+        assert event.subject_id == session["person"]["id"]
+        assert event.person_id == session["person"]["id"]
+        assert event.caregiver_id == session["caregiver"]["id"]
         assert event.outcome == "approve"
+        assert event.record_metadata == {
+            "request_type": "deletion",
+            "fulfilment_started": False,
+        }
+        assert "authority_evidence_checked" not in str(event.record_metadata)
     finally:
         db.close()
 
@@ -295,7 +303,18 @@ def test_privacy_review_rejection_is_audited_and_removed_from_pending(monkeypatc
     assert body["status"] == "rejected"
     assert body["authority_verified_by_reviewer"] is False
     assert body["fulfilment_started"] is False
+    assert body["resolved_at"] is not None
     assert "no data was exported" in body["message"]
+
+    duplicate_rejection = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "reject",
+            "review_basis": "Attempted duplicate rejection.",
+        },
+    )
+    assert duplicate_rejection.status_code == 409, duplicate_rejection.text
 
     pending = client.get(
         "/api/v1/privacy/requests/reviewer/pending",
