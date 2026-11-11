@@ -839,7 +839,11 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             source_text=source_text,
             extraction_status=qwen_status,
             candidates=qwen_candidates if qwen_status == "available" else None,
+            commit=False,
         )
+        # The route owns this stage boundary; the shared helper must not commit
+        # behind the workflow's back.
+        db.commit()
         analysis_id = analysis.id
     except Exception:
         # The care event has already been committed. Roll back only the
