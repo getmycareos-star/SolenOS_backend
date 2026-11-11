@@ -217,3 +217,34 @@ def test_cached_extraction_rechecks_original_binary_integrity(client, monkeypatc
     retry = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert retry.status_code == 500, retry.text
     assert retry.json()["detail"] == "Stored evidence failed its integrity check"
+
+
+
+def test_duplicate_upload_is_preserved_and_linked_to_original(client):
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    payload = {
+        "person_id": session["person"]["id"],
+        "caregiver_id": session["caregiver"]["id"],
+        "evidence_type": "document",
+    }
+    original = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data=payload,
+        files={"file": ("discharge.pdf", b"identical original document bytes", "application/pdf")},
+    )
+    duplicate = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data=payload,
+        files={"file": ("copy-of-discharge.pdf", b"identical original document bytes", "application/pdf")},
+    )
+    assert original.status_code == 201, original.text
+    assert duplicate.status_code == 201, duplicate.text
+    assert original.json()["persisted"] is True
+    assert original.json()["duplicate_detected"] is False
+    assert duplicate.json()["persisted"] is True
+    assert duplicate.json()["duplicate_detected"] is True
+    assert duplicate.json()["duplicate_of_evidence_id"] == original.json()["evidence_id"]
+    assert duplicate.json()["evidence_id"] != original.json()["evidence_id"]
