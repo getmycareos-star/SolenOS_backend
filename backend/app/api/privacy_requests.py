@@ -231,7 +231,9 @@ def review_privacy_request(
     now = datetime.now(timezone.utc)
     outcome = "approved_pending_fulfilment_assessment" if payload.decision == "approve" else "rejected"
     row.request_status = outcome
-    row.resolved_at = now
+    # Approval is not fulfilment: keep the request unresolved until a separate
+    # export/correction/deletion workflow completes. Rejection is terminal here.
+    row.resolved_at = now if payload.decision == "reject" else None
     row.resolution_code = "review_approved" if payload.decision == "approve" else "review_rejected"
     row.record_metadata = {
         **(row.record_metadata or {}),
