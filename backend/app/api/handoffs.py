@@ -516,7 +516,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         record_metadata={
             "scope_version": 1,
             "request_fingerprint": request_fingerprint,
-            "delivery_status": "in_app_notification_pending_persist",
+            "delivery_status": "in_app_notification_enqueued",
             "delivery_recorded_at": now.isoformat(),
         },
     )
