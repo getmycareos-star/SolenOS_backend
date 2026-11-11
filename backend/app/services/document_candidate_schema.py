@@ -105,6 +105,18 @@ def canonical_candidate(
     if page_number is None:
         warnings.append("The exact excerpt could not be assigned to one unambiguous page.")
     timestamp = (recorded_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+    medication_details = None
+    if field_type == "medication":
+        strength_match = re.search(r"\\b\\d+(?:\\.\\d+)?\\s*(?:mg|mcg|g|ml)\\b", excerpt, re.I)
+        dosage_match = re.search(
+            r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
+            excerpt,
+            re.I,
+        )
+        medication_details = {
+            "strength": strength_match.group(0).strip() if strength_match else None,
+            "dosage_instructions": dosage_match.group(0).strip() if dosage_match else None,
+        }
     return {
         "candidate_id": str(uuid.uuid4()),
         "document_id": document_id,
@@ -117,6 +129,7 @@ def canonical_candidate(
         "confidence": None,
         "review_status": "Pending",
         "warnings": warnings,
+        "medication_details": medication_details,
     }
 
 
