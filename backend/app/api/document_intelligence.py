@@ -29,7 +29,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.document_candidate_schema import canonical_candidate, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
+from app.services.document_candidate_schema import canonical_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
@@ -113,6 +113,17 @@ def _document_asserted_value(candidate: dict, subject: str, observation: str) ->
     if candidate.get("field_type") == "medication":
         details = canonical.get("medication_details")
         details = details if isinstance(details, dict) else {}
+        if candidate.get("review_status") == "corrected_pending_approval":
+            strength_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", observation, re.I)
+            dosage_match = re.search(
+                r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
+                observation,
+                re.I,
+            )
+            details = {
+                "strength": strength_match.group(0).strip() if strength_match else None,
+                "dosage_instructions": dosage_match.group(0).strip() if dosage_match else None,
+            }
         return (
             f"Medication: {subject}\n"
             f"Strength: {details.get('strength') or 'Not stated in source'}\n"
@@ -515,6 +526,28 @@ def review_document_candidate(
             raise HTTPException(status_code=422, detail="A subject and corrected observation are required")
         candidate["subject"] = subject[:120]
         candidate["observation"] = observation[:500]
+        candidate["field_type"] = classify_field(subject, observation, str(candidate.get("source_quote") or ""))
+        canonical = candidate.get("canonical_candidate")
+        if isinstance(canonical, dict):
+            canonical["field_type"] = candidate["field_type"]
+            canonical["extracted_value"] = observation[:500]
+            canonical["review_status"] = "Corrected"
+            if candidate["field_type"] == "medication":
+                strength_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", observation, re.I)
+                dosage_match = re.search(
+                    r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
+                    observation,
+                    re.I,
+                )
+                canonical["medication_details"] = {
+                    "strength": strength_match.group(0).strip() if strength_match else None,
+                    "dosage_instructions": dosage_match.group(0).strip() if dosage_match else None,
+                }
+            else:
+                canonical["medication_details"] = None
+            canonical.setdefault("warnings", []).append(
+                "Caregiver-corrected wording requires review against the original source passage."
+            )
         candidate["review_status"] = "corrected_pending_approval"
     else:
         quote = candidate.get("source_quote")
