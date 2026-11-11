@@ -146,6 +146,51 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
             caregiver,
             "Caregiver reported waking several times overnight and restless sleep.",
         )
+        auth = {"Authorization": f"Bearer {caregiver['access_token']}"}
+
+        # Exercise the real Qwen Daily Care path against the event just persisted
+        # through the public Daily Care API. The answer remains read-only.
+        daily_qwen = client.post(
+            "/api/v1/daily-care/intelligence/ask",
+            headers=auth,
+            json={"question": "What did the caregiver report about sleep?", "history_query": "sleep"},
+        )
+        assert daily_qwen.status_code == 200, daily_qwen.text
+        daily_qwen_body = daily_qwen.json()
+        assert daily_qwen_body["status"] == "completed", daily_qwen_body
+        assert any(row.get("source_id") == event_id for row in daily_qwen_body.get("source_records", [])), daily_qwen_body
+        assert daily_qwen_body["written_to_lcr"] is False, daily_qwen_body
+
+        # Exercise actual Qwen document candidate extraction, not the mocked
+        # extraction boundary used by the isolated PostgreSQL persistence suite.
+        document_text = (
+            "Discharge note: Patient walked 20 metres with a frame on 12 October. "
+            "The patient ate half of lunch during the observation period."
+        )
+        uploaded = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": caregiver["person"]["id"],
+                "caregiver_id": caregiver["caregiver"]["id"],
+                "evidence_type": "document",
+            },
+            files={"file": ("live-discharge-note.txt", document_text, "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth, json={})
+        assert extracted.status_code == 201, extracted.text
+        interpreted = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert interpreted.status_code == 201, interpreted.text
+        document_result = interpreted.json()
+        assert document_result["intelligence_status"] == "available", document_result
+        assert document_result["written_to_lcr"] is False, document_result
+        assert all(
+            item.get("review_status") == "pending_review"
+            and item.get("source_quote") in document_text
+            for item in document_result.get("observations", [])
+        ), document_result
 
         direct = _ask(client, caregiver, "What did we record about sleep?")
         assert direct.status_code == 200, direct.text
