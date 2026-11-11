@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database import Base, get_db
+from app.core.database import get_db
 from app.models.care import CareEvent, Evidence
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
@@ -27,10 +27,10 @@ pytestmark = pytest.mark.skipif(
     reason="requires the dedicated live-Qwen appointment-assist workflow",
 )
 
-engine = create_engine(
-    "sqlite:////tmp/solenos-appointment-assist-live.db",
-    connect_args={"check_same_thread": False},
-)
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+if not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+    raise RuntimeError("Live appointment Qwen acceptance requires migrated PostgreSQL")
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -44,7 +44,6 @@ def override_db():
 
 def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
@@ -134,4 +133,4 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
     finally:
         client.close()
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
