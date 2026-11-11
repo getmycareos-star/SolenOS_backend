@@ -880,6 +880,14 @@ def test_medication_mentions_do_not_count_as_prescribing_changes():
         "change_type": "discontinued",
         "evidence_excerpt": "Amlodipine 5 mg daily appears on the historical medication list.",
     })
+    assert not _medication_change_is_explicit({
+        "change_type": "new",
+        "evidence_excerpt": "Amlodipine was not started during this admission.",
+    })
+    assert not _medication_change_is_explicit({
+        "change_type": "discontinued",
+        "evidence_excerpt": "Amlodipine was not discontinued.",
+    })
     assert _medication_change_is_explicit({
         "change_type": "new",
         "evidence_excerpt": "The prescriber started amlodipine 5 mg daily.",
