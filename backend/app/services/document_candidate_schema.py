@@ -82,7 +82,7 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[
             warnings.append("Medication administration instructions are not explicit; dosage remains missing.")
         if re.search(r"\b(?:increase|decrease|stop|discontinue|hold|restart|replace)\b", excerpt, re.I):
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
-    if re.search(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b", excerpt) and _date_from_excerpt(excerpt) is None:
+    if re.search(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt) and _date_from_excerpt(excerpt) is None:
         warnings.append("A date-like value could not be validated; event_date remains missing.")
     if not excerpt.strip():
         warnings.append("No readable source excerpt is available.")
