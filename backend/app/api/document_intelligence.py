@@ -29,11 +29,12 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.document_candidate_schema import canonical_candidate, split_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
+from app.services.document_candidate_schema import canonical_candidate, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
 MAX_DOCUMENT_QWEN_PAGES = 25
+MAX_DOCUMENT_QWEN_CHUNKS = 60
 
 
 class CandidateReview(BaseModel):
@@ -205,7 +206,14 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     all_page_numbers = sorted({int(match.group(1)) for match in re.finditer(r"(?m)^\[Page\s+(\d+)", source_text)})
     if not page_inputs:
         raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
-    for page_number, page_text in page_inputs[:MAX_DOCUMENT_QWEN_PAGES]:
+    selected_pages = page_inputs[:MAX_DOCUMENT_QWEN_PAGES]
+    qwen_chunks = chunk_document_pages(selected_pages)
+    selected_chunks = qwen_chunks[:MAX_DOCUMENT_QWEN_CHUNKS]
+    unprocessed_pages = sorted(
+        {number for number, _ in page_inputs[MAX_DOCUMENT_QWEN_PAGES:]}
+        | {number for number, _ in qwen_chunks[MAX_DOCUMENT_QWEN_CHUNKS:]}
+    )
+    for page_number, page_text in selected_chunks:
         try:
             page_result = extract_review_candidates(
                 page_text,
@@ -292,8 +300,12 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 if isinstance(value, str) and value.strip()
             ],
             *(
-                [f"Qwen processed {MAX_DOCUMENT_QWEN_PAGES} of {len(page_inputs)} readable pages. Remaining pages need a separate extraction pass."]
+                [f"Only the first {MAX_DOCUMENT_QWEN_PAGES} readable pages were selected for Qwen. Remaining pages {', '.join(map(str, unprocessed_pages))} need another extraction pass."]
                 if len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES else []
+            ),
+            *(
+                [f"Qwen reached the {MAX_DOCUMENT_QWEN_CHUNKS}-chunk processing limit. Remaining source text on pages {', '.join(map(str, unprocessed_pages))} was not processed and needs another extraction pass."]
+                if len(qwen_chunks) > MAX_DOCUMENT_QWEN_CHUNKS else []
             ),
             *(
                 [f"Pages {', '.join(map(str, unreadable_pages))} have no readable extracted text. Review the original pages manually; no facts were inferred from them."]
@@ -304,12 +316,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 if candidate_overflow else []
             ),
         ],
-        "processed_page_count": min(len(page_inputs), MAX_DOCUMENT_QWEN_PAGES),
+        "processed_page_count": len({number for number, _ in selected_chunks}),
         "total_readable_page_count": len(page_inputs),
         "total_page_count": len(all_page_numbers) or len(page_inputs),
-        "processed_page_numbers": [number for number, _ in page_inputs[:MAX_DOCUMENT_QWEN_PAGES]],
+        "processed_page_numbers": sorted({number for number, _ in selected_chunks}),
+        "unprocessed_page_numbers": unprocessed_pages,
         "unreadable_page_numbers": unreadable_pages,
-        "status": "partial" if (len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES or unreadable_pages or candidate_overflow) else "available",
+        "status": "partial" if (len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES or len(qwen_chunks) > MAX_DOCUMENT_QWEN_CHUNKS or unreadable_pages or candidate_overflow) else "available",
         "model_authority": "review_only",
         "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
     }
