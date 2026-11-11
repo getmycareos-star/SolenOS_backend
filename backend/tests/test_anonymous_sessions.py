@@ -442,6 +442,51 @@ def test_optional_improvement_preference_can_be_toggled_without_required_acknowl
         assert reread.json()["required"] is True
 
 
+def test_consent_isolation_prevents_cross_caregiver_read_and_write():
+    client = TestClient(app)
+    first = create_session(client, "Consent isolation first recipient")
+    second = create_session(client, "Consent isolation second recipient")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    # Caregiver one accepts terms for their own person/caregiver scope.
+    accepted = _accept_required_privacy_terms(client, first, improvement=True)
+    assert accepted == first_headers
+
+    # A different caregiver cannot read the first caregiver's consent by
+    # supplying the first person's ID, even with their own valid bearer token.
+    cross_read = client.get(
+        f"/api/v1/consent?person_id={first['person']['id']}",
+        headers=second_headers,
+    )
+    assert cross_read.status_code == 403, cross_read.text
+
+    # Nor can caregiver two submit a consent mutation attributed to caregiver one.
+    cross_write = client.post(
+        "/api/v1/consent",
+        headers=second_headers,
+        json={
+            "person_id": first["person"]["id"],
+            "caregiver_id": first["caregiver"]["id"],
+            "action": "update_data_improvement",
+            "data_improvement_consent": False,
+        },
+    )
+    assert cross_write.status_code == 403, cross_write.text
+
+    # The legitimate owner retains their acceptance and optional preference.
+    owner_read = client.get("/api/v1/consent", headers=first_headers)
+    assert owner_read.status_code == 200, owner_read.text
+    assert owner_read.json()["verified"] is True
+    assert owner_read.json()["profile"]["data_improvement_consent"] is True
+
+    # Caregiver two remains unaccepted; no cross-scope mutation was created.
+    other_read = client.get("/api/v1/consent", headers=second_headers)
+    assert other_read.status_code == 200, other_read.text
+    assert other_read.json()["verified"] is False
+    assert other_read.json()["profile"]["data_improvement_consent"] is False
+
+
 def test_required_privacy_and_optional_improvement_choice_persist_per_session():
     client = TestClient(app)
     created = create_session(client, "Consent persistence recipient")
