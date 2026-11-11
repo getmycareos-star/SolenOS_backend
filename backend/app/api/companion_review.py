@@ -140,6 +140,9 @@ def review_companion_care_update(
                 corrected_value = (payload.corrected_text or "").strip()
                 next_version = int(proposal.proposal_version or 1) + 1
                 corrected_proposal = db.query(AIOutputLCRProposal).filter(
+                    AIOutputLCRProposal.person_id == person_id,
+                    AIOutputLCRProposal.caregiver_id == caregiver_id,
+                    AIOutputLCRProposal.proposal_type == "companion_care_observation",
                     AIOutputLCRProposal.source_message_id == proposal.source_message_id,
                     AIOutputLCRProposal.candidate_index == proposal.candidate_index,
                     AIOutputLCRProposal.proposal_version == next_version,
@@ -204,6 +207,9 @@ def review_companion_care_update(
             )
         next_version = int(proposal.proposal_version or 1) + 1
         existing_corrected = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.person_id == person_id,
+            AIOutputLCRProposal.caregiver_id == caregiver_id,
+            AIOutputLCRProposal.proposal_type == "companion_care_observation",
             AIOutputLCRProposal.source_message_id == proposal.source_message_id,
             AIOutputLCRProposal.candidate_index == proposal.candidate_index,
             AIOutputLCRProposal.proposal_version == next_version,
