@@ -302,7 +302,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         extraction_method = str(metadata.get("extraction_method") or "")
         if duplicate_of_evidence_id:
             canonical["warnings"].append(
-                f"This upload is an exact binary duplicate of evidence {duplicate_of_evidence_id}; preserve the copy but do not count it as independent corroboration."
+                "This upload is an exact binary duplicate of an earlier evidence file; preserve the copy but do not count it as independent corroboration."
             )
         if "server_pdf_text" in extraction_method:
             canonical["warnings"].append("PDF text extraction may flatten multi-column or table reading order; compare this passage with the original page.")
