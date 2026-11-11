@@ -15,6 +15,7 @@ def persist_capture_analysis(
     source_text: str,
     extraction_status: str,
     candidates: dict[str, Any] | None,
+    commit: bool = True,
 ) -> CaptureAnalysis:
     """Persist the source-linked extraction and review state without writing LCR facts."""
     analysis = CaptureAnalysis(
@@ -28,6 +29,8 @@ def persist_capture_analysis(
         review_history=[],
     )
     db.add(analysis)
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     db.refresh(analysis)
     return analysis
