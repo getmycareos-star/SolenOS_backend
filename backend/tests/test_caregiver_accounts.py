@@ -144,3 +144,55 @@ def test_revoke_endpoint_revokes_only_the_current_bearer_session():
         headers={"Authorization": f"Bearer {other['access_token']}"},
     )
     assert other_read.status_code == 200, other_read.text
+
+
+
+def test_one_time_recovery_code_resets_password_and_revokes_old_sessions():
+    client = TestClient(app)
+    session = create_session(client)
+    original_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = client.post(
+        "/api/v1/accounts",
+        headers=original_headers,
+        json={"email": "recoverable@example.com", "password": "initial-password-long-enough"},
+    )
+    assert created.status_code == 201, created.text
+    recovery_code = created.json().get("recovery_code")
+    assert recovery_code and len(recovery_code) >= 32
+
+    recovered = client.post(
+        "/api/v1/accounts/recover",
+        json={
+            "email": "recoverable@example.com",
+            "recovery_code": recovery_code,
+            "new_password": "replacement-password-long-enough",
+        },
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["recovered"] is True
+    replacement_code = recovered.json()["recovery_code"]
+    assert replacement_code and replacement_code != recovery_code
+
+    old_session_read = client.get(
+        f"/api/v1/evidence/{session['person']['id']}",
+        headers=original_headers,
+    )
+    assert old_session_read.status_code == 401
+
+    login = client.post(
+        "/api/v1/accounts/login",
+        json={"email": "recoverable@example.com", "password": "replacement-password-long-enough"},
+    )
+    assert login.status_code == 200, login.text
+    assert login.json()["person_id"] == session["person"]["id"]
+    assert login.json()["caregiver_id"] == session["caregiver"]["id"]
+
+    reused = client.post(
+        "/api/v1/accounts/recover",
+        json={
+            "email": "recoverable@example.com",
+            "recovery_code": recovery_code,
+            "new_password": "another-password-long-enough",
+        },
+    )
+    assert reused.status_code == 401
