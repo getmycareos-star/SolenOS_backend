@@ -29,7 +29,7 @@ DELTA_JSON_CONTRACT = {
         "follow_ups", "contradictions", "clinical_gaps", "caregiver_summary", "clinician_summary"
     ],
     "properties": {
-        "event_summary": {"type": "string"},
+        "event_summary": {"type": "string", "maxLength": 140},
         "medications": {
             "type": "array",
             "items": {
@@ -40,7 +40,7 @@ DELTA_JSON_CONTRACT = {
                     "name": {"type": "string"},
                     "previous": {"type": ["string", "null"]},
                     "current": {"type": ["string", "null"]},
-                    "evidence_excerpt": {"type": "string"},
+                    "evidence_excerpt": {"type": "string", "maxLength": 160},
                     "certainty": {"type": "string", "enum": ["supported", "uncertain"]}
                 }
             }
@@ -55,7 +55,7 @@ DELTA_JSON_CONTRACT = {
                     "name": {"type": "string"},
                     "previous": {"type": ["string", "null"]},
                     "current": {"type": ["string", "null"]},
-                    "evidence_excerpt": {"type": "string"},
+                    "evidence_excerpt": {"type": "string", "maxLength": 160},
                     "certainty": {"type": "string", "enum": ["supported", "uncertain"]}
                 }
             }
@@ -70,7 +70,7 @@ DELTA_JSON_CONTRACT = {
                     "name": {"type": "string"},
                     "previous": {"type": ["string", "null"]},
                     "current": {"type": ["string", "null"]},
-                    "evidence_excerpt": {"type": "string"},
+                    "evidence_excerpt": {"type": "string", "maxLength": 160},
                     "certainty": {"type": "string", "enum": ["supported", "uncertain"]}
                 }
             }
@@ -85,7 +85,7 @@ DELTA_JSON_CONTRACT = {
                     "status": {"type": "string"},
                     "ordered_date": {"type": ["string", "null"]},
                     "result_present": {"type": "boolean"},
-                    "evidence_excerpt": {"type": "string"}
+                    "evidence_excerpt": {"type": "string", "maxLength": 160}
                 }
             }
         },
@@ -99,7 +99,7 @@ DELTA_JSON_CONTRACT = {
                     "status": {"type": "string"},
                     "due_date": {"type": ["string", "null"]},
                     "owner": {"type": ["string", "null"]},
-                    "evidence_excerpt": {"type": "string"}
+                    "evidence_excerpt": {"type": "string", "maxLength": 160}
                 }
             }
         },
@@ -123,14 +123,14 @@ DELTA_JSON_CONTRACT = {
                 "required": ["gap", "why_it_matters", "next_question", "evidence_excerpt"],
                 "properties": {
                     "gap": {"type": "string"},
-                    "why_it_matters": {"type": "string"},
-                    "next_question": {"type": "string"},
-                    "evidence_excerpt": {"type": "string"}
+                    "why_it_matters": {"type": "string", "maxLength": 120},
+                    "next_question": {"type": "string", "maxLength": 120},
+                    "evidence_excerpt": {"type": "string", "maxLength": 160}
                 }
             }
         },
-        "caregiver_summary": {"type": "string"},
-        "clinician_summary": {"type": "string"}
+        "caregiver_summary": {"type": "string", "maxLength": 140},
+        "clinician_summary": {"type": "string", "maxLength": 140}
     }
 }
 
@@ -157,6 +157,10 @@ def _validate_schema(value: Any, schema: dict[str, Any], path: str = "$") -> Non
         raise HTTPException(status_code=502, detail=f"The local model returned an invalid Delta field at {path}; no delta was persisted.")
     if "enum" in schema and value not in schema["enum"]:
         raise HTTPException(status_code=502, detail=f"The local model returned an unsupported Delta value at {path}; no delta was persisted.")
+    if isinstance(value, str) and "maxLength" in schema and len(value) > schema["maxLength"]:
+        raise HTTPException(status_code=502, detail=f"The local model exceeded the Delta output length limit at {path}; no delta was persisted.")
+    if isinstance(value, list) and "maxItems" in schema and len(value) > schema["maxItems"]:
+        raise HTTPException(status_code=502, detail=f"The local model exceeded the Delta item limit at {path}; no delta was persisted.")
     if isinstance(value, dict):
         for key in schema.get("required", []):
             if key not in value:
@@ -432,7 +436,10 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "Mark uncertainty explicitly. A test ordered without a result present in the provided record is an open loop, not a negative result. "
         "For symptoms, compare only when comparable prior observations exist; do not infer trends from incomparable reports. "
         "Clinical gaps and follow-ups must be grounded in supplied text/state. caregiver_summary uses clear plain language; clinician_summary preserves exact clinical terms. "
-        "Do not diagnose, recommend treatment, or replace a clinician. Evidence excerpts must be short verbatim snippets from NEW_CARE_EVENT, EXISTING_ACTIVE_STATE, or EXISTING_RECORD_CONTEXT. When citing historical context, do not claim it is current unless its date/status supports that interpretation."
+        "Do not diagnose, recommend treatment, or replace a clinician. Evidence excerpts must be short verbatim snippets from NEW_CARE_EVENT, EXISTING_ACTIVE_STATE, or EXISTING_RECORD_CONTEXT. When citing historical context, do not claim it is current unless its date/status supports that interpretation. "
+        "Keep event_summary, caregiver_summary, and clinician_summary to at most 18 words each. Keep evidence excerpts to the shortest exact quote that proves the finding. "
+        "Do not speculate about medical risks or possible causes. An undocumented cause is unknown, not evidence of a risk. "
+        "Do not create both a follow-up and a clinical gap for the same missing information; do not create either unless the source identifies a concrete unanswered care requirement or explicitly requests follow-up."
     )
     user_payload = {
         "existing_active_state": active_state,
@@ -445,7 +452,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             "evidence_ids": evidence_ids,
             "source_event_id": source_event_id,
         },
-        "json_schema": DELTA_JSON_CONTRACT,
     }
     try:
         content_json = qwen_chat(
