@@ -83,7 +83,9 @@ def test_companion_message_persists_source_and_only_acceptance_creates_assertion
             assert original.content == source
             assert proposal.source_message_id == original.id
             assert proposal.source_conversation_id == response.json()["session_id"]
-            assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+            provisional = db.query(CareAssertion).filter_by(source_proposal_id=proposal_data["id"]).one()
+            assert provisional.assertion_status == "caregiver_reported_unreviewed"
+            assert provisional.asserted_value == source
         finally:
             db.close()
         accepted = review(client, session, proposal_data["id"], {"decision": "accept"})
@@ -139,7 +141,8 @@ def test_correction_preserves_original_and_requires_separate_acceptance(monkeypa
         assert new["proposed_change"]["asserted_value"] == corrected_text
         db = TestingSessionLocal()
         try:
-            assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+            old_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal["id"]).one()
+            assert old_assertion.assertion_status == "superseded_by_caregiver_correction"
             old = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
             assert old.proposed_change_json["asserted_value"] == source
             assert db.query(AIOutputLCRDecision).filter_by(proposal_id=old.id).one().decision == "corrected"
@@ -174,7 +177,8 @@ def test_rejection_never_creates_assertion_or_allows_later_acceptance(monkeypatc
         assert retry.status_code == 409
         db = TestingSessionLocal()
         try:
-            assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+            stored_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal["id"]).one()
+            assert stored_assertion.assertion_status == "caregiver_reported_rejected"
             stored = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
             assert stored.status == "rejected"
             decisions = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal["id"]).all()
@@ -198,7 +202,7 @@ def test_proposals_are_person_scoped_and_candidate_inference_failure_keeps_messa
         assert foreign.status_code == 404
         db = TestingSessionLocal()
         try:
-            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 1
         finally:
             db.close()
     finally:
