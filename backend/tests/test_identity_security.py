@@ -74,6 +74,12 @@ def test_device_registration_is_scoped_and_never_trusted_by_itself():
     assert hidden.status_code == 200, hidden.text
     assert hidden.json()["devices"] == []
 
+    cross_record = client.get(
+        f"/api/v1/evidence/{first['person']['id']}",
+        headers=second_auth,
+    )
+    assert cross_record.status_code in {403, 404}, cross_record.text
+
     forbidden = client.delete(f"/api/v1/identity/devices/{device['id']}", headers=second_auth)
     assert forbidden.status_code == 404, forbidden.text
 
