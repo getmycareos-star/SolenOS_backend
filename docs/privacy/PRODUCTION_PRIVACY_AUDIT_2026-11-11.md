@@ -83,3 +83,16 @@ For each control, retain:
 ## Change control
 
 No production secrets, care records, personal data, access tokens or provider credentials belong in this document. Revalidate all deployment facts immediately before publication because provider regions and service configurations can change.
+
+
+## Remediation update — authenticated privacy request intake
+
+Backend `main` now includes an authenticated request-intake API:
+- `POST /api/v1/privacy/requests` accepts access, export, correction and deletion request types.
+- `GET /api/v1/privacy/requests` returns only requests scoped to the authenticated caregiver and care record.
+- Each submission records the authenticated caregiver and care-recipient scope, a claimed authority basis, timestamp, request correlation ID and audit event.
+- New requests remain `received_pending_authority_review`. The stored metadata explicitly records `authority_verified=false` and `fulfilment_started=false`.
+
+This is deliberately an intake mechanism only. It does **not** verify legal authority, perform an export, correct a record, delete care data, or promise a completion deadline. Account/session authentication is not proof that a caregiver has legal authority to exercise another adult's data rights. A separate controlled review and fulfilment workflow remains required.
+
+The ORM mapping reuses the existing `data_subject_requests` table from migration `20261027_08_privacy_delivery`; no production migration or deployment was initiated for this intake change. CI must pass before this source change is treated as verified.
