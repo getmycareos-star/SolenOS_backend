@@ -103,7 +103,7 @@ The ORM mapping reuses the existing `data_subject_requests` table from migration
 Backend `main` now includes a restricted review decision workflow for the initial designated reviewer:
 - Reviewer queue: `GET /api/v1/privacy/requests/reviewer/pending`.
 - Review decision: `POST /api/v1/privacy/requests/{request_id}/review`.
-- Both routes require the normal server-issued caregiver bearer session **and** a separate reviewer credential in `X-SolenOS-Privacy-Reviewer-Token`. The caregiver session alone is not reviewer authorization.
+- Both routes require the separate designated-reviewer credential in `X-SolenOS-Privacy-Reviewer-Token`; a caregiver bearer session alone cannot access reviewer operations. The reviewer credential is independent of caregiver sessions and must be kept server-side.
 - Reviewer access is fail-closed unless both deployment secrets are configured: `SOLENOS_PRIVACY_REVIEWER_TOKEN` (unique random secret, at least 32 characters) and `SOLENOS_PRIVACY_REVIEWER_ID` (stable reviewer actor ID; initial value intended: `david_abuchi`).
 - Review requires a written decision basis. Approval additionally requires a description of the authority evidence checked. Each decision is recorded in the request metadata and `audit_log_events` under the configured reviewer actor ID.
 - A request can be reviewed only once while it is in `received_pending_authority_review`. Approval moves it to `approved_pending_fulfilment_assessment`; rejection moves it to `rejected`.
