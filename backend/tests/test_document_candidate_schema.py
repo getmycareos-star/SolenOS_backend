@@ -139,3 +139,15 @@ def test_twelve_page_discharge_summary_keeps_each_page_identity():
     assert [page_number for page_number, _ in pages] == list(range(1, 13))
     assert [page_number for page_number, _ in chunks] == list(range(1, 13))
     assert all(f"page {number}" in text for number, text in chunks)
+
+
+
+def test_month_name_dates_are_flagged_and_mixed_date_conflicts_remain_unresolved():
+    excerpt = "Admission date: 2026-10-12. Discharge date: 14 October 2026."
+    candidate = canonical_candidate(
+        {"subject": "admission", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-natural-date",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["event_date"] is None
+    assert any("Multiple dates" in warning for warning in candidate["warnings"])
