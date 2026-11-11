@@ -28,7 +28,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.document_candidate_schema import canonical_candidate, split_document_pages, apply_medication_conflict_warnings
+from app.services.document_candidate_schema import canonical_candidate, split_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
@@ -185,6 +185,8 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     raw_observations = []
     all_open_questions = []
     page_inputs = split_document_pages(source_text)
+    unreadable_pages = unreadable_page_numbers(source_text)
+    all_page_numbers = sorted({int(match.group(1)) for match in re.finditer(r"(?m)^\[Page\s+(\d+)", source_text)})
     if not page_inputs:
         raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
     for page_number, page_text in page_inputs[:MAX_DOCUMENT_QWEN_PAGES]:
@@ -274,13 +276,20 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 if len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES else []
             ),
             *(
+                [f"Pages {', '.join(map(str, unreadable_pages))} have no readable extracted text. Review the original pages manually; no facts were inferred from them."]
+                if unreadable_pages else []
+            ),
+            *(
                 ["The candidate review limit was reached; additional extracted candidates were not included and require a follow-up extraction."]
                 if candidate_overflow else []
             ),
         ],
         "processed_page_count": min(len(page_inputs), MAX_DOCUMENT_QWEN_PAGES),
         "total_readable_page_count": len(page_inputs),
-        "status": "partial" if len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES else "available",
+        "total_page_count": len(all_page_numbers) or len(page_inputs),
+        "processed_page_numbers": [number for number, _ in page_inputs[:MAX_DOCUMENT_QWEN_PAGES]],
+        "unreadable_page_numbers": unreadable_pages,
+        "status": "partial" if (len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES or unreadable_pages or candidate_overflow) else "available",
         "model_authority": "review_only",
         "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
     }
