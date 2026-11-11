@@ -354,6 +354,14 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         caregiver = create_record(client, "Multi-page caregiver")
         auth = {"Authorization": "Bearer " + caregiver["access_token"]}
         evidence_id = save_original(caregiver, source)
+        with Session() as db:
+            evidence_row = db.query(Evidence).filter_by(id=evidence_id).one()
+            evidence_row.extra_metadata = json.dumps({
+                "filename": "duplicate-discharge-summary.txt",
+                "duplicate_detected": True,
+                "duplicate_of_evidence_id": "original-evidence-123",
+            })
+            db.commit()
         extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
         assert extracted.status_code == 201, extracted.text
         understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
@@ -370,6 +378,10 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         assert all(item["review_status"] == "pending_review" for item in body["observations"])
         assert all(
             any("Conflicting medication instructions" in warning for warning in item["warnings"])
+            for item in body["observations"]
+        )
+        assert all(
+            any("exact binary duplicate" in warning for warning in item["warnings"])
             for item in body["observations"]
         )
         assert any("outdated or superseded" in warning for warning in body["observations"][0]["warnings"])
