@@ -98,7 +98,10 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         assert [item["id"] for item in pending_list.json()["items"]] == [proposal["id"]]
         before_accept = client.get("/api/v1/care-continuity/current-care", headers=first_auth)
         assert before_accept.status_code == 200, before_accept.text
-        assert not any(item.get("id") == proposal["id"] for item in before_accept.json().get("items", []))
+        with TestingSessionLocal() as db:
+            provisional = db.query(CareAssertion).filter_by(source_proposal_id=proposal["id"]).one()
+            assert provisional.assertion_status == "caregiver_reported_unreviewed"
+            assert provisional.asserted_value == original
 
         replay = send(client, first, original, first_turn)
         assert replay.status_code == 200, replay.text
@@ -166,7 +169,9 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         new_proposal = corrected.json()["corrected_proposal"]
         assert new_proposal["status"] == "pending_authorization"
         with TestingSessionLocal() as db:
-            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 1
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 3
+            old_assertion = db.query(CareAssertion).filter_by(source_proposal_id=correction_proposal["id"]).one()
+            assert old_assertion.assertion_status == "superseded_by_caregiver_correction"
             old = db.query(AIOutputLCRProposal).filter_by(id=correction_proposal["id"]).one()
             assert old.proposed_change_json["asserted_value"] == corrected_source
             assert old.status == "corrected"
@@ -188,7 +193,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
             assert corrected_source in corrected_assertion.source_text
             assert correction_context in corrected_assertion.source_text
 
-        # Rejection is terminal and must never create an assertion.
+        # Rejection is terminal; the provisional source remains auditable with rejected status.
         rejected_source = "The caregiver recorded a separate event for review."
         monkeypatch.setattr(
             care_updates,
@@ -212,7 +217,8 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         retry = review(client, first, rejected_proposal["id"], {"decision": "accept"})
         assert retry.status_code == 409
         with TestingSessionLocal() as db:
-            assert db.query(CareAssertion).filter_by(source_proposal_id=rejected_proposal["id"]).count() == 0
+            rejected_assertion = db.query(CareAssertion).filter_by(source_proposal_id=rejected_proposal["id"]).one()
+            assert rejected_assertion.assertion_status == "caregiver_reported_rejected"
             assert db.query(AIOutputLCRProposal).filter_by(id=rejected_proposal["id"]).one().status == "rejected"
 
         # Another care recipient cannot read or decide the first caregiver's proposal.
@@ -234,7 +240,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
             assert db.query(ConversationMessage).filter_by(
                 session_id=failed.json()["session_id"], role="user", content=failed_extraction_source
             ).count() == 1
-            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 2
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 4
 
             # The database trigger makes review decisions append-only, not merely ORM-convention append-only.
             accepted_decision = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal["id"]).one()
