@@ -287,6 +287,7 @@ def review_companion_care_update(
         else:
             existing_assertion.asserted_value = accepted_value
             existing_assertion.assertion_status = "caregiver_reviewed"
+            existing_assertion.observed_at = _parse_explicit_event_time(original.get("event_time_text"))
             existing_assertion.source_label = "Caregiver-reviewed Companion conversation"
             existing_assertion.source_text = source_quote + (("\nCaregiver-supplied correction context: " + correction_context) if correction_context else "")
             assertion_id = existing_assertion.id
