@@ -151,3 +151,16 @@ def test_month_name_dates_are_flagged_and_mixed_date_conflicts_remain_unresolved
     )
     assert candidate["event_date"] is None
     assert any("Multiple dates" in warning for warning in candidate["warnings"])
+
+
+
+def test_event_date_is_not_confused_with_separately_labelled_recorded_date():
+    excerpt = "Medication instruction: Metformin 500 mg once daily. Event date 2026-10-12. Recorded on 2026-10-13."
+    candidate = canonical_candidate(
+        {"subject": "Metformin", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-event-recorded-date",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["event_date"] == "2026-10-12"
+    assert candidate["recorded_date"] == "2026-10-13"
+    assert not any("Multiple dates" in warning for warning in candidate["warnings"])
