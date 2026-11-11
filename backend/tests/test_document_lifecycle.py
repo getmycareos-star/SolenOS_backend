@@ -273,3 +273,32 @@ def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_te
     with TestSessionLocal() as db:
         assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
         assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
+
+
+
+def test_multi_column_pdf_uses_layout_preserving_text_extraction(client, monkeypatch):
+    from app.api import document_lifecycle
+
+    class MultiColumnPage:
+        def extract_text(self, extraction_mode=None):
+            assert extraction_mode == "layout"
+            return "LEFT COLUMN: Medication 500 mg\\nRIGHT COLUMN: Follow-up in 14 days"
+
+    class LayoutReader:
+        pages = [MultiColumnPage()]
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(document_lifecycle, "PdfReader", LayoutReader)
+    test_client, session = client
+    evidence_id = persist_document(session, b"%PDF-layout-test", "multi-column.pdf", "application/pdf")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 201, response.text
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert "LEFT COLUMN: Medication 500 mg" in retrieved.json()["extracted_text"]
+    assert "RIGHT COLUMN: Follow-up in 14 days" in retrieved.json()["extracted_text"]
