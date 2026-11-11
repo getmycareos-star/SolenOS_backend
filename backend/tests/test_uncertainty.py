@@ -2729,7 +2729,7 @@ def test_answer_without_upload_saves_the_caregiver_report_as_source_evidence():
             assert evidence.evidence_kind == "caregiver_report"
             assert evidence.epistemic_status == "caregiver_reported"
             assert evidence.uploaded_by_caregiver_id == caregiver.id
-            assert evidence.source_text == f"Answer: {answer_text}\\n\\nProvided by: {answer_source}"
+            assert evidence.source_text == f"Answer: {answer_text}\n\nProvided by: {answer_source}"
         finally:
             db.close()
     finally:
