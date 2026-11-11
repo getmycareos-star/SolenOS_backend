@@ -307,6 +307,7 @@ def main() -> int:
             backup_seconds = time.monotonic() - seeded_at
             _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error", "--dbname", _libpq_url(restore_url), dump_path])
             restore_seconds = time.monotonic() - seeded_at - backup_seconds
+        backup_bytes = Path(dump_path).stat().st_size if "dump_path" in locals() else None
         counts = _assert_restored(restore_url, ids, document)
         report = {
             "status": "PASS",
@@ -314,6 +315,7 @@ def main() -> int:
             "source_database": _database_name(source_url),
             "restore_database": _database_name(restore_url),
             "backup_seconds": round(backup_seconds, 3),
+            "backup_bytes": backup_bytes,
             "restore_seconds": round(restore_seconds, 3),
             "end_to_end_seconds": round(time.monotonic() - started, 3),
             "fixture_record_counts": counts,
@@ -330,13 +332,22 @@ def main() -> int:
             ],
             "scope": "synthetic PostgreSQL backup/restore; no production data",
         }
-        print(json.dumps(report, indent=2))
+        rendered = json.dumps(report, indent=2)
+        print(rendered)
+        report_path = os.environ.get("SOLENOS_BACKUP_RESTORE_REPORT_PATH")
+        if report_path:
+            Path(report_path).write_text(rendered + "\\n", encoding="utf-8")
         return 0
     except Exception as exc:
-        print(json.dumps({
+        failure_report = {
             "status": "FAIL", "run_id": run_id, "error": str(exc),
             "note": "Do not mark backup recovery verified. Inspect the isolated databases and logs.",
-        }, indent=2), file=sys.stderr)
+        }
+        rendered = json.dumps(failure_report, indent=2)
+        print(rendered, file=sys.stderr)
+        report_path = os.environ.get("SOLENOS_BACKUP_RESTORE_REPORT_PATH")
+        if report_path:
+            Path(report_path).write_text(rendered + "\\n", encoding="utf-8")
         return 1
 
 
