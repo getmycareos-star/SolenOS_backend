@@ -118,3 +118,37 @@ def canonical_candidate(
         "review_status": "Pending",
         "warnings": warnings,
     }
+
+
+
+def split_document_pages(source_text: str) -> list[tuple[int, str]]:
+    """Split page-labelled extraction into independent Qwen inputs."""
+    markers = list(_PAGE_MARKER.finditer(source_text or ""))
+    if not markers:
+        return [(1, (source_text or "").strip())] if (source_text or "").strip() else []
+    pages: list[tuple[int, str]] = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
+        body = source_text[marker.end():end].strip()
+        if body and "[No readable text detected on this page]" not in body:
+            pages.append((int(marker.group(1)), body))
+    return pages
+
+
+def apply_medication_conflict_warnings(candidates: list[dict[str, Any]]) -> None:
+    """Flag differing instructions for the same extracted medication subject."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        if candidate.get("field_type") != "medication":
+            continue
+        subject = str(candidate.get("subject") or "").strip().casefold()
+        if subject:
+            grouped.setdefault(subject, []).append(candidate)
+    for rows in grouped.values():
+        distinct = {str(row.get("observation") or "").strip().casefold() for row in rows}
+        if len(distinct) > 1:
+            for row in rows:
+                warnings = row.setdefault("warnings", [])
+                warning = "Conflicting medication instructions appear in this document; reconcile against the original and a clinician before updating the active medication record."
+                if warning not in warnings:
+                    warnings.append(warning)
