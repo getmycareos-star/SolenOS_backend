@@ -11,6 +11,7 @@ from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import Evidence
 import app.services.care_execution as care_execution
+import app.api.capture_review as capture_review_api
 from app.models.care_continuity import CareAssertion
 
 pytestmark = pytest.mark.session_security
@@ -401,4 +402,55 @@ def test_capture_analysis_helper_can_leave_commit_to_the_workflow(monkeypatch):
         assert db.query(CaptureAnalysis).filter_by(id=analysis.id).one().source_text == "Caregiver reported an observation."
     finally:
         db.rollback()
+        db.close()
+
+
+def test_acceptance_and_reconciliation_fail_as_one_atomic_review(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Atomic review recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(care_execution, "extract_review_candidates", lambda *args, **kwargs: {
+        "observations": [{
+            "subject": "sleep",
+            "observation": "slept badly",
+            "source_quote": "slept badly",
+            "review_status": "pending_review",
+        }],
+        "open_questions": [],
+    })
+    monkeypatch.setattr(care_execution, "reconcile_person_change_intelligence", lambda *args, **kwargs: None)
+
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": "Caregiver reported that Mum slept badly.",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    analysis_id = saved.json()["qwen_analysis_id"]
+
+    def fail_reconciliation(*args, **kwargs):
+        raise RuntimeError("reconciliation unavailable")
+
+    monkeypatch.setattr(capture_review_api, "reconcile_person_change_intelligence", fail_reconciliation)
+    accepted = client.post(
+        f"/api/v1/capture/analyses/{analysis_id}/review",
+        headers=auth,
+        json={"candidate_index": 0, "decision": "accept"},
+    )
+    assert accepted.status_code == 503, accepted.text
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+        analysis = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+        assert analysis.review_history == []
+        assert analysis.candidates["observations"][0]["review_status"] == "pending_review"
+    finally:
         db.close()
