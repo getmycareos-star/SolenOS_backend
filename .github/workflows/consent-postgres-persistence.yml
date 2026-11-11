@@ -47,5 +47,5 @@ jobs:
         run: >-
           python -m pytest
           backend/tests/test_anonymous_sessions.py
-          -k consent_survives_database_engine_restart_and_is_visible_to_another_instance
+          -k 'consent_survives_database_engine_restart_and_is_visible_to_another_instance or consent_isolation_prevents_cross_caregiver_read_and_write'
           -q -vv
