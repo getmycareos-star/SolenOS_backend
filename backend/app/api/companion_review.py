@@ -184,6 +184,10 @@ def review_companion_care_update(
     corrected_proposal = None
 
     if decision == "reject":
+        provisional_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
+        if provisional_assertion is not None:
+            provisional_assertion.assertion_status = "caregiver_reported_rejected"
+            provisional_assertion.source_label = "Caregiver-rejected Companion disclosure"
         proposal.status = "rejected"
         db.add(AIOutputLCRDecision(
             id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
@@ -210,6 +214,10 @@ def review_companion_care_update(
         if existing_corrected:
             return {"proposal": _proposal_json(proposal), "corrected_proposal": _proposal_json(existing_corrected), "decision": "correct", "idempotent_replay": True}
         proposal.status = "corrected"
+        provisional_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
+        if provisional_assertion is not None:
+            provisional_assertion.assertion_status = "superseded_by_caregiver_correction"
+            provisional_assertion.source_label = "Superseded Companion disclosure; caregiver supplied a correction"
         corrected_proposal = AIOutputLCRProposal(
             id=str(uuid.uuid4()), person_id=person_id, caregiver_id=caregiver_id,
             proposal_type="companion_care_observation",
@@ -233,6 +241,18 @@ def review_companion_care_update(
             status="pending_authorization",
         )
         db.add(corrected_proposal)
+        db.flush()
+        db.add(CareAssertion(
+            id=str(uuid.uuid4()), person_id=person_id, subject_type="person",
+            subject_id=person_id, field="care_observation",
+            assertion_kind="time_bound_observation", asserted_value=corrected,
+            source_label="Caregiver-corrected Companion disclosure (unreviewed)",
+            source_text=source_quote + (("\nCaregiver-supplied correction context: " + context) if context else ""),
+            source_conversation_id=session.id, source_message_id=source_message.id,
+            source_proposal_id=corrected_proposal.id, event_time_text=original.get("event_time_text"),
+            evidence_ids=[], assertion_status="caregiver_reported_unreviewed",
+            observed_at=None, created_by_caregiver_id=caregiver_id,
+        ))
         db.add(AIOutputLCRDecision(
             id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
             reviewer_caregiver_id=caregiver_id, decision="corrected",
@@ -265,6 +285,10 @@ def review_companion_care_update(
             db.flush()
             assertion_id = assertion.id
         else:
+            existing_assertion.asserted_value = accepted_value
+            existing_assertion.assertion_status = "caregiver_reviewed"
+            existing_assertion.source_label = "Caregiver-reviewed Companion conversation"
+            existing_assertion.source_text = source_quote + (("\nCaregiver-supplied correction context: " + correction_context) if correction_context else "")
             assertion_id = existing_assertion.id
         proposal.status = "accepted"
         db.add(AIOutputLCRDecision(
