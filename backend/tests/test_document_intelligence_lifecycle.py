@@ -408,3 +408,67 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+
+def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    quote = "Metformin 500 mg once daily."
+    source = f"[Page 1]\nMedication reconciliation: {quote}"
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        return {"observations": [{
+            "subject": "Metformin",
+            "observation": quote,
+            "source_quote": quote,
+            "extraction_method": "test_verbatim",
+        }], "open_questions": []}
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Medication correction caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert understood.status_code == 201, understood.text
+        analysis_id = understood.json()["analysis_id"]
+
+        corrected = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 0,
+                "decision": "correct",
+                "corrected_subject": "Metformin",
+                "corrected_observation": "Metformin 1000 mg twice daily.",
+            },
+        )
+        assert corrected.status_code == 200, corrected.text
+        assert corrected.json()["candidate"]["review_status"] == "corrected_pending_approval"
+        assert corrected.json()["written_to_lcr"] is False
+
+        accepted = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["written_to_lcr"] is True
+
+        with Session() as db:
+            assertion = db.query(CareAssertion).filter_by(
+                person_id=caregiver["person"]["id"]
+            ).one()
+            assert assertion.field == "document_medication_statement"
+            assert "Strength: 1000 mg" in assertion.asserted_value
+            assert "Dosage instructions: Metformin 1000 mg twice daily" in assertion.asserted_value
+            assert quote == assertion.source_text
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
