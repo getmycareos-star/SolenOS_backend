@@ -75,7 +75,7 @@ def _get_json_after_restart(base_url: str, path: str, token: str) -> tuple[int, 
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
-def _verify_persistence_after_real_server_restart(session: dict, other: dict, conversation_id: str, proposal_id: str, assertion_id: str, disclosure: str) -> None:
+def _verify_persistence_after_real_server_restart(session: dict, other: dict, conversation_id: str, proposal_id: str, assertion_id: str, disclosure: str, document_analysis_id: str) -> None:
     backend_dir = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     process = subprocess.Popen(
@@ -116,6 +116,10 @@ def _verify_persistence_after_real_server_restart(session: dict, other: dict, co
         status, lcr = _get_json_after_restart(base_url, "/api/v1/care-continuity/current-care", token)
         assert status == 200, lcr
         assert any(item.get("id") == assertion_id for item in lcr.get("items", [])), lcr
+
+        status, document_history = _get_json_after_restart(base_url, "/api/v1/documents/intelligence", token)
+        assert status == 200, document_history
+        assert any(item.get("analysis_id") == document_analysis_id for item in document_history.get("items", [])), document_history
 
         denied = urllib.request.Request(
             base_url + f"/api/v1/conversation/{conversation_id}",
@@ -312,4 +316,5 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
             proposal["id"],
             assertion_id,
             new_observation,
+            document_result["analysis_id"],
         )
