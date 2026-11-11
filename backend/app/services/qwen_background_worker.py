@@ -17,10 +17,9 @@ from sqlalchemy import inspect, or_
 from app.core.database import SessionLocal
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
 from app.services.qwen_gateway import qwen_chat
+from app.services.qwen_workflows import ENABLED_WORKFLOWS
 
 logger = logging.getLogger(__name__)
-
-from app.services.qwen_workflows import ENABLED_WORKFLOWS
 # High-confidence local routing rules take precedence over the small model's
 # classification. This avoids sending an obvious medication/appointment/security
 # request to the wrong contract. Ambiguous requests still use constrained Qwen
