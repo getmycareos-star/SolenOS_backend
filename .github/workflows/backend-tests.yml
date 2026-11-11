@@ -365,9 +365,8 @@ jobs:
 
 
   qwen-image-build:
-    # The full model-image/inference check is only needed for Qwen-specific PRs.
-    # Database and API changes should not wait on a heavyweight model build.
-    if: github.event_name == 'workflow_dispatch'
+    # Require real local-model inference acceptance on backend PRs; manual dispatch remains available.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
