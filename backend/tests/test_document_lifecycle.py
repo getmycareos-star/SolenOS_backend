@@ -232,13 +232,13 @@ def test_duplicate_upload_is_preserved_and_linked_to_original(client):
         "/api/v1/upload",
         headers=auth,
         data=payload,
-        files={"file": ("discharge.pdf", b"identical original document bytes", "application/pdf")},
+        files={"file": ("discharge-copy.txt", b"identical original document bytes", "text/plain")},
     )
     duplicate = test_client.post(
         "/api/v1/upload",
         headers=auth,
         data=payload,
-        files={"file": ("copy-of-discharge.pdf", b"identical original document bytes", "application/pdf")},
+        files={"file": ("copy-of-discharge.txt", b"identical original document bytes", "text/plain")},
     )
     assert original.status_code == 201, original.text
     assert duplicate.status_code == 201, duplicate.text
