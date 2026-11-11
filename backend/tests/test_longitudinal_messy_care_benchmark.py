@@ -786,7 +786,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
 
     with TestingSessionLocal() as db:
         person, caregiver = make_person(db, "delta-finding-provenance")
-        excerpt = "Amlodipine 5 mg daily appears on the discharge medication list."
+        excerpt = "The prescriber started amlodipine 5 mg daily."
         content_text = f"The discharge summary states: {excerpt}"
         source_event = CareEvent(
             id="ev-delta-provenance-source",
@@ -867,3 +867,24 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
         assert assertion.source_event_id == source_event.id
         assert assertion.evidence_ids == [matching.id]
         assert unrelated.id not in assertion.evidence_ids
+
+
+def test_medication_mentions_do_not_count_as_prescribing_changes():
+    from app.services.delta_engine import _medication_change_is_explicit
+
+    assert not _medication_change_is_explicit({
+        "change_type": "new",
+        "evidence_excerpt": "Amlodipine 5 mg daily appears on the discharge medication list.",
+    })
+    assert not _medication_change_is_explicit({
+        "change_type": "discontinued",
+        "evidence_excerpt": "Amlodipine 5 mg daily appears on the historical medication list.",
+    })
+    assert _medication_change_is_explicit({
+        "change_type": "new",
+        "evidence_excerpt": "The prescriber started amlodipine 5 mg daily.",
+    })
+    assert _medication_change_is_explicit({
+        "change_type": "discontinued",
+        "evidence_excerpt": "The clinician discontinued amlodipine.",
+    })
