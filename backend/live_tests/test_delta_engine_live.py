@@ -43,8 +43,7 @@ def override_db():
 def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget():
     app.dependency_overrides[get_db] = override_db
     source_text = (
-        "Caregiver reported that Mary ate only a few bites of breakfast and drank "
-        "about half a cup of water this morning."
+        "Caregiver reported that Mary ate half of breakfast this morning."
     )
     event_id = str(uuid.uuid4())
     try:
@@ -99,6 +98,8 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
                 len(result[key]) <= 140
                 for key in ("event_summary", "caregiver_summary", "clinician_summary")
             ), result
+            assert result.get("conditions") == [], result
+            assert result.get("symptoms") == [], result
             assert result.get("follow_ups") == [], result
             assert result.get("clinical_gaps") == [], result
             assert "breakfast" in (
