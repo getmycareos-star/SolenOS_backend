@@ -1010,6 +1010,12 @@ def fulfil_approved_deletion(
             elif table.name in direct_predicates:
                 db.execute(table.delete().where(direct_predicates[table.name]))
 
+        # Explicitly remove the two root identity rows after the dependent-row
+        # closure. Foreign-key violations fail closed rather than reporting a
+        # successful erasure while either root identity remains.
+        db.execute(text("DELETE FROM caregivers WHERE id = :caregiver_id"), {"caregiver_id": caregiver_id})
+        db.execute(text("DELETE FROM persons WHERE id = :person_id"), {"person_id": person_id})
+
         # Released/expired holds are no longer a deletion blocker and must not
         # retain the deleted subject identifier.
         if inspector.has_table("legal_holds"):
