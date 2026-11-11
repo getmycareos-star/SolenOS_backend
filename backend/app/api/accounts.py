@@ -13,7 +13,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.caregiver_account import CaregiverAccount
 from app.models.caregiver_intelligence import CaregiverProfile
-from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent
+from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent, AccountRecoveryEvent, RecoveryCodeSet
 
 router = APIRouter(prefix="/accounts", tags=["caregiver accounts"])
 PASSWORD_ITERATIONS = 600_000
@@ -32,6 +32,12 @@ class AccountLogin(BaseModel):
 
 class AccountDelete(BaseModel):
     password: str = Field(min_length=1, max_length=256)
+
+
+class AccountRecover(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    recovery_code: str = Field(min_length=32, max_length=200)
+    new_password: str = Field(min_length=12, max_length=256)
 
 
 def _email(value: str) -> str:
@@ -106,6 +112,7 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         person_id=person_id,
         caregiver_id=caregiver_id,
     )
+    recovery_code = secrets.token_urlsafe(32)
     db.add(account)
     try:
         db.flush()
@@ -122,6 +129,14 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
             db.rollback()
             raise HTTPException(status_code=409, detail="This caregiver identity cannot be linked safely.") from exc
         session.account_id = account.id
+        db.add(RecoveryCodeSet(
+            account_id=account.id,
+            code_hash=hashlib.sha256(recovery_code.encode("utf-8")).hexdigest(),
+        ))
+        db.add(AccountSecurityEvent(
+            account_id=account.id, caregiver_id=caregiver_id,
+            event_type="account_created_with_recovery_code",
+        ))
         db.commit()
     except HTTPException:
         db.rollback()
@@ -130,7 +145,12 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         db.rollback()
         raise HTTPException(status_code=409, detail="We could not create this account. The email or care record may already be registered.")
     db.refresh(account)
-    return {"account": _account_json(account), "caregiver_profile_id": caregiver_profile.id, "message": "Account created and linked to this care record."}
+    return {
+        "account": _account_json(account),
+        "caregiver_profile_id": caregiver_profile.id,
+        "recovery_code": recovery_code,
+        "message": "Account created and linked to this care record. Store the recovery code somewhere private; it is shown only once.",
+    }
 
 
 @router.post("/login")
@@ -199,6 +219,84 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
         "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
+    }
+
+
+@router.post("/recovery-code")
+def rotate_recovery_code(request: Request, db: Session = Depends(get_db)):
+    """Issue a new one-time offline recovery code to an authenticated caregiver."""
+    person_id, caregiver_id = _scoped_ids(request)
+    account = db.query(CaregiverAccount).filter(
+        CaregiverAccount.person_id == person_id,
+        CaregiverAccount.caregiver_id == caregiver_id,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Create an optional account before generating a recovery code.")
+    now = datetime.now(timezone.utc)
+    db.query(RecoveryCodeSet).filter(
+        RecoveryCodeSet.account_id == account.id,
+        RecoveryCodeSet.used_at.is_(None),
+    ).update({RecoveryCodeSet.used_at: now}, synchronize_session=False)
+    recovery_code = secrets.token_urlsafe(32)
+    db.add(RecoveryCodeSet(
+        account_id=account.id,
+        code_hash=hashlib.sha256(recovery_code.encode("utf-8")).hexdigest(),
+    ))
+    db.add(AccountSecurityEvent(
+        account_id=account.id, caregiver_id=caregiver_id,
+        event_type="recovery_code_rotated",
+    ))
+    db.commit()
+    return {
+        "recovery_code": recovery_code,
+        "message": "New recovery code created. Previous unused recovery codes are no longer valid. Store this code somewhere private; it is shown only once.",
+    }
+
+
+@router.post("/recover")
+def recover_account(payload: AccountRecover, request: Request, db: Session = Depends(get_db)):
+    """Reset account credentials using the one-time offline recovery code."""
+    email = _validate_email(payload.email)
+    account = db.query(CaregiverAccount).filter(
+        CaregiverAccount.email_normalized == email
+    ).first()
+    code_hash = hashlib.sha256(payload.recovery_code.strip().encode("utf-8")).hexdigest()
+    recovery = db.query(RecoveryCodeSet).filter(
+        RecoveryCodeSet.code_hash == code_hash,
+        RecoveryCodeSet.used_at.is_(None),
+    ).first()
+    # Same response for unknown email, unknown code, expired/reused code, or
+    # a code belonging to a different account.
+    if not account or not recovery or recovery.account_id != account.id:
+        raise HTTPException(status_code=401, detail="The account email or recovery code is incorrect.")
+    now = datetime.now(timezone.utc)
+    recovery.used_at = now
+    account.password_hash = _hash_password(payload.new_password)
+    db.query(AnonymousSession).filter(
+        AnonymousSession.account_id == account.id,
+        AnonymousSession.revoked_at.is_(None),
+    ).update({AnonymousSession.revoked_at: now}, synchronize_session=False)
+    replacement_code = secrets.token_urlsafe(32)
+    db.add(RecoveryCodeSet(
+        account_id=account.id,
+        code_hash=hashlib.sha256(replacement_code.encode("utf-8")).hexdigest(),
+    ))
+    db.add(AccountRecoveryEvent(
+        recovery_request_id=None,
+        actor_account_id=account.id,
+        event_type="recovery_code_used",
+        details={"sessions_revoked": True, "replacement_code_issued": True},
+    ))
+    db.add(AccountSecurityEvent(
+        account_id=account.id, caregiver_id=account.caregiver_id,
+        event_type="account_recovered",
+        details={"method": "one_time_offline_recovery_code"},
+    ))
+    db.commit()
+    return {
+        "recovered": True,
+        "message": "Password reset. All existing sessions were revoked. Sign in again on this device to restore access.",
+        "recovery_code": replacement_code,
     }
 
 
