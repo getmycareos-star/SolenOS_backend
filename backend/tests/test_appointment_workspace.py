@@ -1394,7 +1394,7 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
 
 
 
-def test_fresh_companion_session_retrieves_relevant_appointment_assertions(client, monkeypatch):
+def test_fresh_companion_session_retrieves_reported_and_accepted_appointment_assertions(client, monkeypatch):
     import app.api.collaboration as collaboration
 
     test_client, owner, _ = client
@@ -1461,14 +1461,16 @@ def test_fresh_companion_session_retrieves_relevant_appointment_assertions(clien
             CareAssertion.source_proposal_id == proposals[2]["id"]
         ).scalar()
     assert accepted_assertion_id in body["source_assertion_ids"]
-    assert pending_assertion_id not in body["source_assertion_ids"]
+    assert pending_assertion_id in body["source_assertion_ids"]
     assert rejected_assertion_id not in body["source_assertion_ids"]
     assert body["written_to_lcr"] is False
     assert body["persistence"] == "conversation_only"
     assert body["session_id"]
     prompt = "\n".join(item["content"] for item in captured["messages"] if item.get("role") in {"system", "user"})
     assert "asked for help with dressing this morning" in prompt
-    assert "mentioned a follow-up on Tuesday" not in prompt
+    assert "mentioned a follow-up on Tuesday" in prompt
+    assert "caregiver_reported_assertion" in prompt
+    assert "unverified" in prompt
     assert "plans to ask about transport arrangements" not in prompt
 
 
