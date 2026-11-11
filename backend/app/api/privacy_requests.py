@@ -88,6 +88,7 @@ def submit_privacy_request(
     request_id = str(uuid.uuid4())
     row = DataSubjectRequest(
         id=str(uuid.uuid4()),
+        requester_id=caregiver_id,
         actor_id=caregiver_id,
         subject_id=person_id,
         person_id=person_id,
