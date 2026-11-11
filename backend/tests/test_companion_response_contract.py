@@ -1073,3 +1073,73 @@ def test_companion_care_update_list_is_scoped_by_bearer_session(monkeypatch):
         assert response.json()["items"] == []
     finally:
         teardown()
+
+
+def test_companion_claim_source_trace_includes_event_reporter_and_original_document(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "She felt unsteady near the kitchen."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        occurred_at = datetime(2026, 11, 2, 8, 0, tzinfo=timezone.utc)
+        evidence = Evidence(
+            id="unsteadiness-original-note",
+            person_id=person_id,
+            type="note",
+            source_text="She felt unsteady near the kitchen.",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_label="Daughter",
+            original_author="Daughter",
+            extra_metadata='{"filename":"family-observation.txt"}',
+            occurred_at=occurred_at,
+            reported_at=occurred_at + timedelta(minutes=10),
+        )
+        event = CareEvent(
+            id="unsteadiness-care-entry",
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=occurred_at,
+            title="Unsteadiness near the kitchen",
+            description="She felt unsteady near the kitchen.",
+            evidence_ids=["unsteadiness-original-note"],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([evidence, event])
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened in the kitchen?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        claim = data["claim_provenance"]["claims"][0]
+        assert claim["support_status"] == "matched_saved_wording"
+        reference = claim["source_references"][0]
+        assert reference["record_id"] == "unsteadiness-care-entry"
+        assert reference["entered_by"] == "Family caregiver"
+        assert reference["occurred_at"] is not None
+        assert reference["recorded_at"] is not None
+        assert reference["related_evidence"][0]["record_id"] == "unsteadiness-original-note"
+        assert reference["related_evidence"][0]["label"] == "family-observation.txt"
+        assert reference["related_evidence"][0]["reported_by"] == "Daughter"
+
+        history = client.get(
+            f"/api/v1/conversation/{data['session_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert history.status_code == 200, history.text
+        saved_claim = history.json()["messages"][-1]["claim_provenance"]["claims"][0]
+        assert saved_claim["source_references"][0]["record_id"] == "unsteadiness-care-entry"
+    finally:
+        teardown()
