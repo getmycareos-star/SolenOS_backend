@@ -651,7 +651,7 @@ def create_appointment_outcome_proposals(record_id: str, request: Request, db: S
                 },
                 source_event_ids_json=[],
                 source_evidence_ids_json=[],
-                rationale="Extracted from a persisted appointment workspace revision. Caregiver review is required before adding a source-attributed assertion to the LCR.",
+                rationale="Extracted from a persisted appointment workspace revision. The exact caregiver report is admitted to the LCR as unreviewed; review controls its status, not whether the source report is retained.",
                 uncertainty_json={"semantic_grounding": "exact_workspace_field", "clinical_verification": "not_performed"},
                 source_conversation_id=None,
                 source_message_id=None,
@@ -661,6 +661,37 @@ def create_appointment_outcome_proposals(record_id: str, request: Request, db: S
             )
             db.add(proposal)
             db.flush()
+
+        # The caregiver's exact saved outcome enters the LCR immediately as
+        # an unreviewed report, linked to the immutable appointment revision.
+        # This is not a clinician-verified assertion.
+        provisional = db.query(CareAssertion).filter(
+            CareAssertion.source_proposal_id == proposal.id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if provisional is None and proposal.status == "pending_authorization":
+            change = proposal.proposed_change_json or {}
+            quote = str(change.get("source_quote") or "").strip()
+            if quote:
+                provisional = CareAssertion(
+                    id=str(uuid.uuid4()), person_id=person_id,
+                    subject_type="person", subject_id=person_id,
+                    field=str(change.get("field") or "appointment_observation"),
+                    assertion_kind="time_bound_observation",
+                    asserted_value=str(change.get("asserted_value") or quote),
+                    source_label="Caregiver-reported appointment outcome (unreviewed)",
+                    source_text=quote,
+                    source_proposal_id=proposal.id,
+                    source_conversation_id=None, source_message_id=None,
+                    event_time_text=change.get("event_time_text"),
+                    evidence_ids=[],
+                    assertion_status="caregiver_reported_unreviewed",
+                    observed_at=None,
+                    created_by_caregiver_id=caregiver_id,
+                    updated_by_caregiver_id=caregiver_id,
+                )
+                db.add(provisional)
+                db.flush()
         created.append(_appointment_proposal_json(proposal))
 
     db.commit()
