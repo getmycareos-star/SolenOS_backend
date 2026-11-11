@@ -757,3 +757,43 @@ def test_evidence_id_filter_is_bounded_deduplicated_and_person_scoped():
     legacy = client.get(path, headers=headers)
     assert legacy.status_code == 200, legacy.text
     assert {item["id"] for item in legacy.json()} >= {first["id"], second["id"]}
+
+
+def test_revoking_anonymous_session_is_durable_audited_and_preserves_care_record():
+    client = TestClient(app)
+    created = create_session(client, "Revocation audit recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+
+    revoked = client.post("/api/v1/sessions/revoke", headers=headers)
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json() == {"revoked": True, "care_record_retained": True}
+
+    denied = client.get(
+        f"/api/v1/persons/{created['person']['id']}",
+        headers=headers,
+    )
+    assert denied.status_code == 401, denied.text
+
+    from app.models.anonymous_session import AnonymousSession
+    from app.models.privacy_delivery import AuditLogEvent
+    import hashlib
+
+    db = TestSessionLocal()
+    try:
+        session = db.query(AnonymousSession).filter_by(
+            token_hash=hashlib.sha256(created["access_token"].encode()).hexdigest()
+        ).one()
+        assert session.revoked_at is not None
+
+        event = db.query(AuditLogEvent).filter_by(
+            action="anonymous_session.revoked",
+            target_type="anonymous_session",
+            target_id=session.id,
+        ).one()
+        assert event.actor_id == created["caregiver"]["id"]
+        assert event.person_id == created["person"]["id"]
+        assert event.caregiver_id == created["caregiver"]["id"]
+        assert event.outcome == "success"
+        assert event.record_metadata == {"reason": "self_service_revocation"}
+    finally:
+        db.close()
