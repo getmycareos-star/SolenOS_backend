@@ -26,7 +26,12 @@ def _value_key(value: str) -> str:
 
 def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True) -> CareAssertion:
     """Store every report; create/update unresolved conflict metadata without selecting a winner."""
+    if payload.epistemic_state == "verified":
+        raise HTTPException(status_code=422, detail="Verified assertions require a persisted verification review; direct assertion creation cannot self-certify")
     assertion = CareAssertion(**payload.model_dump())
+    # AI proposal lineage is an interpretation, never a caregiver report or verified fact.
+    if payload.source_proposal_id:
+        assertion.epistemic_state = "inferred"
     if payload.source_event_id:
         source_event = db.query(CareEvent).filter(
             CareEvent.id == payload.source_event_id,
