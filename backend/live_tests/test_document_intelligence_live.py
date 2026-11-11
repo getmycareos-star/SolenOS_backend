@@ -36,8 +36,9 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
     source = (
-        "Discharge summary. Patient walked 20 metres with a frame on 12 October. "
-        "The patient ate half of lunch during the observation period."
+        "[Page 1]\nDischarge summary. Patient walked 20 metres with a frame on 12 October.\n\n"
+        "[Page 2]\nThe patient ate half of lunch during the observation period.\n\n"
+        "[Page 3 OCR]\n[No readable text detected on this page]"
     )
     try:
         created = client.post(
@@ -80,6 +81,10 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert data["analysis_id"] == analysis_id
         assert data["review_required"] is True
         assert data["written_to_lcr"] is False
+        assert data["intelligence_status"] == "partial"
+        assert data["processed_page_numbers"] == [1, 2]
+        assert data["unreadable_page_numbers"] == [3]
+        assert any("Pages 3 have no readable extracted text" in note for note in data["open_questions"])
         candidates = data["observations"]
         assert len(candidates) >= 2, (
             "Live Qwen plus exact-source fallback did not preserve both explicit "
@@ -87,6 +92,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         )
         assert all(candidate["review_status"] == "pending_review" for candidate in candidates)
         assert all(candidate["source_quote"] in source for candidate in candidates)
+        assert all(candidate["page_number"] in {1, 2} for candidate in candidates)
         assert all(candidate["observation"] in candidate["source_quote"] for candidate in candidates)
         assert all(candidate["subject"].casefold() in candidate["source_quote"].casefold() for candidate in candidates)
 
@@ -131,6 +137,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             assert assertion.assertion_status == "accepted"
             assert assertion.evidence_ids == [evidence_id]
             assert candidates[0]["source_quote"] in assertion.source_text
+            assert f"page {candidates[0]['page_number']}" in assertion.source_label
         finally:
             db.close()
 
