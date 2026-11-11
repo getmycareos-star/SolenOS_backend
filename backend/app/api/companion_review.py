@@ -12,6 +12,8 @@ from app.core.database import get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 
 router = APIRouter(prefix="/companion/care-updates", tags=["companion care updates"])
 
@@ -147,7 +149,7 @@ def review_companion_care_update(
                     raise HTTPException(status_code=409, detail="This proposal already has a different correction decision")
                 assertion = db.query(CareAssertion).filter_by(source_proposal_id=corrected_proposal.id).first()
                 active_assertion = assertion is not None and assertion.assertion_status not in {
-                    "caregiver_reported_rejected", "superseded_by_caregiver_correction",
+                    "rejected", "superseded",
                 }
                 return {
                     "proposal": _proposal_json(proposal),
@@ -195,7 +197,7 @@ def review_companion_care_update(
     if decision == "reject":
         provisional_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
         if provisional_assertion is not None:
-            provisional_assertion.assertion_status = "caregiver_reported_rejected"
+            provisional_assertion.assertion_status = "rejected"
             provisional_assertion.source_label = "Caregiver-rejected Companion disclosure"
         proposal.status = "rejected"
         db.add(AIOutputLCRDecision(
@@ -225,7 +227,7 @@ def review_companion_care_update(
         proposal.status = "corrected"
         provisional_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
         if provisional_assertion is not None:
-            provisional_assertion.assertion_status = "superseded_by_caregiver_correction"
+            provisional_assertion.assertion_status = "superseded"
             provisional_assertion.source_label = "Superseded Companion disclosure; caregiver supplied a correction"
         corrected_proposal = AIOutputLCRProposal(
             id=str(uuid.uuid4()), person_id=person_id, caregiver_id=caregiver_id,
@@ -251,17 +253,23 @@ def review_companion_care_update(
         )
         db.add(corrected_proposal)
         db.flush()
-        db.add(CareAssertion(
-            id=str(uuid.uuid4()), person_id=person_id, subject_type="person",
-            subject_id=person_id, field="care_observation",
-            assertion_kind="time_bound_observation", asserted_value=corrected,
-            source_label="Caregiver-corrected Companion disclosure (unreviewed)",
-            source_text=source_quote + (("\nCaregiver-supplied correction context: " + context) if context else ""),
-            source_conversation_id=session.id, source_message_id=source_message.id,
-            source_proposal_id=corrected_proposal.id, event_time_text=original.get("event_time_text"),
-            evidence_ids=[], assertion_status="caregiver_reported_unreviewed",
-            observed_at=None, created_by_caregiver_id=caregiver_id,
-        ))
+        create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person_id, subject_type="person", subject_id=person_id,
+                field="care_observation", assertion_kind="time_bound_observation",
+                asserted_value=corrected,
+                source_label="Companion caregiver correction",
+                source_text=source_quote + (("\nCaregiver-supplied correction context: " + context) if context else ""),
+                source_conversation_id=session.id, source_message_id=source_message.id,
+                source_proposal_id=corrected_proposal.id,
+                event_time_text=original.get("event_time_text"),
+                evidence_ids=[], observed_at=None,
+                created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+            ),
+            commit=False,
+        )
         db.add(AIOutputLCRDecision(
             id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
             reviewer_caregiver_id=caregiver_id, decision="corrected",
