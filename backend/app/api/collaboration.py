@@ -2234,7 +2234,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # for their explicit contracts; this adds canonical facts, reviewed assertions,
     # uncertainty, decisions, open loops and provenance without duplicating events,
     # evidence, appointments or document text already loaded above.
-    shared_lcr_workflows = event_workflows | appointment_workflows
+    shared_lcr_workflows = (event_workflows | appointment_workflows) - {"medication_day"}
     if payload.workflow in shared_lcr_workflows:
         shared_lcr_context = build_unified_lcr_context(
             db,
