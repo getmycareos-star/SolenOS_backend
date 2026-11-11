@@ -1239,7 +1239,7 @@ def current_care_projection(
                               "perspective_text", "observed_value", "normalized_value", "value_text", "source_passage", "ambiguity_note", "decision_text", "summary", "resolution", "decision_notes")
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
-        occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at")
+        occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("event_time_text") or row.get("decided_at")
         recorded_at = row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at") or row.get("asked_at")
         evidence_ids = row.get("evidence_ids")
         if not isinstance(evidence_ids, list):
