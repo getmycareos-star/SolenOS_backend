@@ -293,39 +293,14 @@ def test_open_question_lifecycle():
         
         question_id = data["id"]
 
-        # A typed answer without persisted source evidence must remain open.
-        unsupported_answer = client.patch(
-            f"/api/v1/uncertainty/questions/{question_id}",
-            json={
-                "status": "answered",
-                "answer": "The caregiver reports that the appointment was attended.",
-                "answer_provenance": "Caregiver report recorded during the current session.",
-            },
-        )
-        assert unsupported_answer.status_code == 422, unsupported_answer.text
-        assert client.get("/api/v1/uncertainty/questions/person-5?status=open").json()[0]["status"] == "open"
-
-        first_source = client.post(
-            "/api/v1/evidence",
-            json={
-                "person_id": "person-5",
-                "uploaded_by_caregiver_id": "caregiver-5",
-                "type": "note",
-                "evidence_kind": "caregiver_report",
-                "epistemic_status": "unverified",
-                "source_text": "The caregiver checked the visit record and confirms attendance.",
-            },
-        )
-        assert first_source.status_code in {200, 201}, first_source.text
-        first_evidence_id = first_source.json()["id"]
-
+        # A caregiver can answer without uploading a separate document. The
+        # answer is saved as a new, source-attributed caregiver report.
         first_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
                 "status": "answered",
                 "answer": "The caregiver reports that the appointment was attended.",
                 "answer_provenance": "Caregiver report recorded during the current session.",
-                "evidence_ids": [first_evidence_id],
             },
         )
         assert first_answer.status_code == 200, first_answer.text
@@ -336,8 +311,21 @@ def test_open_question_lifecycle():
         assert len(first_history.json()) == 1
         assert first_history.json()[0]["answer"] == "The caregiver reports that the appointment was attended."
         assert first_history.json()[0]["answered_by_caregiver_id"] == "caregiver-5"
-        assert first_history.json()[0]["evidence_ids"] == [first_evidence_id]
+        first_evidence_id = first_history.json()[0]["evidence_ids"][0]
+        assert first_evidence_id
         assert first_history.json()[0]["answer_version"] == 1
+
+        audit_db = TestingSessionLocal()
+        try:
+            answer_source = audit_db.query(Evidence).filter(Evidence.id == first_evidence_id).one()
+            assert answer_source.evidence_kind == "caregiver_report"
+            assert answer_source.epistemic_status == "caregiver_reported"
+            assert answer_source.uploaded_by_caregiver_id == "caregiver-5"
+            assert "The caregiver reports that the appointment was attended." in answer_source.source_text
+            assert "Caregiver report recorded during the current session." in answer_source.source_text
+        finally:
+            audit_db.close()
+
         repeated_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
