@@ -14,7 +14,7 @@ jobs:
   document-lifecycle-postgres:
     name: Care spine, documents, Daily Care and handoff on PostgreSQL
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
@@ -33,6 +33,8 @@ jobs:
       DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
       SOLENOS_COMPANION_TEST_DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
       SOLENOS_TEST_POSTGRES_RESTART: "1"
+      SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
+      APP_ENV: test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -63,3 +65,6 @@ jobs:
           backend/tests/test_appointment_workspace_postgres.py
           backend/tests/test_companion_care_update_postgres.py
           -q -s
+      - name: Verify authenticated identity and care persistence across real HTTP server restart
+        working-directory: backend
+        run: python scripts/postgres_anonymous_e2e.py
