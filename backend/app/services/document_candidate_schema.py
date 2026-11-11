@@ -221,8 +221,14 @@ def apply_medication_conflict_warnings(candidates: list[dict[str, Any]]) -> None
         if candidate.get("field_type") != "medication":
             continue
         subject = str(candidate.get("subject") or "").strip().casefold()
-        if subject:
-            grouped.setdefault(subject, []).append(candidate)
+        source_text = " ".join(
+            str(candidate.get(key) or "")
+            for key in ("source_quote", "observation")
+        )
+        medication_match = _MEDICATION_NAME.search(source_text)
+        medication_key = medication_match.group(1).casefold() if medication_match else subject
+        if medication_key:
+            grouped.setdefault(medication_key, []).append(candidate)
     for rows in grouped.values():
         distinct = {str(row.get("observation") or "").strip().casefold() for row in rows}
         if len(distinct) > 1:
