@@ -1,0 +1,128 @@
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+import app.main as main_module
+from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
+from app.main import app
+
+engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def override_get_db():
+    db = TestSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def setup_function():
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_get_db
+    main_module.SessionLocal = TestSessionLocal
+
+
+def teardown_function():
+    app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
+    Base.metadata.drop_all(bind=engine)
+
+
+def create_session(client, name):
+    response = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": name, "caregiver_name": "Caregiver"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_privacy_request_requires_authenticated_session():
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/privacy/requests",
+        json={
+            "request_type": "deletion",
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert response.status_code == 401
+
+
+def test_privacy_request_is_pending_and_does_not_claim_fulfilment():
+    client = TestClient(app)
+    session = create_session(client, "Care recipient")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = client.post(
+        "/api/v1/privacy/requests",
+        headers=headers,
+        json={
+            "request_type": "deletion",
+            "authority_basis": "authorized_caregiver",
+            "authority_attested": True,
+            "note": "Please review this request.",
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["status"] == "received_pending_authority_review"
+    assert body["authority_verified"] is False
+    assert body["fulfilment_started"] is False
+
+    listed = client.get("/api/v1/privacy/requests", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert [item["id"] for item in listed.json()["requests"]] == [body["id"]]
+
+    from app.models.care import Person
+    db = TestSessionLocal()
+    try:
+        assert db.query(Person).filter(Person.id == session["person"]["id"]).count() == 1
+    finally:
+        db.close()
+
+
+def test_privacy_request_list_is_scoped_to_the_requesting_caregiver_and_record():
+    client = TestClient(app)
+    first = create_session(client, "First recipient")
+    second = create_session(client, "Second recipient")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=first_headers,
+        json={
+            "request_type": "access",
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    own = client.get("/api/v1/privacy/requests", headers=first_headers)
+    other = client.get("/api/v1/privacy/requests", headers=second_headers)
+    assert len(own.json()["requests"]) == 1
+    assert other.json()["requests"] == []
+
+
+def test_privacy_request_rejects_unattested_authority():
+    client = TestClient(app)
+    session = create_session(client, "Care recipient")
+    response = client.post(
+        "/api/v1/privacy/requests",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "request_type": "export",
+            "authority_basis": "other",
+            "authority_attested": False,
+        },
+    )
+    assert response.status_code == 422
