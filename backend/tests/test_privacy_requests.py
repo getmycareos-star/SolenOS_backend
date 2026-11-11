@@ -916,13 +916,24 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
         },
     )
     assert approved.status_code == 200, approved.text
-    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "g2" * 20)
-    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "independent-erasure-reviewer")
-    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "g2" * 20}
+    monkeypatch.setenv("SOLENOS_PRIVACY_DELETION_REVIEWER_TOKEN", "g2" * 20)
+    monkeypatch.setenv("SOLENOS_PRIVACY_DELETION_REVIEWER_ID", "independent-erasure-reviewer")
+    deletion_reviewer_headers = {"X-SolenOS-Privacy-Deletion-Reviewer-Token": "g2" * 20}
+
+    # The approving reviewer's credential must not be accepted for destructive erasure.
+    primary_credential_reuse = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
+        headers={"X-SolenOS-Privacy-Deletion-Reviewer-Token": "g" * 40},
+        json={
+            "backup_erasure_verified": True,
+            "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
+        },
+    )
+    assert primary_credential_reuse.status_code == 401, primary_credential_reuse.text
 
     fulfilled = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
-        headers=reviewer_headers,
+        headers=deletion_reviewer_headers,
         json={
             "backup_erasure_verified": True,
             "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
@@ -963,7 +974,7 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
     # Reviewer-only retry is idempotent and does not recreate or repeat deletion.
     replay = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
-        headers=reviewer_headers,
+        headers=deletion_reviewer_headers,
         json={
             "backup_erasure_verified": True,
             "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
@@ -1011,12 +1022,12 @@ def test_deletion_fails_closed_for_shared_care_record(monkeypatch):
         },
     )
     assert approved.status_code == 200, approved.text
-    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "h2" * 20)
-    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "independent-erasure-reviewer")
-    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "h2" * 20}
+    monkeypatch.setenv("SOLENOS_PRIVACY_DELETION_REVIEWER_TOKEN", "h2" * 20)
+    monkeypatch.setenv("SOLENOS_PRIVACY_DELETION_REVIEWER_ID", "independent-erasure-reviewer")
+    deletion_reviewer_headers = {"X-SolenOS-Privacy-Deletion-Reviewer-Token": "h2" * 20}
     denied = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
-        headers=reviewer_headers,
+        headers=deletion_reviewer_headers,
         json={
             "backup_erasure_verified": True,
             "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
@@ -1071,12 +1082,12 @@ def test_deletion_fails_closed_when_legal_hold_is_active(monkeypatch):
         },
     )
     assert approved.status_code == 200, approved.text
-    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "i2" * 20)
-    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "independent-erasure-reviewer")
-    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "i2" * 20}
+    monkeypatch.setenv("SOLENOS_PRIVACY_DELETION_REVIEWER_TOKEN", "i2" * 20)
+    monkeypatch.setenv("SOLENOS_PRIVACY_DELETION_REVIEWER_ID", "independent-erasure-reviewer")
+    deletion_reviewer_headers = {"X-SolenOS-Privacy-Deletion-Reviewer-Token": "i2" * 20}
     denied = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
-        headers=reviewer_headers,
+        headers=deletion_reviewer_headers,
         json={
             "backup_erasure_verified": True,
             "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
