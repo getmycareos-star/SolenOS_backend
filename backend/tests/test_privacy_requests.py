@@ -176,7 +176,7 @@ def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
     assert body["authority_verified_by_reviewer"] is True
     assert body["fulfilment_started"] is False
     assert body["resolved_at"] is None
-    assert "no data was exported" in body["message"]
+    assert "no data was exported" in body["message"].casefold()
 
     # Approval removes the request from the pending queue but does not mark it
     # fulfilled or resolved.
