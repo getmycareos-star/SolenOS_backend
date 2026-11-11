@@ -136,7 +136,7 @@ def test_privacy_request_rejects_unattested_authority():
 
 
 from app.models.privacy_delivery import AuditLogEvent
-from app.models.privacy_requests import DataSubjectRequest
+from app.models.privacy_request import DataSubjectRequest
 
 
 def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
