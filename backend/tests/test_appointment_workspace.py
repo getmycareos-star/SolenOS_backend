@@ -1245,7 +1245,7 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
     )
     assert prepared.status_code == 200, prepared.text
     body = prepared.json()
-    assert body["written_to_lcr"] is False
+    assert body["written_to_lcr"] is True
     assert body["review_required"] is True
     assert body["count"] == 3
     proposals = body["items"]
@@ -1272,7 +1272,7 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
         json={"decision": "accept"},
     ).status_code == 404
 
-    # Accept creates exactly one caregiver-reviewed assertion, not a clinical fact.
+    # Exact caregiver-entered outcome reports are already in the LCR as unreviewed; acceptance upgrades status, not truth.
     accepted = test_client.post(
         f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[0]['id']}/review",
         headers=headers,
@@ -1378,9 +1378,10 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
             AIOutputLCRProposal.id == proposals[2]["id"]
         ).one()
         assert rejected_proposal.status == "rejected"
-        assert db.query(CareAssertion).filter(
+        rejected_assertion = db.query(CareAssertion).filter(
             CareAssertion.source_proposal_id == proposals[2]["id"]
-        ).count() == 0
+        ).one()
+        assert rejected_assertion.assertion_status == "caregiver_reported_rejected"
         decisions = db.query(AIOutputLCRDecision).filter(
             AIOutputLCRDecision.proposal_id.in_([proposals[0]["id"], proposals[1]["id"], proposals[2]["id"]])
         ).all()
@@ -1390,7 +1391,7 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
 
 
 
-def test_fresh_companion_session_retrieves_only_accepted_appointment_assertions(client, monkeypatch):
+def test_fresh_companion_session_retrieves_relevant_appointment_assertions(client, monkeypatch):
     import app.api.collaboration as collaboration
 
     test_client, owner, _ = client
