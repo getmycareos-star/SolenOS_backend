@@ -1,3 +1,5 @@
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -62,6 +64,60 @@ def test_contradiction_persists_all_source_assertion_ids():
         assert contradiction.resolution_status == "unresolved"
         assert set(contradiction.source_assertion_ids or []) == {first.id, second.id}
         assert len(contradiction.evidence_ids or []) == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_shared_assertion_ingestion_rejects_unowned_source_provenance():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = session_factory()
+    try:
+        person = Person(id="provenance-validation-person", name="Provenance validation test person")
+        db.add(person)
+        db.commit()
+
+        with pytest.raises(HTTPException) as proposal_error:
+            create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person.id,
+                    subject_type="person",
+                    subject_id=person.id,
+                    field="care_observation",
+                    assertion_kind="time_bound_observation",
+                    asserted_value="A caregiver report",
+                    source_label="Companion caregiver report",
+                    source_proposal_id="proposal-from-another-care-record",
+                    created_by_caregiver_id="caregiver-a",
+                ),
+            )
+        assert proposal_error.value.status_code == 422
+
+        with pytest.raises(HTTPException) as message_error:
+            create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person.id,
+                    subject_type="person",
+                    subject_id=person.id,
+                    field="care_observation",
+                    assertion_kind="time_bound_observation",
+                    asserted_value="A caregiver report",
+                    source_label="Companion caregiver report",
+                    source_message_id="message-without-validated-conversation",
+                    created_by_caregiver_id="caregiver-a",
+                ),
+            )
+        assert message_error.value.status_code == 422
+        assert db.query(Person).filter_by(id=person.id).one()
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
