@@ -923,6 +923,10 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
     fulfilled = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
         headers=reviewer_headers,
+        json={
+            "backup_erasure_verified": True,
+            "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
+        },
     )
     assert fulfilled.status_code == 200, fulfilled.text
     body = fulfilled.json()
@@ -960,6 +964,10 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
     replay = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
         headers=reviewer_headers,
+        json={
+            "backup_erasure_verified": True,
+            "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
+        },
     )
     assert replay.status_code == 200, replay.text
     assert replay.json()["idempotent_replay"] is True
@@ -1006,6 +1014,10 @@ def test_deletion_fails_closed_for_shared_care_record(monkeypatch):
     denied = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
         headers=reviewer_headers,
+        json={
+            "backup_erasure_verified": True,
+            "backup_retention_evidence": "Verified all backups containing this synthetic test record have expired.",
+        },
     )
     assert denied.status_code == 409
     db = TestSessionLocal()
