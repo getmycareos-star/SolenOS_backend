@@ -134,6 +134,26 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         finally:
             db.close()
 
+        # The accepted document assertion must be available to the same caregiver's
+        # real-Qwen Companion response, with the original upload retained as source.
+        companion = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": session["person"]["id"],
+                "text": "What does the discharge summary say about walking?",
+            },
+        )
+        assert companion.status_code == 200, companion.text
+        grounded = companion.json()
+        assert grounded.get("ai_generated") is True, grounded
+        assert evidence_id in grounded.get("source_evidence_ids", []), grounded
+        assert any(
+            term in grounded.get("reply", "").casefold()
+            for term in ("20 metres", "20 meter", "frame", "walked 20")
+        ), grounded
+        assert grounded.get("written_to_lcr") is False, grounded
+
         # A separate care record cannot list, retrieve, or review the first record's analysis.
         other = client.post(
             "/api/v1/sessions/anonymous",
