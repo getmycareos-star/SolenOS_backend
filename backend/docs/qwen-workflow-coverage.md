@@ -4,7 +4,7 @@
 
 Qwen is a read-only support layer. The caregiver and the Living Care Record (LCR) remain authoritative. Every returned suggestion requires caregiver review; Qwen must never create or alter LCR facts, assign a handoff, change a reminder, grant access, or claim a save occurred. If source context is missing or a claim cannot be grounded, the system should ask for clarification or fail closed rather than inventing details.
 
-Community is intentionally excluded from Qwen workflow selection and inference. The disabled workflow is not counted among the 30 enabled workflows.
+Community is intentionally excluded from Qwen workflow selection and inference. The disabled workflow is not counted among the 39 enabled workflows.
 
 ## Enabled workflow matrix
 
@@ -40,10 +40,19 @@ Community is intentionally excluded from Qwen workflow selection and inference. 
 | `offline_sync` | Explain offline/sync state | Distinguish local pending edits from server-confirmed persistence |
 | `ai_reliability` | Explain Qwen availability and retry state | Report only observed status; never fabricate successful inference |
 | `audit_review` | Summarize review candidates/audit details | Preserve proposed/accepted/rejected/persisted status; never claim a write occurred |
+| `care_transition` | Organize information around a change in care setting | Preserve source, timing and unconfirmed instructions; do not infer discharge completion |
+| `incident_follow_through` | Review what is known after an incident | Separate the incident report from later outcomes; do not invent resolution |
+| `emergency_readiness` | Identify recorded emergency information and gaps | Report missing information plainly; do not claim an emergency plan exists unless recorded |
+| `care_coverage_gap` | Review recorded care coverage | Identify only evidenced gaps; do not assign a caregiver or invent coverage |
+| `care_instruction_change_tracker` | Compare earlier and newer care instructions | Preserve both versions, source and effective dates; do not choose between conflicts |
+| `critical_information_completeness` | Identify missing essential care information | Distinguish absent information from negative findings |
+| `personal_preferences_distress_context` | Summarize recorded preferences and distress context | Preserve who reported each preference; do not infer triggers |
+| `caregiver_strain_support` | Organize caregiver-reported strain and support needs | Use caregiver-provided information only; do not diagnose |
+| `document_validity_renewal` | Review document dates and renewal information | Use explicit dates in authorized documents; do not invent expiry dates |
 
 ## Validation gates
 
-1. Schema contract tests accept exactly these 30 IDs and reject `community` and unknown IDs.
+1. Schema contract tests accept exactly these 39 IDs and reject `community` and unknown IDs.
 2. Backend CI runs authenticated inference against the actual bundled Qwen model for each enabled ID.
 3. The same run checks non-empty generated output, provider availability, review-required state and `written_to_lcr=false`.
 4. Daily Capture candidate extraction is checked separately from the read-only assistance path.
@@ -52,6 +61,6 @@ Community is intentionally excluded from Qwen workflow selection and inference. 
 
 ## Background processing boundary
 
-The backend now has a proposed database-backed Qwen job queue: caregiver requests are persisted, a worker classifies each request into exactly one of the 30 enabled workflow IDs, runs the existing record-scoped read-only assistant, and persists queued/processing/completed/failed status plus the returned suggestion and source IDs. The caregiver never chooses a workflow. Classification must fail closed if it returns an unknown ID or Community.
+The backend now has a proposed database-backed Qwen job queue: caregiver requests are persisted, a worker classifies each request into exactly one of the 39 enabled workflow IDs, runs the existing record-scoped read-only assistant, and persists queued/processing/completed/failed status plus the returned suggestion and source IDs. The caregiver never chooses a workflow. Classification must fail closed if it returns an unknown ID or Community.
 
 This is **request-driven background processing**, not yet an autonomous scanner that independently schedules work whenever any care event, reminder, appointment, document or account state changes. Those event producers must be connected incrementally with idempotency keys and workflow-specific eligibility rules before claiming continuous autonomous coverage. The worker never silently writes LCR facts; returned suggestions require caregiver review. Production readiness still requires migration, CI, live queue execution, retry/restart tests and authorization-isolation verification.
