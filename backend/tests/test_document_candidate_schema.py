@@ -176,3 +176,37 @@ def test_unambiguous_month_name_event_date_is_normalized():
     )
     assert candidate["event_date"] == "2026-10-14"
     assert not any("Date format is ambiguous or invalid" in warning for warning in candidate["warnings"])
+
+
+
+def test_medication_strength_and_dosage_are_resolved_from_matching_table_row():
+    excerpt = "Metformin 500 mg once daily\nAmlodipine 5 mg twice daily"
+    candidate = canonical_candidate(
+        {
+            "subject": "Amlodipine",
+            "observation": "Amlodipine 5 mg twice daily",
+            "source_quote": excerpt,
+        },
+        document_id="doc-medication-table",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["medication_details"] == {
+        "strength": "5 mg",
+        "dosage_instructions": "Amlodipine 5 mg twice daily",
+    }
+    assert not any("Multiple medication strengths" in warning for warning in candidate["warnings"])
+
+
+def test_unmatched_multi_strength_medication_excerpt_does_not_guess_strength():
+    excerpt = "Metformin 500 mg once daily\nAmlodipine 5 mg twice daily"
+    candidate = canonical_candidate(
+        {
+            "subject": "Medication list",
+            "observation": "Medication list includes two entries.",
+            "source_quote": excerpt,
+        },
+        document_id="doc-ambiguous-medication-table",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["medication_details"]["strength"] is None
+    assert any("Multiple medication strengths" in warning for warning in candidate["warnings"])
