@@ -24,6 +24,15 @@ class CareAssertionCreate(BaseModel):
     source_proposal_id: Optional[str] = None
     event_time_text: Optional[str] = Field(default=None, max_length=500)
 
+    @model_validator(mode="after")
+    def observed_assertions_require_observation_context(self):
+        if self.epistemic_state == "observed":
+            if self.observed_at is None:
+                raise ValueError("observed_at is required for an observed assertion")
+            if not (self.source_text or "").strip() and not self.evidence_ids:
+                raise ValueError("source_text or evidence_ids is required for an observed assertion")
+        return self
+
 
 class CareAssertionResponse(BaseModel):
     id: str
