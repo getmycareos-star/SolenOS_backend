@@ -7,7 +7,13 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+import time
+import urllib.request
+import urllib.error
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,6 +63,75 @@ def _ask(client: TestClient, session: dict, question: str, session_id: str | Non
         headers={"Authorization": f"Bearer {session['access_token']}"},
         json=payload,
     )
+
+
+def _get_json_after_restart(base_url: str, path: str, token: str) -> tuple[int, dict]:
+    request = urllib.request.Request(
+        base_url + path,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return response.status, json.loads(response.read().decode("utf-8"))
+
+
+def _verify_persistence_after_real_server_restart(session: dict, other: dict, conversation_id: str, proposal_id: str, assertion_id: str, disclosure: str) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "uvicorn", "app.main:app",
+            "--host", "127.0.0.1", "--port", "8013",
+        ],
+        cwd=str(backend_dir),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
+    base_url = "http://127.0.0.1:8013"
+    try:
+        for _ in range(60):
+            if process.poll() is not None:
+                raise AssertionError(f"Uvicorn exited during restart persistence check: {process.returncode}")
+            try:
+                with urllib.request.urlopen(base_url + "/health", timeout=2) as response:
+                    if response.status == 200:
+                        break
+            except Exception:
+                time.sleep(0.5)
+        else:
+            raise AssertionError("Fresh Uvicorn process did not become healthy against the migrated PostgreSQL database")
+
+        token = session["access_token"]
+        status, history = _get_json_after_restart(base_url, f"/api/v1/conversation/{conversation_id}", token)
+        assert status == 200, history
+        assert any(item.get("role") == "user" and item.get("text") == disclosure for item in history.get("messages", [])), history
+        status, candidates = _get_json_after_restart(base_url, "/api/v1/companion/care-updates", token)
+        assert status == 200, candidates
+        persisted = next((item for item in candidates.get("items", []) if item.get("id") == proposal_id), None)
+        assert persisted is not None and persisted.get("status") == "accepted", candidates
+        status, lcr = _get_json_after_restart(base_url, "/api/v1/care-continuity/current-care", token)
+        assert status == 200, lcr
+        assert any(item.get("id") == assertion_id for item in lcr.get("items", [])), lcr
+
+        denied = urllib.request.Request(
+            base_url + f"/api/v1/conversation/{conversation_id}",
+            headers={"Authorization": f"Bearer {other['access_token']}"},
+            method="GET",
+        )
+        try:
+            urllib.request.urlopen(denied, timeout=10)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("A different caregiver retrieved the persisted Companion conversation after restart")
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_identity():
@@ -174,3 +249,18 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         isolated_data = isolated.json()
         assert event_id not in isolated_data.get("source_event_ids", []), isolated_data
         assert isolated_data.get("written_to_lcr") is False, isolated_data
+
+        # Close the in-process client, start a fresh Uvicorn process against the
+        # same migrated PostgreSQL database, and prove conversation, accepted
+        # candidate and LCR assertion survive a real application restart.
+        conversation_id = capture.json().get("session_id")
+        assert conversation_id
+        client.close()
+        _verify_persistence_after_real_server_restart(
+            caregiver,
+            other,
+            conversation_id,
+            proposal["id"],
+            assertion_id,
+            new_observation,
+        )
