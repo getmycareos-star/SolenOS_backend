@@ -2607,6 +2607,76 @@ def list_record_snapshots(request: Request, limit: int = 50, db: Session = Depen
     return [_jsonable(dict(row)) for row in rows]
 
 
+@router.get("/record-snapshots/as-of")
+def reconstruct_record_snapshot_as_of(
+    request: Request,
+    as_of: datetime = Query(..., description="Return the latest saved full-record snapshot at or before this time"),
+    db: Session = Depends(get_db),
+):
+    """Return the latest saved record-wide snapshot at or before a requested time.
+
+    This endpoint returns only an explicitly saved snapshot. It does not fill gaps
+    from current tables or claim that snapshots were captured after every write.
+    """
+    person_id, _caregiver_id = _scoped_identity(request, db)
+    as_of = as_of.replace(tzinfo=timezone.utc) if as_of.tzinfo is None else as_of.astimezone(timezone.utc)
+    snapshots = _table(db, "care_record_snapshots")
+    records = _table(db, "living_care_records")
+    row = db.execute(
+        select(snapshots)
+        .join(records, snapshots.c.care_record_id == records.c.id)
+        .where(
+            records.c.person_id == person_id,
+            snapshots.c.as_of <= as_of,
+        )
+        .order_by(desc(snapshots.c.as_of), desc(snapshots.c.created_at))
+        .limit(1)
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No saved full-record snapshot exists at or before this time. This does not mean the care record was empty.",
+        )
+
+    snapshot_payload = row.get("snapshot_payload")
+    if isinstance(snapshot_payload, str):
+        try:
+            snapshot_payload = json.loads(snapshot_payload)
+        except (TypeError, json.JSONDecodeError) as exc:
+            logger.exception("Saved care-record snapshot is not valid JSON")
+            raise HTTPException(status_code=500, detail="Saved care history could not be read") from exc
+    if not isinstance(snapshot_payload, dict):
+        raise HTTPException(status_code=500, detail="Saved care history has an invalid format")
+
+    encoded = json.dumps(snapshot_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    computed_digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    stored_digest = row.get("record_digest")
+    if stored_digest and not hmac.compare_digest(str(stored_digest), computed_digest):
+        logger.error("Care-record snapshot digest mismatch for snapshot %s", row.get("id"))
+        raise HTTPException(status_code=500, detail="Saved care history failed its integrity check")
+
+    tables = snapshot_payload.get("tables")
+    tables = tables if isinstance(tables, dict) else {}
+    return {
+        "person_id": person_id,
+        "care_record_id": row.get("care_record_id"),
+        "snapshot_id": row.get("id"),
+        "version_id": row.get("version_id"),
+        "requested_as_of": as_of.isoformat(),
+        "snapshot_as_of": row.get("as_of").isoformat() if row.get("as_of") else None,
+        "record_digest": stored_digest,
+        "integrity_status": "verified" if stored_digest else "not_available",
+        "coverage_status": "saved_snapshot_only",
+        "tables_captured": sorted(tables.keys()),
+        "state": snapshot_payload,
+        "interpretation_limit": (
+            "This is the latest saved full-record snapshot at or before the requested time. "
+            "It does not include changes made after that snapshot, prove the truth of saved information, "
+            "or establish that every source and write path was captured."
+        ),
+    }
+
+
 @router.get("/record-revisions")
 def list_record_revisions(request: Request, limit: int = 50, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
