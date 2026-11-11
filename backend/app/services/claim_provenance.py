@@ -64,7 +64,10 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]]) -> 
                         "record_status": source.get("record_status"),
                         "source_independence_status": source.get("source_independence_status", "not_assessed"),
                         "exact_wording_duplicate_count": int(source.get("exact_wording_duplicate_count") or 0),
-                        "source_state_label": "Earlier or corrected record; not treated as current" if is_historical else None,
+                        "source_state_label": source.get("source_state_label") or ("Earlier or corrected record; not treated as current" if is_historical else None),
+                        "correction_note": source.get("correction_note"),
+                        "correction_rationale": source.get("correction_rationale"),
+                        "previous_source_excerpt": source.get("previous_source_excerpt"),
                         "related_evidence_ids": list(source.get("related_evidence_ids") or []),
                         "related_evidence": list(source.get("related_evidence") or []),
                     })
