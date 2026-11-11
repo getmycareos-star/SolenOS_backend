@@ -1381,7 +1381,7 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
         rejected_assertion = db.query(CareAssertion).filter(
             CareAssertion.source_proposal_id == proposals[2]["id"]
         ).one()
-        assert rejected_assertion.assertion_status == "caregiver_reported_rejected"
+        assert rejected_assertion.assertion_status == "rejected"
         decisions = db.query(AIOutputLCRDecision).filter(
             AIOutputLCRDecision.proposal_id.in_([proposals[0]["id"], proposals[1]["id"], proposals[2]["id"]])
         ).all()
