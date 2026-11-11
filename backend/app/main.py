@@ -54,6 +54,7 @@ from app.models.uncertainty import (
 from app.core.uncertainty_enums import GapLifecycleStatus
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.accounts import router as accounts_router
+from app.api.privacy_requests import router as privacy_requests_router
 from app.api.identity_security import router as identity_security_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
@@ -208,6 +209,7 @@ app.add_middleware(RequestBodySizeLimitMiddleware)
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
+app.include_router(privacy_requests_router, prefix="/api/v1")
 app.include_router(identity_security_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
