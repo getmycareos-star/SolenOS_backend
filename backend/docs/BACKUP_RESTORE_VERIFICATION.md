@@ -41,7 +41,7 @@ The script:
 3. Runs a real custom-format `pg_dump`.
 4. Restores that dump into the isolated restore database with `pg_restore`.
 5. Verifies caregiver/person ownership, evidence provenance/hash, event/evidence association, exact document bytes/size/SHA-256, correction history, LCR revision history and cross-caregiver isolation.
-6. Emits a machine-readable PASS/FAIL report with measured backup, restore and end-to-end durations.
+6. Emits a machine-readable PASS/FAIL report with measured backup size, backup/restore durations and end-to-end duration. CI retains the sanitized report as a 30-day workflow artifact; the raw database dump is not uploaded.
 7. The dedicated GitHub Actions workflow `Backup and recovery verification` runs the existing real-Uvicorn PostgreSQL anonymous-session E2E suite against the restored database. It first discovers the exact synthetic caregiver fixture from the backup run and reads that caregiver's identity, evidence, care event, LCR projection and document bytes through authenticated APIs; it then covers authenticated reads/writes, token revocation/refresh, cross-caregiver denial and persistence across a Uvicorn restart.
 
 For a local full check, after the backup/restore script passes, point the application at the restored database and run the real HTTP/PostgreSQL E2E suite:
@@ -67,7 +67,7 @@ This second test creates additional synthetic records in the restored target and
 
 Do not mark backup recovery as verified until a fresh run against disposable PostgreSQL databases reports PASS and the operator has reviewed:
 
-- source and restore database names (never credentials);
+- source and restore database names (never credentials);\n- the sanitized JSON report artifact and its PASS/FAIL status;
 - backup artifact format and size, stored outside the repository;
 - measured backup and restore durations;
 - fixture counts and all verification assertions;
