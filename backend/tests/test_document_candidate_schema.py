@@ -110,3 +110,18 @@ def test_long_page_is_chunked_without_dropping_source_text():
     assert all(page_number == 7 for page_number, _ in chunks)
     assert all(len(chunk) <= 8000 for _, chunk in chunks)
     assert "".join(chunks[index][1] for index in range(len(chunks))) == page_text
+
+
+
+def test_recorded_date_is_not_mislabelled_as_event_date():
+    excerpt = "Recorded on 2026-10-15. Patient slept poorly."
+    candidate = canonical_candidate(
+        {"subject": "sleep", "observation": "Patient slept poorly.", "source_quote": excerpt},
+        document_id="doc-recorded-date",
+        source_text=f"[Page 1]\n{excerpt}",
+        recorded_at=datetime(2026, 11, 11, tzinfo=timezone.utc),
+    )
+    assert candidate["event_date"] is None
+    assert candidate["recorded_date"] == "2026-10-15"
+    assert candidate["extracted_at"] == "2026-11-11T00:00:00+00:00"
+    assert any("document recording date" in warning for warning in candidate["warnings"])
