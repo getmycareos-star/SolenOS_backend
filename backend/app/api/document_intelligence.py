@@ -125,17 +125,6 @@ def _document_asserted_value(candidate: dict, subject: str, observation: str) ->
     if candidate.get("field_type") == "medication":
         details = canonical.get("medication_details")
         details = details if isinstance(details, dict) else {}
-        if candidate.get("review_status") == "corrected_pending_approval":
-            strength_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", observation, re.I)
-            dosage_match = re.search(
-                r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
-                observation,
-                re.I,
-            )
-            details = {
-                "strength": strength_match.group(0).strip() if strength_match else None,
-                "dosage_instructions": dosage_match.group(0).strip() if dosage_match else None,
-            }
         return (
             f"Medication: {subject}\n"
             f"Strength: {details.get('strength') or 'Not stated in source'}\n"
