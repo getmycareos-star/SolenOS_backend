@@ -897,3 +897,14 @@ jobs:
           else
             echo "Alembic version table rolled back with failed upgrade transaction; legacy data and schema checks passed."
           fi
+
+      - name: Run privacy request reviewer workflow tests against PostgreSQL
+        env:
+          PGPASSWORD: postgres
+          TEST_POSTGRES_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_privacy_requests
+        working-directory: backend
+        run: |
+          createdb -h localhost -U postgres solenos_privacy_requests
+          python -m pytest tests/test_privacy_requests.py -q
+          dropdb -h localhost -U postgres solenos_privacy_requests
+
