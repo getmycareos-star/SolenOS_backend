@@ -882,7 +882,7 @@ def review_appointment_outcome_proposal(
                 assertion_kind="time_bound_observation",
                 asserted_value=corrected_text,
                 source_label="Caregiver-corrected appointment outcome (unreviewed)",
-                source_text=source_quote + "\\nCaregiver correction context: " + correction_context,
+                source_text=source_quote + "\nCaregiver correction context: " + correction_context,
                 source_proposal_id=corrected_proposal.id,
                 event_time_text=original.get("event_time_text"),
                 evidence_ids=[], assertion_status="caregiver_reported_unreviewed",
