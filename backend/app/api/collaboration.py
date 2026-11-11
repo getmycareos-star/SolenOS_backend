@@ -3540,6 +3540,12 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         EvidenceModel.id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
     ).all()
     evidence_by_id = {str(item.id): item for item in evidence_rows}
+    observation_rows = []
+    if inspect(db.get_bind()).has_table("evidence_observations") and all_claim_evidence_ids:
+        observation_rows = db.query(EvidenceObservation).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id.in_(all_claim_evidence_ids),
+        ).all()
     relationship_rows = []
     if inspect(db.get_bind()).has_table("evidence_source_relationships"):
         relationship_rows = db.query(EvidenceSourceRelationship).filter(
@@ -3586,6 +3592,13 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         str(event.created_by_caregiver_id)
         for event in event_rows if event.created_by_caregiver_id
     }
+    for observation in observation_rows:
+        attribution_ids.update(
+            str(value) for value in (
+                observation.created_by_caregiver_id,
+                observation.observer_caregiver_id,
+            ) if value
+        )
     for evidence in evidence_rows:
         attribution_ids.update(
             str(value) for value in (
@@ -3664,12 +3677,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             "source_independence_status": _source_independence_status(evidence.id),
             "exact_wording_duplicate_count": _exact_duplicate_count(evidence),
         })
-    observation_rows = []
-    if inspect(db.get_bind()).has_table("evidence_observations") and all_claim_evidence_ids:
-        observation_rows = db.query(EvidenceObservation).filter(
-            EvidenceObservation.person_id == person_id,
-            EvidenceObservation.evidence_id.in_(all_claim_evidence_ids),
-        ).all()
     superseded_observation_ids = {
         str(item.supersedes_observation_id)
         for item in observation_rows if item.supersedes_observation_id
@@ -3691,8 +3698,8 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             "source_text": observation.source_passage or "",
             "occurred_at": observation.occurred_at.isoformat() if observation.occurred_at else None,
             "recorded_at": observation.recorded_at.isoformat() if observation.recorded_at else None,
-            "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
-            "entered_by": caregiver_names.get(str(evidence.uploaded_by_caregiver_id), "Caregiver not identified"),
+            "reported_by": observation.observer_label or evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
+            "entered_by": caregiver_names.get(str(observation.created_by_caregiver_id), "Caregiver not identified"),
             "record_status": "superseded" if is_superseded else observation.epistemic_status,
             "source_state_label": "This detail was later corrected or replaced; it is not treated as current" if is_superseded else None,
             "correction_note": correction_note,
