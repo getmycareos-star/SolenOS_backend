@@ -554,7 +554,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         or item.get("certainty") != "supported"
                         or not item.get("evidence_supported")
                         or not item.get("claim_supported")
-                        or not finding_source_supported
+                        or not item.get("finding_source_supported", False)
                     ):
                         continue
                     if domain == "medications":
@@ -746,6 +746,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 finding_source_supported = bool(finding_evidence_ids) or bool(
                     source_event_id and excerpt and _normalise(excerpt) in _normalise(content)
                 )
+                source_item["finding_source_supported"] = finding_source_supported
                 baseline_ids = set(str(value) for value in (source_item.get("existing_assertions") or []))
                 baseline_assertions = [
                     assertion for assertion in active_state
