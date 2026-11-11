@@ -107,7 +107,7 @@ def canonical_candidate(
     timestamp = (recorded_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
     medication_details = None
     if field_type == "medication":
-        strength_match = re.search(r"\\b\\d+(?:\\.\\d+)?\\s*(?:mg|mcg|g|ml)\\b", excerpt, re.I)
+        strength_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b", excerpt, re.I)
         dosage_match = re.search(
             r"[^.!?]*(?:take|dose|dosage|once|twice|daily|every|at bedtime|as needed|prn)[^.!?]*",
             excerpt,
