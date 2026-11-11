@@ -233,3 +233,97 @@ def test_privacy_review_approval_requires_authority_evidence(monkeypatch):
         },
     )
     assert response.status_code == 422
+
+
+def test_privacy_reviewer_fails_closed_when_configuration_is_missing(monkeypatch):
+    monkeypatch.delenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", raising=False)
+    monkeypatch.delenv("SOLENOS_PRIVACY_REVIEWER_ID", raising=False)
+    response = TestClient(app).get("/api/v1/privacy/requests/reviewer/pending")
+    assert response.status_code == 503
+
+
+def test_privacy_reviewer_rejects_wrong_and_short_credentials(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "v" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    for token in ("wrong-token", "v" * 31, ""):
+        response = client.get(
+            "/api/v1/privacy/requests/reviewer/pending",
+            headers={"X-SolenOS-Privacy-Reviewer-Token": token},
+        )
+        assert response.status_code == 401, response.text
+
+
+def test_privacy_review_rejection_is_audited_and_removed_from_pending(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "w" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Rejection recipient")
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "request_type": "correction",
+            "authority_basis": "other",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "w" * 40}
+
+    rejected = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "reject",
+            "review_basis": "The submitted authority evidence was insufficient.",
+        },
+    )
+    assert rejected.status_code == 200, rejected.text
+    body = rejected.json()
+    assert body["status"] == "rejected"
+    assert body["authority_verified_by_reviewer"] is False
+    assert body["fulfilment_started"] is False
+    assert "no data was exported" in body["message"]
+
+    pending = client.get(
+        "/api/v1/privacy/requests/reviewer/pending",
+        headers=reviewer_headers,
+    )
+    assert pending.status_code == 200, pending.text
+    assert request_id not in [item["id"] for item in pending.json()["requests"]]
+
+    db = TestSessionLocal()
+    try:
+        event = (
+            db.query(AuditLogEvent)
+            .filter(
+                AuditLogEvent.target_id == request_id,
+                AuditLogEvent.action == "privacy_request.reviewed",
+            )
+            .one()
+        )
+        assert event.actor_id == "privacy-reviewer"
+        assert event.outcome == "reject"
+    finally:
+        db.close()
+
+
+def test_privacy_request_accepts_each_supported_request_type(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Request type recipient")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    for request_type in ("access", "export", "correction", "deletion"):
+        response = client.post(
+            "/api/v1/privacy/requests",
+            headers=headers,
+            json={
+                "request_type": request_type,
+                "authority_basis": "self",
+                "authority_attested": True,
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["request_type"] == request_type
+        assert response.json()["fulfilment_started"] is False
