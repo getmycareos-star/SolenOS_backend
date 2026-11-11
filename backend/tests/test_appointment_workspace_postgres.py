@@ -218,6 +218,13 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             assert proposals_response.status_code == 200, proposals_response.text
             proposals = proposals_response.json()["items"]
             assert len(proposals) == 3
+            with test_session_local() as db:
+                provisional = db.query(CareAssertion).filter_by(person_id=person_id).all()
+                assert len(provisional) == 3
+                assert all(item.assertion_status == "caregiver_reported_unreviewed" for item in provisional)
+            initial_lcr = client.get("/api/v1/care-continuity/current-care?limit_per_source=50", headers=headers)
+            assert initial_lcr.status_code == 200, initial_lcr.text
+            assert len([item for item in initial_lcr.json().get("items", []) if item.get("kind") == "assertion"]) >= 0
 
             accepted = client.post(
                 f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[0]['id']}/review",
@@ -382,9 +389,11 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
                 assertions = db.query(CareAssertion).filter(
                     CareAssertion.person_id == person_id
                 ).all()
-                assert len(assertions) == 1
-                assert assertions[0].id == accepted_assertion_id
-                assert assertions[0].assertion_status == "caregiver_reviewed"
+                assert len(assertions) == 3
+                accepted_assertion = next(item for item in assertions if item.id == accepted_assertion_id)
+                assert accepted_assertion.assertion_status == "caregiver_reviewed"
+                assert any(item.assertion_status == "caregiver_reported_unreviewed" for item in assertions)
+                assert any(item.assertion_status == "caregiver_reported_rejected" for item in assertions)
                 conversation = db.query(ConversationMessage).join(
                     ConversationSession,
                     ConversationMessage.session_id == ConversationSession.id,
