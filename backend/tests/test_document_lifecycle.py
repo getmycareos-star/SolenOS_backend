@@ -132,6 +132,71 @@ def test_real_tesseract_ocr_extracts_uploaded_scanned_image(client):
     assert "12 October" in extracted
 
 
+
+
+def test_sparse_native_pdf_text_layer_still_triggers_ocr_for_clinical_content(client, monkeypatch):
+    from app.api import document_lifecycle
+
+    class NativePage:
+        def extract_text(self, extraction_mode=None):
+            return "footer 1"
+
+    class Reader:
+        pages = [NativePage()]
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class Bitmap:
+        def to_pil(self):
+            return Image.new("RGB", (20, 20), "white")
+
+        def close(self):
+            pass
+
+    class RenderPage:
+        def get_size(self):
+            return (600, 800)
+
+        def render(self, scale=2):
+            return Bitmap()
+
+        def close(self):
+            pass
+
+    class RenderedPdf:
+        def __getitem__(self, index):
+            assert index == 0
+            return RenderPage()
+
+        def close(self):
+            pass
+
+    class Pdfium:
+        @staticmethod
+        def PdfDocument(content):
+            return RenderedPdf()
+
+    monkeypatch.setattr(document_lifecycle, "PdfReader", Reader)
+    monkeypatch.setattr(document_lifecycle.pdfium, "PdfDocument", Pdfium.PdfDocument)
+    monkeypatch.setattr(document_lifecycle, "_ocr_image", lambda image: "Patient walked 20 metres with a frame.")
+
+    test_client, session = client
+    evidence_id = persist_document(session, b"%PDF-sparse-text-layer", "mixed-scan.pdf", "application/pdf")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_method"] == "server_pdf_text_plus_tesseract_ocr"
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}",
+        headers=auth,
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    extracted = retrieved.json()["extracted_text"]
+    assert "[Page 1 OCR]" in extracted
+    assert "footer 1" in extracted
+    assert "Patient walked 20 metres" in extracted
+
 def test_real_tesseract_ocr_extracts_scanned_pdf_with_page_provenance(client):
     test_client, session = client
     image_bytes = _scanned_text_image()
