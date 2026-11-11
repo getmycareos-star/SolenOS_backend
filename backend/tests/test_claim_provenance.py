@@ -94,3 +94,18 @@ def test_corrected_or_withdrawn_source_is_retained_as_history_not_current_suppor
     assert claim["support_status"] == "matched_historical_only"
     assert claim["source_references"][0]["source_state_label"] == "Earlier or corrected record; not treated as current"
     assert result["unmatched_statement_count"] == 1
+
+def test_claim_reference_carries_reviewed_source_relationship_and_duplicate_status():
+    result = build_claim_provenance(
+        "She felt dizzy after lunch.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "evidence-1",
+            "source_text": "She felt dizzy after lunch.",
+            "source_independence_status": "shared_origin",
+            "exact_wording_duplicate_count": 2,
+        }],
+    )
+    reference = result["claims"][0]["source_references"][0]
+    assert reference["source_independence_status"] == "shared_origin"
+    assert reference["exact_wording_duplicate_count"] == 2
