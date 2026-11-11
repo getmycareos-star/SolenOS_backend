@@ -286,7 +286,7 @@ def recover_account(payload: AccountRecover, request: Request, db: Session = Dep
     recovery = db.query(RecoveryCodeSet).filter(
         RecoveryCodeSet.code_hash == code_hash,
         RecoveryCodeSet.used_at.is_(None),
-    ).first()
+    ).with_for_update().first()
     # Same response for unknown email, unknown code, expired/reused code, or
     # a code belonging to a different account.
     if not account or not recovery or recovery.account_id != account.id:
