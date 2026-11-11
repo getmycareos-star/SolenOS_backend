@@ -221,7 +221,7 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             with test_session_local() as db:
                 provisional = db.query(CareAssertion).filter_by(person_id=person_id).all()
                 assert len(provisional) == 3
-                assert all(item.assertion_status == "caregiver_reported_unreviewed" for item in provisional)
+                assert all(item.assertion_status == "reported" for item in provisional)
                 provisional_ids = {item.id for item in provisional}
             initial_lcr = client.get("/api/v1/care-continuity/current-care?limit_per_source=50", headers=headers)
             assert initial_lcr.status_code == 200, initial_lcr.text
@@ -399,8 +399,8 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
                 assert len(assertions) == 3
                 accepted_assertion = next(item for item in assertions if item.id == accepted_assertion_id)
                 assert accepted_assertion.assertion_status == "caregiver_reviewed"
-                assert any(item.assertion_status == "caregiver_reported_unreviewed" for item in assertions)
-                assert any(item.assertion_status == "caregiver_reported_rejected" for item in assertions)
+                assert any(item.assertion_status == "reported" for item in assertions)
+                assert any(item.assertion_status == "rejected" for item in assertions)
                 conversation = db.query(ConversationMessage).join(
                     ConversationSession,
                     ConversationMessage.session_id == ConversationSession.id,
