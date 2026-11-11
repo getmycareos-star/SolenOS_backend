@@ -327,14 +327,29 @@ def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_te
     output = io.BytesIO()
     image.save(output, format="JPEG", quality=8)
     image.close()
-    evidence_id = persist_document(session, output.getvalue(), "poor-quality-photo.jpg", "image/jpeg")
+    original_bytes = output.getvalue()
     monkeypatch.setattr(document_lifecycle.pytesseract, "image_to_string", lambda *args, **kwargs: "")
     auth = {"Authorization": f"Bearer {session['access_token']}"}
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+        },
+        files={"file": ("poor-quality-photo.jpg", original_bytes, "image/jpeg")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
 
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert response.status_code == 422, response.text
     assert "No readable text" in response.json()["detail"]
 
+    original_download = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert original_download.status_code == 200, original_download.text
+    assert original_download.content == original_bytes
     with TestSessionLocal() as db:
         assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
         assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
