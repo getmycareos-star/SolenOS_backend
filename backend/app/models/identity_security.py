@@ -98,3 +98,13 @@ class LoginAttemptLimit(Base):
     attempts = Column(Integer, nullable=False, default=0)
     blocked_until = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RecoveryCodeSet(Base):
+    """One-time, high-entropy offline recovery codes; only hashes are persisted."""
+    __tablename__ = "recovery_code_sets"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id = Column(String(36), ForeignKey("caregiver_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
