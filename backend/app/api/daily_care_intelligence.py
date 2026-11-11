@@ -160,6 +160,7 @@ def _history_bundle(
     lcr_context = build_lcr_context(
         db,
         person_id,
+        caregiver_id=caregiver_id,
         limit_per_source=50,
         query=context_query if context_query is not None else query,
     )
