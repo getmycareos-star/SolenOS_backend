@@ -179,7 +179,38 @@ def _parse_model_json(content: str) -> dict[str, Any]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=502, detail="The local model returned invalid JSON; no delta was persisted.") from exc
+        # Some local model builds wrap otherwise valid JSON in a short preamble.
+        # Decode one object without accepting or persisting arbitrary trailing text.
+        start = text.find("{")
+        if start >= 0:
+            try:
+                data, consumed = json.JSONDecoder().raw_decode(text[start:])
+                trailing = text[start + consumed:].strip()
+                if trailing and trailing != "```":
+                    raise ValueError("non-whitespace content follows the JSON object")
+            except (json.JSONDecodeError, ValueError):
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "code": "delta_invalid_json",
+                        "message": "The local model returned incomplete or invalid JSON; no delta was persisted.",
+                        "output_length": len(text),
+                        "ends_with_object_brace": text.rstrip().endswith("}"),
+                        "parse_line": exc.lineno,
+                        "parse_column": exc.colno,
+                    },
+                ) from exc
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "delta_invalid_json",
+                    "message": "The local model returned no JSON object; no delta was persisted.",
+                    "output_length": len(text),
+                    "parse_line": exc.lineno,
+                    "parse_column": exc.colno,
+                },
+            ) from exc
     _validate_schema(data, DELTA_JSON_CONTRACT)
     return data
 
@@ -424,7 +455,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             ],
             timeout=timeout,
             response_format="json",
-            options={"temperature": 0, "num_ctx": 2048, "num_predict": 768},
+            options={"temperature": 0, "num_ctx": 4096, "num_predict": 1024},
         )
     except HTTPException as exc:
         if exc.status_code == 504:
