@@ -160,7 +160,7 @@ def test_postgres_appointment_workspace_create_update_retry_and_isolation(monkey
 
 
 
-def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_in_fresh_session(monkeypatch):
+def test_postgres_appointment_outcome_review_retrieves_reported_and_accepted_assertions_in_fresh_session(monkeypatch):
     from app.models.care_continuity import CareAssertion
     from app.models.collaboration import ConversationMessage, ConversationSession
     import app.api.collaboration as collaboration
@@ -283,7 +283,7 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             assert companion.status_code == 200, companion.text
             body = companion.json()
             assert accepted_assertion_id in body["source_assertion_ids"]
-            assert pending_assertion_id not in body["source_assertion_ids"]
+            assert pending_assertion_id in body["source_assertion_ids"]
             assert rejected_assertion_id not in body["source_assertion_ids"]
             assert body["written_to_lcr"] is False
             assert body["persistence"] == "conversation_only"
@@ -293,7 +293,9 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
                 if item.get("role") in {"system", "user"}
             )
             assert "two-person assistance this morning" in prompt
-            assert "requested a call next Tuesday" not in prompt
+            assert "requested a call next Tuesday" in prompt
+            assert "caregiver_reported_assertion" in prompt
+            assert "unverified" in prompt
             assert "ask about transport availability" not in prompt
 
             # Appointment follow-ups use the shared Open Loop store, with a
