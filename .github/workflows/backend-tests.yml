@@ -239,6 +239,9 @@ jobs:
           print(f"PostgreSQL legacy-schema migration passed at {expected_revision}; no caregiver rows fabricated.")
           PY
 
+      - name: Verify Daily Care to LCR retrieval on PostgreSQL
+        run: python -m pytest backend/tests/test_unified_care_spine_capture.py -q
+
       - name: Verify privacy, sharing, audit, notification, reminder and handoff schema
         run: |
           python - <<'PY'
