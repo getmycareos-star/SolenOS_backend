@@ -96,3 +96,18 @@ Backend `main` now includes an authenticated request-intake API:
 This is deliberately an intake mechanism only. It does **not** verify legal authority, perform an export, correct a record, delete care data, or promise a completion deadline. Account/session authentication is not proof that a caregiver has legal authority to exercise another adult's data rights. A separate controlled review and fulfilment workflow remains required.
 
 The ORM mapping reuses the existing `data_subject_requests` table from migration `20261027_08_privacy_delivery`; no production migration or deployment was initiated for this intake change. CI must pass before this source change is treated as verified.
+
+
+## Remediation update — designated initial privacy reviewer
+
+Backend `main` now includes a restricted review decision workflow for the initial designated reviewer:
+- Reviewer queue: `GET /api/v1/privacy/requests/reviewer/pending`.
+- Review decision: `POST /api/v1/privacy/requests/{request_id}/review`.
+- Both routes require the normal server-issued caregiver bearer session **and** a separate reviewer credential in `X-SolenOS-Privacy-Reviewer-Token`. The caregiver session alone is not reviewer authorization.
+- Reviewer access is fail-closed unless both deployment secrets are configured: `SOLENOS_PRIVACY_REVIEWER_TOKEN` (unique random secret, at least 32 characters) and `SOLENOS_PRIVACY_REVIEWER_ID` (stable reviewer actor ID; initial value intended: `david_abuchi`).
+- Review requires a written decision basis. Approval additionally requires a description of the authority evidence checked. Each decision is recorded in the request metadata and `audit_log_events` under the configured reviewer actor ID.
+- A request can be reviewed only once while it is in `received_pending_authority_review`. Approval moves it to `approved_pending_fulfilment_assessment`; rejection moves it to `rejected`.
+
+**Important boundary:** this is a recorded reviewer decision, not a legal determination engine or fulfilment workflow. The evidence description is an accountable human attestation, not independent verification by the software. Approval does not export, correct, delete, or disclose data and does not bypass legal holds, retention requirements, scope checks, or the need for a separate fulfilment assessment. The initial single-reviewer arrangement also has no separation of duties; high-risk fulfilment should require an independent second reviewer before it is built.
+
+The reviewer header was added to the backend CORS allowlist. No production secrets were created or changed, no deployment was initiated, and no export/deletion handler was added. The new focused tests have been committed but have not yet been observed passing in CI.
