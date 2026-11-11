@@ -52,7 +52,7 @@ def _new_session(client: TestClient) -> dict:
     return response.json()
 
 
-def _record_fixture(client: TestClient, session: dict) -> str:
+def _record_fixture(client: TestClient, session: dict, detail: str = "Caregiver reported that the person slept poorly last night.") -> str:
     response = client.post(
         "/api/v1/daily/log",
         headers={"Authorization": f"Bearer {session['access_token']}"},
@@ -60,7 +60,7 @@ def _record_fixture(client: TestClient, session: dict) -> str:
             "person_id": session["person"]["id"],
             "caregiver_id": session["caregiver"]["id"],
             "capture_idempotency_key": str(uuid.uuid4()),
-            "observation": "Caregiver reported that the person slept poorly last night.",
+            "observation": detail,
             "source": "live_qwen_workflow_acceptance",
         },
     )
@@ -80,6 +80,10 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
     with TestClient(app) as client:
         session = _new_session(client)
         event_id = _record_fixture(client, session)
+        medication_event_id = _record_fixture(
+            client, session,
+            "Medication observation: caregiver reported that the morning medication was taken.",
+        )
         headers = {"Authorization": f"Bearer {session['access_token']}"}
         response = client.post(
             "/api/v1/assistant/assist",
@@ -109,7 +113,14 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
         ), f"{workflow} exposed an internal record identifier: {data['reply']!r}"
         assert isinstance(data.get("source_event_ids"), list), data
         assert isinstance(data.get("source_evidence_ids"), list), data
-        if workflow in EVENT_WORKFLOWS:
+        if workflow == "medication_day":
+            assert medication_event_id in data["source_event_ids"], (
+                f"{workflow} did not retrieve the authorized medication observation: {data}"
+            )
+            assert event_id not in data["source_event_ids"], (
+                f"{workflow} included an unrelated sleep observation: {data}"
+            )
+        elif workflow in EVENT_WORKFLOWS:
             assert event_id in data["source_event_ids"], (
                 f"{workflow} did not retrieve the authorized fixture event: {data}"
             )
