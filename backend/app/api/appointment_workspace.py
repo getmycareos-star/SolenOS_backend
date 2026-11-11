@@ -361,7 +361,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     try:
         contradiction_rows = db.query(Contradiction).filter(
             Contradiction.person_id == person_id,
-            Contradiction.resolution_status.notin_(["resolved", "dismissed", "rejected"]),
+            Contradiction.resolution_status.in_(["unresolved", "qualified"]),
         ).order_by(Contradiction.created_at.desc()).limit(30).all()
         contradiction_source_status = "available" if contradiction_rows else "empty"
     except Exception:
