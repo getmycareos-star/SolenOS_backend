@@ -70,4 +70,4 @@ def test_invalid_calendar_date_is_left_missing_and_warned():
         source_text=f"[Page 1]\n{excerpt}",
     )
     assert candidate["event_date"] is None
-    assert any("date-like value could not be validated" in warning for warning in candidate["warnings"])
+    assert any("Date format is ambiguous or invalid" in warning for warning in candidate["warnings"])
