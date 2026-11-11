@@ -115,14 +115,14 @@ jobs:
           exit 1
       - name: Download the configured Qwen model
         run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
+      - name: Run real Qwen document extraction and review against PostgreSQL
+        run: python -m pytest backend/live_tests/test_document_intelligence_live.py -q -s
       - name: Run real Qwen inference across every enabled workflow against PostgreSQL
         run: python -m pytest backend/live_tests/test_all_qwen_workflows_live.py -q -s
       - name: Run real Qwen Companion inference against PostgreSQL
         run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
       - name: Run real Qwen Daily Capture extraction and persistence against PostgreSQL
         run: python -m pytest backend/live_tests/test_daily_capture_live_inference.py -q -s
-      - name: Run real Qwen document extraction and review against PostgreSQL
-        run: python -m pytest backend/live_tests/test_document_intelligence_live.py -q -s
       - name: Run real Qwen appointment assistance against PostgreSQL
         run: python -m pytest backend/live_tests/test_appointment_assist_live_inference.py -q -s
       - name: Stop isolated Ollama runtime
