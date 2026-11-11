@@ -145,6 +145,7 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
     """Genuine configured Qwen must answer from real workflow-created care evidence."""
     with TestClient(app) as client:
         caregiver = _create_session(client, "Live Qwen PostgreSQL evaluator")
+        other = _create_session(client, "Independent identity-isolation evaluator")
         event_id = _record_daily_care(
             client,
             caregiver,
@@ -196,6 +197,15 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
             and item.get("source_quote") in document_text
             for item in document_result.get("observations", [])
         ), document_result
+        other_auth = {"Authorization": f"Bearer {other['access_token']}"}
+        denied_document = client.get(
+            f"/api/v1/documents/analyses/{document_result['analysis_id']}",
+            headers=other_auth,
+        )
+        assert denied_document.status_code == 404, denied_document.text
+        other_document_list = client.get("/api/v1/documents/intelligence", headers=other_auth)
+        assert other_document_list.status_code == 200, other_document_list.text
+        assert not other_document_list.json().get("items"), other_document_list.json()
 
         direct = _ask(client, caregiver, "What did we record about sleep?")
         assert direct.status_code == 200, direct.text
@@ -296,7 +306,6 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         assert any(term in recalled_text for term in ("breakfast", "nauseated", "untouched", "left most")), recalled_data
         assert recalled_data.get("written_to_lcr") is False, recalled_data
 
-        other = _create_session(client, "Independent identity-isolation evaluator")
         isolated = _ask(client, other, "What did we record about sleep?")
         assert isolated.status_code == 200, isolated.text
         isolated_data = isolated.json()
