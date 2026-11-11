@@ -250,6 +250,7 @@ PUBLIC_V1_ENDPOINTS = {
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
     ("/api/v1/accounts/login", "POST"),
+    ("/api/v1/accounts/recover", "POST"),
     ("/api/v1/identity/recovery-requests", "POST"),
 }
 
