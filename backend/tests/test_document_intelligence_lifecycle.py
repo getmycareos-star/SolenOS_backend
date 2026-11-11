@@ -323,3 +323,58 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    first_quote = "Previous instruction: take metformin 500 mg once daily."
+    second_quote = "New instruction: take metformin 1000 mg twice daily."
+    source = (
+        "[Page 1]\nDischarge summary\n" + first_quote + "\n\n"
+        "[Page 2 OCR]\n[No readable text detected on this page]\n\n"
+        "[Page 3]\nMedication reconciliation\n" + second_quote
+    )
+    calls = []
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        calls.append(page_text)
+        quote = first_quote if first_quote in page_text else second_quote
+        return {"observations": [{
+            "subject": "metformin",
+            "observation": quote,
+            "source_quote": quote,
+            "extraction_method": "test_verbatim",
+        }], "open_questions": []}
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Multi-page caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert understood.status_code == 201, understood.text
+        body = understood.json()
+        assert len(calls) == 2
+        assert body["intelligence_status"] == "partial"
+        assert body["processed_page_count"] == 2
+        assert body["total_page_count"] == 3
+        assert body["processed_page_numbers"] == [1, 3]
+        assert body["unreadable_page_numbers"] == [2]
+        assert any("Pages 2 have no readable extracted text" in note for note in body["open_questions"])
+        assert [item["page_number"] for item in body["observations"]] == [1, 3]
+        assert all(item["review_status"] == "pending_review" for item in body["observations"])
+        assert all(
+            any("Conflicting medication instructions" in warning for warning in item["warnings"])
+            for item in body["observations"]
+        )
+        assert any("outdated or superseded" in warning for warning in body["observations"][0]["warnings"])
+        assert body["written_to_lcr"] is False
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
