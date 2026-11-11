@@ -58,3 +58,24 @@ def test_duplicate_sources_are_not_counted_as_independent_corroboration():
     ])
     assert len(result["claims"][0]["source_references"]) == 2
     assert "independent" in result["matching_limit"]
+
+
+
+def test_matched_event_keeps_its_original_supporting_document_details():
+    result = build_claim_provenance(
+        "She felt dizzy after lunch.",
+        [{
+            "record_type": "care_event",
+            "record_id": "event-with-document",
+            "source_text": "She felt dizzy after lunch.",
+            "related_evidence_ids": ["document-1"],
+            "related_evidence": [{
+                "record_id": "document-1",
+                "label": "discharge-summary.pdf",
+                "source_excerpt": "The patient reported dizziness after lunch.",
+            }],
+        }],
+    )
+    reference = result["claims"][0]["source_references"][0]
+    assert reference["related_evidence"][0]["record_id"] == "document-1"
+    assert reference["related_evidence"][0]["label"] == "discharge-summary.pdf"
