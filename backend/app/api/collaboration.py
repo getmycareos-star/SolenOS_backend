@@ -3548,12 +3548,34 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         ).all()
     relationship_rows = []
     if inspect(db.get_bind()).has_table("evidence_source_relationships"):
+        relationship_scope_filters = [
+            and_(
+                EvidenceSourceRelationship.scope_type == "evidence_pair",
+                EvidenceSourceRelationship.scope_id == "",
+            )
+        ]
+        if source_event_ids:
+            relationship_scope_filters.append(and_(
+                EvidenceSourceRelationship.scope_type.in_(("event", "care_event")),
+                EvidenceSourceRelationship.scope_id.in_(list(dict.fromkeys(source_event_ids))),
+            ))
+        if observation_rows:
+            relationship_scope_filters.append(and_(
+                EvidenceSourceRelationship.scope_type == "observation",
+                EvidenceSourceRelationship.scope_id.in_([str(item.id) for item in observation_rows]),
+            ))
+        if source_assertion_ids:
+            relationship_scope_filters.append(and_(
+                EvidenceSourceRelationship.scope_type == "claim",
+                EvidenceSourceRelationship.scope_id.in_(list(dict.fromkeys(source_assertion_ids))),
+            ))
         relationship_rows = db.query(EvidenceSourceRelationship).filter(
             EvidenceSourceRelationship.person_id == person_id,
             or_(
                 EvidenceSourceRelationship.source_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
                 EvidenceSourceRelationship.related_evidence_id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
             ),
+            or_(*relationship_scope_filters),
         ).all()
     relationship_status_by_evidence = {}
     for relationship in relationship_rows:
