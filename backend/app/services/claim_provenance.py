@@ -24,7 +24,7 @@ def split_response_claims(reply: str) -> list[str]:
             continue
         statements.extend(
             part.strip()
-            for part in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'])", cleaned)
+            for part in re.split(r"(?<=[.!?;])\s+(?=[A-Z0-9\"'])", cleaned)
             if part.strip()
         )
     return statements
@@ -58,6 +58,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]]) -> 
                         "entered_by": source.get("entered_by"),
                         "record_status": source.get("record_status"),
                         "related_evidence_ids": list(source.get("related_evidence_ids") or []),
+                        "related_evidence": list(source.get("related_evidence") or []),
                     })
         claims.append({
             "claim_id": f"statement-{index + 1}",
