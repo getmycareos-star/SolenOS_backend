@@ -19,12 +19,15 @@ ENABLED_WORKFLOWS = (
     "reminders_notifications", "care_coordination", "companion",
     "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
     "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-    "audit_review",
+    "audit_review", "care_transition", "incident_follow_through",
+    "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker",
+    "critical_information_completeness", "personal_preferences_distress_context",
+    "caregiver_strain_support", "document_validity_renewal",
 )
 
 
 @pytest.mark.parametrize("workflow", ENABLED_WORKFLOWS)
-def test_all_30_enabled_solenos_workflows_are_accepted(workflow):
+def test_all_39_enabled_solenos_workflows_are_accepted(workflow):
     request = QwenAssistRequest(workflow=workflow, text="Help organize the supplied information.")
     assert request.workflow == workflow
 
