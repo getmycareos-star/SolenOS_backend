@@ -454,7 +454,7 @@ def review_document_candidate(
         if not subject or not observation:
             raise HTTPException(status_code=422, detail="The candidate is incomplete and cannot be accepted")
         asserted_value = f"Subject: {subject}\nObservation: {observation}"
-        source_label = f"Caregiver-reviewed document statement (not independently verified): {metadata.get('filename') or 'Uploaded document'}"
+        source_label = f"Caregiver-reviewed document statement (not independently verified): {metadata.get('filename') or 'Uploaded document'} · page {candidate.get('page_number') or 'unresolved'}"
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
         existing = db.query(CareAssertion).filter(
