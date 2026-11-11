@@ -168,12 +168,43 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     )
     assert approved.status_code == 200, approved.text
     assert approved.json()["written_to_lcr"] is True
+    assertion_id = approved.json()["assertion_id"]
+    assert assertion_id
     repeated = client.post(
         f"/api/v1/daily-care/intelligence/proposals/{result['proposal_analysis_id']}/0/review",
         headers=auth,
         json={"decision": "accept"},
     )
-    assert repeated.status_code == 409, repeated.text
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["idempotent_replay"] is True
+    assert repeated.json()["written_to_lcr"] is True
+    assert repeated.json()["assertion_id"] == assertion_id
+
+    db = TestSessionLocal()
+    try:
+        assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=session["person"]["id"]).one()
+        assertion.assertion_status = "superseded"
+        db.commit()
+    finally:
+        db.close()
+
+    superseded_replay = client.post(
+        f"/api/v1/daily-care/intelligence/proposals/{result['proposal_analysis_id']}/0/review",
+        headers=auth,
+        json={"decision": "accept"},
+    )
+    assert superseded_replay.status_code == 200, superseded_replay.text
+    assert superseded_replay.json()["idempotent_replay"] is True
+    assert superseded_replay.json()["written_to_lcr"] is False
+    assert superseded_replay.json()["assertion_id"] is None
+
+    db = TestSessionLocal()
+    try:
+        assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=session["person"]["id"]).one()
+        assertion.assertion_status = "caregiver_reviewed"
+        db.commit()
+    finally:
+        db.close()
 
     db = TestSessionLocal()
     try:
