@@ -1,5 +1,5 @@
 name: Companion live Qwen inference evaluation
-# CI-only live acceptance suite: Companion, Daily Capture, Documents and Appointments on main.
+# CI-only live Qwen acceptance suite and appointment outcome regression coverage on current main.
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
       - "backend/live_tests/test_daily_capture_live_inference.py"
       - "backend/live_tests/test_document_intelligence_live.py"
       - "backend/live_tests/test_appointment_assist_live_inference.py"
+      - "backend/tests/test_appointment_workspace.py"
       - "backend/app/api/collaboration.py"
       - "backend/app/api/companion_review.py"
       - "backend/app/api/daily_care_intelligence.py"
