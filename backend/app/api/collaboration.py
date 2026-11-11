@@ -787,6 +787,7 @@ def _companion_replay_response(
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "guard_verdict": row.guard_verdict,
             "safety_note": row.safety_note,
+            "claim_provenance": _stored_claim_provenance(row),
         } for row in history],
     }
 
@@ -2607,6 +2608,18 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _stored_claim_provenance(row: ConversationMessage) -> dict | None:
+    """Read the immutable claim/source snapshot stored with an assistant turn."""
+    if row.role != "assistant":
+        return None
+    try:
+        metadata = json.loads(row.response_metadata_json or "{}")
+    except (TypeError, ValueError):
+        return None
+    value = metadata.get("claim_provenance")
+    return value if isinstance(value, dict) else None
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -3506,6 +3519,34 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     # use. A sentence is linked only when its wording appears in that source;
     # paraphrases and unmatched statements are explicitly left unsupported.
     claim_source_records = []
+    attribution_ids = set()
+    if source_event_ids:
+        attribution_ids.update(
+            str(value) for value in db.query(CareEvent.created_by_caregiver_id).filter(
+                CareEvent.person_id == person_id,
+                CareEvent.id.in_(list(dict.fromkeys(source_event_ids))),
+            ).all() if value and value[0]
+        )
+    if source_evidence_ids:
+        for value in db.query(EvidenceModel.uploaded_by_caregiver_id, EvidenceModel.reported_by_caregiver_id).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(list(dict.fromkeys(source_evidence_ids))),
+        ).all():
+            attribution_ids.update(str(item) for item in value if item)
+    if source_assertion_ids:
+        attribution_ids.update(
+            str(value) for value in db.query(CareAssertion.created_by_caregiver_id).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.id.in_(list(dict.fromkeys(source_assertion_ids))),
+            ).all() if value and value[0]
+        )
+    caregiver_names = {
+        str(row.id): row.name
+        for row in db.query(Caregiver).filter(
+            Caregiver.person_id == person_id,
+            Caregiver.id.in_(attribution_ids or {"__no_matching_caregiver__"}),
+        ).all()
+    }
     if source_event_ids:
         for event in db.query(CareEvent).filter(
             CareEvent.person_id == person_id,
@@ -3518,7 +3559,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 "source_text": " ".join(part for part in (event.title, event.description or "") if part),
                 "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
                 "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
-                "entered_by": "Caregiver who recorded this entry",
+                "entered_by": caregiver_names.get(str(event.created_by_caregiver_id), "Caregiver not identified"),
                 "record_status": event.status,
                 "related_evidence_ids": list(event.evidence_ids or []),
             })
@@ -3536,8 +3577,8 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 "recorded_at": evidence.ingested_at.isoformat() if evidence.ingested_at else (
                     evidence.uploaded_at.isoformat() if evidence.uploaded_at else None
                 ),
-                "reported_by": evidence.reported_by_label or evidence.original_author,
-                "entered_by": "Caregiver who added this source",
+                "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
+                "entered_by": caregiver_names.get(str(evidence.uploaded_by_caregiver_id), "Caregiver not identified"),
                 "record_status": evidence.epistemic_status or evidence.evidence_status,
                 "related_evidence_ids": [str(evidence.id)],
             })
@@ -3553,7 +3594,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 "source_text": " ".join(part for part in (assertion.asserted_value, assertion.source_text or "") if part),
                 "occurred_at": assertion.observed_at.isoformat() if assertion.observed_at else assertion.event_time_text,
                 "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
-                "entered_by": "Caregiver who reviewed this statement",
+                "entered_by": caregiver_names.get(str(assertion.created_by_caregiver_id or ""), "Caregiver not identified"),
                 "record_status": assertion.assertion_status,
                 "related_evidence_ids": list(assertion.evidence_ids or []),
             })
@@ -3689,6 +3730,7 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
         "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
+        "claim_provenance": _stored_claim_provenance(row),
     } for row in rows]}
 
 
