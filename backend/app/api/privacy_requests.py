@@ -97,6 +97,30 @@ def _privacy_reviewer(
         raise HTTPException(status_code=401, detail="Invalid privacy reviewer credentials")
     return reviewer_id
 
+def _privacy_deletion_reviewer(
+    token: Optional[str] = Header(default=None, alias="X-SolenOS-Privacy-Deletion-Reviewer-Token"),
+) -> str:
+    """Require a separately provisioned reviewer identity for destructive erasure."""
+    expected = os.getenv("SOLENOS_PRIVACY_DELETION_REVIEWER_TOKEN", "").strip()
+    reviewer_id = os.getenv("SOLENOS_PRIVACY_DELETION_REVIEWER_ID", "").strip()
+    primary_token = os.getenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "").strip()
+    primary_id = os.getenv("SOLENOS_PRIVACY_REVIEWER_ID", "").strip()
+    if (
+        len(expected) < 32
+        or not reviewer_id
+        or len(reviewer_id) > 120
+        or not primary_id
+        or reviewer_id == primary_id
+        or (primary_token and hmac.compare_digest(expected, primary_token))
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Independent privacy deletion reviewer access is not configured",
+        )
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid independent deletion reviewer credentials")
+    return reviewer_id
+
 
 def _serialize(item: DataSubjectRequest) -> dict:
     return {
@@ -820,7 +844,7 @@ def fulfil_approved_correction(
 def fulfil_approved_deletion(
     request_id: str,
     payload: PrivacyDeletionFulfilment,
-    reviewer_id: str = Depends(_privacy_reviewer),
+    reviewer_id: str = Depends(_privacy_deletion_reviewer),
     db: Session = Depends(get_db),
 ):
     """Erase a single-caregiver record after independent approval and backup-expiry review."""
