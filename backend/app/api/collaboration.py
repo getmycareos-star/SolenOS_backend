@@ -2152,6 +2152,39 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 )
             source_event_ids.append(str(event.id))
 
+        if payload.workflow == "medication_day":
+            # Daily Capture preserves the caregiver's original structured report
+            # as append-only Evidence. The generic CareEvent title/type may not
+            # contain the medication topic, so retrieve matching source evidence
+            # separately and keep it within this authorized person's record.
+            medication_terms = (
+                "medication", "medicine", "prescription", "dosage", "dose",
+                "tablet", "pill", "administered", "missed dose", "withheld",
+            )
+            evidence_predicates = [
+                EvidenceModel.source_text.ilike(f"%{term}%")
+                for term in medication_terms
+            ]
+            medication_evidence = (
+                db.query(EvidenceModel)
+                .filter(
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.evidence_kind == "caregiver_report",
+                    EvidenceModel.epistemic_status == "caregiver_reported",
+                    or_(*evidence_predicates),
+                )
+                .order_by(EvidenceModel.occurred_at.desc())
+                .limit(8)
+                .all()
+            )
+            for evidence in medication_evidence:
+                source_evidence_ids.append(str(evidence.id))
+                context_lines.append(
+                    f"Caregiver-reported medication source evidence [{evidence.id}]: "
+                    f"{evidence.source_text[:2400]}. "
+                    "This is the original caregiver report, not independent clinical verification."
+                )
+
     appointment_workflows = {
         "living_care_record", "care_history_search", "care_situation_change",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
