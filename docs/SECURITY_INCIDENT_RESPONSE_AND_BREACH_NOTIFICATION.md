@@ -214,12 +214,12 @@ Mark each step PASS/FAIL/BLOCKED with evidence. A tabletop discussion alone does
 
 | Gate | Evidence required | Status from repository inspection |
 | --- | --- | --- |
-| Primary and backup contacts | Verified contacts and successful test message | BLOCKED — not configured/verified |
+| Primary and backup contacts | Verified contacts and successful test message | BLOCKED — must be configured and tested outside source control |
 | Session containment | Rehearsal proving old token denied after revocation | PARTIAL — revoke route exists in source; production rehearsal not evidenced |
 | Account/device suspension | Verified server-side control for each identity type | BLOCKED — not established |
 | Cross-family investigation | Synthetic adversarial test and request/audit trace | BLOCKED — incident simulation not evidenced |
 | Evidence preservation | Export, hash, restricted storage and retrieval rehearsal | BLOCKED — sources/schema exist; rehearsal not evidenced |
-| Incident register | Restricted operator workflow with durable writes | PARTIAL — migration tables exist; no verified role-protected incident console/API |
+| Incident register | Restricted operator workflow with durable writes | PARTIAL — restricted operator API committed; secret configuration and production PostgreSQL rehearsal not verified |
 | Regulatory decision | Named qualified decision-maker/counsel and jurisdiction assessment | BLOCKED — not verified |
 | Caregiver notification | Monitored contact channel and reviewed delivery rehearsal | BLOCKED — not verified |
 | Tabletop exercise | Completed evidence-backed simulation | NOT RUN |
