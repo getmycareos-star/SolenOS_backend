@@ -19,7 +19,7 @@ from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///:memory:"
 POSTGRES_DATABASE = DATABASE_URL.startswith(
     ("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")
 )
