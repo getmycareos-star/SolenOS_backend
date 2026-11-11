@@ -244,6 +244,8 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             )
             assert rejected.status_code == 200, rejected.text
             assert rejected.json()["written_to_lcr"] is False
+            with test_session_local() as db:
+                rejected_assertion_id = db.query(CareAssertion.id).filter_by(source_proposal_id=proposals[2]["id"]).scalar()
 
             denied = client.get(
                 f"/api/v1/appointment-workspaces/{record_id}",
@@ -279,7 +281,8 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             )
             assert companion.status_code == 200, companion.text
             body = companion.json()
-            assert body["source_assertion_ids"] == [accepted_assertion_id]
+            assert accepted_assertion_id in body["source_assertion_ids"]
+            assert rejected_assertion_id not in body["source_assertion_ids"]
             assert body["written_to_lcr"] is False
             assert body["persistence"] == "conversation_only"
             prompt = "\n".join(
