@@ -62,10 +62,9 @@ def _date_from_excerpt(excerpt: str) -> str | None:
             if pattern is _DATE_PATTERNS[0]:
                 parsed = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
             else:
-                year = int(match.group(3))
-                if year < 100:
-                    year += 2000 if year < 70 else 1900
-                parsed = date(year, int(match.group(1)), int(match.group(2)))
+                # Slash-formatted dates are locale-ambiguous (MM/DD vs DD/MM).
+                # Preserve them as source text until a caregiver confirms the format.
+                return None
             return parsed.isoformat()
         except ValueError:
             # Invalid dates remain missing and are explicitly flagged below.
@@ -83,7 +82,7 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str) -> list[
         if re.search(r"\b(?:increase|decrease|stop|discontinue|hold|restart|replace)\b", excerpt, re.I):
             warnings.append("Medication change language requires caregiver or clinician reconciliation.")
     if re.search(r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b", excerpt) and _date_from_excerpt(excerpt) is None:
-        warnings.append("A date-like value could not be validated; event_date remains missing.")
+        warnings.append("Date format is ambiguous or invalid; event_date remains missing until confirmed.")
     if not excerpt.strip():
         warnings.append("No readable source excerpt is available.")
     return warnings
