@@ -1021,7 +1021,7 @@ def main():
 
         # Account login on a fresh client/session must recover the same care record.
         # This models a second device without reusing browser localStorage.
-        account_email = "postgres-e2e-continuity@example.test"
+        account_email = f"postgres-e2e-continuity-{uuid.uuid4().hex[:12]}@example.test"
         account_password = "CI-only-strong-passphrase-2026!"
         status, account_created = request(
             "POST",
