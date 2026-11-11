@@ -108,9 +108,11 @@ Backend `main` now includes a restricted review decision workflow for the initia
 - Review requires a written decision basis. Approval additionally requires a description of the authority evidence checked. Each decision is recorded in the request metadata and `audit_log_events` under the configured reviewer actor ID.
 - A request can be reviewed only once while it is in `received_pending_authority_review`. Approval moves it to `approved_pending_fulfilment_assessment`; rejection moves it to `rejected`.
 
-**Important boundary:** this is a recorded reviewer decision, not a legal determination engine or fulfilment workflow. The evidence description is an accountable human attestation, not independent verification by the software. Approval does not export, correct, delete, or disclose data and does not bypass legal holds, retention requirements, scope checks, or the need for a separate fulfilment assessment. The initial single-reviewer arrangement also has no separation of duties; high-risk fulfilment should require an independent second reviewer before it is built.
+**Important boundary:** this is a recorded reviewer decision, not a legal determination engine. The evidence description is an accountable human attestation, not independent verification by the software. Approval does not itself export, correct, delete, or disclose data and does not bypass legal holds, retention requirements or scope checks. The primary reviewer credential remains a single configured identity for intake review, export and correction; those operations do not yet have multi-reviewer identity management.
 
-The reviewer header was added to the backend CORS allowlist. No production secrets were created or changed, no deployment was initiated, and no export/deletion handler was added.
+**Deletion separation of duties:** the deletion fulfilment route now uses a distinct 'X-SolenOS-Privacy-Deletion-Reviewer-Token' credential and reviewer identity. It fails closed unless 'SOLENOS_PRIVACY_DELETION_REVIEWER_TOKEN' and 'SOLENOS_PRIVACY_DELETION_REVIEWER_ID' are configured, the deletion reviewer ID differs from the primary reviewer ID, and the deletion token differs from the primary reviewer token. Reusing the primary reviewer credential for deletion is rejected. This is a two-credential separation control, not a complete reviewer identity-management system; production provisioning, custody, rotation and independent human assignment still require verification.
+
+The reviewer and deletion-reviewer headers are included in the backend CORS allowlist. No production secrets were created or changed, and no deployment was initiated.
 
 ### Verification evidence — 2026-11-11
 
@@ -155,11 +157,12 @@ Backend `main` now contains initial fulfilment handlers. These are implementatio
 
 ### Required release conditions
 
-1. Configure and rotate a unique `SOLENOS_PRIVACY_EXPORT_ENCRYPTION_KEY` in the deployment secret store; do not place it in source control.
-2. Verify the current migration and PostgreSQL test workflows, including export ZIP inspection, cross-caregiver denial, correction provenance, deletion dependency removal, legal-hold rejection and independent-review enforcement.
-3. Exercise export and correction with synthetic production-like data before real-user access.
-4. Establish a documented backup-retention schedule and a restore procedure that cannot reintroduce erased records. Backup expiry evidence must be independently checked, not accepted as an unchecked assertion.
-5. Trace all external processors, replicas, caches and unregistered stores before claiming complete erasure.
-6. Expand correction coverage and define mixed-caregiver/third-party data handling before claiming universal correction or deletion fulfilment.
+1. Configure and rotate a unique 'SOLENOS_PRIVACY_EXPORT_ENCRYPTION_KEY' in the deployment secret store; do not place it in source control.
+2. Provision independent, high-entropy 'SOLENOS_PRIVACY_REVIEWER_TOKEN' / 'SOLENOS_PRIVACY_REVIEWER_ID' and 'SOLENOS_PRIVACY_DELETION_REVIEWER_TOKEN' / 'SOLENOS_PRIVACY_DELETION_REVIEWER_ID' values in the deployment secret store. Keep the reviewer identities distinct; do not place credentials in source control.
+3. Verify the current migration and PostgreSQL test workflows, including export ZIP inspection, cross-caregiver denial, correction provenance, deletion dependency removal, legal-hold rejection and independent-review enforcement.
+4. Exercise export and correction with synthetic production-like data before real-user access.
+5. Establish a documented backup-retention schedule and a restore procedure that cannot reintroduce erased records. Backup expiry evidence must be independently checked, not accepted as an unchecked assertion.
+6. Trace all external processors, replicas, caches and unregistered stores before claiming complete erasure.
+7. Expand correction coverage and define mixed-caregiver/third-party data handling before claiming universal correction or deletion fulfilment.
 
 At the time this section was added, GitHub Actions runs for the new source commits were queued and had not produced test conclusions. No production deployment or production secret change was performed. These handlers are not a production-readiness certification.
