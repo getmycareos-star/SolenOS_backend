@@ -336,7 +336,7 @@ def main() -> int:
         print(rendered)
         report_path = os.environ.get("SOLENOS_BACKUP_RESTORE_REPORT_PATH")
         if report_path:
-            Path(report_path).write_text(rendered + "\\n", encoding="utf-8")
+            Path(report_path).write_text(rendered + "\n", encoding="utf-8")
         return 0
     except Exception as exc:
         failure_report = {
@@ -347,7 +347,7 @@ def main() -> int:
         print(rendered, file=sys.stderr)
         report_path = os.environ.get("SOLENOS_BACKUP_RESTORE_REPORT_PATH")
         if report_path:
-            Path(report_path).write_text(rendered + "\\n", encoding="utf-8")
+            Path(report_path).write_text(rendered + "\n", encoding="utf-8")
         return 1
 
 
