@@ -241,3 +241,37 @@ def test_ordinary_conversation_and_ungrounded_model_output_create_no_candidate(m
             db.close()
     finally:
         teardown()
+
+
+
+def test_idempotent_accept_replay_does_not_report_rejected_assertion_as_active_lcr_write(monkeypatch):
+    source = "The caregiver reports a new observation that is later withdrawn."
+    client = setup_client(
+        monkeypatch,
+        lambda text: {"observations": [{"source_quote": source}] if text == source else []},
+    )
+    try:
+        session = create_session(client, "Caregiver replay status")
+        response = send(client, session, source)
+        assert response.status_code == 200, response.text
+        proposal = pending(client, session)[0]
+        accepted = review(client, session, proposal["id"], {"decision": "accept"})
+        assert accepted.status_code == 200, accepted.text
+        assertion_id = accepted.json()["assertion_id"]
+        assert assertion_id
+
+        db = TestingSessionLocal()
+        try:
+            assertion = db.query(CareAssertion).filter_by(id=assertion_id).one()
+            assertion.assertion_status = "rejected"
+            db.commit()
+        finally:
+            db.close()
+
+        replay = review(client, session, proposal["id"], {"decision": "accept"})
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+        assert replay.json()["written_to_lcr"] is False
+        assert replay.json()["assertion_id"] is None
+    finally:
+        teardown()
