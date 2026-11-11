@@ -206,6 +206,7 @@ async def process_one_qwen_job() -> bool:
                 "persistence": "read_only_assistance",
                 "written_to_lcr": False,
                 "source_provenance_version": "qwen-source-records-v1",
+                "source_document_analysis_ids": result.get("source_document_analysis_ids", []),
                 "source_appointment_ids": result.get("source_appointment_ids", []),
                 "source_handoff_ids": result.get("source_handoff_ids", []),
                 "source_notification_ids": result.get("source_notification_ids", []),
