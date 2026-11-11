@@ -891,7 +891,7 @@ def fulfil_approved_deletion(
     # A shared record contains other caregivers' personal data and contributions.
     # Until mixed-subject erasure is separately assessed, fail closed rather than
     # silently erase other caregivers' accounts or private material.
-    from app.models.care import Caregiver
+    from app.models.care import Caregiver, Person
     linked_caregivers = db.query(Caregiver.id).filter(Caregiver.person_id == person_id).all()
     if {str(item[0]) for item in linked_caregivers} != {caregiver_id}:
         raise HTTPException(
@@ -1039,6 +1039,17 @@ def fulfil_approved_deletion(
         # successful erasure while either root identity remains.
         db.execute(text("DELETE FROM caregivers WHERE id = :caregiver_id"), {"caregiver_id": caregiver_id})
         db.execute(text("DELETE FROM persons WHERE id = :person_id"), {"person_id": person_id})
+        # Verify the root identity is actually gone before marking the request
+        # fulfilled. The ORM delete is a typed fallback for database drivers
+        # that do not match the raw UUID/string bind exactly.
+        remaining_person = db.query(Person).filter(Person.id == person_id).first()
+        if remaining_person is not None:
+            db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
+        if db.query(Person).filter(Person.id == person_id).count() != 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Person record remains after deletion attempt; request was not marked fulfilled",
+            )
 
         # Released/expired holds are no longer a deletion blocker and must not
         # retain the deleted subject identifier.
