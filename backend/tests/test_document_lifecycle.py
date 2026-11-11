@@ -321,7 +321,7 @@ def _digital_pdf_with_two_columns():
     })
     content = DecodedStreamObject()
     content.set_data(
-        b"BT /F1 12 Tf 50 720 Td (Discharge summary: patient walked 20 metres.) Tj ET\\n"
+        b"BT /F1 12 Tf 50 720 Td (Discharge summary: patient walked 20 metres.) Tj ET\n"
         b"BT /F1 12 Tf 320 720 Td (Medication: metformin 500 mg.) Tj ET"
     )
     page[NameObject("/Contents")] = writer._add_object(content)
