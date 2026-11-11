@@ -841,3 +841,223 @@ def test_export_download_is_not_available_to_another_caregiver(monkeypatch):
         headers=second_headers,
     )
     assert denied.status_code == 404
+
+
+
+def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_receipt(monkeypatch):
+    from datetime import datetime, timezone
+    from app.models.care import CareEvent, Evidence, Person, Caregiver
+    from app.models.collaboration import EvidenceUpload
+    from app.models.privacy_delivery import AuditLogEvent
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "g" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Deletion recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "g" * 40}
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            person_id=person_id,
+            type="document",
+            source_text="Synthetic deletion test document",
+            uploaded_by_caregiver_id=caregiver_id,
+        )
+        db.add(evidence)
+        db.flush()
+        upload_bytes = b"synthetic deletion test bytes"
+        upload = EvidenceUpload(
+            evidence_id=evidence.id,
+            filename="delete-me.txt",
+            mime_type="text/plain",
+            content=upload_bytes,
+            size_bytes=len(upload_bytes),
+            sha256=__import__("hashlib").sha256(upload_bytes).hexdigest(),
+        )
+        event = CareEvent(
+            person_id=person_id,
+            event_type="test_observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Synthetic deletion event",
+            description="This record must be erased.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([upload, event])
+        db.commit()
+        evidence_id = evidence.id
+        event_id = event.id
+    finally:
+        db.close()
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": "deletion",
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed the identity and authority evidence for erasure.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+
+    fulfilled = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
+        headers=reviewer_headers,
+    )
+    assert fulfilled.status_code == 200, fulfilled.text
+    body = fulfilled.json()
+    assert body["status"] == "fulfilled"
+    assert body["fulfilment"]["operation"] == "deletion"
+    assert body["fulfilment"]["receipt_id"]
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(Person).filter(Person.id == person_id).count() == 0
+        assert db.query(Caregiver).filter(Caregiver.id == caregiver_id).count() == 0
+        assert db.query(Evidence).filter(Evidence.id == evidence_id).count() == 0
+        assert db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).count() == 0
+        assert db.query(CareEvent).filter(CareEvent.id == event_id).count() == 0
+        receipt = db.query(DataSubjectRequest).filter(DataSubjectRequest.id == request_id).one()
+        assert receipt.request_status == "fulfilled"
+        assert receipt.person_id is None
+        assert receipt.caregiver_id is None
+        assert receipt.subject_id is None
+        assert receipt.requester_id.startswith("erased:")
+        audit = db.query(AuditLogEvent).filter(
+            AuditLogEvent.target_id == body["fulfilment"]["receipt_id"]
+        ).one()
+        assert audit.action == "privacy_request.deletion_fulfilled"
+        assert audit.person_id is None
+        assert audit.caregiver_id is None
+    finally:
+        db.close()
+
+    # The erased bearer capability no longer authorizes any caregiver API.
+    inaccessible = client.get("/api/v1/privacy/requests", headers=caregiver_headers)
+    assert inaccessible.status_code == 401
+
+    # Reviewer-only retry is idempotent and does not recreate or repeat deletion.
+    replay = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
+        headers=reviewer_headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+
+
+def test_deletion_fails_closed_for_shared_care_record(monkeypatch):
+    from app.models.care import Caregiver, Person
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "h" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Shared deletion recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "h" * 40}
+    db = TestSessionLocal()
+    try:
+        db.add(Caregiver(
+            id="second-caregiver-shared-delete",
+            name="Second caregiver",
+            relationship="family caregiver",
+            person_id=session["person"]["id"],
+            timezone="UTC",
+        ))
+        db.commit()
+    finally:
+        db.close()
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={"request_type": "deletion", "authority_basis": "self", "authority_attested": True},
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed the request and authority evidence.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    denied = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
+        headers=reviewer_headers,
+    )
+    assert denied.status_code == 409
+    db = TestSessionLocal()
+    try:
+        assert db.query(Person).filter(Person.id == session["person"]["id"]).count() == 1
+        still_pending = db.query(DataSubjectRequest).filter(DataSubjectRequest.id == request_id).one()
+        assert still_pending.request_status == "approved_pending_fulfilment_assessment"
+    finally:
+        db.close()
+
+
+def test_deletion_fails_closed_when_legal_hold_is_active(monkeypatch):
+    from sqlalchemy import text
+    from app.models.care import Person
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "i" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Legal hold recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "i" * 40}
+    db = TestSessionLocal()
+    try:
+        db.execute(text(
+            "CREATE TABLE legal_holds (id VARCHAR PRIMARY KEY, subject_id VARCHAR, hold_status VARCHAR)"
+        ))
+        db.execute(text(
+            "INSERT INTO legal_holds (id, subject_id, hold_status) VALUES ('hold-1', :person_id, 'active')"
+        ), {"person_id": session["person"]["id"]})
+        db.commit()
+    finally:
+        db.close()
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={"request_type": "deletion", "authority_basis": "self", "authority_attested": True},
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed the request and authority evidence.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    denied = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-deletion",
+        headers=reviewer_headers,
+    )
+    assert denied.status_code == 409
+    db = TestSessionLocal()
+    try:
+        assert db.query(Person).filter(Person.id == session["person"]["id"]).count() == 1
+    finally:
+        db.close()
