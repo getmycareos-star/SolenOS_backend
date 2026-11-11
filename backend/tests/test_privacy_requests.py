@@ -654,3 +654,190 @@ def test_correction_fulfilment_rejects_unapproved_and_unsupported_targets(monkey
         headers=headers,
     )
     assert pending.status_code == 409
+
+
+
+def test_approved_export_persists_downloadable_archive_and_excludes_other_caregiver(monkeypatch):
+    import io
+    import json
+    import zipfile
+    from datetime import datetime, timedelta, timezone
+    from app.models.care import Caregiver, Evidence
+    from app.models.collaboration import EvidenceUpload
+    from app.models.privacy_export import PrivacyExportArtifact
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "e" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Export recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {
+        **caregiver_headers,
+        "X-SolenOS-Privacy-Reviewer-Token": "e" * 40,
+    }
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    db = TestSessionLocal()
+    try:
+        other_caregiver = Caregiver(
+            id="other-caregiver-export-test",
+            name="Other caregiver",
+            relationship="family caregiver",
+            person_id=person_id,
+            timezone="UTC",
+        )
+        db.add(other_caregiver)
+        db.flush()
+        owned = Evidence(
+            person_id=person_id,
+            type="document",
+            source_text="Requester-owned document metadata",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+        )
+        other = Evidence(
+            person_id=person_id,
+            type="document",
+            source_text="Other caregiver private document metadata",
+            uploaded_by_caregiver_id=other_caregiver.id,
+            reported_by_caregiver_id=other_caregiver.id,
+        )
+        db.add_all([owned, other])
+        db.flush()
+        db.add_all([
+            EvidenceUpload(
+                evidence_id=owned.id,
+                filename="requester-record.txt",
+                mime_type="text/plain",
+                content=b"requester document contents",
+                size_bytes=len(b"requester document contents"),
+                sha256=__import__("hashlib").sha256(b"requester document contents").hexdigest(),
+            ),
+            EvidenceUpload(
+                evidence_id=other.id,
+                filename="other-caregiver-private.txt",
+                mime_type="text/plain",
+                content=b"other caregiver private contents",
+                size_bytes=len(b"other caregiver private contents"),
+                sha256=__import__("hashlib").sha256(b"other caregiver private contents").hexdigest(),
+            ),
+        ])
+        db.commit()
+        owned_id = owned.id
+        other_id = other.id
+    finally:
+        db.close()
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": "export",
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed the export requester's identity and authority.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+
+    fulfilled = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-export",
+        headers=reviewer_headers,
+    )
+    assert fulfilled.status_code == 200, fulfilled.text
+    result = fulfilled.json()
+    assert result["status"] == "fulfilled"
+    assert result["fulfilment"]["document_count"] == 1
+    assert result["fulfilment"]["size_bytes"] > 0
+    assert result["fulfilment"]["sha256"]
+
+    downloaded = client.get(
+        f"/api/v1/privacy/requests/{request_id}/export",
+        headers=caregiver_headers,
+    )
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
+        names = archive.namelist()
+        manifest = json.loads(archive.read("manifest.json"))
+        assert any(name.startswith(f"documents/{owned_id}_") for name in names)
+        assert not any(other_id in name for name in names)
+        assert not any("other-caregiver-private" in name for name in names)
+        evidence_file = json.loads(archive.read("records/evidence.json"))
+        exported_ids = {item["id"] for item in evidence_file}
+        assert owned_id in exported_ids
+        assert other_id not in exported_ids
+        assert manifest["document_files"][0]["evidence_id"] == owned_id
+
+    replay = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-export",
+        headers=reviewer_headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+
+    db = TestSessionLocal()
+    try:
+        artifact = db.query(PrivacyExportArtifact).filter_by(request_id=request_id).one()
+        assert artifact.downloaded_at is not None
+        assert artifact.sha256 == result["fulfilment"]["sha256"]
+        artifact.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
+    expired = client.get(
+        f"/api/v1/privacy/requests/{request_id}/export",
+        headers=caregiver_headers,
+    )
+    assert expired.status_code == 410
+
+
+def test_export_download_is_not_available_to_another_caregiver(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "f" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    first = create_session(client, "First export recipient")
+    second = create_session(client, "Second export recipient")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=first_headers,
+        json={"request_type": "export", "authority_basis": "self", "authority_attested": True},
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    reviewer_headers = {
+        **first_headers,
+        "X-SolenOS-Privacy-Reviewer-Token": "f" * 40,
+    }
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed identity and authority evidence.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    fulfilled = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-export",
+        headers=reviewer_headers,
+    )
+    assert fulfilled.status_code == 200, fulfilled.text
+    denied = client.get(
+        f"/api/v1/privacy/requests/{request_id}/export",
+        headers=second_headers,
+    )
+    assert denied.status_code == 404
