@@ -9,6 +9,7 @@ import app.api.v1 as api_v1_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
+from app.services.capture_review import persist_capture_analysis
 from app.models.care_continuity import CareAssertion
 
 pytestmark = pytest.mark.session_security
@@ -307,3 +308,31 @@ def test_capture_review_rejects_repeat_decisions_and_empty_corrections(monkeypat
         json={"candidate_index": 0, "decision": "reject"},
     )
     assert repeat.status_code == 409, repeat.text
+
+
+def test_capture_analysis_helper_can_leave_commit_to_the_workflow(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Transaction boundary recipient")
+    db = TestSessionLocal()
+
+    def unexpected_commit():
+        raise AssertionError("shared persistence helper must not commit when commit=False")
+
+    monkeypatch.setattr(db, "commit", unexpected_commit)
+    try:
+        analysis = persist_capture_analysis(
+            db,
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            source_event_id=None,
+            source_evidence_id=None,
+            source_text="Caregiver reported an observation.",
+            extraction_status="available",
+            candidates={"observations": []},
+            commit=False,
+        )
+        assert analysis.id
+        assert db.query(CaptureAnalysis).filter_by(id=analysis.id).one().source_text == "Caregiver reported an observation."
+    finally:
+        db.rollback()
+        db.close()
