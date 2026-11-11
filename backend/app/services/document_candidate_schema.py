@@ -152,6 +152,20 @@ def split_document_pages(source_text: str) -> list[tuple[int, str]]:
     return pages
 
 
+def unreadable_page_numbers(source_text: str) -> list[int]:
+    """Return page labels whose OCR/text extraction produced no usable passage."""
+    markers = list(_PAGE_MARKER.finditer(source_text or ""))
+    if not markers:
+        return []
+    unreadable: list[int] = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
+        body = source_text[marker.end():end].strip()
+        if not body or "[No readable text detected on this page]" in body:
+            unreadable.append(int(marker.group(1)))
+    return unreadable
+
+
 def apply_medication_conflict_warnings(candidates: list[dict[str, Any]]) -> None:
     """Flag differing instructions for the same extracted medication subject."""
     grouped: dict[str, list[dict[str, Any]]] = {}
