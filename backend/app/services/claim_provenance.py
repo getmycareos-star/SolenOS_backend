@@ -51,6 +51,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]]) -> 
                         "record_id": str(source.get("record_id")),
                         "label": source.get("label") or "Saved care record",
                         "matched_passage": statement,
+                        "source_excerpt": source_text[:700],
                         "occurred_at": source.get("occurred_at"),
                         "recorded_at": source.get("recorded_at"),
                         "reported_by": source.get("reported_by"),
