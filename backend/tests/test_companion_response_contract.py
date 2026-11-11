@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -1099,6 +1099,17 @@ def test_companion_claim_source_trace_includes_event_reporter_and_original_docum
             occurred_at=occurred_at,
             reported_at=occurred_at + timedelta(minutes=10),
         )
+        duplicate_evidence = Evidence(
+            id="unsteadiness-duplicate-note",
+            person_id=person_id,
+            type="note",
+            source_text="She felt unsteady near the kitchen.",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_label="Daughter",
+            original_author="Daughter",
+            extra_metadata='{"filename":"copied-family-observation.txt"}',
+            occurred_at=occurred_at,
+        )
         event = CareEvent(
             id="unsteadiness-care-entry",
             person_id=person_id,
@@ -1111,7 +1122,19 @@ def test_companion_claim_source_trace_includes_event_reporter_and_original_docum
             created_by_caregiver_id=caregiver_id,
             time_provenance="caregiver_reported",
         )
-        db.add_all([evidence, event])
+        unrelated_event_relationship = EvidenceSourceRelationship(
+            id="unrelated-event-source-link",
+            person_id=person_id,
+            source_evidence_id="unsteadiness-original-note",
+            related_evidence_id="unsteadiness-duplicate-note",
+            relationship_type="duplicate",
+            scope_type="event",
+            scope_id="different-event",
+            source_independence_status="shared_origin",
+            rationale="Synthetic relationship scoped to a different event.",
+            reviewed_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, duplicate_evidence, event, unrelated_event_relationship])
         db.commit()
         db.close()
 
@@ -1133,6 +1156,8 @@ def test_companion_claim_source_trace_includes_event_reporter_and_original_docum
         assert reference["related_evidence"][0]["record_id"] == "unsteadiness-original-note"
         assert reference["related_evidence"][0]["label"] == "family-observation.txt"
         assert reference["related_evidence"][0]["reported_by"] == "Daughter"
+        assert reference["related_evidence"][0]["source_independence_status"] == "not_assessed"
+        assert reference["related_evidence"][0]["exact_wording_duplicate_count"] == 1
 
         history = client.get(
             f"/api/v1/conversation/{data['session_id']}",
