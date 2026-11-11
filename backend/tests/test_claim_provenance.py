@@ -109,3 +109,21 @@ def test_claim_reference_carries_reviewed_source_relationship_and_duplicate_stat
     reference = result["claims"][0]["source_references"][0]
     assert reference["source_independence_status"] == "shared_origin"
     assert reference["exact_wording_duplicate_count"] == 2
+
+def test_correction_trace_keeps_the_prior_wording_and_reason():
+    result = build_claim_provenance(
+        "The updated note says she felt steady after lunch.",
+        [{
+            "record_type": "evidence_observation",
+            "record_id": "corrected-observation",
+            "source_text": "The updated note says she felt steady after lunch.",
+            "record_status": "recorded",
+            "correction_note": "This saved detail replaces an earlier version.",
+            "correction_rationale": "The caregiver corrected the time of the observation.",
+            "previous_source_excerpt": "She felt unsteady after lunch.",
+        }],
+    )
+    reference = result["claims"][0]["source_references"][0]
+    assert reference["correction_note"] == "This saved detail replaces an earlier version."
+    assert reference["correction_rationale"] == "The caregiver corrected the time of the observation."
+    assert reference["previous_source_excerpt"] == "She felt unsteady after lunch."
