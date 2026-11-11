@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -220,7 +221,15 @@ def _medication_change_is_explicit(item: dict[str, Any]) -> bool:
             "stop taking", "stop the medication",
         ),
     }
-    return any(marker in excerpt for marker in markers.get(change_type, ()))
+    for marker in markers.get(change_type, ()):
+        position = excerpt.find(marker)
+        if position < 0:
+            continue
+        prefix = excerpt[max(0, position - 36):position]
+        if re.search(r"\\b(?:not|never|no|without)\\s+(?:(?:been|being|actually|yet)\\s+)?$", prefix):
+            continue
+        return True
+    return False
 
 
 def _match_finding_evidence(persisted_evidence: list[dict[str, Any]], excerpt: str) -> list[dict[str, Any]]:
