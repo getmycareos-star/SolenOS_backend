@@ -404,6 +404,18 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
             assert assertion.field == "document_medication_statement"
             assert "Strength: 500 mg" in assertion.asserted_value
             assert "Dosage instructions:" in assertion.asserted_value
+        current_care = client.get(
+            "/api/v1/care-continuity/current-care?limit_per_source=12",
+            headers=auth,
+        )
+        assert current_care.status_code == 200, current_care.text
+        lcr_item = next(
+            item for item in current_care.json()["items"]
+            if item["title"] == "document_medication_statement"
+        )
+        assert "Strength: 500 mg" in lcr_item["description"]
+        assert "Dosage instructions:" in lcr_item["description"]
+        assert lcr_item["source_label"].find("page 1") >= 0
     finally:
         client.close()
         app.dependency_overrides.clear()
