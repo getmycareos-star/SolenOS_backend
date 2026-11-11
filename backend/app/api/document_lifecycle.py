@@ -60,7 +60,7 @@ def _ocr_image(image: Image.Image) -> str:
     """Run the installed local Tesseract engine; never silently fall back to a fake result."""
     try:
         normalized = ImageOps.exif_transpose(image).convert("RGB")
-        return pytesseract.image_to_string(normalized, lang="eng", config="--psm 6").strip()
+        return pytesseract.image_to_string(normalized, lang="eng", config="--psm 6 -c preserve_interword_spaces=1").strip()
     except pytesseract.TesseractNotFoundError as exc:
         raise HTTPException(
             status_code=503,
@@ -79,7 +79,14 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
             reader = PdfReader(io.BytesIO(content), strict=True)
             if len(reader.pages) > MAX_PDF_PAGES:
                 raise HTTPException(status_code=413, detail="PDFs are limited to 100 pages")
-            native_pages = [(page.extract_text() or "").strip() for page in reader.pages]
+            native_pages = []
+            for page in reader.pages:
+                try:
+                    page_text = page.extract_text(extraction_mode="layout") or ""
+                except TypeError:
+                    # Older pypdf versions do not expose layout extraction.
+                    page_text = page.extract_text() or ""
+                native_pages.append(page_text.strip())
         except HTTPException:
             raise
         except Exception as exc:
