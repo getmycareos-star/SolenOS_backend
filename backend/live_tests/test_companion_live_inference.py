@@ -71,8 +71,18 @@ def _get_json_after_restart(base_url: str, path: str, token: str) -> tuple[int, 
         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        return response.status, json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(body)
+        except json.JSONDecodeError:
+            detail = body
+        raise AssertionError(
+            f"Restarted server denied authenticated {path}: HTTP {exc.code} {detail}"
+        ) from exc
 
 
 def _verify_persistence_after_real_server_restart(session: dict, other: dict, conversation_id: str, proposal_id: str, assertion_id: str, disclosure: str) -> None:
