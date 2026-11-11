@@ -378,6 +378,20 @@ jobs:
           connection.close()
           PY
 
+      - name: Use PostgreSQL 17 client matching the CI database service
+        run: |
+          cat > /usr/local/bin/pg_dump <<'SH'
+          #!/bin/sh
+          exec docker run --rm --network host -v /tmp:/tmp postgres:17 pg_dump "$@"
+          SH
+          cat > /usr/local/bin/pg_restore <<'SH'
+          #!/bin/sh
+          exec docker run --rm --network host -v /tmp:/tmp postgres:17 pg_restore "$@"
+          SH
+          chmod +x /usr/local/bin/pg_dump /usr/local/bin/pg_restore
+          pg_dump --version
+          pg_restore --version
+
       - name: Prove PostgreSQL backup restore and caregiver record integrity
         env:
           SOLENOS_BACKUP_SOURCE_DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_test
