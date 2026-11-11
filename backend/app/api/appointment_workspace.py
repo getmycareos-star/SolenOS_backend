@@ -700,7 +700,7 @@ def create_appointment_outcome_proposals(record_id: str, request: Request, db: S
         "source_record_version": row.version_number,
         "items": created,
         "count": len(created),
-        "written_to_lcr": False,
+        "written_to_lcr": bool(created),
         "review_required": True,
         "limitations": [
             "Candidates quote only persisted caregiver-entered workspace fields.",
