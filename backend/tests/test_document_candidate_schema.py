@@ -223,3 +223,16 @@ def test_recorded_date_before_event_date_does_not_hide_event_date():
     assert candidate["event_date"] == "2026-10-12"
     assert candidate["recorded_date"] == "2026-10-13"
     assert not any("Multiple dates" in warning for warning in candidate["warnings"])
+
+
+
+def test_natural_recorded_date_is_normalized_without_becoming_event_date():
+    excerpt = "Recorded on 15 October 2026. Patient slept poorly."
+    candidate = canonical_candidate(
+        {"subject": "sleep", "observation": "Patient slept poorly.", "source_quote": excerpt},
+        document_id="doc-natural-recorded-date",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["event_date"] is None
+    assert candidate["recorded_date"] == "2026-10-15"
+    assert any("document recording date" in warning for warning in candidate["warnings"])
