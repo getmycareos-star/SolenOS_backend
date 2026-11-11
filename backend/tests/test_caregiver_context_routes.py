@@ -657,7 +657,7 @@ def test_change_item_appends_same_person_fact_revision():
     assert revisions.json()[2]["current_payload"]["fact_value"] == "needs support"
     timeline = client.get("/api/v1/care-continuity/record-revisions", headers=headers)
     assert timeline.status_code == 200, timeline.text
-    assert len(timeline.json()) == 2
+    assert len(timeline.json()) == 3
     assert timeline.json()[0]["revision_type"] == "care_fact_revisions"
 
 
