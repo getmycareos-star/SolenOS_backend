@@ -24,6 +24,8 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
 
@@ -403,23 +405,24 @@ def review_document_candidate(
         # generic care-continuity helper commits independently in other routes;
         # document review must not expose an assertion without its audit event.
         if assertion_row is None:
-            assertion_row = CareAssertion(
-                person_id=person_id,
-                subject_type="person",
-                subject_id=person_id,
-                field="document_extracted_observation",
-                assertion_kind="document_reviewed_observation",
-                asserted_value=asserted_value,
-                source_label=source_label,
-                source_text=quote,
-                evidence_ids=[evidence_id],
-                # The explicit caregiver accept is the creation event; do not
-                # insert a reported row and then run a separate status transition.
-                assertion_status="accepted",
-                created_by_caregiver_id=caregiver_id,
-                updated_by_caregiver_id=caregiver_id,
+            assertion_row = create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person_id,
+                    subject_type="person",
+                    subject_id=person_id,
+                    field="document_extracted_observation",
+                    assertion_kind="document_reviewed_observation",
+                    asserted_value=asserted_value,
+                    source_label=source_label,
+                    source_text=quote,
+                    evidence_ids=[evidence_id],
+                    created_by_caregiver_id=caregiver_id,
+                    updated_by_caregiver_id=caregiver_id,
+                ),
+                commit=False,
             )
-            db.add(assertion_row)
+            assertion_row.assertion_status = "accepted"
             db.flush()
         else:
             assertion_row = db.query(CareAssertion).filter(
