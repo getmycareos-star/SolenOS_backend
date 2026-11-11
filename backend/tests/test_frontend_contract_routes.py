@@ -15,6 +15,8 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage, EvidenceUpload
 from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.capture_analysis import CaptureAnalysis
+from app.models.care_continuity import CareAssertion
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -774,6 +776,85 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         after = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert after.status_code == 200, after.text
         assert {row["id"] for row in after.json()} == before_ids
+    finally:
+        teardown()
+
+
+def test_qwen_lcr_assist_uses_shared_projection_and_scopes_document_extractions(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        captured = []
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: captured.append(messages) or "The reviewed care record notes reduced breakfast intake.",
+        )
+        peer_caregiver_id = "same-person-peer-caregiver"
+        peer_evidence_id = "same-person-peer-document-evidence"
+        db = TestingSessionLocal()
+        try:
+            db.add(Caregiver(
+                id=peer_caregiver_id,
+                name="Other caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.add(Evidence(
+                id=peer_evidence_id,
+                person_id=person_id,
+                type="document",
+                source_text="PRIVATE_PEER_DOCUMENT_TEXT: confidential note uploaded by another caregiver.",
+                uploaded_by_caregiver_id=peer_caregiver_id,
+                evidence_status="available",
+                source_type="document",
+            ))
+            db.add(CaptureAnalysis(
+                id="same-person-peer-document-analysis",
+                person_id=person_id,
+                caregiver_id=peer_caregiver_id,
+                source_evidence_id=peer_evidence_id,
+                source_text="PRIVATE_PEER_DOCUMENT_TEXT: confidential extracted document text.",
+                extraction_status="available",
+                candidates={"kind": "document_extraction_v1", "filename": "peer-note.pdf"},
+                review_history=[],
+            ))
+            db.add(CareAssertion(
+                id="qwen-shared-lcr-accepted-assertion",
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="appetite",
+                assertion_kind="caregiver_reviewed_daily_care_observation",
+                asserted_value="Breakfast intake was lower than usual",
+                source_label="Caregiver review",
+                source_text="Caregiver reviewed the breakfast observation.",
+                evidence_ids=[],
+                assertion_status="accepted",
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "living_care_record",
+                "text": "Summarize the authorized Living Care Record and distinguish known information from uncertainty.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["written_to_lcr"] is False
+        assert response.json()["review_required"] is True
+        assert captured, "Qwen must receive the authorized LCR context"
+        prompt = captured[0][0]["content"]
+        assert "Breakfast intake was lower than usual" in prompt
+        assert "Canonical LCR source (assertions;" in prompt
+        assert "PRIVATE_PEER_DOCUMENT_TEXT" not in prompt
+        assert "peer-note.pdf" not in prompt
     finally:
         teardown()
 

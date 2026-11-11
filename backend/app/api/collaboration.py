@@ -2187,7 +2187,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         try:
             document_analyses = (
                 db.query(CaptureAnalysis)
-                .filter(CaptureAnalysis.person_id == person_id)
+                .filter(
+                    CaptureAnalysis.person_id == person_id,
+                    CaptureAnalysis.caregiver_id == caregiver_id,
+                )
                 .order_by(CaptureAnalysis.created_at.desc())
                 .limit(30)
                 .all()
@@ -2199,6 +2202,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 source_document = db.query(EvidenceModel).filter(
                     EvidenceModel.id == analysis.source_evidence_id,
                     EvidenceModel.person_id == person_id,
+                    EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
                     EvidenceModel.type == "document",
                 ).first()
                 if source_document is None:
@@ -2224,6 +2228,56 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             context_lines.append(
                 "Persisted document extraction context could not be retrieved. Document content is unknown for this request."
             )
+
+    # All LCR-facing Qwen workflows consume the same bounded, caregiver-scoped
+    # projection as Companion and the LCR UI. Purpose-specific records above remain
+    # for their explicit contracts; this adds canonical facts, reviewed assertions,
+    # uncertainty, decisions, open loops and provenance without duplicating events,
+    # evidence, appointments or document text already loaded above.
+    shared_lcr_workflows = (event_workflows | appointment_workflows) - {"medication_day"}
+    if payload.workflow in shared_lcr_workflows:
+        shared_lcr_context = build_unified_lcr_context(
+            db,
+            person_id,
+            caregiver_id,
+            limit_per_source=8,
+            query=None if payload.workflow == "living_care_record" else (payload.text or "")[:1000],
+        )
+        context_lines.append(
+            "Canonical LCR retrieval coverage: "
+            + json.dumps({
+                "schema_status": shared_lcr_context.get("schema_status"),
+                "history_coverage": shared_lcr_context.get("history_coverage"),
+                "missing_required_sources": shared_lcr_context.get("missing_required_sources", []),
+                "missing_optional_sources": shared_lcr_context.get("missing_optional_sources", []),
+                "retrieval_contract": shared_lcr_context.get("retrieval_contract", {}),
+            }, ensure_ascii=False, default=str)
+        )
+        canonical_sources = (
+            "living_record", "evidence_observations", "facts", "assertions",
+            "decisions", "decision_outcomes", "timeline", "uncertainties",
+            "uncertainty_assessments", "missing_information", "open_questions",
+            "open_loop_records", "information_gaps", "follow_up_links",
+            "reconciliations", "conflicts", "provenance", "caregiver_observations",
+            "caregiver_contexts", "caregiver_perspectives", "corrections",
+        )
+        shared_items_added = 0
+        shared_chars_added = 0
+        for source_name in canonical_sources:
+            source = shared_lcr_context.get("sources", {}).get(source_name, {})
+            for item in source.get("items", [])[:8]:
+                line = (
+                    f"Canonical LCR source ({source_name}; "
+                    f"information_status={item.get('information_status', 'unknown')}): "
+                    + json.dumps(item, ensure_ascii=False, default=str)
+                )
+                if shared_items_added >= 32 or shared_chars_added + len(line) > 10000:
+                    break
+                context_lines.append(line)
+                shared_items_added += 1
+                shared_chars_added += len(line)
+            if shared_items_added >= 32 or shared_chars_added >= 10000:
+                break
 
     if payload.workflow in {"handoff", "care_coordination", "care_transition"}:
         handoffs = db.query(CaregiverHandoff).filter(
