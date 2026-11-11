@@ -471,7 +471,7 @@ def build_lcr_context(
             # without caregiver attribution are excluded.
             accepted_or_legacy = table.c.assertion_status.in_(("accepted", "caregiver_reviewed"))
             caregiver_report = and_(
-                table.c.assertion_status == "reported",
+                table.c.assertion_status.in_(("reported", "caregiver_reported_unreviewed")),
                 table.c.created_by_caregiver_id.is_not(None),
             ) if "created_by_caregiver_id" in table.c else None
             statement = statement.where(or_(accepted_or_legacy, caregiver_report) if caregiver_report is not None else accepted_or_legacy)
