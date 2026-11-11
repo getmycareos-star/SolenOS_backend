@@ -115,6 +115,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
 
         accepted = review(client, first, proposal["id"], {"decision": "accept"})
         assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["change_intelligence_status"] == "available"
         assertion_id = accepted.json()["assertion_id"]
         assert assertion_id
         repeated = review(client, first, proposal["id"], {"decision": "accept"})
