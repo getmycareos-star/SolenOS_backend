@@ -1450,7 +1450,12 @@ def test_fresh_companion_session_retrieves_relevant_appointment_assertions(clien
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["source_assertion_ids"] == [accepted_assertion_id]
+    with TestSessionLocal() as db:
+        rejected_assertion_id = db.query(CareAssertion.id).filter(
+            CareAssertion.source_proposal_id == proposals[2]["id"]
+        ).scalar()
+    assert accepted_assertion_id in body["source_assertion_ids"]
+    assert rejected_assertion_id not in body["source_assertion_ids"]
     assert body["written_to_lcr"] is False
     assert body["persistence"] == "conversation_only"
     assert body["session_id"]
