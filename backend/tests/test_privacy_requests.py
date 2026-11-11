@@ -532,3 +532,125 @@ def test_privacy_reviewer_queue_excludes_request_notes_and_non_pending_items(mon
     assert after_rejection.status_code == 200, after_rejection.text
     assert request_id not in [item["id"] for item in after_rejection.json()["requests"]]
 
+
+
+
+def test_approved_insight_correction_is_fulfilled_once_and_preserves_original(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "c" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    from app.models.care import Insight, Correction
+
+    client = TestClient(app)
+    session = create_session(client, "Correction recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {
+        **caregiver_headers,
+        "X-SolenOS-Privacy-Reviewer-Token": "c" * 40,
+    }
+    db = TestSessionLocal()
+    try:
+        insight = Insight(
+            person_id=session["person"]["id"],
+            title="Mobility observation",
+            description="The caregiver reported difficulty walking on Monday.",
+            insight_type="observation",
+            confidence=0.7,
+            evidence_ids=[],
+            possible_context="The duration and cause are not established.",
+        )
+        db.add(insight)
+        db.commit()
+        db.refresh(insight)
+        insight_id = insight.id
+        original = insight.description
+    finally:
+        db.close()
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": "correction",
+            "authority_basis": "self",
+            "authority_attested": True,
+            "correction_target_type": "insight",
+            "correction_target_id": insight_id,
+            "correction_text": "The caregiver reported difficulty walking on Tuesday.",
+            "correction_reason": "The original weekday was entered incorrectly.",
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed the identity and correction authority evidence.",
+            "authority_evidence_checked": "Requester identity and record authority were checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+
+    fulfilled = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
+        headers=reviewer_headers,
+    )
+    assert fulfilled.status_code == 200, fulfilled.text
+    body = fulfilled.json()
+    assert body["status"] == "fulfilled"
+    assert body["fulfilment"]["operation"] == "correction"
+    assert body["correction"]["original_text"] == original
+    assert body["correction"]["corrected_text"].endswith("Tuesday.")
+
+    replay = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
+        headers=reviewer_headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["fulfilment"]["correction_id"] == body["fulfilment"]["correction_id"]
+
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(Insight).filter(Insight.id == insight_id).one()
+        assert persisted.description == "The caregiver reported difficulty walking on Tuesday."
+        correction_rows = db.query(Correction).filter(
+            Correction.id == body["fulfilment"]["correction_id"]
+        ).all()
+        assert len(correction_rows) == 1
+        assert correction_rows[0].original_text == original
+        assert correction_rows[0].corrected_text == persisted.description
+    finally:
+        db.close()
+
+
+def test_correction_fulfilment_rejects_unapproved_and_unsupported_targets(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "d" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Correction boundary recipient")
+    headers = {
+        "Authorization": f"Bearer {session['access_token']}",
+        "X-SolenOS-Privacy-Reviewer-Token": "d" * 40,
+    }
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=headers,
+        json={
+            "request_type": "correction",
+            "authority_basis": "self",
+            "authority_attested": True,
+            "correction_target_type": "insight",
+            "correction_target_id": "missing-insight",
+            "correction_text": "Corrected value",
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    pending = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
+        headers=headers,
+    )
+    assert pending.status_code == 409
