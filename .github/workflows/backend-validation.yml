@@ -26,32 +26,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install local OCR engine
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if command -v tesseract >/dev/null 2>&1; then
-            tesseract --version
-            exit 0
-          fi
-
-          installed=0
-          for attempt in 1 2 3; do
-            if sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update &&
-               sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y tesseract-ocr tesseract-ocr-eng; then
-              installed=1
-              break
-            fi
-            echo "OCR package installation attempt ${attempt}/3 failed; retrying." >&2
-            sleep "$((attempt * 10))"
-          done
-
-          test "$installed" = "1"
-          tesseract --version
-      - name: Install package and test dependencies
-        run: python -m pip install -e . pytest httpx
+      - name: Build backend CI image with OCR and test dependencies
+        run: docker build -f ci/Dockerfile.backend-tests -t solenos-backend-ci-tests .
       - name: Compile backend
-        run: python -m compileall -q app
+        run: docker run --rm -v "$GITHUB_WORKSPACE:/workspace" -w /workspace/backend solenos-backend-ci-tests python -m compileall -q app
       - name: Smoke-test ASGI startup and health
         shell: bash
         run: |
