@@ -326,6 +326,7 @@ _SEARCH_STOPWORDS = {
     "last", "past", "week", "month", "year", "today", "yesterday", "days", "day",
     "since", "before", "after", "between", "then", "there", "their", "them", "please",
     "her", "his", "our", "your", "been", "getting", "over", "into",
+    "caregiver", "caregivers", "report", "reported", "recorded", "unreviewed",
 }
 
 
