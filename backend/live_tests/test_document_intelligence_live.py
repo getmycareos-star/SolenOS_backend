@@ -13,7 +13,7 @@ from app.models.care_continuity import CareAssertion
 from app.main import app
 import app.main as main_module
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///:memory:")
 POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://"))
 pytestmark = pytest.mark.skipif(
     os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1" or not POSTGRES_DATABASE,
