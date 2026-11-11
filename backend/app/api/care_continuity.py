@@ -3662,6 +3662,28 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         row = result.mappings().one()
         if resource == "record-change-items":
             _append_revision_for_change_item(db, person_id, caregiver_id, data)
+        # These source records are inserted with SQLAlchemy Core, so the ORM
+        # revision listener cannot see them. Append their first revision in the
+        # same transaction as the source row.
+        initial_revision_targets = {
+            "facts": "care_fact",
+            "assertions": "care_assertion",
+            "decisions": "care_decision",
+            "caregiver-observations": "caregiver_observation",
+        }
+        if resource in initial_revision_targets:
+            _append_revision_for_change_item(
+                db,
+                person_id,
+                caregiver_id,
+                {
+                    "target_type": initial_revision_targets[resource],
+                    "target_id": str(row["id"]),
+                    "operation": "created",
+                    "before_value": None,
+                    "after_value": _jsonable(dict(row)),
+                },
+            )
         if resource == "living-records" and inspect(db.get_bind()).has_table("care_record_status_history"):
             status_history = _table(db, "care_record_status_history")
             db.execute(insert(status_history).values(
