@@ -37,15 +37,20 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]]) -> 
     truth. Duplicate records remain separate references and are not counted as
     independent corroboration.
     """
+    historical_statuses = {"corrected", "superseded", "withdrawn", "rejected", "retracted", "expired", "deleted", "archived"}
     claims = []
     for index, statement in enumerate(split_response_claims(reply)):
         normalized_claim = _normalise(statement)
         matches = []
+        current_matches = 0
         if normalized_claim:
             for source in source_records:
                 source_text = str(source.get("source_text") or "")
                 normalized_source = _normalise(source_text)
                 if normalized_claim and normalized_claim in normalized_source:
+                    is_historical = str(source.get("record_status") or "").casefold() in historical_statuses
+                    if not is_historical:
+                        current_matches += 1
                     matches.append({
                         "record_type": source.get("record_type"),
                         "record_id": str(source.get("record_id")),
@@ -57,13 +62,18 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]]) -> 
                         "reported_by": source.get("reported_by"),
                         "entered_by": source.get("entered_by"),
                         "record_status": source.get("record_status"),
+                        "source_state_label": "Earlier or corrected record; not treated as current" if is_historical else None,
                         "related_evidence_ids": list(source.get("related_evidence_ids") or []),
                         "related_evidence": list(source.get("related_evidence") or []),
                     })
         claims.append({
             "claim_id": f"statement-{index + 1}",
             "text": statement,
-            "support_status": "matched_saved_wording" if matches else "not_matched_to_saved_wording",
+            "support_status": (
+                "matched_saved_wording" if current_matches else
+                "matched_historical_only" if matches else
+                "not_matched_to_saved_wording"
+            ),
             "source_references": matches,
         })
     unmatched = sum(1 for claim in claims if claim["support_status"] != "matched_saved_wording")
