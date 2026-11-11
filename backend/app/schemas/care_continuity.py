@@ -8,7 +8,7 @@ class CareAssertionCreate(BaseModel):
     subject_type: str = Field(min_length=1, max_length=80)
     subject_id: str = Field(min_length=1, max_length=160)
     field: str = Field(min_length=1, max_length=120)
-    assertion_kind: Literal["current_state", "time_bound_observation"] = "current_state"
+    assertion_kind: str = Field(default="current_state", min_length=1, max_length=80)
     asserted_value: str = Field(min_length=1, max_length=4000)
     source_event_id: Optional[str] = None
     source_label: str = Field(min_length=1, max_length=160)
@@ -30,7 +30,7 @@ class CareAssertionResponse(BaseModel):
     subject_type: str
     subject_id: str
     field: str
-    assertion_kind: Literal["current_state", "time_bound_observation"] = "current_state"
+    assertion_kind: str = Field(default="current_state", min_length=1, max_length=80)
     asserted_value: str
     source_event_id: Optional[str] = None
     source_label: str
