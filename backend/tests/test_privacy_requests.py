@@ -668,6 +668,8 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
 
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "e" * 40)
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("SOLENOS_PRIVACY_EXPORT_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     client = TestClient(app)
     session = create_session(client, "Export recipient")
     caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
@@ -805,6 +807,8 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
 def test_export_download_is_not_available_to_another_caregiver(monkeypatch):
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "f" * 40)
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("SOLENOS_PRIVACY_EXPORT_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     client = TestClient(app)
     first = create_session(client, "First export recipient")
     second = create_session(client, "Second export recipient")
