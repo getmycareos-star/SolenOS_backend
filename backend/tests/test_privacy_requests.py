@@ -647,13 +647,10 @@ def test_correction_fulfilment_rejects_unapproved_and_unsupported_targets(monkey
             "correction_text": "Corrected value",
         },
     )
-    assert submitted.status_code == 201, submitted.text
-    request_id = submitted.json()["id"]
-    pending = client.post(
-        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
-        headers=headers,
-    )
-    assert pending.status_code == 409
+    # A correction request must resolve its target inside the authenticated
+    # care record before it can enter the reviewer workflow.
+    assert submitted.status_code == 404, submitted.text
+    assert submitted.json()["detail"] == "Correction target was not found in this care record"
 
 
 
