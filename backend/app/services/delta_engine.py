@@ -549,7 +549,13 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         continue
                     if domain == "medications" and change_type == "discontinued" and current is None:
                         current = "discontinued"
-                    if not name or current is None or item.get("certainty") != "supported" or not item.get("evidence_supported") or not item.get("claim_supported"):
+                    if (
+                        not name or current is None
+                        or item.get("certainty") != "supported"
+                        or not item.get("evidence_supported")
+                        or not item.get("claim_supported")
+                        or not finding_source_supported
+                    ):
                         continue
                     if domain == "medications":
                         inferred_field = {
@@ -602,7 +608,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         field=field, assertion_kind=assertion_kind,
                         asserted_value=str(current), source_event_id=source_event_id, source_label=source,
                         source_text=str(item.get("evidence_excerpt") or content[:500]),
-                        evidence_ids=evidence_ids, observed_at=event_date or datetime.now(timezone.utc),
+                        evidence_ids=finding_evidence_ids, observed_at=event_date or datetime.now(timezone.utc),
                         created_by_caregiver_id=created_by_caregiver_id,
                         review_after_days=30 if domain != "symptoms" else None,
                     ), commit=False)
@@ -733,6 +739,13 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 excerpt = str(source_item.get("evidence_excerpt") or "").strip()
                 finding_evidence = _match_finding_evidence(persisted_evidence, excerpt)
                 finding_evidence_ids = [str(row["id"]) for row in finding_evidence if row.get("id")]
+                # An assertion may cite either exact matching persisted evidence or
+                # the incoming persisted event itself. Never inherit every evidence
+                # ID attached to the reconciliation request: unrelated documents
+                # must not become provenance for this finding.
+                finding_source_supported = bool(finding_evidence_ids) or bool(
+                    source_event_id and excerpt and _normalise(excerpt) in _normalise(content)
+                )
                 baseline_ids = set(str(value) for value in (source_item.get("existing_assertions") or []))
                 baseline_assertions = [
                     assertion for assertion in active_state
