@@ -187,6 +187,42 @@ def _normalise(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _medication_change_is_explicit(item: dict[str, Any]) -> bool:
+    """Require source wording that actually describes a medication change.
+
+    A medication name/dose appearing in a historical list is not evidence that
+    the medicine was started, stopped, or changed. The model's change_type label
+    alone is never sufficient authority to promote a current medication state.
+    """
+    change_type = _normalise(item.get("change_type"))
+    excerpt = _normalise(item.get("evidence_excerpt"))
+    markers = {
+        "new": (
+            "started", "start taking", "prescribed", "initiated", "commenced",
+            "began taking", "new prescription", "added to the medication",
+            "changed medication to", "medication changed to",
+        ),
+        "dose_changed": (
+            "dose increased", "dose decreased", "increased the dose",
+            "decreased the dose", "reduced the dose", "raised the dose",
+            "dose changed", "changed the dose",
+        ),
+        "frequency_changed": (
+            "frequency changed", "changed frequency", "changed from once",
+            "changed from twice", "increased to twice", "reduced to once",
+        ),
+        "route_changed": (
+            "route changed", "changed route", "switched from oral",
+            "changed from oral", "route was changed",
+        ),
+        "discontinued": (
+            "stopped", "discontinued", "held", "ceased", "no longer taking",
+            "stop taking", "stop the medication",
+        ),
+    }
+    return any(marker in excerpt for marker in markers.get(change_type, ()))
+
+
 def _match_finding_evidence(persisted_evidence: list[dict[str, Any]], excerpt: str) -> list[dict[str, Any]]:
     """Match a finding to sufficiently specific text in persisted, person-scoped evidence.
 
@@ -389,6 +425,20 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         raise
 
     result = _parse_model_json(content_json)
+
+    # Medication-list mentions are not prescribing instructions. Fail closed
+    # unless the quoted source itself explicitly describes the requested change.
+    for medication in result.get("medications", []):
+        change_type = _normalise(medication.get("change_type"))
+        if change_type in {"new", "dose_changed", "frequency_changed", "route_changed", "discontinued"}:
+            if not _medication_change_is_explicit(medication):
+                medication["change_type"] = "uncertain"
+                medication["certainty"] = "uncertain"
+                medication["medication_mention_only"] = True
+                medication["promotion_warning"] = (
+                    "The source mentions a medication but does not explicitly document "
+                    "a start, stop, or change. It was not promoted as current medication state."
+                )
 
     # Verify both the quotation and the claim before allowing a finding to
     # become a normalized assertion. A real quote alone must not legitimize an
