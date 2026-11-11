@@ -210,3 +210,16 @@ def test_unmatched_multi_strength_medication_excerpt_does_not_guess_strength():
     )
     assert candidate["medication_details"]["strength"] is None
     assert any("Multiple medication strengths" in warning for warning in candidate["warnings"])
+
+
+
+def test_recorded_date_before_event_date_does_not_hide_event_date():
+    excerpt = "Recorded on 2026-10-13. Event date 2026-10-12."
+    candidate = canonical_candidate(
+        {"subject": "care event", "observation": "Event date 2026-10-12.", "source_quote": excerpt},
+        document_id="doc-recorded-before-event",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["event_date"] == "2026-10-12"
+    assert candidate["recorded_date"] == "2026-10-13"
+    assert not any("Multiple dates" in warning for warning in candidate["warnings"])
