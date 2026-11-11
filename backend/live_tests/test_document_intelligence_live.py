@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.database import Base, get_db
+from app.core.database import get_db
 from app.models.care_continuity import CareAssertion
 from app.main import app
 import app.main as main_module
@@ -18,10 +18,10 @@ pytestmark = pytest.mark.skipif(
     reason="requires the dedicated live-Qwen workflow and a running Ollama model",
 )
 
-engine = create_engine(
-    "sqlite:////tmp/solenos-live-inference.db",
-    connect_args={"check_same_thread": False},
-)
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+if not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+    raise RuntimeError("Live document Qwen acceptance requires migrated PostgreSQL")
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -34,7 +34,6 @@ def override_db():
 
 
 def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted(monkeypatch):
-    Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
@@ -152,4 +151,4 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
     finally:
         client.close()
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
