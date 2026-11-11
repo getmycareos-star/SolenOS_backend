@@ -194,7 +194,13 @@ def _priority_weight(value: Any) -> int:
     return {"critical": 50, "high": 40, "medium": 30, "low": 20, "informational": 10}.get(str(value), 10)
 
 
-def next_best_questions(db: Session, person_id: str, persist: bool = True) -> List[Dict[str, Any]]:
+def next_best_questions(
+    db: Session,
+    person_id: str,
+    persist: bool = True,
+    *,
+    commit: bool = True,
+) -> List[Dict[str, Any]]:
     """Rank questions from explicit contradictions, stale reports, and open gaps only."""
     candidates: List[Dict[str, Any]] = []
     contradictions = db.query(Contradiction).filter(
@@ -287,6 +293,12 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
                 OpenQuestion.question == clean["question"],
                 OpenQuestion.status == "open",
             ).first()
+            source_context = {
+                "source_kind": clean["source_kind"],
+                "source_id": clean["source_id"],
+                "source_ids": clean.get("source_ids") or [clean["source_id"]],
+                "reason": clean["reason"],
+            }
             if existing is None:
                 question = OpenQuestion(
                     person_id=person_id,
@@ -296,17 +308,42 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
                     status="open",
                     priority=Priority(clean["priority"]),
                     evidence_ids=clean["evidence_ids"],
-                    context=[{"source_kind": clean["source_kind"], "source_id": clean["source_id"], "reason": clean["reason"]}],
+                    context=[source_context],
                 )
                 db.add(question)
                 db.flush()
                 persisted_id = question.id
             else:
+                # Refresh an existing open question with newly linked source records.
+                # Never change an answered, declined, or closed question here.
+                existing.evidence_ids = list(dict.fromkeys(
+                    list(existing.evidence_ids or []) + list(clean["evidence_ids"] or [])
+                ))
+                contexts = list(existing.context or [])
+                context_key = (source_context["source_kind"], source_context["source_id"])
+                matching = next(
+                    (entry for entry in contexts
+                     if (entry.get("source_kind"), entry.get("source_id")) == context_key),
+                    None,
+                )
+                if matching is None:
+                    contexts.append(source_context)
+                else:
+                    matching["source_ids"] = list(dict.fromkeys(
+                        list(matching.get("source_ids") or [])
+                        + list(source_context["source_ids"])
+                    ))
+                    matching["reason"] = source_context["reason"]
+                existing.context = contexts
+                existing.priority = Priority(clean["priority"]) if _priority_weight(clean["priority"]) > _priority_weight(existing.priority) else existing.priority
                 persisted_id = existing.id
         clean["persisted_question_id"] = persisted_id
         output.append(clean)
     if persist:
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     return output
 
 

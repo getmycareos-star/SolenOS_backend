@@ -8,6 +8,8 @@ from app.models.care import Person
 from app.models.uncertainty import Contradiction
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
+from app.models.uncertainty import OpenQuestion
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 
 def test_contradiction_persists_all_source_assertion_ids():
@@ -62,6 +64,65 @@ def test_contradiction_persists_all_source_assertion_ids():
         assert contradiction.resolution_status == "unresolved"
         assert set(contradiction.source_assertion_ids or []) == {first.id, second.id}
         assert len(contradiction.evidence_ids or []) == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+
+def test_reconciliation_creates_and_refreshes_source_linked_clarification_question():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = session_factory()
+    try:
+        person = Person(id="uncertainty-flow-person", name="Uncertainty flow test person")
+        db.add(person)
+        db.commit()
+
+        first = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="current_location",
+                assertion_kind="current_state",
+                asserted_value="At home",
+                source_label="First caregiver report",
+                source_text="The person is at home.",
+            ),
+        )
+        reconcile_person_change_intelligence(db, person.id)
+        question = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).one()
+        assert first.id in question.context[0]["source_ids"]
+
+        second = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="current_location",
+                assertion_kind="current_state",
+                asserted_value="At hospital",
+                source_label="Second caregiver report",
+                source_text="The person is at the hospital.",
+            ),
+        )
+        reconcile_person_change_intelligence(db, person.id)
+        refreshed = db.query(OpenQuestion).filter(OpenQuestion.id == question.id).one()
+        assert refreshed.id == question.id
+        assert set(refreshed.evidence_ids or []) == set()
+        assert set(refreshed.context[0]["source_ids"]) == {first.id, second.id}
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)

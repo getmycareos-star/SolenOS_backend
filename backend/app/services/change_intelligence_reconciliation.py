@@ -16,6 +16,7 @@ from app.services.change_detection import (
     detect_numeric_observation_changes,
 )
 from app.services.pattern_detection import detect_cross_domain_patterns, detect_patterns
+from app.services.care_continuity import next_best_questions
 
 
 def reconcile_person_change_intelligence(
@@ -45,4 +46,7 @@ def reconcile_person_change_intelligence(
     detect_cross_domain_patterns(db, person_id, reference_time)
     detect_assertion_changes(db, person_id)
     detect_numeric_observation_changes(db, person_id)
+    # Keep source-linked clarification questions in step with every ordinary
+    # evidence/assertion reconciliation. The caller retains transaction ownership.
+    next_best_questions(db, person_id, persist=True, commit=False)
     db.flush()
