@@ -25,6 +25,7 @@ router = APIRouter(prefix="/documents", tags=["document lifecycle"])
 MAX_EXTRACTED_CHARS = 100_000
 MAX_PDF_PAGES = 100
 MAX_OCR_PAGES = 25
+MIN_NATIVE_PDF_TEXT_CHARS = 40
 MAX_IMAGE_PIXELS = 20_000_000
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
@@ -92,11 +93,16 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved PDF could not be read") from exc
 
-        if native_pages and all(native_pages):
+        # Sparse hidden text layers (e.g. a scanned page with only a footer)
+        # do not prove that the clinical content is digitally readable.
+        ocr_page_indexes = [
+            index for index, value in enumerate(native_pages)
+            if len(value.strip()) < MIN_NATIVE_PDF_TEXT_CHARS
+        ]
+        if native_pages and not ocr_page_indexes:
             page_texts = [f"[Page {index + 1}]\n{text}" for index, text in enumerate(native_pages)]
             return "\n\n".join(page_texts)[:MAX_EXTRACTED_CHARS], "server_pdf_text"
 
-        ocr_page_indexes = [index for index, value in enumerate(native_pages) if not value]
         if len(ocr_page_indexes) > MAX_OCR_PAGES:
             raise HTTPException(
                 status_code=413,
@@ -107,7 +113,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
             rendered = pdfium.PdfDocument(content)
             page_texts = []
             for index, native_text in enumerate(native_pages):
-                if native_text:
+                if len(native_text.strip()) >= MIN_NATIVE_PDF_TEXT_CHARS:
                     page_texts.append(f"[Page {index + 1}]\n{native_text}")
                     continue
                 page = rendered[index]
@@ -126,10 +132,12 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
                         image.close()
                         bitmap.close()
                     if ocr_text:
-                        page_texts.append(f"[Page {index + 1} OCR]\n{ocr_text}")
+                        combined_text = "\n".join(value for value in (native_text.strip(), ocr_text) if value)
+                        page_texts.append(f"[Page {index + 1} OCR]\n{combined_text}")
+                    elif native_text.strip():
+                        page_texts.append(f"[Page {index + 1}]\n{native_text.strip()}")
                     else:
-                        # Preserve the page boundary and make the extraction gap explicit.
-                        # This marker is never passed off as extracted clinical content.
+                        # Keep unreadable page identity explicit; never invent content.
                         page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
                 finally:
                     page.close()
