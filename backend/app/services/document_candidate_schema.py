@@ -98,7 +98,15 @@ def _date_tokens(excerpt: str) -> list[str]:
         r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b",
         excerpt,
     )
-    tokens.extend(_NATURAL_DATE_TOKEN.findall(excerpt))
+    for natural in _NATURAL_DATE_TOKEN.findall(excerpt):
+        normalized = natural
+        for date_format in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%B %d %Y", "%b %d, %Y", "%b %d %Y"):
+            try:
+                normalized = datetime.strptime(natural, date_format).date().isoformat()
+                break
+            except ValueError:
+                continue
+        tokens.append(normalized)
     return tokens
 
 
