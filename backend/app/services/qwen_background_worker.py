@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import inspect, or_
 
 from app.core.database import SessionLocal
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -146,6 +146,12 @@ async def process_one_qwen_job() -> bool:
     db = SessionLocal()
     job = None
     try:
+        # The API container can start while the deployment migration command is
+        # still creating the queue table. Avoid querying it before its DDL commits;
+        # the poll loop retries after its normal idle wait.
+        if not inspect(db.get_bind()).has_table("qwen_background_jobs"):
+            return False
+
         now = datetime.now(timezone.utc)
         # Recover a job left processing by a crashed worker after a 10-minute lease.
         stale_before = now - timedelta(minutes=10)
