@@ -133,6 +133,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "processed_page_count": intelligence.get("processed_page_count"),
         "total_page_count": intelligence.get("total_page_count") or metadata.get("page_count"),
         "processed_page_numbers": intelligence.get("processed_page_numbers", []),
+        "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers", []),
         "unreadable_page_numbers": intelligence.get("unreadable_page_numbers", []),
         "extraction_method": metadata.get("extraction_method"),
         "extracted_char_count": len(analysis.source_text or ""),
