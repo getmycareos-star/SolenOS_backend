@@ -1040,6 +1040,7 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
         "care_facts": "empty",
         "care_events": "empty",
         "appointments": "empty",
+        "care_assertions": "empty",
         "evidence_freshness_assessments": "empty",
         "medications_and_allergies": "unavailable",
         "documents": "empty",
@@ -1609,3 +1610,53 @@ def test_appointment_workspace_create_and_revision_writes_are_idempotent(client)
     )
     assert revisions.status_code == 200, revisions.text
     assert [item["revision_number"] for item in revisions.json()["items"]] == [1, 2]
+
+
+def test_appointment_preparation_brief_includes_source_attributed_lcr_assertions(client):
+    test_client, owner, other = client
+    with TestSessionLocal() as db:
+        db.add_all([
+            CareAssertion(
+                id="appointment-prep-owner-assertion",
+                person_id=owner["person"]["id"],
+                subject_type="person",
+                subject_id=owner["person"]["id"],
+                field="sleep_observation",
+                assertion_kind="time_bound_observation",
+                asserted_value="Sleep was interrupted twice last night.",
+                source_label="Companion caregiver report",
+                source_text="Caregiver reported that sleep was interrupted twice last night.",
+                assertion_status="reported",
+                evidence_ids=[],
+                created_by_caregiver_id=owner["caregiver"]["id"],
+            ),
+            CareAssertion(
+                id="appointment-prep-other-assertion",
+                person_id=other["person"]["id"],
+                subject_type="person",
+                subject_id=other["person"]["id"],
+                field="private_observation",
+                assertion_kind="time_bound_observation",
+                asserted_value="Other person's private care detail.",
+                source_label="Other caregiver report",
+                source_text="Private source text.",
+                assertion_status="reported",
+                evidence_ids=[],
+                created_by_caregiver_id=other["caregiver"]["id"],
+            ),
+        ])
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_coverage"]["care_assertions"] == "available"
+    assert len(body["assertions"]) == 1
+    assertion = body["assertions"][0]
+    assert assertion["source_id"] == "appointment-prep-owner-assertion"
+    assert assertion["asserted_value"] == "Sleep was interrupted twice last night."
+    assert assertion["assertion_status"] == "reported"
+    assert assertion["source_label"] == "Companion caregiver report"
+    assert "not independent clinical verification" in assertion["interpretation_limit"]
+    assert "Other person's private care detail." not in response.text
