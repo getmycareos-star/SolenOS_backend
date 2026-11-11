@@ -714,6 +714,22 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         str(item.get("why_it_matters") or gap), question_text, Priority.MEDIUM,
                         linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""))
 
+            # Only evidence supplied with this incoming event may support a
+            # newly promoted assertion. Older evidence remains available to
+            # uncertainty/baseline analysis, but must not be relabelled as support
+            # from the event currently being reconciled.
+            incoming_evidence_rows = (
+                db.query(Evidence).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(evidence_ids),
+                ).all()
+                if evidence_ids else []
+            )
+            incoming_persisted_evidence = [
+                evidence_record_to_uncertainty_item(row)
+                for row in incoming_evidence_rows
+            ]
+
             for finding in computed:
                 finding_name = str(finding.get("name") or "").strip()
                 if not finding_name:
@@ -737,7 +753,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 # Link only persisted evidence whose stored text contains the finding's
                 # explicit excerpt; otherwise preserve the finding as unsupported/unknown.
                 excerpt = str(source_item.get("evidence_excerpt") or "").strip()
-                finding_evidence = _match_finding_evidence(persisted_evidence, excerpt)
+                finding_evidence = _match_finding_evidence(incoming_persisted_evidence, excerpt)
                 finding_evidence_ids = [str(row["id"]) for row in finding_evidence if row.get("id")]
                 # An assertion may cite either exact matching persisted evidence or
                 # the incoming persisted event itself. Never inherit every evidence
