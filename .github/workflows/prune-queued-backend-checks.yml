@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   prune-queued-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Keep only the newest queued run for each backend check
         uses: actions/github-script@v7
