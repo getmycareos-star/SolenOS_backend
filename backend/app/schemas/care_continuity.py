@@ -9,6 +9,7 @@ class CareAssertionCreate(BaseModel):
     subject_id: str = Field(min_length=1, max_length=160)
     field: str = Field(min_length=1, max_length=120)
     assertion_kind: str = Field(default="current_state", min_length=1, max_length=80)
+    epistemic_state: Literal["reported", "observed", "verified", "inferred", "uncertain", "conflicting", "missing", "withdrawn", "corrected"] = "reported"
     asserted_value: str = Field(min_length=1, max_length=4000)
     source_event_id: Optional[str] = None
     source_label: str = Field(min_length=1, max_length=160)
@@ -31,6 +32,7 @@ class CareAssertionResponse(BaseModel):
     subject_id: str
     field: str
     assertion_kind: str = Field(default="current_state", min_length=1, max_length=80)
+    epistemic_state: Literal["reported", "observed", "verified", "inferred", "uncertain", "conflicting", "missing", "withdrawn", "corrected"] = "reported"
     asserted_value: str
     source_event_id: Optional[str] = None
     source_label: str
