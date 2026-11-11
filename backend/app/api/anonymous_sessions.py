@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Person
+from app.models.privacy_delivery import AuditLogEvent
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 
 router = APIRouter(prefix="/sessions", tags=["anonymous sessions"])
@@ -157,6 +158,19 @@ def revoke_anonymous_session(request: Request, db: Session = Depends(get_db)):
     )
     if not session:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid")
-    session.revoked_at = datetime.now(timezone.utc)
+    revoked_at = datetime.now(timezone.utc)
+    session.revoked_at = revoked_at
+    db.add(AuditLogEvent(
+        actor_id=session.caregiver_id,
+        subject_id=session.person_id,
+        person_id=session.person_id,
+        caregiver_id=session.caregiver_id,
+        action="anonymous_session.revoked",
+        target_type="anonymous_session",
+        target_id=session.id,
+        occurred_at=revoked_at,
+        outcome="success",
+        record_metadata={"reason": "self_service_revocation"},
+    ))
     db.commit()
     return {"revoked": True, "care_record_retained": True}
