@@ -100,7 +100,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         assert before_accept.status_code == 200, before_accept.text
         with TestingSessionLocal() as db:
             provisional = db.query(CareAssertion).filter_by(source_proposal_id=proposal["id"]).one()
-            assert provisional.assertion_status == "caregiver_reported_unreviewed"
+            assert provisional.assertion_status == "reported"
             assert provisional.asserted_value == original
             provisional_id = provisional.id
         assert any(item.get("id") == provisional_id for item in before_accept.json().get("items", [])), before_accept.json()
@@ -173,7 +173,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         with TestingSessionLocal() as db:
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 3
             old_assertion = db.query(CareAssertion).filter_by(source_proposal_id=correction_proposal["id"]).one()
-            assert old_assertion.assertion_status == "superseded_by_caregiver_correction"
+            assert old_assertion.assertion_status == "superseded"
             old = db.query(AIOutputLCRProposal).filter_by(id=correction_proposal["id"]).one()
             assert old.proposed_change_json["asserted_value"] == corrected_source
             assert old.status == "corrected"
@@ -220,7 +220,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         assert retry.status_code == 409
         with TestingSessionLocal() as db:
             rejected_assertion = db.query(CareAssertion).filter_by(source_proposal_id=rejected_proposal["id"]).one()
-            assert rejected_assertion.assertion_status == "caregiver_reported_rejected"
+            assert rejected_assertion.assertion_status == "rejected"
             assert db.query(AIOutputLCRProposal).filter_by(id=rejected_proposal["id"]).one().status == "rejected"
 
         # Another care recipient cannot read or decide the first caregiver's proposal.
