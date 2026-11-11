@@ -382,10 +382,13 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 .scalar()
             )
         if not target_person_id and (
-            path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
+            path.startswith("/api/v1/evidence/")
+            or path.startswith("/api/v1/events/")
+            or path.startswith("/api/v1/persons/")
         ):
-            # These legacy list endpoints use the care-recipient ID as the final
-            # path segment. Resolve it explicitly before the session-scope check.
+            # These legacy person-scoped endpoints use the care-recipient ID as
+            # the final path segment. Resolve it explicitly before the session
+            # scope check when Starlette route matching did not supply path params.
             target_person_id = path.rsplit("/", 1)[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
