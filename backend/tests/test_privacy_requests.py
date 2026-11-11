@@ -126,3 +126,110 @@ def test_privacy_request_rejects_unattested_authority():
         },
     )
     assert response.status_code == 422
+
+
+from app.models.privacy_delivery import AuditLogEvent
+
+
+def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "r" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "founder_privacy_reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Review recipient")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=headers,
+        json={
+            "request_type": "deletion",
+            "authority_basis": "legal_representative",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+
+    denied = client.get("/api/v1/privacy/requests/reviewer/pending", headers=headers)
+    assert denied.status_code == 401
+
+    reviewer_headers = {
+        **headers,
+        "X-SolenOS-Privacy-Reviewer-Token": "r" * 40,
+    }
+    pending = client.get("/api/v1/privacy/requests/reviewer/pending", headers=reviewer_headers)
+    assert pending.status_code == 200, pending.text
+    assert [item["id"] for item in pending.json()["requests"]] == [request_id]
+    assert pending.json()["reviewer_id"] == "founder_privacy_reviewer"
+
+    reviewed = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed the submitted identity and authority evidence.",
+            "authority_evidence_checked": "Government-issued identity and signed legal authority document.",
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    body = reviewed.json()
+    assert body["status"] == "approved_pending_fulfilment_assessment"
+    assert body["authority_verified_by_reviewer"] is True
+    assert body["fulfilment_started"] is False
+    assert "no data was exported" in body["message"]
+
+    duplicate = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Attempted duplicate review.",
+            "authority_evidence_checked": "Same evidence.",
+        },
+    )
+    assert duplicate.status_code == 409
+
+    db = TestSessionLocal()
+    try:
+        event = (
+            db.query(AuditLogEvent)
+            .filter(
+                AuditLogEvent.target_id == request_id,
+                AuditLogEvent.action == "privacy_request.reviewed",
+            )
+            .one()
+        )
+        assert event.actor_id == "founder_privacy_reviewer"
+        assert event.outcome == "approve"
+    finally:
+        db.close()
+
+
+def test_privacy_review_approval_requires_authority_evidence(monkeypatch):
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "s" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "founder_privacy_reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Evidence recipient")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=headers,
+        json={
+            "request_type": "export",
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+
+    response = client.post(
+        f"/api/v1/privacy/requests/{submitted.json()['id']}/review",
+        headers={
+            **headers,
+            "X-SolenOS-Privacy-Reviewer-Token": "s" * 40,
+        },
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed the available request.",
+        },
+    )
+    assert response.status_code == 422
