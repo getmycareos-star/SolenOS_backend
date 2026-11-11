@@ -222,14 +222,17 @@ def verify_restored_backup_fixture_if_present():
         f"restored care event/evidence association is not available through the API: {events_status}: {events}",
     )
     lcr_status, lcr = request(
-        "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token
+        "GET", "/api/v1/care-continuity/context?limit_per_source=50", token=token
     )
+    lcr_events = (
+        ((lcr or {}).get("sources") or {}).get("events") or {}
+    ).get("items") or []
     require(
         lcr_status == 200
         and any(item.get("id") == fixture["event_id"]
                 and fixture["evidence_id"] in (item.get("evidence_ids") or [])
-                for item in (lcr or {}).get("items", [])),
-        f"restored evidence is not available in the LCR projection: {lcr_status}: {lcr}",
+                for item in lcr_events),
+        f"restored care event/evidence association is not available in the authoritative LCR source context: {lcr_status}: {lcr}",
     )
     document_status, downloaded = download_binary(fixture["evidence_id"], token)
     require(
