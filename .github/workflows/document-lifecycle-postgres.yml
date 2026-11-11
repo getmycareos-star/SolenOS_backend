@@ -50,6 +50,8 @@ jobs:
           docker run --rm
           --add-host=host.docker.internal:host-gateway
           --volume "$GITHUB_WORKSPACE:/workspace"
+          --volume /var/run/docker.sock:/var/run/docker.sock
+          --volume /usr/bin/docker:/usr/bin/docker:ro
           --workdir /workspace
           --env DATABASE_URL="$DATABASE_URL"
           --env SOLENOS_COMPANION_TEST_DATABASE_URL="$SOLENOS_COMPANION_TEST_DATABASE_URL"
