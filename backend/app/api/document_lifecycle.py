@@ -187,7 +187,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
 def _normalized_extraction_text(value: str) -> str:
     """Compare legacy unlabelled extractions with the newer page-labelled format."""
     return re.sub(
-        r"(?m)^\\[(?:Page\\s+\\d+(?:\\s+OCR)?|Image OCR)\\]\\s*\\n?",
+        r"(?m)^\[(?:Page\s+\d+(?:\s+OCR)?|Image OCR)\]\s*\n?",
         "",
         value or "",
     ).strip()
