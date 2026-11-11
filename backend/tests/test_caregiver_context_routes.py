@@ -472,6 +472,25 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
     assert direct.status_code == 201, direct.text
     assert direct.json()["observation_type"] == "DIRECT"
 
+    db = TestingSessionLocal()
+    try:
+        revisions = Base.metadata.tables["care_observation_revisions"]
+        saved_revisions = db.execute(
+            select(revisions).where(
+                revisions.c.person_id == first["person"]["id"],
+                revisions.c.observation_id.in_([observation.json()["id"], direct.json()["id"]]),
+            )
+        ).mappings().all()
+        assert len(saved_revisions) == 2
+        assert {row["observation_id"] for row in saved_revisions} == {
+            observation.json()["id"], direct.json()["id"],
+        }
+        assert all(row["revision_number"] == 1 for row in saved_revisions)
+        assert all(row["previous_payload"] is None for row in saved_revisions)
+        assert all(row["current_payload"] for row in saved_revisions)
+    finally:
+        db.close()
+
     invalid = client.post(
         "/api/v1/care-continuity/caregiver-observations",
         headers=headers,
