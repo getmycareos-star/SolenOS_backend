@@ -84,7 +84,7 @@ def test_companion_message_persists_source_and_only_acceptance_creates_assertion
             assert proposal.source_message_id == original.id
             assert proposal.source_conversation_id == response.json()["session_id"]
             provisional = db.query(CareAssertion).filter_by(source_proposal_id=proposal_data["id"]).one()
-            assert provisional.assertion_status == "caregiver_reported_unreviewed"
+            assert provisional.assertion_status == "reported"
             assert provisional.asserted_value == source
         finally:
             db.close()
@@ -142,7 +142,7 @@ def test_correction_preserves_original_and_requires_separate_acceptance(monkeypa
         db = TestingSessionLocal()
         try:
             old_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal["id"]).one()
-            assert old_assertion.assertion_status == "superseded_by_caregiver_correction"
+            assert old_assertion.assertion_status == "superseded"
             old = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
             assert old.proposed_change_json["asserted_value"] == source
             assert db.query(AIOutputLCRDecision).filter_by(proposal_id=old.id).one().decision == "corrected"
@@ -178,7 +178,7 @@ def test_rejection_never_creates_assertion_or_allows_later_acceptance(monkeypatc
         db = TestingSessionLocal()
         try:
             stored_assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal["id"]).one()
-            assert stored_assertion.assertion_status == "caregiver_reported_rejected"
+            assert stored_assertion.assertion_status == "rejected"
             stored = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
             assert stored.status == "rejected"
             decisions = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal["id"]).all()
