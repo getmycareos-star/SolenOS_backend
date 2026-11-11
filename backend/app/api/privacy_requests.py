@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
+from app.models.care import Correction, Insight
 
 router = APIRouter(prefix="/privacy/requests", tags=["privacy requests"])
 
@@ -35,6 +36,10 @@ class PrivacyRequestCreate(BaseModel):
     authority_basis: AuthorityBasis
     authority_attested: bool
     note: Optional[str] = Field(default=None, max_length=1000)
+    correction_target_type: Optional[Literal["insight"]] = None
+    correction_target_id: Optional[str] = Field(default=None, max_length=255)
+    correction_text: Optional[str] = Field(default=None, max_length=10000)
+    correction_reason: Optional[str] = Field(default=None, max_length=2000)
 
 
 class PrivacyRequestReview(BaseModel):
@@ -104,6 +109,19 @@ def submit_privacy_request(
             detail="You must confirm your authority to submit this request.",
         )
 
+    correction_fields = (
+        payload.correction_target_type,
+        payload.correction_target_id,
+        payload.correction_text,
+    )
+    if payload.request_type == "correction" and any(correction_fields) and not all(
+        value and str(value).strip() for value in correction_fields
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="A correction request must include target type, target ID and corrected text.",
+        )
+
     now = datetime.now(timezone.utc)
     request_id = str(uuid.uuid4())
     row = DataSubjectRequest(
@@ -123,6 +141,12 @@ def submit_privacy_request(
             "authority_basis_claimed": payload.authority_basis,
             "authority_verified": False,
             "request_note": payload.note,
+            "correction": ({
+                "target_type": payload.correction_target_type,
+                "target_id": payload.correction_target_id,
+                "corrected_text": payload.correction_text,
+                "reason": payload.correction_reason,
+            } if payload.request_type == "correction" and payload.correction_target_id else None),
             "fulfilment_started": False,
         },
     )
@@ -281,4 +305,125 @@ def review_privacy_request(
             if payload.decision == "approve"
             else "Review rejected. No data was exported, corrected, or deleted."
         ),
+    }
+
+
+@router.post("/{request_id}/fulfil-correction")
+def fulfil_approved_correction(
+    request_id: str,
+    reviewer_id: str = Depends(_privacy_reviewer),
+    db: Session = Depends(get_db),
+):
+    """Apply a reviewed insight correction while retaining its original value and provenance."""
+    row = (
+        db.query(DataSubjectRequest)
+        .filter(DataSubjectRequest.id == request_id)
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Privacy request not found")
+    if row.request_type != "correction":
+        raise HTTPException(status_code=409, detail="This privacy request is not a correction")
+    metadata = row.record_metadata if isinstance(row.record_metadata, dict) else {}
+    existing = metadata.get("fulfilment") if isinstance(metadata.get("fulfilment"), dict) else {}
+    if row.request_status == "fulfilled" and existing.get("correction_id"):
+        return {
+            **_serialize(row),
+            "fulfilment": existing,
+            "idempotent_replay": True,
+        }
+    if row.request_status != "approved_pending_fulfilment_assessment":
+        raise HTTPException(status_code=409, detail="Correction request has not been approved")
+    correction_request = metadata.get("correction")
+    if not isinstance(correction_request, dict):
+        raise HTTPException(status_code=422, detail="Correction details were not supplied with the request")
+    if correction_request.get("target_type") != "insight":
+        raise HTTPException(status_code=422, detail="Only insight-description corrections are currently supported")
+    target_id = str(correction_request.get("target_id") or "").strip()
+    corrected_text = str(correction_request.get("corrected_text") or "").strip()
+    if not target_id or not corrected_text:
+        raise HTTPException(status_code=422, detail="Correction target and corrected text are required")
+
+    insight = (
+        db.query(Insight)
+        .filter(Insight.id == target_id, Insight.person_id == row.person_id)
+        .with_for_update()
+        .first()
+    )
+    if insight is None:
+        raise HTTPException(status_code=404, detail="Correction target was not found in this care record")
+    original_text = insight.description
+    if original_text == corrected_text:
+        raise HTTPException(status_code=409, detail="The requested correction does not change the target")
+
+    now = datetime.now(timezone.utc)
+    correction = Correction(
+        id=str(uuid.uuid4()),
+        person_id=row.person_id,
+        target_type="insight",
+        target_id=insight.id,
+        original_text=original_text,
+        corrected_text=corrected_text,
+        reason=str(correction_request.get("reason") or "Approved privacy correction request"),
+        caregiver_id=row.caregiver_id,
+    )
+    db.add(correction)
+    insight.description = corrected_text
+    insight.updated_at = now
+    row.request_status = "fulfilled"
+    row.resolved_at = now
+    row.resolution_code = "correction_fulfilled"
+    fulfilment = {
+        "operation": "correction",
+        "correction_id": correction.id,
+        "target_type": "insight",
+        "target_id": insight.id,
+        "fulfilled_at": now.isoformat(),
+        "fulfilled_by": reviewer_id,
+        "original_value_preserved_in_correction_record": True,
+    }
+    row.record_metadata = {
+        **metadata,
+        "fulfilment": fulfilment,
+    }
+    db.add(AuditLogEvent(
+        actor_id=reviewer_id,
+        subject_id=row.subject_id,
+        person_id=row.person_id,
+        caregiver_id=row.caregiver_id,
+        action="privacy_request.correction_fulfilled",
+        target_type="correction",
+        target_id=correction.id,
+        occurred_at=now,
+        outcome="fulfilled",
+        request_id=row.request_id,
+        correlation_id=row.correlation_id,
+        policy_version="privacy-correction-fulfilment-v1",
+        record_metadata={
+            "privacy_request_id": row.id,
+            "target_type": "insight",
+            "target_id": insight.id,
+        },
+    ))
+    try:
+        db.commit()
+        db.refresh(row)
+        db.refresh(correction)
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        **_serialize(row),
+        "fulfilment": fulfilment,
+        "correction": {
+            "id": correction.id,
+            "target_type": correction.target_type,
+            "target_id": correction.target_id,
+            "original_text": correction.original_text,
+            "corrected_text": correction.corrected_text,
+            "reason": correction.reason,
+            "created_at": correction.created_at.isoformat() if correction.created_at else now.isoformat(),
+        },
+        "idempotent_replay": False,
     }
