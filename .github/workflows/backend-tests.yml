@@ -31,100 +31,16 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: backend/pyproject.toml
+      - name: Build backend CI image with real OCR and test dependencies
+        run: docker build -f ci/Dockerfile.backend-tests -t solenos-backend-ci-tests .
 
-      - name: Install local OCR engine
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if command -v tesseract >/dev/null 2>&1; then
-            tesseract --version
-            exit 0
-          fi
-
-          installed=0
-          for attempt in 1 2 3; do
-            if sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update &&
-               sudo apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y tesseract-ocr tesseract-ocr-eng; then
-              installed=1
-              break
-            fi
-            echo "OCR package installation attempt ${attempt}/3 failed; retrying." >&2
-            sleep "$((attempt * 10))"
-          done
-
-          test "$installed" = "1"
-          tesseract --version
-
-      - name: Install backend and test dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx 'psycopg[binary]'
-
-      - name: Run backend tests
-        run: python -m pytest backend/tests -q
-
-      - name: Run uncertainty benchmark and publish measured score
-        if: always()
-        run: |
-          python -m pytest backend/tests/test_uncertainty_benchmark.py -q --junitxml=/tmp/uncertainty-benchmark.xml
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
-
-          root = ET.parse("/tmp/uncertainty-benchmark.xml").getroot()
-          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
-          tests = sum(int(suite.attrib.get("tests", 0)) for suite in suites)
-          failures = sum(int(suite.attrib.get("failures", 0)) for suite in suites)
-          errors = sum(int(suite.attrib.get("errors", 0)) for suite in suites)
-          skipped = sum(int(suite.attrib.get("skipped", 0)) for suite in suites)
-          executed = tests - skipped
-          passed = executed - failures - errors
-          score = round(100 * passed / executed, 2) if executed else 0.0
-          print(f"UNCERTAINTY_BENCHMARK_SCORE={score:.2f}")
-          print(f"UNCERTAINTY_BENCHMARK_PASSED={passed}")
-          print(f"UNCERTAINTY_BENCHMARK_EXECUTED={executed}")
-          print(f"UNCERTAINTY_BENCHMARK_FAILED={failures + errors}")
-          print(f"UNCERTAINTY_BENCHMARK_SKIPPED={skipped}")
-          if not executed or failures or errors or skipped:
-              raise SystemExit("Benchmark gate failed: zero executed, failing/error cases, or skipped cases.")
-          PY
-
-
-      - name: Run longitudinal change benchmark and publish measured score
-        if: always()
-        shell: bash
-        run: |
-          set -o pipefail
-          python -m pytest backend/tests/test_longitudinal_change_benchmark.py -q -s | tee /tmp/longitudinal-change-benchmark.log
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          output = Path("/tmp/longitudinal-change-benchmark.log").read_text()
-          marker = "LONGITUDINAL_CHANGE_BENCHMARK="
-          reports = [line.split(marker, 1)[1] for line in output.splitlines() if marker in line]
-          if not reports:
-              raise SystemExit("Longitudinal benchmark did not publish its measured case report.")
-          report = json.loads(reports[-1])
-          passed = int(report.get("cases_passed", 0))
-          total = int(report.get("cases_total", 0))
-          score = float(report.get("score", 0.0))
-          print(f"LONGITUDINAL_CHANGE_BENCHMARK_SCORE={score:.4f}")
-          print(f"LONGITUDINAL_CHANGE_BENCHMARK_PASSED={passed}")
-          print(f"LONGITUDINAL_CHANGE_BENCHMARK_TOTAL={total}")
-          failed = [case for case in report.get("outcomes", []) if not case.get("pass")]
-          print("LONGITUDINAL_CHANGE_BENCHMARK_FAILED_CASES=" + json.dumps(failed, sort_keys=True))
-          if total == 0 or passed != total or score != 1.0 or failed:
-              raise SystemExit("Longitudinal change benchmark gate failed.")
-          PY
+      - name: Run backend tests and measured benchmarks
+        run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace solenos-backend-ci-tests bash /workspace/ci/run-backend-tests.sh
 
   postgres-migration:
     runs-on: ubuntu-latest
