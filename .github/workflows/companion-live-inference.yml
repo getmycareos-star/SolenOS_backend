@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/workflows/companion-live-inference.yml"
       - "backend/live_tests/test_companion_live_inference.py"
       - "backend/live_tests/test_daily_capture_live_inference.py"
       - "backend/app/api/collaboration.py"
