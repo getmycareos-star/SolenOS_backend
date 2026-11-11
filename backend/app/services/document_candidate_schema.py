@@ -165,3 +165,22 @@ def apply_medication_conflict_warnings(candidates: list[dict[str, Any]]) -> None
                 warning = "Conflicting medication instructions appear in this document; reconcile against the original and a clinician before updating the active medication record."
                 if warning not in warnings:
                     warnings.append(warning)
+
+
+
+def classify_document(filename: str, source_text: str) -> dict[str, str]:
+    """Conservative document-type routing; never infer a diagnosis or care fact."""
+    text = f"{filename}\n{(source_text or '')[:12000]}".casefold()
+    if re.search(r"\b(discharge summary|discharge instructions|after visit summary)\b", text):
+        kind = "discharge_summary"
+    elif re.search(r"\b(medication list|medication reconciliation|prescription list)\b", text):
+        kind = "medication_list"
+    elif re.search(r"\b(laboratory|lab results|blood test|pathology)\b", text):
+        kind = "laboratory_results"
+    elif re.search(r"\b(radiology|imaging report|x-ray|ct scan|mri)\b", text):
+        kind = "imaging_report"
+    elif re.search(r"\b(appointment|clinic visit|follow-up)\b", text):
+        kind = "appointment_record"
+    else:
+        kind = "general_care_document"
+    return {"document_type": kind, "classification_method": "deterministic_source_keyword", "classification_confidence": "unscored"}
