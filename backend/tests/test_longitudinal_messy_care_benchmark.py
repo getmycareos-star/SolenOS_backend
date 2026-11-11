@@ -841,11 +841,12 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             "_local_ollama_url",
             lambda: ("http://127.0.0.1:11434", "synthetic-contract-model", 1.0),
         )
-        monkeypatch.setattr(
-            delta_engine,
-            "qwen_chat",
-            lambda *args, **kwargs: json.dumps(model_result),
-        )
+        qwen_call_options = []
+        def fake_qwen_chat(*args, **kwargs):
+            qwen_call_options.append(kwargs.get("options") or {})
+            return json.dumps(model_result)
+
+        monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen_chat)
 
         delta_engine.reconcile_event(
             db,
@@ -858,6 +859,10 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             persist=True,
             created_by_caregiver_id=caregiver.id,
         )
+
+        assert qwen_call_options
+        assert qwen_call_options[0].get("num_predict") == 384
+        assert qwen_call_options[0].get("num_ctx") == 4096
 
         assertion = db.query(CareAssertion).filter(
             CareAssertion.person_id == person.id,
