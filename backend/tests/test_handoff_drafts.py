@@ -1106,6 +1106,7 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
     observed = {}
 
     def capture_inference(messages, **kwargs):
+        observed["messages"] = messages
         observed.update(kwargs)
         return json.dumps({"items": [{
             "section": "Recent observations and changes",
