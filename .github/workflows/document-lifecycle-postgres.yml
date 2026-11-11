@@ -35,7 +35,7 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@host.docker.internal:5432/solenos_document
-      SOLENOS_COMPANION_TEST_DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
+      SOLENOS_COMPANION_TEST_DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@host.docker.internal:5432/solenos_document
       SOLENOS_TEST_POSTGRES_RESTART: "1"
       SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
       APP_ENV: test
