@@ -42,14 +42,24 @@ The script:
 4. Restores that dump into the isolated restore database with `pg_restore`.
 5. Verifies caregiver/person ownership, evidence provenance/hash, event/evidence association, exact document bytes/size/SHA-256, correction history, LCR revision history and cross-caregiver isolation.
 6. Emits a machine-readable PASS/FAIL report with measured backup, restore and end-to-end durations.
+7. In CI, runs the existing real-Uvicorn PostgreSQL anonymous-session E2E suite against the restored database, covering authenticated reads/writes, document upload/download bytes, LCR retrieval, token revocation/refresh and cross-caregiver denial.
 
-A non-zero exit code or any failed assertion is a failed recovery exercise. Preserve the sanitized report and investigate before retrying. Do not manually edit the restored data to make assertions pass.
+For a local full check, after the backup/restore script passes, point the application at the restored database and run the real HTTP/PostgreSQL E2E suite:
+
+```powershell
+$env:DATABASE_URL = $env:SOLENOS_BACKUP_RESTORE_DATABASE_URL
+$env:SECRET_KEY = "local-ci-only-secret-key-long-enough-for-test-runtime"
+$env:APP_ENV = "test"
+python scripts/postgres_anonymous_e2e.py
+```
+
+This second test creates additional synthetic records in the restored target and starts a local Uvicorn process. Keep the target disposable. A non-zero exit code or any failed assertion in either command is a failed recovery exercise. Preserve the sanitized report and investigate before retrying. Do not manually edit the restored data to make assertions pass.
 
 ## What this check does not prove
 
 - It does not connect to or restore the live production database.
 - It does not verify a provider-managed automated backup schedule, retention policy, point-in-time recovery, WAL archiving, or cross-region copies.
-- It does not exercise the authenticated HTTP API against the restored database. The cross-caregiver check here is a relational ownership assertion, not a substitute for API authorization tests.
+- The SQL verifier's cross-caregiver check is a relational ownership assertion; the separate PostgreSQL HTTP E2E suite is required to prove application authorization against the restored database.
 - It does not verify object storage outside PostgreSQL. Current `EvidenceUpload` records store binary content in the `evidence_uploads.content` database column, and this runner verifies that binary payload. If any document path uses external object storage, add a separate synthetic object-store backup/restore test before claiming document recovery.
 - It does not establish a production RPO or RTO target. The report records observed backup/restore duration only. Define approved targets from the real backup cadence, data-loss tolerance and recovery operations, then test against those targets.
 
