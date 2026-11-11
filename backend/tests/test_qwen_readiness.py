@@ -79,24 +79,37 @@ def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
 
 
 
-def test_assistant_status_does_not_claim_operational_when_only_inventory_is_available(monkeypatch):
+def test_assistant_status_uses_one_cached_readiness_check_and_never_claims_inference(monkeypatch):
     from app.api import collaboration
 
-    monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
-        "available": True,
-        "installation": {"state": "installed"},
-    })
-    monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda: {
-        "available": False,
-        "state": "unavailable",
-        "failure_reason": "inference_timeout",
-    })
+    readiness_calls = []
+    def readiness():
+        readiness_calls.append(True)
+        return {
+            "available": True,
+            "state": "runtime_available",
+            "runtime_available": True,
+            "model_installed": True,
+            "inference_verified": False,
+            "inference_status": "not_verified",
+            "model": "qwen3.5:4b",
+            "installation": {"state": "installed"},
+            "failure_reason": None,
+            "error_category": None,
+        }
+
+    monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: (_ for _ in ()).throw(
+        AssertionError("assistant status must not make a second Ollama inventory request")
+    ))
+    monkeypatch.setattr(collaboration, "qwen_readiness_status", readiness)
 
     status = collaboration.qwen_assistant_status()
-    assert status["available"] is False
+    assert status["available"] is True
     assert status["operational"] is False
     assert status["installation"]["state"] == "installed"
-    assert status["readiness"]["failure_reason"] == "inference_timeout"
+    assert status["inference_verified"] is False
+    assert status["provider"] == "local_ollama"
+    assert len(readiness_calls) == 1
 
 
 def test_production_evaluation_has_five_independent_synthetic_acceptance_criteria():
