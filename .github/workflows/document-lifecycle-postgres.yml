@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: document-lifecycle-postgres-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   document-lifecycle-postgres:
