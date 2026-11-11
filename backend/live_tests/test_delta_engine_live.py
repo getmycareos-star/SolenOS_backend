@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent
+from app.services import delta_engine as delta_engine_module
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(
@@ -40,8 +41,20 @@ def override_db():
         db.close()
 
 
-def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget():
+def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget(monkeypatch):
     app.dependency_overrides[get_db] = override_db
+    real_qwen_chat = delta_engine_module.qwen_chat
+
+    def capture_real_qwen_output(*args, **kwargs):
+        output = real_qwen_chat(*args, **kwargs)
+        # This test uses synthetic care data only; print the real response so a
+        # truncation failure can be diagnosed without weakening JSON validation.
+        print("LIVE_QWEN_DELTA_RAW_OUTPUT_BEGIN")
+        print(output)
+        print("LIVE_QWEN_DELTA_RAW_OUTPUT_END")
+        return output
+
+    monkeypatch.setattr(delta_engine_module, "qwen_chat", capture_real_qwen_output)
     source_text = (
         "Caregiver reported that Mary ate only a few bites of breakfast and drank "
         "about half a cup of water this morning. The caregiver has not documented "
