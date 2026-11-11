@@ -175,6 +175,7 @@ def test_privacy_review_requires_configured_reviewer_credential(monkeypatch):
     assert body["status"] == "approved_pending_fulfilment_assessment"
     assert body["authority_verified_by_reviewer"] is True
     assert body["fulfilment_started"] is False
+    assert body["resolved_at"] is None
     assert "no data was exported" in body["message"]
 
     duplicate = client.post(
