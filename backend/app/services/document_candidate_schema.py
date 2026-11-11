@@ -152,6 +152,33 @@ def split_document_pages(source_text: str) -> list[tuple[int, str]]:
     return pages
 
 
+def chunk_document_pages(
+    page_inputs: list[tuple[int, str]],
+    *,
+    max_chars: int = 12_000,
+) -> list[tuple[int, str]]:
+    """Split long pages into bounded Qwen inputs without dropping source text."""
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    chunks: list[tuple[int, str]] = []
+    for page_number, page_text in page_inputs:
+        remaining = page_text or ""
+        while remaining:
+            if len(remaining) <= max_chars:
+                chunk = remaining.strip()
+                if chunk:
+                    chunks.append((page_number, chunk))
+                break
+            boundary = remaining.rfind("\\n", 0, max_chars)
+            if boundary < max_chars // 2:
+                boundary = max_chars
+            chunk = remaining[:boundary].strip()
+            if chunk:
+                chunks.append((page_number, chunk))
+            remaining = remaining[boundary:].lstrip()
+    return chunks
+
+
 def unreadable_page_numbers(source_text: str) -> list[int]:
     """Return page labels whose OCR/text extraction produced no usable passage."""
     markers = list(_PAGE_MARKER.finditer(source_text or ""))
