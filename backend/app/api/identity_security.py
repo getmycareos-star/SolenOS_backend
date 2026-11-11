@@ -46,11 +46,18 @@ def list_devices(request: Request, db: Session = Depends(get_db)):
         CaregiverDevice.caregiver_id == caregiver_id,
         CaregiverDevice.revoked_at.is_(None),
     ).order_by(CaregiverDevice.created_at.desc()).all()
+    trust_by_device = {
+        item.device_id: item
+        for item in db.query(DeviceTrustRecord).filter(
+            DeviceTrustRecord.device_id.in_([device.id for device in devices])
+        ).all()
+    } if devices else {}
     return {"devices": [{
         "id": item.id, "label": item.label, "platform": item.platform,
         "last_seen_at": item.last_seen_at.isoformat() if item.last_seen_at else None,
         "created_at": item.created_at.isoformat() if item.created_at else None,
-        "trust_status": "unverified",
+        "trust_status": trust_by_device[item.id].trust_status if item.id in trust_by_device else "unverified",
+        "verified_at": trust_by_device[item.id].verified_at.isoformat() if item.id in trust_by_device and trust_by_device[item.id].verified_at else None,
         "recovery_can_use_device_alone": False,
     } for item in devices]}
 
@@ -75,11 +82,15 @@ def register_device(payload: DeviceRegister, request: Request, db: Session = Dep
     if device and device.revoked_at is not None:
         raise HTTPException(status_code=409, detail="This device registration was revoked. Register a new device installation.")
     now = datetime.now(timezone.utc)
+    # A device is trusted only when its registration is bound to a session
+    # created by successful account authentication. Anonymous possession alone
+    # is never enough to establish trusted-device status.
+    account = db.query(CaregiverAccount).filter(
+        CaregiverAccount.person_id == person_id,
+        CaregiverAccount.caregiver_id == caregiver_id,
+    ).first()
+    account_authenticated = bool(session.account_id and account and session.account_id == account.id)
     if device is None:
-        account = db.query(CaregiverAccount).filter(
-            CaregiverAccount.person_id == person_id,
-            CaregiverAccount.caregiver_id == caregiver_id,
-        ).first()
         device = CaregiverDevice(
             account_id=account.id if account else None,
             caregiver_id=caregiver_id,
@@ -90,16 +101,43 @@ def register_device(payload: DeviceRegister, request: Request, db: Session = Dep
         )
         db.add(device)
         db.flush()
-        db.add(DeviceTrustRecord(device_id=device.id, trust_status="unverified"))
-        db.add(DeviceEnrollmentEvent(device_id=device.id, caregiver_id=caregiver_id, event_type="registered_unverified"))
-        db.add(IdentityAuditEvent(actor_caregiver_id=caregiver_id, person_id=person_id, action="device_registered_unverified"))
+        trust = DeviceTrustRecord(
+            device_id=device.id,
+            trust_status="verified" if account_authenticated else "unverified",
+            verified_at=now if account_authenticated else None,
+        )
+        db.add(trust)
+        event_type = "registered_and_verified" if account_authenticated else "registered_unverified"
+        db.add(DeviceEnrollmentEvent(
+            device_id=device.id, caregiver_id=caregiver_id, event_type=event_type,
+            details={"session_id": session.id},
+        ))
+        db.add(IdentityAuditEvent(
+            actor_caregiver_id=caregiver_id, person_id=person_id,
+            action="device_registered_and_verified" if account_authenticated else "device_registered_unverified",
+            details={"device_id": device.id, "session_id": session.id},
+        ))
     else:
         device.label = payload.label.strip() or device.label
         device.platform = payload.platform
         device.last_seen_at = now
-        db.add(DeviceEnrollmentEvent(device_id=device.id, caregiver_id=caregiver_id, event_type="seen_again"))
+        if account_authenticated:
+            device.account_id = account.id
+        trust = db.query(DeviceTrustRecord).filter(DeviceTrustRecord.device_id == device.id).first()
+        if trust is None:
+            trust = DeviceTrustRecord(device_id=device.id, trust_status="unverified")
+            db.add(trust)
+        if account_authenticated and trust.trust_status != "verified":
+            trust.trust_status = "verified"
+            trust.verified_at = now
+        db.add(DeviceEnrollmentEvent(
+            device_id=device.id, caregiver_id=caregiver_id,
+            event_type="seen_again_verified" if account_authenticated else "seen_again",
+            details={"session_id": session.id},
+        ))
     db.commit()
-    return {"device": {"id": device.id, "label": device.label, "platform": device.platform, "trust_status": "unverified", "recovery_can_use_device_alone": False}}
+    trust_status = trust.trust_status
+    return {"device": {"id": device.id, "label": device.label, "platform": device.platform, "trust_status": trust_status, "recovery_can_use_device_alone": False}}
 
 
 @router.delete("/devices/{device_id}")
@@ -114,13 +152,34 @@ def revoke_device(device_id: str, request: Request, db: Session = Depends(get_db
         raise HTTPException(status_code=404, detail="Device not found")
     now = datetime.now(timezone.utc)
     device.revoked_at = now
+    # Revoke every bearer session previously associated with this installation.
+    # The audit events intentionally store only opaque session IDs, never tokens.
+    enrollment_events = db.query(DeviceEnrollmentEvent).filter(
+        DeviceEnrollmentEvent.device_id == device.id,
+    ).all()
+    session_ids = {
+        (event.details or {}).get("session_id")
+        for event in enrollment_events
+        if isinstance(event.details, dict) and (event.details or {}).get("session_id")
+    }
+    revoked_sessions = 0
+    if session_ids:
+        sessions = db.query(AnonymousSession).filter(
+            AnonymousSession.id.in_(session_ids),
+            AnonymousSession.person_id == person_id,
+            AnonymousSession.caregiver_id == caregiver_id,
+            AnonymousSession.revoked_at.is_(None),
+        ).all()
+        for linked_session in sessions:
+            linked_session.revoked_at = now
+            revoked_sessions += 1
     db.add(DeviceRevocation(device_id=device.id, caregiver_id=caregiver_id, reason="caregiver_revoked", revoked_at=now))
-    db.add(DeviceEnrollmentEvent(device_id=device.id, caregiver_id=caregiver_id, event_type="revoked"))
-    db.add(IdentityAuditEvent(actor_caregiver_id=caregiver_id, person_id=person_id, action="device_revoked"))
+    db.add(DeviceEnrollmentEvent(device_id=device.id, caregiver_id=caregiver_id, event_type="revoked", details={"sessions_revoked": revoked_sessions}))
+    db.add(IdentityAuditEvent(actor_caregiver_id=caregiver_id, person_id=person_id, action="device_revoked", details={"device_id": device.id, "sessions_revoked": revoked_sessions}))
     if device.account_id:
-        db.add(AccountSecurityEvent(account_id=device.account_id, caregiver_id=caregiver_id, event_type="device_revoked"))
+        db.add(AccountSecurityEvent(account_id=device.account_id, caregiver_id=caregiver_id, event_type="device_revoked", details={"device_id": device.id, "sessions_revoked": revoked_sessions}))
     db.commit()
-    return {"revoked": True, "device_id": device.id}
+    return {"revoked": True, "device_id": device.id, "sessions_revoked": revoked_sessions}
 
 
 @router.post("/recovery-requests", status_code=202)
