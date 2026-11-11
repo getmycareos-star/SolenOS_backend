@@ -919,28 +919,25 @@ def review_appointment_outcome_proposal(
             CareAssertion.person_id == person_id,
         ).first()
         if assertion is None:
-            assertion = CareAssertion(
-                id=str(uuid.uuid4()),
-                person_id=person_id,
-                subject_type="person",
-                subject_id=person_id,
-                field=str(original.get("field") or "appointment_observation"),
-                assertion_kind="time_bound_observation",
-                asserted_value=accepted_value,
-                source_label="Caregiver-reviewed appointment workspace",
-                source_text=source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else ""),
-                source_proposal_id=proposal.id,
-                source_conversation_id=None,
-                source_message_id=None,
-                event_time_text=original.get("event_time_text"),
-                evidence_ids=[],
-                assertion_status="caregiver_reviewed",
-                observed_at=_parse_appointment_event_time(original.get("event_time_text")),
-                created_by_caregiver_id=caregiver_id,
-                updated_by_caregiver_id=caregiver_id,
+            assertion = create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person_id, subject_type="person", subject_id=person_id,
+                    field=str(original.get("field") or "appointment_observation"),
+                    assertion_kind="time_bound_observation",
+                    asserted_value=accepted_value,
+                    source_label="Caregiver-reviewed appointment workspace",
+                    source_text=source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else ""),
+                    source_proposal_id=proposal.id,
+                    event_time_text=original.get("event_time_text"),
+                    evidence_ids=[],
+                    observed_at=_parse_appointment_event_time(original.get("event_time_text")),
+                    created_by_caregiver_id=caregiver_id,
+                    updated_by_caregiver_id=caregiver_id,
+                ),
+                commit=False,
             )
-            db.add(assertion)
-            db.flush()
+            assertion.assertion_status = "caregiver_reviewed"
         else:
             assertion.asserted_value = accepted_value
             assertion.assertion_status = "caregiver_reviewed"
