@@ -123,7 +123,7 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                      evidence_ids, created_by_caregiver_id)
                 VALUES
                     (:id, :person_id, 'observation', 'recorded', :occurred_at, :title,
-                     :description, CAST(:evidence_ids), :caregiver_id)
+                     :description, :evidence_ids, :caregiver_id)
             """), {
                 "id": ids["event"], "person_id": ids["person"],
                 "occurred_at": datetime(2026, 11, 10, 8, 30, tzinfo=timezone.utc),
@@ -158,7 +158,7 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                     (id, person_id, target_type, target_id, revision_number,
                      change_kind, before_state, after_state, evidence_ids, changed_by_caregiver_id)
                 VALUES (:id, :person_id, 'care_event', :target_id, 1, 'created',
-                        NULL, :after_state, CAST(:evidence_ids AS json), :caregiver_id)
+                        NULL, :after_state, :evidence_ids, :caregiver_id)
             """), {
                 "id": ids["revision"], "person_id": ids["person"],
                 "target_id": ids["event"],
@@ -260,7 +260,8 @@ def _assert_restored(database_url: str, ids: dict[str, str], document: bytes) ->
             return {
                 "caregivers": connection.execute(text("SELECT count(*) FROM caregivers WHERE id IN (:a, :b)"), {"a": ids["caregiver"], "b": ids["other_caregiver"]}).scalar_one(),
                 "persons": connection.execute(text("SELECT count(*) FROM persons WHERE id IN (:a, :b)"), {"a": ids["person"], "b": ids["other_person"]}).scalar_one(),
-                "anonymous_sessions": 1, "consent_records": 1,\n                "evidence": 1, "care_events": 1, "document_blobs": 1,
+                "anonymous_sessions": 1, "consent_records": 1,
+                "evidence": 1, "care_events": 1, "document_blobs": 1,
                 "corrections": 1, "lcr_revisions": 1,
             }
     finally:
@@ -289,6 +290,7 @@ def main() -> int:
         "other_person": str(uuid.uuid4()), "other_caregiver": str(uuid.uuid4()),
         "evidence": str(uuid.uuid4()), "event": str(uuid.uuid4()),
         "correction": str(uuid.uuid4()), "revision": str(uuid.uuid4()),
+        "session": str(uuid.uuid4()), "consent": str(uuid.uuid4()),
         "person_name": f"BACKUP-TEST-PERSON-{run_id}",
         "caregiver_name": f"BACKUP-TEST-CAREGIVER-{run_id}",
         "other_person_name": f"BACKUP-TEST-OTHER-PERSON-{run_id}",
@@ -317,6 +319,8 @@ def main() -> int:
             "fixture_record_counts": counts,
             "verified": [
                 "caregiver and person identity association",
+                "anonymous session identity and token-hash persistence",
+                "caregiver consent and accepted-terms persistence",
                 "evidence ownership and source fingerprint",
                 "care event to evidence association",
                 "uploaded document bytes, size and SHA-256",
