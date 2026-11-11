@@ -302,3 +302,49 @@ def test_multi_column_pdf_uses_layout_preserving_text_extraction(client, monkeyp
     assert retrieved.status_code == 200, retrieved.text
     assert "LEFT COLUMN: Medication 500 mg" in retrieved.json()["extracted_text"]
     assert "RIGHT COLUMN: Follow-up in 14 days" in retrieved.json()["extracted_text"]
+
+
+def _digital_pdf_with_two_columns():
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    font_ref = writer._add_object(font)
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})
+    })
+    content = DecodedStreamObject()
+    content.set_data(
+        b"BT /F1 12 Tf 50 720 Td (Discharge summary: patient walked 20 metres.) Tj ET\\n"
+        b"BT /F1 12 Tf 320 720 Td (Medication: metformin 500 mg.) Tj ET"
+    )
+    page[NameObject("/Contents")] = writer._add_object(content)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def test_clean_digital_pdf_extracts_real_text_without_ocr(client):
+    test_client, session = client
+    evidence_id = persist_document(
+        session,
+        _digital_pdf_with_two_columns(),
+        "digital-discharge-summary.pdf",
+        "application/pdf",
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_method"] == "server_pdf_text"
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert "Discharge summary: patient walked 20 metres" in retrieved.json()["extracted_text"]
+    assert "Medication: metformin 500 mg" in retrieved.json()["extracted_text"]
