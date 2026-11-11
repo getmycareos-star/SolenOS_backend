@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 from datetime import datetime, timezone
 
 import pypdfium2 as pdfium
@@ -18,6 +19,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
+from app.services.document_candidate_schema import classify_document
 
 router = APIRouter(prefix="/documents", tags=["document lifecycle"])
 MAX_EXTRACTED_CHARS = 100_000
@@ -281,6 +283,8 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             "binary_sha256": upload.sha256,
             "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
             "extraction_method": method,
+            **classify_document(upload.filename or "", source_text),
+            "page_count": len(re.findall(r"(?m)^\[Page\s+\d+", source_text)) or 1,
             "observations": [],
             "open_questions": [],
         },
