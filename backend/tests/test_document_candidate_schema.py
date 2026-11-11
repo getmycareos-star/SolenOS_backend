@@ -71,3 +71,16 @@ def test_invalid_calendar_date_is_left_missing_and_warned():
     )
     assert candidate["event_date"] is None
     assert any("Date format is ambiguous or invalid" in warning for warning in candidate["warnings"])
+
+
+
+def test_outdated_instructions_and_multiple_dates_are_flagged():
+    excerpt = "Previous instruction: take warfarin 2 mg daily until 2025-01-10; new instruction recorded 2026-02-11."
+    candidate = canonical_candidate(
+        {"subject": "warfarin", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-3",
+        source_text=f"[Page 2]\\n{excerpt}",
+    )
+    assert candidate["event_date"] is None
+    assert any("Multiple dates" in warning for warning in candidate["warnings"])
+    assert any("outdated or superseded" in warning for warning in candidate["warnings"])
