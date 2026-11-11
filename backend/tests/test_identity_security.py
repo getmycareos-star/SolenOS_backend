@@ -77,6 +77,23 @@ def test_device_registration_is_scoped_and_never_trusted_by_itself():
     forbidden = client.delete(f"/api/v1/identity/devices/{device['id']}", headers=second_auth)
     assert forbidden.status_code == 404, forbidden.text
 
+    # Device revocation must revoke the bearer session associated with that
+    # installation, not merely hide the device from the settings list.
+    revoked = client.delete(f"/api/v1/identity/devices/{device['id']}", headers=first_auth)
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revoked"] is True
+    assert revoked.json()["sessions_revoked"] == 1
+    after_revoke = client.get(
+        f"/api/v1/evidence/{first["person"]["id"]}",
+        headers=first_auth,
+    )
+    assert after_revoke.status_code == 401, after_revoke.text
+    second_still_works = client.get(
+        f"/api/v1/evidence/{second["person"]["id"]}",
+        headers=second_auth,
+    )
+    assert second_still_works.status_code == 200, second_still_works.text
+
     db = TestSessionLocal()
     try:
         row = db.query(CaregiverDevice).filter_by(id=device["id"]).one()
