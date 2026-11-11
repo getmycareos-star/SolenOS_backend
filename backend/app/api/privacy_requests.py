@@ -446,7 +446,10 @@ def fulfil_approved_export(
         PrivacyExportArtifact.person_id == row.person_id,
         PrivacyExportArtifact.caregiver_id == row.caregiver_id,
     ).with_for_update().first()
-    if existing is not None and existing.expires_at > now:
+    existing_expiry = existing.expires_at if existing is not None else None
+    if existing_expiry is not None and existing_expiry.tzinfo is None:
+        existing_expiry = existing_expiry.replace(tzinfo=timezone.utc)
+    if existing is not None and existing_expiry > now:
         return {
             **_serialize(row),
             "fulfilment": {
@@ -557,7 +560,10 @@ def download_privacy_export(request_id: str, request: Request, db: Session = Dep
         PrivacyExportArtifact.caregiver_id == caregiver_id,
     ).first()
     now = datetime.now(timezone.utc)
-    if artifact is None or artifact.expires_at <= now:
+    artifact_expiry = artifact.expires_at if artifact is not None else None
+    if artifact_expiry is not None and artifact_expiry.tzinfo is None:
+        artifact_expiry = artifact_expiry.replace(tzinfo=timezone.utc)
+    if artifact is None or artifact_expiry <= now:
         raise HTTPException(status_code=410, detail="Export archive is unavailable or has expired")
     if len(artifact.content) != artifact.size_bytes or hashlib.sha256(artifact.content).hexdigest() != artifact.sha256:
         raise HTTPException(status_code=500, detail="Export archive failed its integrity check")
