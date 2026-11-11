@@ -1,10 +1,8 @@
-name: Messy-care benchmark gate
+name: On-demand messy-care benchmark
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  # The 10,000-scenario + PostgreSQL restart benchmark is intentionally manual.
+  # It is a release/performance exercise, not a per-commit MVP correctness gate.
   workflow_dispatch:
 
 permissions:
