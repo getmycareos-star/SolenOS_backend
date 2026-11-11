@@ -106,10 +106,13 @@ def _verify_persistence_after_real_server_restart(session: dict, other: dict, co
         status, history = _get_json_after_restart(base_url, f"/api/v1/conversation/{conversation_id}", token)
         assert status == 200, history
         assert any(item.get("role") == "user" and item.get("text") == disclosure for item in history.get("messages", [])), history
-        status, candidates = _get_json_after_restart(base_url, "/api/v1/companion/care-updates", token)
-        assert status == 200, candidates
-        persisted = next((item for item in candidates.get("items", []) if item.get("id") == proposal_id), None)
-        assert persisted is not None and persisted.get("status") == "accepted", candidates
+        status, candidate_history = _get_json_after_restart(
+            base_url, f"/api/v1/companion/care-updates/{proposal_id}/history", token
+        )
+        assert status == 200, candidate_history
+        persisted = candidate_history.get("proposal", {})
+        assert persisted.get("id") == proposal_id and persisted.get("status") == "accepted", candidate_history
+        assert candidate_history.get("items"), candidate_history
         status, lcr = _get_json_after_restart(base_url, "/api/v1/care-continuity/current-care", token)
         assert status == 200, lcr
         assert any(item.get("id") == assertion_id for item in lcr.get("items", [])), lcr
