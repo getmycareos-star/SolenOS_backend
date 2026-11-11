@@ -6,6 +6,7 @@ restarts Uvicorn itself so persistence is verified across an application restart
 from __future__ import annotations
 
 import json
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import os
 import subprocess
@@ -17,6 +18,8 @@ import urllib.request
 from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from sqlalchemy import text
 
 from app.core.database import SessionLocal
 from app.core.change_enums import SituationType, SituationState
@@ -154,11 +157,98 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+def verify_restored_backup_fixture_if_present():
+    """Exercise the exact synthetic caregiver restored by verify_backup_restore.py.
+
+    This is a no-op during the first source-database E2E run. After pg_restore,
+    the fixture exists and must be readable through the real authenticated API.
+    """
+    with SessionLocal() as db:
+        fixture = db.execute(text("""
+            SELECT c.id AS caregiver_id, p.id AS person_id, p.name AS person_name,
+                   s.id AS session_id, s.token_hash, e.id AS evidence_id,
+                   ce.id AS event_id, u.content AS document_content, u.sha256 AS document_sha256
+            FROM caregivers c
+            JOIN persons p ON p.id = c.person_id
+            JOIN anonymous_sessions s ON s.caregiver_id = c.id AND s.person_id = p.id
+            JOIN evidence e ON e.person_id = p.id AND e.uploaded_by_caregiver_id = c.id
+            JOIN care_events ce ON ce.person_id = p.id
+                AND ce.evidence_ids::jsonb ? e.id
+            JOIN evidence_uploads u ON u.evidence_id = e.id
+            WHERE c.name LIKE 'BACKUP-TEST-CAREGIVER-%'
+              AND e.origin_channel = 'backup_restore_test'
+            ORDER BY c.created_at DESC
+            LIMIT 1
+        """)).mappings().first()
+        if fixture is None:
+            return False
+        fixture = dict(fixture)
+
+    token = "synthetic-token-" + fixture["session_id"]
+    require(
+        hashlib.sha256(token.encode()).hexdigest() == fixture["token_hash"],
+        "restored synthetic session token hash does not match its expected capability",
+    )
+    document = bytes(fixture["document_content"])
+    require(
+        hashlib.sha256(document).hexdigest() == fixture["document_sha256"],
+        "restored synthetic document SHA-256 does not match its binary contents",
+    )
+
+    person_status, person = request(
+        "GET", f"/api/v1/persons/{fixture['person_id']}", token=token
+    )
+    require(
+        person_status == 200 and person.get("id") == fixture["person_id"]
+        and person.get("name") == fixture["person_name"],
+        f"restored caregiver could not read the correct person identity: {person_status}: {person}",
+    )
+    evidence_status, evidence = request(
+        "GET", f"/api/v1/evidence/{fixture['person_id']}", token=token
+    )
+    require(
+        evidence_status == 200
+        and any(item.get("id") == fixture["evidence_id"] for item in evidence),
+        f"restored caregiver could not retrieve its original evidence: {evidence_status}: {evidence}",
+    )
+    events_status, events = request(
+        "GET", f"/api/v1/events/{fixture['person_id']}", token=token
+    )
+    require(
+        events_status == 200
+        and any(item.get("id") == fixture["event_id"]
+                and fixture["evidence_id"] in (item.get("evidence_ids") or [])
+                for item in events),
+        f"restored care event/evidence association is not available through the API: {events_status}: {events}",
+    )
+    lcr_status, lcr = request(
+        "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token
+    )
+    require(
+        lcr_status == 200
+        and any(item.get("id") == fixture["event_id"]
+                and fixture["evidence_id"] in (item.get("evidence_ids") or [])
+                for item in (lcr or {}).get("items", [])),
+        f"restored evidence is not available in the LCR projection: {lcr_status}: {lcr}",
+    )
+    document_status, downloaded = download_binary(fixture["evidence_id"], token)
+    require(
+        document_status == 200 and downloaded == document,
+        f"restored document download differs from the original bytes: {document_status}",
+    )
+    print(
+        "PASS: exact restored synthetic caregiver identity, anonymous session, evidence, "
+        "care-event/LCR associations and document bytes are readable through authenticated APIs."
+    )
+    return True
+
+
 def main():
     server = start_server()
     try:
         status, _ = request("GET", "/health")
         require(status == 200, f"/health expected 200, got {status}")
+        verify_restored_backup_fixture_if_present()
 
         status, first = request(
             "POST",
