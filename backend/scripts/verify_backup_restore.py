@@ -123,7 +123,7 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                      evidence_ids, created_by_caregiver_id)
                 VALUES
                     (:id, :person_id, 'observation', 'recorded', :occurred_at, :title,
-                     :description, :evidence_ids, :caregiver_id)
+                     :description, CAST(:evidence_ids AS json), :caregiver_id)
             """), {
                 "id": ids["event"], "person_id": ids["person"],
                 "occurred_at": datetime(2026, 11, 10, 8, 30, tzinfo=timezone.utc),
@@ -158,7 +158,7 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                     (id, person_id, target_type, target_id, revision_number,
                      change_kind, before_state, after_state, evidence_ids, changed_by_caregiver_id)
                 VALUES (:id, :person_id, 'care_event', :target_id, 1, 'created',
-                        NULL, :after_state, :evidence_ids, :caregiver_id)
+                        NULL, :after_state, CAST(:evidence_ids AS json), :caregiver_id)
             """), {
                 "id": ids["revision"], "person_id": ids["person"],
                 "target_id": ids["event"],
