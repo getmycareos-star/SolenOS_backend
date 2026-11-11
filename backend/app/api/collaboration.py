@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -49,6 +49,7 @@ from app.models.notifications import CareNotification, CareNotificationPreferenc
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.time_location import Appointment
+from app.services.qwen_workflows import QwenWorkflow
 from app.services.qwen_gateway import (
     extract_review_candidates,
     get_ollama_config,
@@ -125,17 +126,7 @@ class QwenBackgroundJobCreate(BaseModel):
 
 class QwenAssistRequest(BaseModel):
     # Community is intentionally excluded while that product area is disabled.
-    workflow: Literal[
-        "daily_capture", "add_record", "document", "living_care_record",
-        "care_history_search", "care_situation_change", "delta_engine",
-        "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
-        "appointment", "after_appointment", "handoff", "professional_summary",
-        "open_loops", "two_week_review", "decision_outcome", "medication_day",
-        "reminders_notifications", "care_coordination", "companion",
-        "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
-        "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-        "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker", "critical_information_completeness", "personal_preferences_distress_context", "caregiver_strain_support", "document_validity_renewal",
-    ]
+    workflow: QwenWorkflow
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
     appointment_id: Optional[str] = Field(default=None, max_length=128)
