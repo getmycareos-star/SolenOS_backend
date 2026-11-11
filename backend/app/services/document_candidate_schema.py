@@ -59,7 +59,7 @@ def _date_from_excerpt(excerpt: str) -> str | None:
         if not match:
             continue
         prefix = excerpt[max(0, match.start() - 50):match.start()]
-        if re.search(r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+(?:on\\s+)?$", prefix, re.I):
+        if re.search(r"\b(?:recorded|documented|entered|signed|authored|created)\s+(?:on\s+)?$", prefix, re.I):
             continue
         try:
             if pattern is _DATE_PATTERNS[0]:
@@ -77,7 +77,7 @@ def _date_from_excerpt(excerpt: str) -> str | None:
 
 def _recorded_date_from_excerpt(excerpt: str) -> str | None:
     match = re.search(
-        r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+(?:on\\s+)?(\\d{4}-\\d{2}-\\d{2})\\b",
+        r"\b(?:recorded|documented|entered|signed|authored|created)\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})\b",
         excerpt,
         re.I,
     )
