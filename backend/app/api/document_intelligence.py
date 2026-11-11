@@ -114,6 +114,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "analysis_id": str(analysis.id),
         "source_evidence_id": str(analysis.source_evidence_id),
         "document_name": metadata.get("filename") or "Uploaded document",
+        "document_type": metadata.get("document_type") or "general_care_document",
+        "page_count": metadata.get("page_count"),
         "extraction_status": analysis.extraction_status,
         "intelligence_status": intelligence.get("status") or "not_run",
         "extraction_method": metadata.get("extraction_method"),
@@ -250,7 +252,6 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     metadata = copy.deepcopy(metadata)
     metadata["document_intelligence"] = {
         "version": 1,
-        "status": "available",
         "observations": grounded,
         "open_questions": [
             *[
