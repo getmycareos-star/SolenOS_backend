@@ -20,19 +20,7 @@ from app.services.qwen_gateway import qwen_chat
 
 logger = logging.getLogger(__name__)
 
-ENABLED_WORKFLOWS = (
-    "daily_capture", "add_record", "document", "living_care_record",
-    "care_history_search", "care_situation_change", "delta_engine",
-    "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
-    "appointment", "after_appointment", "handoff", "professional_summary",
-    "open_loops", "two_week_review", "decision_outcome", "medication_day",
-    "reminders_notifications", "care_coordination", "companion",
-    "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
-    "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-    "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker", "critical_information_completeness", "personal_preferences_distress_context", "caregiver_strain_support", "document_validity_renewal",
-)
-
-
+from app.services.qwen_workflows import ENABLED_WORKFLOWS
 # High-confidence local routing rules take precedence over the small model's
 # classification. This avoids sending an obvious medication/appointment/security
 # request to the wrong contract. Ambiguous requests still use constrained Qwen
