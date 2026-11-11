@@ -226,7 +226,7 @@ def _medication_change_is_explicit(item: dict[str, Any]) -> bool:
         if position < 0:
             continue
         prefix = excerpt[max(0, position - 36):position]
-        if re.search(r"\\b(?:not|never|no|without)\\s+(?:(?:been|being|actually|yet)\\s+)?$", prefix):
+        if re.search(r"\b(?:not|never|no|without)\s+(?:(?:been|being|actually|yet)\s+)?$", prefix):
             continue
         return True
     return False
