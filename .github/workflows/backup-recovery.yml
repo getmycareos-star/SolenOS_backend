@@ -99,6 +99,9 @@ jobs:
           SOLENOS_BACKUP_RESTORE_REPORT_PATH: /tmp/solenos-backup-recovery-report.json
         run: python backend/scripts/verify_backup_restore.py
 
+      - name: Validate sanitized recovery evidence JSON
+        run: python -m json.tool /tmp/solenos-backup-recovery-report.json > /dev/null
+
       - name: Verify exact restored caregiver through authenticated APIs
         env:
           DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_recovery_test
