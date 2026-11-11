@@ -29,7 +29,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.document_candidate_schema import canonical_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
+from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
@@ -110,6 +110,12 @@ def _document_assertion_field(candidate: dict) -> str:
 def _document_asserted_value(candidate: dict, subject: str, observation: str) -> str:
     canonical = candidate.get("canonical_candidate")
     canonical = canonical if isinstance(canonical, dict) else {}
+    warnings = canonical.get("warnings")
+    warnings = warnings if isinstance(warnings, list) else candidate.get("warnings", [])
+    warning_text = (
+        "\nReview warnings: " + "; ".join(str(value) for value in warnings[:5])
+        if warnings else ""
+    )
     if candidate.get("field_type") == "medication":
         details = canonical.get("medication_details")
         details = details if isinstance(details, dict) else {}
@@ -128,13 +134,13 @@ def _document_asserted_value(candidate: dict, subject: str, observation: str) ->
             f"Medication: {subject}\n"
             f"Strength: {details.get('strength') or 'Not stated in source'}\n"
             f"Dosage instructions: {details.get('dosage_instructions') or 'Not stated in source'}\n"
-            f"Source statement: {observation}"
+            f"Source statement: {observation}{warning_text}"
         )
     return (
         f"Subject: {subject}\n"
         f"Statement: {observation}\n"
         f"Event date: {candidate.get('event_date') or 'Not stated or unresolved'}\n"
-        f"Source-recorded date: {candidate.get('recorded_date') or 'Not stated in document'}"
+        f"Source-recorded date: {candidate.get('recorded_date') or 'Not stated in document'}{warning_text}"
     )
 
 
@@ -545,9 +551,15 @@ def review_document_candidate(
                 }
             else:
                 canonical["medication_details"] = None
-            canonical.setdefault("warnings", []).append(
+            canonical["warnings"] = candidate_warnings(
+                candidate["field_type"],
+                observation,
+                str(candidate.get("source_quote") or ""),
+            )
+            canonical["warnings"].append(
                 "Caregiver-corrected wording requires review against the original source passage."
             )
+            candidate["warnings"] = canonical["warnings"]
         candidate["review_status"] = "corrected_pending_approval"
     else:
         quote = candidate.get("source_quote")
