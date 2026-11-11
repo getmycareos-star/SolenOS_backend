@@ -406,7 +406,7 @@ def test_postgres_daily_capture_http_write_latency_idempotency_and_isolation(mon
     durable capture write path only. Synthetic records exist only in disposable
     PostgreSQL CI; no production caregiver data is created.
     """
-    from app.api import v1 as v1_module
+    from app.services import care_execution
 
     database_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
     engine = create_engine(database_url, pool_pre_ping=True)
@@ -421,8 +421,8 @@ def test_postgres_daily_capture_http_write_latency_idempotency_and_isolation(mon
 
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", test_session_local)
-    monkeypatch.setattr(v1_module, "extract_review_candidates", lambda *args, **kwargs: {"observations": [], "open_questions": []})
-    monkeypatch.setattr(v1_module, "reconcile_person_change_intelligence", lambda *args, **kwargs: None)
+    monkeypatch.setattr(care_execution, "extract_review_candidates", lambda *args, **kwargs: {"observations": [], "open_questions": []})
+    monkeypatch.setattr(care_execution, "reconcile_person_change_intelligence", lambda *args, **kwargs: None)
     suffix = uuid.uuid4().hex
     sample_count = 20
     write_ms: list[float] = []
