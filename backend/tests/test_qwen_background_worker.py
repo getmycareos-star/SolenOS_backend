@@ -247,13 +247,15 @@ def test_twelve_previously_misrouted_workflows_have_specific_intent_routes(expec
     assert asyncio.run(worker._classify_task(task, "")) == expected
 
 
-def test_worker_backs_off_when_job_table_is_not_yet_migrated(tmp_path, monkeypatch):
+def test_worker_waits_quietly_when_job_table_is_not_yet_migrated(tmp_path, monkeypatch, caplog):
     # The production container may start before the migration step completes.
-    # A missing queue table must not turn the worker into a tight DB polling loop.
+    # A missing queue table must not produce PostgreSQL/SQLAlchemy query errors.
     engine = create_engine(f"sqlite:///{tmp_path / 'unmigrated-qwen.sqlite'}")
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     monkeypatch.setattr(worker, "SessionLocal", sessions)
     try:
-        assert asyncio.run(worker.process_one_qwen_job()) is False
+        with caplog.at_level("WARNING", logger=worker.logger.name):
+            assert asyncio.run(worker.process_one_qwen_job()) is False
+        assert "Qwen background job failed" not in caplog.text
     finally:
         engine.dispose()
