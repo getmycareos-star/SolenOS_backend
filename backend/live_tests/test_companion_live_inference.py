@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.core.database import TestingSessionLocal
+from app.core.database import SessionLocal as TestingSessionLocal
 from app.models.care import Caregiver, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
