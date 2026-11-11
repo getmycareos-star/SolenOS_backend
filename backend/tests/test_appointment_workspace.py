@@ -1602,3 +1602,55 @@ def test_appointment_workspace_create_and_revision_writes_are_idempotent(client)
     )
     assert revisions.status_code == 200, revisions.text
     assert [item["revision_number"] for item in revisions.json()["items"]] == [1, 2]
+
+
+def test_appointment_accept_replay_does_not_report_rejected_assertion_as_active_lcr_write(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "outcome_pending",
+        "payload": {
+            "caregiverReport": "Caregiver reports that breakfast intake was lower yesterday.",
+            "actualVisitDate": "2026-11-10T10:00:00+01:00",
+        },
+        "change_reason": "Record appointment outcome",
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    generated = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals",
+        headers=headers,
+    )
+    assert generated.status_code == 200, generated.text
+    proposal = next(
+        item for item in generated.json()["items"]
+        if item["proposed_change"].get("field") == "caregiver_report"
+    )
+
+    accepted = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposal['id']}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assertion_id = accepted.json()["assertion_id"]
+    assert assertion_id
+
+    db = TestSessionLocal()
+    try:
+        assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
+        assertion.assertion_status = "rejected"
+        db.commit()
+    finally:
+        db.close()
+
+    replay = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposal['id']}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["written_to_lcr"] is False
+    assert replay.json()["assertion_id"] is None
