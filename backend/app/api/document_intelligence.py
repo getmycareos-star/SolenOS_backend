@@ -140,6 +140,8 @@ def _document_asserted_value(candidate: dict, subject: str, observation: str) ->
             f"Medication: {subject}\n"
             f"Strength: {details.get('strength') or 'Not stated in source'}\n"
             f"Dosage instructions: {details.get('dosage_instructions') or 'Not stated in source'}\n"
+            f"Event date: {candidate.get('event_date') or 'Not stated or unresolved'}\n"
+            f"Source-recorded date: {candidate.get('recorded_date') or 'Not stated in document'}\n"
             f"Source statement: {observation}{warning_text}"
         )
     return (
