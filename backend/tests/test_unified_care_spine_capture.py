@@ -18,7 +18,7 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.api.daily_care_intelligence import _history_bundle
+import app.api.daily_care_intelligence as daily_care_intelligence
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
 
@@ -31,7 +31,7 @@ def _postgres_url() -> str:
     return value
 
 
-def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_context():
+def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_context(monkeypatch):
     engine = create_engine(_postgres_url(), pool_pre_ping=True)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     suffix = uuid.uuid4().hex
@@ -109,9 +109,18 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
         # Daily Care's history projection must apply the authenticated caregiver
         # filter to document extractions, just as the direct evidence list does.
         with SessionLocal() as db:
-            history = _history_bundle(db, person_id, caregiver_id)
-            document_rows = history["lcr_context"]["sources"]["document_extractions"]["items"]
-            document_ids = {row["id"] for row in document_rows}
+            original_builder = daily_care_intelligence.build_lcr_context
+            observed_scopes = []
+
+            def scoped_builder(*args, **kwargs):
+                observed_scopes.append(kwargs.get("caregiver_id"))
+                return original_builder(*args, **kwargs)
+
+            monkeypatch.setattr(daily_care_intelligence, "build_lcr_context", scoped_builder)
+            daily_care_intelligence._history_bundle(db, person_id, caregiver_id)
+            assert observed_scopes == [caregiver_id]
+            scoped_context = original_builder(db, person_id, caregiver_id=caregiver_id, limit_per_source=50)
+            document_ids = {row["id"] for row in scoped_context["sources"]["document_extractions"]["items"]}
             assert own_document_analysis_id in document_ids
             assert peer_document_analysis_id not in document_ids
 
