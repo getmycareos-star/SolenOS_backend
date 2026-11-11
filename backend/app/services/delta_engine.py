@@ -439,7 +439,9 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "Do not diagnose, recommend treatment, or replace a clinician. Evidence excerpts must be short verbatim snippets from NEW_CARE_EVENT, EXISTING_ACTIVE_STATE, or EXISTING_RECORD_CONTEXT. When citing historical context, do not claim it is current unless its date/status supports that interpretation. "
         "Keep event_summary, caregiver_summary, and clinician_summary to at most 18 words each. Keep evidence excerpts to the shortest exact quote that proves the finding. "
         "Do not speculate about medical risks or possible causes. An undocumented cause is unknown, not evidence of a risk. "
-        "Do not create both a follow-up and a clinical gap for the same missing information; do not create either unless the source identifies a concrete unanswered care requirement or explicitly requests follow-up."
+        "Do not create both a follow-up and a clinical gap for the same missing information; do not create either unless the source identifies a concrete unanswered care requirement or explicitly requests follow-up. "
+        "A meal or fluid-intake observation is not itself a diagnosis or symptom: do not infer reduced appetite, dehydration, illness, or a cause from an amount eaten or drunk. "
+        "Never duplicate one observation as both a condition and a symptom; preserve the source observation in the event summary unless a distinct, explicitly documented clinical finding exists."
     )
     user_payload = {
         "existing_active_state": active_state,
