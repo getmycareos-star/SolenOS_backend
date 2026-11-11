@@ -8,8 +8,7 @@ import logging
 import hashlib
 from app.core.database import get_db
 from app.api.registered_actions import router as registered_actions_router
-from app.services.qwen_gateway import extract_review_candidates
-from app.services.capture_review import persist_capture_analysis
+from app.services.care_execution import execute_care_source
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
@@ -642,6 +641,21 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     and existing_analysis.extraction_status == "available"
                     and reviewable_candidates
                 ),
+                "execution_status": (
+                    existing_analysis.execution_status
+                    if existing_analysis and existing_analysis.execution_status
+                    else {
+                        "source_status": "source_preserved",
+                        "evidence_status": "evidence_persisted" if linked_evidence_ids else "evidence_missing",
+                        "extraction_status": "extraction_pending" if existing_analysis is None else (
+                            "extraction_available" if existing_analysis.extraction_status == "available" else "extraction_failed"
+                        ),
+                        "assessment_status": "assessment_pending",
+                        "review_status": "review_required" if reviewable_candidates else "review_not_required",
+                        "reconciliation_status": "reconciliation_pending",
+                        "retrieval_status": "retrieval_unavailable",
+                    }
+                ),
                 "qwen_written_to_lcr": False,
             }
         detail["capture_request_fingerprint"] = capture_request_fingerprint
@@ -816,49 +830,46 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         db.rollback()
         learning_pipeline_status = "unavailable"
 
-    # Analyze the saved capture through the shared Railway-local Qwen gateway.
-    # This response is a review aid only; candidate output is never written as
-    # an authoritative LCR fact. A Qwen outage cannot undo the saved capture.
-    source_text = json.dumps(detail, ensure_ascii=False, default=str)[:12_000]
-    qwen_status = "unavailable"
-    qwen_candidates = None
-    try:
-        qwen_candidates = extract_review_candidates(source_text, source_event_id=event.id)
-        qwen_status = "available"
-    except Exception:
-        qwen_status = "unavailable"
+    # All saved Daily Care sources use the shared post-save execution contract.
+    # The coordinator reads the persisted evidence row, never this request body.
+    execution = None
+    if evidence is not None:
+        try:
+            execution = execute_care_source(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_event_id=event.id,
+                source_evidence_id=evidence.id,
+            )
+        except Exception:
+            db.rollback()
+            logger.exception("Shared care execution failed after durable capture event %s", event.id)
 
-    analysis_id = None
-    try:
-        analysis = persist_capture_analysis(
-            db,
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            source_event_id=event.id,
-            source_evidence_id=evidence.id if evidence is not None else None,
-            source_text=source_text,
-            extraction_status=qwen_status,
-            candidates=qwen_candidates if qwen_status == "available" else None,
-        )
-        analysis_id = analysis.id
-    except Exception:
-        # The care event has already been committed. Roll back only the
-        # secondary review transaction and return the durable event receipt.
-        db.rollback()
+    if execution is None:
+        execution_status = {
+            "source_status": "source_preserved",
+            "evidence_status": "evidence_persisted" if evidence is not None else "evidence_missing",
+            "extraction_status": "extraction_failed",
+            "assessment_status": "assessment_failed",
+            "review_status": "review_not_required",
+            "reconciliation_status": "reconciliation_failed",
+            "retrieval_status": "retrieval_unavailable",
+        }
+        analysis_id = None
         qwen_status = "unavailable"
         qwen_candidates = None
+    else:
+        execution_status = execution["execution_status"]
+        analysis_id = execution["analysis_id"]
+        qwen_status = execution["extraction_status"]
+        qwen_candidates = execution["candidates"]
 
-    change_intelligence_status = "available"
-    try:
-        reconcile_person_change_intelligence(db, person_id)
-        db.commit()
-    except Exception:
-        db.rollback()
-        change_intelligence_status = "unavailable"
-        logger.exception(
-            "Change intelligence reconciliation failed after durable capture event %s",
-            event.id,
-        )
+    change_intelligence_status = (
+        "available"
+        if execution_status["reconciliation_status"] == "reconciliation_completed"
+        else "unavailable"
+    )
 
     return {
         "success": True,
@@ -872,8 +883,9 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
         "qwen_analysis_id": analysis_id,
-        "qwen_review_required": True,
+        "qwen_review_required": execution_status["review_status"] == "review_required",
         "qwen_written_to_lcr": False,
+        "execution_status": execution_status,
     }
 
 
