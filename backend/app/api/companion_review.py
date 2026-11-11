@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 router = APIRouter(prefix="/companion/care-updates", tags=["companion care updates"])
 
@@ -275,6 +276,14 @@ def review_companion_care_update(
         ))
 
     db.add(proposal)
+    change_intelligence_status = "not_required"
+    if decision == "accept":
+        # Keep the accepted assertion, governance decision, proposal state and
+        # derived LCR change assessments in one transaction. A failed
+        # reconciliation must not leave a partially committed Companion update.
+        db.flush()
+        reconcile_person_change_intelligence(db, person_id)
+        change_intelligence_status = "available"
     db.commit()
     db.refresh(proposal)
     if corrected_proposal is not None:
@@ -285,5 +294,6 @@ def review_companion_care_update(
         "decision": decision,
         "assertion_id": assertion_id,
         "written_to_lcr": bool(assertion_id),
+        "change_intelligence_status": change_intelligence_status,
         "idempotent_replay": False,
     }
