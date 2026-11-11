@@ -94,11 +94,23 @@ def _recorded_date_from_excerpt(excerpt: str) -> str | None:
 
 
 def _date_tokens(excerpt: str) -> list[str]:
-    tokens = re.findall(
-        r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{2,4})\b",
-        excerpt,
+    tokens: list[str] = []
+    recorded_prefix = re.compile(
+        r"\\b(?:recorded|documented|entered|signed|authored|created)\\s+(?:on\\s+)?$",
+        re.I,
     )
-    for natural in _NATURAL_DATE_TOKEN.findall(excerpt):
+    numeric_pattern = re.compile(
+        r"\\b(?:\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}/\\d{1,2}/\\d{2,4})\\b"
+    )
+    for match in numeric_pattern.finditer(excerpt):
+        prefix = excerpt[max(0, match.start() - 60):match.start()]
+        if not recorded_prefix.search(prefix):
+            tokens.append(match.group(0))
+    for match in _NATURAL_DATE_TOKEN.finditer(excerpt):
+        prefix = excerpt[max(0, match.start() - 60):match.start()]
+        if recorded_prefix.search(prefix):
+            continue
+        natural = match.group(0)
         normalized = natural
         for date_format in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%B %d %Y", "%b %d, %Y", "%b %d %Y"):
             try:
