@@ -139,3 +139,74 @@ def test_reconciliation_creates_and_refreshes_source_linked_clarification_questi
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+
+def test_assertion_epistemic_state_is_separate_from_review_lifecycle():
+    from datetime import datetime, timezone
+
+    from fastapi import HTTPException
+    import pytest
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+    try:
+        person = Person(id="epistemic-state-person", name="Epistemic state test person")
+        db.add(person)
+        db.commit()
+
+        reported = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="appetite",
+                asserted_value="Eating less",
+                source_label="Caregiver report",
+                source_text="Caregiver says appetite has decreased.",
+            ),
+        )
+        assert reported.epistemic_state == "reported"
+        assert reported.assertion_status == "reported"
+
+        observed = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="meal_intake",
+                asserted_value="Left half the meal",
+                source_label="Direct caregiver observation",
+                source_text="Observed that half the meal remained.",
+                observed_at=datetime.now(timezone.utc),
+                epistemic_state="observed",
+            ),
+        )
+        assert observed.epistemic_state == "observed"
+        assert observed.assertion_status == "reported"
+
+        with pytest.raises(HTTPException) as exc:
+            create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person.id,
+                    subject_type="care_recipient",
+                    subject_id=person.id,
+                    field="diagnosis",
+                    asserted_value="Verified condition",
+                    source_label="Unverified input",
+                    epistemic_state="verified",
+                ),
+            )
+        assert exc.value.status_code == 422
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
