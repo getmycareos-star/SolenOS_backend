@@ -293,6 +293,11 @@ def list_caregivers(person_id: str, request: Request, db: Session = Depends(get_
 
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = Depends(get_db)):
+    if (
+        getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
+        and str(evidence.evidence_type).lower() != "document"
+    ):
+        raise HTTPException(status_code=403, detail="This caregiver can add documents, not other care updates.")
     # Evidence confidence must not be supplied by a client until a task-specific
     # calibration method has validation evidence. Preserve the field for wire
     # compatibility, but reject numeric values rather than silently trusting them.
