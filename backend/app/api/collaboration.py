@@ -61,7 +61,7 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
+from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.schemas.care_continuity import CareAssertionCreate
@@ -1341,16 +1341,8 @@ def _companion_replay_response(
         .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         .all()
     )
-    source_message_id = metadata.get("source_message_id")
+    # Conversation replay returns conversation data only. Care updates belong in Daily Care.
     care_update_candidates = []
-    if source_message_id:
-        proposals = db.query(AIOutputLCRProposal).filter(
-            AIOutputLCRProposal.person_id == person_id,
-            AIOutputLCRProposal.caregiver_id == caregiver_id,
-            AIOutputLCRProposal.source_message_id == source_message_id,
-            AIOutputLCRProposal.proposal_type == "companion_care_observation",
-        ).order_by(AIOutputLCRProposal.candidate_index.asc(), AIOutputLCRProposal.proposal_version.desc()).all()
-        care_update_candidates = [proposal_payload(item) for item in proposals if item.status == "pending_authorization"]
     return {
         "session_id": saved_session.id,
         "person_id": person_id,
@@ -4587,22 +4579,8 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
+    # The Companion is conversational only. Care capture and LCR review use Daily Care.
     care_update_candidates = []
-    if not emergency and not _is_casual_greeting(user_text):
-        # FastAPI sends the validated conversation response before this background
-        # task performs the separate care-update inference. Casual greetings and
-        # emergency responses never create care-review jobs. The original user and
-        # assistant messages are already committed and cannot be rolled back by it.
-        background_tasks.add_task(
-            process_companion_care_update_message,
-            db.get_bind(),
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            conversation_id=session.id,
-            message_id=str(user_row.id),
-            source_text=user_text,
-            anonymous_session_id=_resolve_anonymous_session_id(request, db, person_id, caregiver_id),
-        )
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
