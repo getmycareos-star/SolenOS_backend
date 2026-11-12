@@ -6,6 +6,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.notifications import CareNotification
+from app.models.change import Change
+from app.models.uncertainty import OpenQuestion
+from app.core.change_enums import ChangeDirection, ChangeType, SignificanceVerdict
 
 
 engine = create_engine(
@@ -117,3 +120,100 @@ def test_notifications_feed_unread_count_and_read_are_scoped(monkeypatch):
         assert marked.json()["is_read"] is True
     finally:
         teardown()
+
+
+def test_proactive_notification_lifecycle_tracks_its_authoritative_source(monkeypatch):
+    client, first, second = setup_client(monkeypatch)
+    try:
+        headers = {"Authorization": f"Bearer {first['access_token']}"}
+        person_id = first["person"]["id"]
+        caregiver_id = first["caregiver"]["id"]
+        db = TestSession()
+        try:
+            change = Change(
+                id="notification-lifecycle-change",
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                change_type=ChangeType.EMERGENCE,
+                change_direction=ChangeDirection.INCREASING,
+                evidence_ids=["source-event"],
+                significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                attention_candidate=True,
+                is_active=True,
+            )
+            question = OpenQuestion(
+                id="notification-lifecycle-question",
+                person_id=person_id,
+                question="Which schedule is current?",
+                subject_type="person",
+                subject_id=person_id,
+                necessity="necessary",
+                necessity_rationale="A current handoff depends on this detail.",
+                status="open",
+                evidence_ids=["source-evidence"],
+            )
+            db.add_all([change, question])
+            db.flush()
+            db.add_all([
+                CareNotification(
+                    id="notification-lifecycle-change-item",
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    title="A care change may be worth reviewing",
+                    body="Review the saved source entries.",
+                    category="care_change",
+                    priority="normal",
+                    source_event_id=change.id,
+                ),
+                CareNotification(
+                    id="notification-lifecycle-question-item",
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    title="A care detail needs confirmation",
+                    body="Which schedule is current?",
+                    category="care_attention",
+                    priority="normal",
+                    source_event_id=question.id,
+                ),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        feed = client.get("/api/v1/notifications?limit=100", headers=headers)
+        assert feed.status_code == 200, feed.text
+        states = {item["category"]: item["lifecycle_status"] for item in feed.json()["items"]}
+        assert states == {"care_attention": "active", "care_change": "active"}
+        unread = client.get("/api/v1/notifications/unread-count", headers=headers)
+        assert unread.status_code == 200
+        assert unread.json()["unread_count"] == 2
+
+        db = TestSession()
+        try:
+            change = db.query(Change).filter_by(id="notification-lifecycle-change").one()
+            change.is_active = False
+            change.superseded_by_change_id = "replacement-change"
+            question = db.query(OpenQuestion).filter_by(id="notification-lifecycle-question").one()
+            question.status = "closed"
+            db.commit()
+        finally:
+            db.close()
+
+        refreshed = client.get("/api/v1/notifications?limit=100", headers=headers)
+        assert refreshed.status_code == 200, refreshed.text
+        refreshed_states = {item["category"]: item["lifecycle_status"] for item in refreshed.json()["items"]}
+        assert refreshed_states == {"care_attention": "resolved", "care_change": "superseded"}
+        unread_after_resolution = client.get("/api/v1/notifications/unread-count", headers=headers)
+        assert unread_after_resolution.status_code == 200
+        assert unread_after_resolution.json()["unread_count"] == 0
+
+        foreign = client.get(
+            "/api/v1/notifications?limit=100",
+            headers={"Authorization": f"Bearer {second['access_token']}"},
+        )
+        assert foreign.status_code == 200
+        assert foreign.json()["items"] == []
+    finally:
+        teardown()
+        client.close()
