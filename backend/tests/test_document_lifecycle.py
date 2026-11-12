@@ -1087,3 +1087,38 @@ def test_document_processing_status_does_not_leak_across_anonymous_sessions(clie
     assert status.status_code == 200, status.text
     assert all(item["evidence_id"] != evidence_id for item in status.json()["processing_jobs"])
     assert all(item["source_evidence_id"] != evidence_id for item in status.json()["items"])
+
+def test_outlook_msg_extracts_headers_and_body_without_unpacking_attachments(monkeypatch):
+    from app.api import document_lifecycle
+
+    class FakeMessage:
+        def __init__(self, content, delayAttachments=False):
+            assert content == b"original-msg-bytes"
+            assert delayAttachments is True
+            self.body = "Appointment confirmed for Tuesday."
+            self.htmlBody = None
+            self.sender = "clinic@example.org"
+            self.to = "caregiver@example.org"
+            self.cc = None
+            self.date = "2026-11-10 09:30:00"
+            self.subject = "Appointment confirmation"
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    instance = FakeMessage(b"original-msg-bytes", delayAttachments=True)
+    monkeypatch.setattr(document_lifecycle.extract_msg, "Message", lambda *args, **kwargs: instance)
+
+    class Upload:
+        mime_type = "application/vnd.ms-outlook"
+        filename = "appointment.msg"
+
+    extracted, method = document_lifecycle._extract(Upload(), b"original-msg-bytes")
+
+    assert method == "server_outlook_msg"
+    assert "From: clinic@example.org" in extracted
+    assert "To: caregiver@example.org" in extracted
+    assert "Subject: Appointment confirmation" in extracted
+    assert "Appointment confirmed for Tuesday." in extracted
+    assert instance.closed is True
