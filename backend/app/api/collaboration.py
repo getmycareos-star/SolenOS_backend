@@ -48,6 +48,7 @@ from app.models.collaboration import (
 )
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference
+from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
 from app.models.time_location import Appointment
@@ -4841,6 +4842,15 @@ def update_care_notification_preferences(
         preference.quiet_hours_end = payload.quiet_hours_end
     if payload.timezone_name is not None:
         preference.timezone_name = payload.timezone_name
+    if any(value is not None for value in (
+        payload.quiet_hours_enabled, payload.quiet_hours_start,
+        payload.quiet_hours_end, payload.timezone_name,
+    )):
+        db.query(CareReminder).filter(
+            CareReminder.person_id == person_id,
+            CareReminder.created_by_caregiver_id == caregiver_id,
+            CareReminder.status == "open",
+        ).update({CareReminder.notification_deferred_until: None}, synchronize_session=False)
     preference.updated_at = datetime.now(timezone.utc)
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
