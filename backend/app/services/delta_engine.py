@@ -1061,8 +1061,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                                 prior_events = db.query(CareEvent).filter(
                                     CareEvent.person_id == person_id,
                                     CareEvent.id != source_event_id,
-                                    CareEvent.event_type == incoming_event.event_type,
-                                    CareEvent.created_by_caregiver_id == created_by_caregiver_id,
                                 ).order_by(CareEvent.recorded_at.asc()).all()
 
                                 def _normalized_event_text(value):
@@ -1071,7 +1069,9 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                                 duplicate_source_event = next(
                                     (
                                         candidate for candidate in prior_events
-                                        if _same_occurrence_instant(candidate.occurred_at, event_date)
+                                        if candidate.event_type == incoming_event.event_type
+                                        and candidate.created_by_caregiver_id == incoming_event.created_by_caregiver_id
+                                        and _same_occurrence_instant(candidate.occurred_at, event_date)
                                         and _normalized_event_text(candidate.title) == _normalized_event_text(incoming_event.title)
                                         and _normalized_event_text(candidate.description) == _normalized_event_text(incoming_event.description)
                                     ),

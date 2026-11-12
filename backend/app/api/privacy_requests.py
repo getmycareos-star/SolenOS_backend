@@ -976,6 +976,17 @@ def fulfil_approved_deletion(
     evidence_ids_to_erase = db.execute(
         select(Evidence.id).where(Evidence.person_id == person_id)
     ).scalars().all()
+    evidence_upload_ids_to_erase = db.execute(
+        select(EvidenceUpload.evidence_id)
+        .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
+        .where(Evidence.person_id == person_id)
+    ).scalars().all()
+    if not evidence_upload_ids_to_erase and evidence_ids_to_erase:
+        evidence_upload_ids_to_erase = db.execute(
+            select(EvidenceUpload.evidence_id).where(
+                EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
+            )
+        ).scalars().all()
 
     # Inspect the active request transaction. Engine-level inspection can
     # check out the same SQLite StaticPool connection and roll back pending
@@ -1149,17 +1160,24 @@ def fulfil_approved_deletion(
         # pass, so re-querying only by person_id can falsely report successful
         # erasure while the evidence row itself survives.
         if evidence_ids_to_erase:
-            db.query(EvidenceUpload).filter(
+            db.execute(EvidenceUpload.__table__.delete().where(
                 EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
-            ).delete(synchronize_session=False)
-            # Repeat by immutable evidence IDs using Core SQL. This remains
-            # deterministic if earlier FK cleanup changed nullable ownership
-            # columns or left an upload object stale in the ORM identity map.
-            for evidence_id in evidence_ids_to_erase:
-                db.execute(
-                    text("DELETE FROM evidence_uploads WHERE evidence_id = :evidence_id"),
-                    {"evidence_id": str(evidence_id)},
-                )
+            ))
+        if evidence_upload_ids_to_erase:
+            db.execute(EvidenceUpload.__table__.delete().where(
+                EvidenceUpload.evidence_id.in_(evidence_upload_ids_to_erase)
+            ))
+        db.execute(
+            text("DELETE FROM evidence_uploads WHERE evidence_id IN (SELECT id FROM evidence WHERE person_id = :person_id)"),
+            {"person_id": person_id},
+        )
+        remaining_uploads = db.execute(
+            select(EvidenceUpload.evidence_id).where(
+                EvidenceUpload.evidence_id.in_(set(evidence_ids_to_erase) | set(evidence_upload_ids_to_erase))
+            )
+        ).scalars().all() if (evidence_ids_to_erase or evidence_upload_ids_to_erase) else []
+        if remaining_uploads:
+            raise HTTPException(status_code=409, detail="Evidence upload bytes remain after the care-record deletion pass; request was not fulfilled")
         # Also mark any remaining ORM evidence objects for deletion. This
         # prevents a loaded identity-map row from surviving a bulk/Core delete path.
         evidence_rows = db.query(Evidence).filter(Evidence.person_id == person_id).all()
@@ -1278,6 +1296,12 @@ def fulfil_approved_deletion(
                 status_code=409,
                 detail="Caregiver record remains after committed deletion verification",
             )
+        if evidence_upload_ids_to_erase:
+            remaining_uploads = db.query(EvidenceUpload.evidence_id).filter(
+                EvidenceUpload.evidence_id.in_(evidence_upload_ids_to_erase)
+            ).all()
+            if remaining_uploads:
+                raise HTTPException(status_code=409, detail="Evidence upload bytes remain after committed deletion verification")
 
         # Verify evidence by the immutable IDs captured before erasure, after
         # commit. This catches database-side ownership nulling or transaction
