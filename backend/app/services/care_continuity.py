@@ -630,8 +630,13 @@ def reconcile_information_gaps_from_accepted_assertions(
         CareAssertion.review_after_days > 0,
     ).order_by(CareAssertion.recorded_at.desc()).all()
 
+    now = datetime.now(timezone.utc)
     evidence_by_assertion = {}
     for assertion in assertions:
+        # An accepted but expired assertion is historical context, not enough
+        # to close a currently open information gap.
+        if get_freshness(assertion, now)["status"] != "within_review_window":
+            continue
         ids = list(dict.fromkeys(str(value) for value in (assertion.evidence_ids or []) if value))
         if not ids:
             continue
@@ -659,7 +664,6 @@ def reconcile_information_gaps_from_accepted_assertions(
         ).all()
     }
 
-    now = datetime.now(timezone.utc)
     resolved = skipped_conflict = 0
     for gap in gaps:
         key = (gap.subject_type, gap.subject_id, gap.field)
