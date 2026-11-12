@@ -689,7 +689,7 @@ class UncertaintyEngine:
             query = query.filter(OpenQuestionModel.status.in_(["open", "unresolved"]))
         from app.services.care_continuity import has_valid_caregiver_necessity
         rows = query.order_by(OpenQuestionModel.asked_at.desc()).all()
-        return [row for row in rows if has_valid_caregiver_necessity(row)]
+        return [row for row in rows if has_valid_caregiver_necessity(row, self.db, scoped_person_id)]
 
     def create_contradiction(self, contradiction: ContradictionCreate) -> ContradictionModel:
         from app.models.care import CareEvent, Evidence
