@@ -49,7 +49,7 @@ from app.models.collaboration import (
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
-from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
 from app.models.time_location import Appointment
 from app.services.qwen_workflows import QwenWorkflow
 from app.services.qwen_gateway import (
@@ -629,6 +629,39 @@ def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None)
     }
 
 
+def _ensure_document_intake_job(db: Session, person_id: str, caregiver_id: str, evidence_id: str):
+    evidence_ids_json = json.dumps([evidence_id])
+    existing = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow == "document_intake",
+        QwenBackgroundJob.evidence_ids_json == evidence_ids_json,
+    ).order_by(QwenBackgroundJob.created_at.desc()).first()
+    if existing is not None and existing.status in {"queued", "processing", "completed"}:
+        return existing
+    job = QwenBackgroundJob(
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        task_text="Process saved document for caregiver review.",
+        context_text="",
+        evidence_ids_json=evidence_ids_json,
+        workflow="document_intake",
+        status="queued",
+    )
+    db.add(job)
+    db.flush()
+    db.add(QwenJobEvent(
+        job_id=job.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        event_type="document_intake_queued",
+        from_status=None,
+        to_status="queued",
+        metadata_json={"source_evidence_id": evidence_id, "written_to_lcr": False},
+    ))
+    return job
+
+
 @router.post("/upload", status_code=201)
 async def upload_evidence(
     request: Request,
@@ -824,6 +857,10 @@ async def upload_evidence(
                 prior_meta = prior.extra_metadata if isinstance(prior.extra_metadata, dict) else json.loads(prior.extra_metadata or "{}")
             except (TypeError, ValueError):
                 pass
+            document_job = _ensure_document_intake_job(
+                db, scoped_person_id, scoped_caregiver_id, prior.id
+            ) if prior.type == "document" else None
+            db.commit()
             return {
                 "evidence_id": prior.id,
                 "size_bytes": prior_blob.size_bytes,
@@ -831,6 +868,8 @@ async def upload_evidence(
                 "sha256": prior_blob.sha256,
                 "persisted": True,
                 "idempotent_replay": True,
+                "document_processing_job_id": document_job.id if document_job else None,
+                "processing_status": "queued" if document_job else "not_applicable",
                 "duplicate_detected": bool(prior_meta.get("duplicate_detected")),
                 "duplicate_of_evidence_id": prior_meta.get("duplicate_of_evidence_id"),
                 "source_integrity": {
@@ -913,6 +952,10 @@ async def upload_evidence(
         size_bytes=len(data),
         sha256=digest,
     ))
+    document_job = (
+        _ensure_document_intake_job(db, scoped_person_id, scoped_caregiver_id, evidence.id)
+        if evidence_type == "document" else None
+    )
     db.commit()
     return {
         "evidence_id": evidence.id,
@@ -920,6 +963,8 @@ async def upload_evidence(
         "mime_type": mime_type,
         "sha256": digest,
         "persisted": True,
+        "document_processing_job_id": document_job.id if document_job else None,
+        "processing_status": "queued" if document_job else "not_applicable",
         "duplicate_detected": duplicate_upload is not None,
         "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
         "source_integrity": {
