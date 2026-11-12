@@ -893,8 +893,13 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     return _response(replacement)
                 row.source_text = retry_text
                 row.extraction_status = retry_status
-                metadata.update(retry_metadata)
-                row.candidates = metadata
+                # SQLAlchemy JSON columns do not track in-place dictionary
+                # mutation. Assign a new top-level object so the refreshed
+                # source-text digest and page metadata are committed together
+                # with the retried extraction text.
+                updated_metadata = dict(metadata)
+                updated_metadata.update(retry_metadata)
+                row.candidates = updated_metadata
                 db.commit()
                 db.refresh(row)
                 return _response(row)
