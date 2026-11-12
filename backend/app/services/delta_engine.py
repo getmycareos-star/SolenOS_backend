@@ -973,7 +973,11 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             (CareAssertion.created_by_caregiver_id == created_by_caregiver_id)
                             if created_by_caregiver_id else (CareAssertion.source_label == source),
                             CareAssertion.observed_at == event_date,
-                            CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
+                            # Duplicate identity is historical, not active-state
+                            # identity. A later observation may supersede the original
+                            # assertion, but must not make the same earlier source
+                            # occurrence eligible for a second assertion.
+                            CareAssertion.assertion_status.notin_(["rejected", "withdrawn"]),
                             CareAssertion.source_event_id != source_event_id,
                         ).order_by(CareAssertion.recorded_at.asc()).first()
                         if duplicate_assertion is not None:
