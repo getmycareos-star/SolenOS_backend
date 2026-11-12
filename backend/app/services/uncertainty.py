@@ -414,6 +414,13 @@ class UncertaintyEngine:
         db_question = OpenQuestionModel(**payload)
         try:
             self.db.add(db_question)
+            self.db.flush()
+            from app.services.care_continuity import _record_open_question_revision
+            _record_open_question_revision(
+                self.db, db_question, before_state=None, change_kind="created",
+                actor="caregiver_question_creation",
+                changed_by_caregiver_id=self.caregiver_id,
+            )
             self.db.commit()
             self.db.refresh(db_question)
             return db_question
@@ -432,6 +439,8 @@ class UncertaintyEngine:
         if not db_question:
             return None
 
+        from app.services.care_continuity import _open_question_state, _record_open_question_revision
+        before_state = _open_question_state(db_question)
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         new_status = update_data.get("status", db_question.status)
         allowed_statuses = {"open", "answered", "declined", "closed", "unresolved"}
@@ -565,6 +574,12 @@ class UncertaintyEngine:
             setattr(db_question, field, value)
 
         try:
+            if before_state != _open_question_state(db_question):
+                _record_open_question_revision(
+                    self.db, db_question, before_state=before_state, change_kind="updated",
+                    actor="caregiver_question_update",
+                    changed_by_caregiver_id=self.caregiver_id,
+                )
             self.db.commit()
             self.db.refresh(db_question)
             return db_question
