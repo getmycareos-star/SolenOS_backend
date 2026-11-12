@@ -19,6 +19,7 @@ class CaptureAnalysis(Base):
     extraction_status = Column(String(24), nullable=False)
     candidates = Column(JSON, nullable=True)
     review_history = Column(JSON, nullable=False, default=list)
+    execution_status = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
