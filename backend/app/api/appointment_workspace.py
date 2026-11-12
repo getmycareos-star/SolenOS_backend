@@ -985,18 +985,27 @@ def review_appointment_outcome_proposal(
         ))
 
     reconciliation_receipt = None
-    if decision == "accept":
-        reconciliation_receipt = execute_care_continuity_reconciliation(
-            db,
-            person_id,
-            workflow="appointment_outcome_review",
-            source_assertion_id=assertion_id,
-            source_appointment_workspace_id=record.id,
-            source_appointment_workspace_revision_id=revision.id,
+    try:
+        if decision == "accept":
+            reconciliation_receipt = execute_care_continuity_reconciliation(
+                db,
+                person_id,
+                workflow="appointment_outcome_review",
+                source_assertion_id=assertion_id,
+                source_appointment_workspace_id=record.id,
+                source_appointment_workspace_revision_id=revision.id,
+            )
+        db.add(proposal)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "Appointment outcome review and care-record reassessment could not be committed"
         )
-
-    db.add(proposal)
-    db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="The appointment outcome review could not be saved with its care-record reassessment. Retry after refreshing.",
+        ) from exc
     if reconciliation_receipt is not None:
         reconciliation_receipt["stages"]["reconciliation"] = "committed"
     db.refresh(proposal)
