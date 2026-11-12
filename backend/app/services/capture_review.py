@@ -55,6 +55,27 @@ _HEDGE_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 
+_CLAUSE_BOUNDARY = re.compile(r"\\b(and|but|or|however|although|yet)\\b|[.;!?]", re.IGNORECASE)
+
+
+def _source_hedge_for_observation(quote: str, observation: str):
+    """Use only a hedge in the same clause as the extracted observation."""
+    observation_match = re.search(re.escape(observation), quote, re.IGNORECASE)
+    if observation_match is None:
+        return _HEDGE_REFERENCE.search(observation)
+    start, end = observation_match.span()
+    eligible = []
+    for marker in _HEDGE_REFERENCE.finditer(quote):
+        if marker.end() <= start:
+            gap = quote[marker.end():start]
+        elif marker.start() >= end:
+            gap = quote[end:marker.start()]
+        else:
+            gap = ""
+        if not _CLAUSE_BOUNDARY.search(gap):
+            eligible.append((abs(marker.start() - start), marker))
+    return min(eligible, key=lambda item: item[0])[1] if eligible else None
+
 
 def persist_source_grounded_daily_observations(
     db: Session,
@@ -112,7 +133,7 @@ def persist_source_grounded_daily_observations(
         if existing:
             continue
 
-        hedge = _HEDGE_REFERENCE.search(observation_text)
+        hedge = _source_hedge_for_observation(quote, observation_text)
         time_reference = _TIME_REFERENCE.search(observation)
         if time_reference is None:
             observation_start = quote.find(observation_text)
