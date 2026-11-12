@@ -413,11 +413,11 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     open_questions = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == person_id, OpenQuestion.status == "open",
         OpenQuestion.necessity == "necessary",
-    ).order_by(OpenQuestion.asked_at.desc()).limit(50).all()
+    ).order_by(OpenQuestion.asked_at.desc())..all()
     open_questions = [
         question for question in open_questions
         if has_valid_caregiver_necessity(question)
-    ]
+    ][:50]
     unresolved_contradictions = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
         Contradiction.resolution_status.in_(["unresolved", "qualified"]),
