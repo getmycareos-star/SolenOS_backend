@@ -380,7 +380,7 @@ def next_best_questions(
         # source-linked question. Do not emit a duplicate stale-report question.
         if has_conflict:
             continue
-        freshness = get_freshness(item, now)
+        freshness = get_freshness(item, now, reviewed_at=item.updated_at)
         if freshness["status"] == "needs_confirmation":
             candidates.append({
                 "question": f"Can you confirm whether the reported information about {item.field} is still accurate? The record does not establish that it is current.",
@@ -641,7 +641,7 @@ def reconcile_information_gaps_from_accepted_assertions(
     for assertion in assertions:
         # An accepted but expired assertion is historical context, not enough
         # to close a currently open information gap.
-        if get_freshness(assertion, now)["status"] != "within_review_window":
+        if get_freshness(assertion, now, reviewed_at=assertion.updated_at)["status"] != "within_review_window":
             continue
         ids = list(dict.fromkeys(str(value) for value in (assertion.evidence_ids or []) if value))
         if not ids:
