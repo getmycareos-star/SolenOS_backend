@@ -3,7 +3,7 @@ import re
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models.care import Evidence as EvidenceModel
+from app.models.care import CareEvent as CareEventModel, Evidence as EvidenceModel
 from app.models.care_continuity import CareAssertion as CareAssertionModel
 from app.models.uncertainty import (
     InformationGap as InformationGapModel,
@@ -27,7 +27,142 @@ from app.schemas.uncertainty import (
 from app.core.uncertainty_enums import (
     EpistemicState,
     GapLifecycleStatus,
+    Priority,
 )
+
+
+def persist_source_clarification_questions(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    source_kind: str,
+    source_record_type: str,
+    source_record_id: str,
+    evidence_ids: Optional[List[str]],
+    questions: Optional[List[str]],
+) -> List[OpenQuestionModel]:
+    """Persist review-only questions against the exact saved source, without committing.
+
+    Question wording is a suggestion from source review, not a verified claim.
+    The caller owns the transaction that saves the source and its clarification.
+    """
+    if not all(isinstance(value, str) and value.strip() for value in (
+        person_id, caregiver_id, source_kind, source_record_type, source_record_id
+    )):
+        raise ValueError("A care record, caregiver, and persisted source reference are required.")
+    if source_record_type == "care_event":
+        source_row = db.query(CareEventModel).filter(
+            CareEventModel.id == source_record_id,
+            CareEventModel.person_id == person_id,
+        ).first()
+        if source_row is None:
+            raise ValueError("The clarification source event is missing or belongs to another care record.")
+        linked_ids = list(dict.fromkeys(str(value) for value in (evidence_ids or []) if value))
+        source_refs = [{"record_type": "care_event", "record_id": source_record_id}]
+        if linked_ids:
+            rows = db.query(EvidenceModel.id).filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.id.in_(linked_ids),
+            ).all()
+            if {str(row[0]) for row in rows} != set(linked_ids):
+                raise ValueError("Every clarification source must belong to the same care record.")
+            event_evidence_ids = {str(value) for value in (source_row.evidence_ids or [])}
+            if not set(linked_ids).issubset(event_evidence_ids):
+                raise ValueError("Clarification evidence must be linked to its saved source event.")
+            source_refs.extend(
+                {"record_type": "evidence", "record_id": evidence_id}
+                for evidence_id in linked_ids
+            )
+    elif source_record_type == "evidence":
+        source_row = db.query(EvidenceModel).filter(
+            EvidenceModel.id == source_record_id,
+            EvidenceModel.person_id == person_id,
+        ).first()
+        if source_row is None:
+            raise ValueError("The clarification source document is missing or belongs to another care record.")
+        if str(source_row.uploaded_by_caregiver_id) != str(caregiver_id):
+            raise ValueError("The clarification source document was not uploaded by the authenticated caregiver.")
+        linked_ids = list(dict.fromkeys([source_record_id, *[
+            str(value) for value in (evidence_ids or []) if value
+        ]]))
+        rows = db.query(EvidenceModel.id).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(linked_ids),
+        ).all()
+        if {str(row[0]) for row in rows} != set(linked_ids):
+            raise ValueError("Every clarification source must belong to the same care record.")
+        source_refs = [{"record_type": "evidence", "record_id": value} for value in linked_ids]
+    else:
+        raise ValueError("Unsupported clarification source type.")
+
+    existing_rows = db.query(OpenQuestionModel).filter(
+        OpenQuestionModel.person_id == person_id,
+        OpenQuestionModel.status == "open",
+    ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
+    existing_by_text = {
+        " ".join((row.question or "").casefold().split()): row
+        for row in existing_rows
+    }
+    persisted: List[OpenQuestionModel] = []
+    seen: set[str] = set()
+    for value in (questions or [])[:20]:
+        if not isinstance(value, str):
+            continue
+        question_text = " ".join(value.strip().split())[:300]
+        normalized = question_text.casefold()
+        if len(question_text) < 5 or normalized in seen:
+            continue
+        # Operational extraction warnings belong in the document review panel,
+        # not in the caregiver's list of questions.
+        if not (
+            question_text.endswith(("?", "？"))
+            or re.match(
+                r"^(who|what|when|where|why|how|is|are|was|were|do|does|did|has|have|had|can|could|would|should|will|which|any)\b",
+                question_text,
+                re.IGNORECASE,
+            )
+        ):
+            continue
+        seen.add(normalized)
+        source_context = {
+            "source_kind": source_kind,
+            "source_id": source_record_id,
+            "source_record_refs": source_refs,
+            "reason": "Suggested while reviewing saved care information. Please check the wording before relying on it.",
+            "grounding_status": "source_record_linked; question wording not independently verified",
+        }
+        existing = existing_by_text.get(normalized)
+        if existing is None:
+            existing = OpenQuestionModel(
+                person_id=person_id,
+                question=question_text,
+                subject_type="person",
+                subject_id=person_id,
+                status="open",
+                priority=Priority.INFORMATIONAL,
+                evidence_ids=linked_ids or None,
+                context=[source_context],
+                created_by_caregiver_id=caregiver_id,
+            )
+            db.add(existing)
+            db.flush()
+            existing_by_text[normalized] = existing
+        else:
+            existing.evidence_ids = list(dict.fromkeys(
+                list(existing.evidence_ids or []) + linked_ids
+            )) or None
+            contexts = list(existing.context or [])
+            context_key = (source_kind, source_record_id)
+            if not any(
+                (item.get("source_kind"), item.get("source_id")) == context_key
+                for item in contexts if isinstance(item, dict)
+            ):
+                contexts.append(source_context)
+                existing.context = contexts
+        persisted.append(existing)
+    db.flush()
+    return persisted
 
 
 class UncertaintyEngine:

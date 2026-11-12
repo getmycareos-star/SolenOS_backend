@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
+from app.services.uncertainty import persist_source_clarification_questions
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.lcr_context import build_lcr_context
@@ -925,6 +926,17 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     execution = None
     change_intelligence_status = "unavailable"
     try:
+        if qwen_status == "available" and isinstance(qwen_candidates, dict):
+            persist_source_clarification_questions(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_kind="daily_capture_extraction",
+                source_record_type="care_event",
+                source_record_id=event.id,
+                evidence_ids=[evidence.id] if evidence is not None else [],
+                questions=qwen_candidates.get("open_questions") or [],
+            )
         execution = execute_care_continuity_reconciliation(
             db,
             person_id,

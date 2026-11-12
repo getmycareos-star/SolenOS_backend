@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.main import app
-from app.models.care import Person, Caregiver, Evidence
+from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationSession, ConversationMessage
@@ -3199,5 +3199,89 @@ def test_monthly_incident_aggregate_uses_person_scoped_events_and_blocks_correct
         after_correction = _requested_event_aggregates(db, person.id, caregiver.id, question)
         assert after_correction[0]["status"] == "source_correction_requires_review"
         assert after_correction[0]["count"] is None
+    finally:
+        teardown_db()
+
+
+def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_links():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.services.uncertainty import persist_source_clarification_questions
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-extracted-question", name="Extracted Question Person")
+        caregiver = Caregiver(
+            id="caregiver-extracted-question",
+            name="Extracted Question Caregiver",
+            email="extracted-question@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="evidence-extracted-question",
+            person_id=person.id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="She has been waking several times overnight.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_caregiver_id=caregiver.id,
+        )
+        event = CareEvent(
+            id="event-extracted-question",
+            person_id=person.id,
+            event_type="daily_care",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Daily care report",
+            description="She has been waking several times overnight.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, event])
+        db.commit()
+
+        questions = [
+            "How many times did she wake overnight?",
+            "Only the first 25 pages were processed; more pages need review.",
+            "How long has this been happening?",
+            "How many times did she wake overnight?",
+        ]
+        first = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction",
+            source_record_type="care_event",
+            source_record_id=event.id,
+            evidence_ids=[evidence.id],
+            questions=questions,
+        )
+        db.commit()
+        assert len(first) == 2
+        assert all(row.person_id == person.id for row in first)
+        assert all(row.status == "open" for row in first)
+        assert all(row.evidence_ids == [evidence.id] for row in first)
+        assert all(row.context[0]["grounding_status"] == "source_record_linked; question wording not independently verified" for row in first)
+        assert all(
+            {"record_type": "care_event", "record_id": event.id} in row.context[0]["source_record_refs"]
+            for row in first
+        )
+
+        second = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction",
+            source_record_type="care_event",
+            source_record_id=event.id,
+            evidence_ids=[evidence.id],
+            questions=questions,
+        )
+        db.commit()
+        assert {row.id for row in second} == {row.id for row in first}
+        assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 2
     finally:
         teardown_db()
