@@ -826,7 +826,6 @@ def test_outlook_msg_extracts_headers_and_body_from_a_real_msg_round_trip(tmp_pa
         "Appointment confirmed for Tuesday.",
     )
     generated.save(str(msg_path))
-    generated.close()
 
     class Upload:
         mime_type = "application/vnd.ms-outlook"
