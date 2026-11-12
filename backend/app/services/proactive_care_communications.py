@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.change_enums import SignificanceVerdict
 from app.core.uncertainty_enums import GapLifecycleStatus
-from app.models.care import Caregiver
+from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.change import Change
 from app.models.notifications import CareNotification
 from app.models.uncertainty import InformationGap
@@ -46,8 +46,29 @@ def create_attention_change_notifications(
 
     created = 0
     timestamp = now or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(timezone.utc)
     for change in changes:
-        if not [value for value in (change.evidence_ids or []) if isinstance(value, str) and value.strip()]:
+        source_ids = {
+            value.strip()
+            for value in (change.evidence_ids or [])
+            if isinstance(value, str) and value.strip()
+        }
+        if not source_ids:
+            continue
+        # Change rows may point to persisted care events or directly to evidence.
+        # Require at least one same-person source before communicating the change.
+        event_source = db.query(CareEvent.id).filter(
+            CareEvent.person_id == person_id,
+            CareEvent.id.in_(source_ids),
+        ).first()
+        evidence_source = db.query(Evidence.id).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(source_ids),
+        ).first()
+        if event_source is None and evidence_source is None:
             continue
         for caregiver in caregivers:
             exists = db.query(CareNotification.id).filter(
