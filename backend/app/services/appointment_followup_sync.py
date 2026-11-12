@@ -153,7 +153,7 @@ def sync_appointment_followups(
         loop.owner_label = owner_label
         loop.deadline_at = due_at
         loop.deadline_source = "explicit_user" if due_at else None
-        loop.deadline_timezone = str(due_at.tzinfo) if due_at else None
+        loop.deadline_timezone = _timezone_label(due_text)
         loop.source_fingerprint = fingerprint
         loop.outcome_status = "outcome_reported" if reported_complete else "outcome_unknown"
         loop.outcome_evidence = (
