@@ -538,3 +538,50 @@ def test_snooze_complete_and_cancel_stop_queued_push_retries():
         }
     finally:
         db.close()
+
+
+
+def test_disabled_reminder_batch_does_not_starve_enabled_caregiver():
+    from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    disabled = create_session(client, "Disabled reminders caregiver")
+    enabled = create_session(client, "Enabled reminders caregiver")
+    due_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db = TestSessionLocal()
+    try:
+        db.add(CareNotificationPreference(
+            person_id=disabled["person"]["id"],
+            caregiver_id=disabled["caregiver"]["id"],
+            reminders_enabled=False,
+            quiet_hours_enabled=False,
+        ))
+        db.add_all([
+            CareReminder(
+                person_id=disabled["person"]["id"],
+                created_by_caregiver_id=disabled["caregiver"]["id"],
+                title=f"Disabled {index}",
+                due_at=due_at,
+                status="open",
+            )
+            for index in range(101)
+        ])
+        enabled_reminder = CareReminder(
+            person_id=enabled["person"]["id"],
+            created_by_caregiver_id=enabled["caregiver"]["id"],
+            title="Enabled reminder",
+            due_at=due_at + timedelta(seconds=1),
+            status="open",
+        )
+        db.add(enabled_reminder)
+        db.commit()
+
+        assert deliver_due_reminders(db=db, now=datetime.now(timezone.utc)) == 0
+        assert deliver_due_reminders(db=db, now=datetime.now(timezone.utc)) == 1
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id == enabled_reminder.id
+        ).count() == 1
+    finally:
+        db.close()
