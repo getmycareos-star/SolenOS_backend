@@ -48,6 +48,9 @@ from app.models.collaboration import (
 )
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
+from app.models.change import Change
+from app.models.uncertainty import OpenQuestion
+from app.core.change_enums import SignificanceVerdict
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -4667,7 +4670,36 @@ class NotificationPreferenceUpdate(BaseModel):
         return value
 
 
-def _notification_json(item: CareNotification) -> dict:
+def _notification_lifecycle_status(db: Session, item: CareNotification) -> str:
+    """Resolve proactive inbox status from its authoritative source record."""
+    if item.category == "care_change":
+        change = db.query(Change).filter(
+            Change.id == item.source_event_id,
+            Change.person_id == item.person_id,
+        ).first()
+        if change is None:
+            return "source_unavailable"
+        if change.superseded_by_change_id:
+            return "superseded"
+        verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
+        if not change.is_active or not change.attention_candidate or verdict != SignificanceVerdict.MEANINGFUL_CANDIDATE.value:
+            return "resolved"
+        return "active"
+    if item.category == "care_attention":
+        question = db.query(OpenQuestion).filter(
+            OpenQuestion.id == item.source_event_id,
+            OpenQuestion.person_id == item.person_id,
+        ).first()
+        if question is None:
+            return "source_unavailable"
+        if question.necessity != "necessary" or question.status not in {"open", "unresolved"}:
+            return "resolved"
+        return "active"
+    return "active"
+
+
+def _notification_json(item: CareNotification, db: Session) -> dict:
+    lifecycle_status = _notification_lifecycle_status(db, item)
     return {
         "id": item.id,
         "title": item.title,
@@ -4678,6 +4710,8 @@ def _notification_json(item: CareNotification) -> dict:
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "is_read": item.read_at is not None,
         "read_at": item.read_at.isoformat() if item.read_at else None,
+        "lifecycle_status": lifecycle_status,
+        "is_current": lifecycle_status == "active",
     }
 
 
@@ -4724,17 +4758,21 @@ def list_care_notifications(
         record_metadata={"limit": limit, "offset": offset, "unread_only": unread_only, "result_count": len(items)},
     ))
     db.commit()
-    return {"items": [_notification_json(item) for item in items], "total": total, "limit": limit, "offset": offset, "unread_only": unread_only}
+    return {"items": [_notification_json(item, db) for item in items], "total": total, "limit": limit, "offset": offset, "unread_only": unread_only}
 
 
 @router.get("/notifications/unread-count")
 def count_unread_care_notifications(request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
-    count = db.query(CareNotification).filter(
+    unread_items = db.query(CareNotification).filter(
         CareNotification.person_id == person_id,
         CareNotification.caregiver_id == caregiver_id,
         CareNotification.read_at.is_(None),
-    ).count()
+    ).all()
+    count = sum(
+        1 for item in unread_items
+        if _notification_lifecycle_status(db, item) == "active"
+    )
     return {"unread_count": count}
 
 
