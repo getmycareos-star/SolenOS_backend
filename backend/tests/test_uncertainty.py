@@ -3601,6 +3601,19 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         assert necessary.necessity_rationale == "The current care handoff depends on which discharge instruction is active."
         assert necessary.context[0]["source_id"] == necessary_gap.id
 
+        # Shared reconciliation emits an in-app message only for this explicitly
+        # necessary, source-backed question.
+        from app.models.notifications import CareNotification
+        from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+        reconcile_person_change_intelligence(db, person.id)
+        db.flush()
+        attention_items = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_attention",
+        ).all()
+        assert len(attention_items) == 1
+        assert attention_items[0].source_event_id == necessary.id
+
         # The caregiver-facing question projection fails closed: only questions
         # with an explicit necessity assessment and rationale are returned.
         unassessed = OpenQuestion(
@@ -3632,17 +3645,20 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         # When the explicit decision dependency disappears, the question is
         # automatically suppressed, not marked answered. A later necessity
         # reassessment reopens the same record and preserves revision history.
-        from app.services.care_continuity import reassess_open_question_lifecycle
         from app.models.care_continuity import CareStateRevision
         necessary_gap.context = []
         db.flush()
-        lifecycle = reassess_open_question_lifecycle(db, person.id)
+        reconcile_person_change_intelligence(db, person.id)
         db.flush()
-        assert lifecycle["suppressed"] == 1
         db.refresh(necessary)
         assert necessary.status == "closed"
         assert necessary.closed_reason.startswith("automatically_suppressed")
         assert necessary.answered_at is None
+        retired_attention = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.source_event_id == necessary.id,
+        ).one()
+        assert retired_attention.category == "care_attention_updated"
 
         necessary_gap.context = [{
             "caregiver_attention_required": True,
@@ -3650,7 +3666,7 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
             "decision_dependency": "The active discharge instruction is again required for the upcoming handoff.",
         }]
         db.flush()
-        next_best_questions(db, person.id, persist=True, commit=False)
+        reconcile_person_change_intelligence(db, person.id)
         db.flush()
         db.refresh(necessary)
         assert necessary.status == "open"
@@ -3659,6 +3675,11 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         assert db.query(OpenQuestion).filter(
             OpenQuestion.person_id == person.id,
             OpenQuestion.question == necessary.question,
+        ).count() == 1
+        assert db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.source_event_id == necessary.id,
+            CareNotification.category == "care_attention",
         ).count() == 1
         db.commit()
         assert db.query(CareStateRevision).filter(
