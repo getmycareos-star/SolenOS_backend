@@ -12,7 +12,7 @@ from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationSession, ConversationMessage
-from app.models.uncertainty import OpenQuestion, InformationGap
+from app.models.uncertainty import OpenQuestion, InformationGap, Contradiction
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -307,7 +307,27 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
                 "decision_dependency": "The handoff cannot state the current dose without this source.",
             }],
         )
-        db.add_all([person, caregiver, gap_source, current_source, gap])
+        conflict_gap_source = Evidence(
+            id="evidence-gap-reconcile-conflict",
+            person_id=person.id,
+            type="document",
+            source_text="A separate medication field remains contested.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        conflict_gap = InformationGap(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="medication-2",
+            field="current_dose",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.CONFLICTING,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="The current dose has competing reports.",
+            evidence_ids=[conflict_gap_source.id],
+        )
+        db.add_all([person, caregiver, gap_source, current_source, gap, conflict_gap_source, conflict_gap])
         db.flush()
 
         from app.services.care_continuity import (
@@ -337,7 +357,32 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
             created_by_caregiver_id=caregiver.id,
             updated_by_caregiver_id=caregiver.id,
         )
-        db.add(accepted_assertion)
+        accepted_conflicting_assertion = CareAssertion(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="medication-2",
+            field="current_dose",
+            assertion_kind="current_state",
+            asserted_value="A different dose is reported",
+            source_label="Caregiver-reviewed medication report",
+            source_text="The competing medication report.",
+            evidence_ids=[conflict_gap_source.id],
+            assertion_status="accepted",
+            epistemic_state="reported",
+            review_after_days=30,
+            created_by_caregiver_id=caregiver.id,
+            updated_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([accepted_assertion, accepted_conflicting_assertion])
+        db.add(Contradiction(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="medication-2",
+            field="current_dose",
+            description="Two source-backed dose reports conflict.",
+            evidence_ids=[conflict_gap_source.id],
+            resolution_status="unresolved",
+        ))
         db.flush()
 
         reconciliation = reconcile_information_gaps_from_accepted_assertions(db, person.id)
@@ -345,8 +390,9 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
         db.flush()
         db.refresh(gap)
         db.refresh(question)
-        assert reconciliation == {"scanned": 1, "resolved": 1, "skipped_conflict": 0}
+        assert reconciliation == {"scanned": 2, "resolved": 1, "skipped_conflict": 1}
         assert gap.lifecycle_status == GapLifecycleStatus.RESOLVED
+        assert conflict_gap.lifecycle_status == GapLifecycleStatus.OPEN
         assert gap.resolution_mechanism.value == "new_evidence"
         assert current_source.id in gap.evidence_ids
         assert question.status == "closed"
