@@ -912,7 +912,26 @@ def test_document_processing_status_does_not_leak_across_anonymous_sessions(clie
     )
     assert uploaded.status_code == 201, uploaded.text
     evidence_id = uploaded.json()["evidence_id"]
-    assert uploaded.json()["document_processing_job_id"]
+    original_job_id = uploaded.json()["document_processing_job_id"]
+
+    queued = test_client.post(f"/api/v1/documents/{evidence_id}/queue", headers=first_auth, json={})
+    assert queued.status_code == 202, queued.text
+    assert queued.json()["job_id"] == original_job_id
+    assert queued.json()["idempotent_replay"] is True
+
+    from app.models.qwen_background_job import QwenBackgroundJob
+    with TestSessionLocal() as db:
+        job = db.query(QwenBackgroundJob).filter_by(id=original_job_id).one()
+        job.status = "failed"
+        job.attempt_count = 3
+        job.error_code = "temporary_failure"
+        db.commit()
+
+    retried = test_client.post(f"/api/v1/documents/{evidence_id}/queue", headers=first_auth, json={})
+    assert retried.status_code == 202, retried.text
+    assert retried.json()["job_id"] == original_job_id
+    assert retried.json()["status"] == "queued"
+    assert retried.json()["idempotent_replay"] is False
 
     second = test_client.post("/api/v1/sessions/anonymous", json={
         "name": "Different care recipient",
