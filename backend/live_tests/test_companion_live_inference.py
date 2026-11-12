@@ -175,6 +175,8 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         assert daily_qwen_body["status"] == "completed", daily_qwen_body
         assert any(row.get("source_id") == event_id for row in daily_qwen_body.get("source_records", [])), daily_qwen_body
         assert daily_qwen_body["written_to_lcr"] is False, daily_qwen_body
+        assert daily_qwen_body["review_required"] is False, daily_qwen_body
+        assert daily_qwen_body["review_available"] is False, daily_qwen_body
 
         direct = _ask(client, caregiver, "What did we record about sleep?")
         assert direct.status_code == 200, direct.text
