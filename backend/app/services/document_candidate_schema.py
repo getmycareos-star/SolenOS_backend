@@ -273,6 +273,7 @@ def split_document_pages(source_text: str) -> list[tuple[int, str]]:
     for index, marker in enumerate(markers):
         end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
         body = source_text[marker.end():end].strip()
+        body = re.sub(r"(?m)^\\[OCR quality:.*\\]\\s*$", "", body).strip()
         if body and "[No readable text detected on this page]" not in body:
             pages.append((int(marker.group(1)), body))
     return pages
