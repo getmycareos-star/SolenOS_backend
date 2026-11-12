@@ -105,27 +105,97 @@ class _HTMLText(HTMLParser):
 
 
 def _extract_docx(content: bytes) -> str:
-    """Read only the main WordprocessingML document with bounded ZIP expansion."""
+    """Read Word paragraphs, tables, headers and footers with bounded ZIP expansion."""
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            info = archive.getinfo("word/document.xml")
-            if info.file_size > 8 * 1024 * 1024 or info.compress_size == 0:
-                raise HTTPException(status_code=413, detail="Word document content exceeds extraction limits")
-            if info.file_size / max(info.compress_size, 1) > 100:
-                raise HTTPException(status_code=413, detail="Word document compression ratio exceeds safety limits")
-            xml = archive.read(info)
-        root = ET.fromstring(xml)
+            names = archive.namelist()
+            wanted = ["word/document.xml", *sorted(
+                name for name in names
+                if re.fullmatch(r"word/(?:header|footer)\d+\.xml", name)
+            )]
+            parts = {}
+            for name in wanted:
+                info = archive.getinfo(name)
+                if info.file_size > 8 * 1024 * 1024 or info.compress_size == 0:
+                    raise HTTPException(status_code=413, detail="Word document content exceeds extraction limits")
+                if info.file_size / max(info.compress_size, 1) > 100:
+                    raise HTTPException(status_code=413, detail="Word document compression ratio exceeds safety limits")
+                parts[name] = ET.fromstring(archive.read(info))
     except HTTPException:
         raise
     except (KeyError, zipfile.BadZipFile, ET.ParseError, OSError) as exc:
         raise HTTPException(status_code=422, detail="The saved Word document could not be read") from exc
+
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    paragraphs = []
-    for paragraph in root.findall(".//w:p", ns):
-        value = "".join(node.text or "" for node in paragraph.findall(".//w:t", ns))
-        if value.strip():
-            paragraphs.append(value)
-    return "\n".join(paragraphs).strip()
+    paragraph_tag = f"{{{ns['w']}}}p"
+    table_tag = f"{{{ns['w']}}}tbl"
+
+    def paragraph_text(paragraph):
+        return "".join(node.text or "" for node in paragraph.findall(".//w:t", ns)).strip()
+
+    blocks = []
+    body = parts["word/document.xml"].find("w:body", ns)
+    if body is None:
+        raise HTTPException(status_code=422, detail="The saved Word document has no readable document body")
+    for child in list(body):
+        if child.tag == paragraph_tag:
+            value = paragraph_text(child)
+            if value:
+                blocks.append(value)
+        elif child.tag == table_tag:
+            for row in child.findall("./w:tr", ns):
+                cells = []
+                for cell in row.findall("./w:tc", ns):
+                    values = [value for value in (paragraph_text(p) for p in cell.findall(".//w:p", ns)) if value]
+                    cells.append(" ".join(values))
+                if any(cells):
+                    blocks.append(" | ".join(cells))
+    for name in wanted[1:]:
+        for paragraph in parts[name].findall(".//w:p", ns):
+            value = paragraph_text(paragraph)
+            if value:
+                blocks.append(value)
+    return "\n".join(blocks).strip()
+
+
+def _extract_legacy_doc(content: bytes) -> str:
+    """Extract legacy binary Word documents using a bounded local antiword process."""
+    executable = shutil.which("antiword")
+    if not executable:
+        raise HTTPException(
+            status_code=503,
+            detail="Legacy Word extraction is not installed on this server. The original remains saved; export as DOCX or PDF.",
+        )
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="solenos-doc-", suffix=".doc", delete=False) as source:
+            source.write(content)
+            path = source.name
+        result = subprocess.run(
+            [executable, "-w", "0", path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=422, detail="The legacy Word document took too long to extract") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Legacy Word extraction could not start") from exc
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    if result.returncode != 0:
+        raise HTTPException(status_code=422, detail="The saved legacy Word document could not be read")
+    if len(result.stdout) > MAX_EXTRACTED_CHARS * 4:
+        raise HTTPException(status_code=413, detail="Legacy Word extraction exceeds the 100,000-character processing limit")
+    extracted = result.stdout.decode("utf-8-sig", errors="replace").strip()
+    if not extracted:
+        raise HTTPException(status_code=422, detail="No readable text was found in the legacy Word document")
+    return extracted
 
 
 def _extract_rtf(content: bytes) -> str:
@@ -403,10 +473,8 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
         )
 
     if mime == "application/msword" or filename.endswith(".doc"):
-        raise HTTPException(
-            status_code=415,
-            detail="Legacy .doc files are preserved, but extraction is unavailable on this server. Save as .docx or PDF and upload again.",
-        )
+        extracted = _extract_legacy_doc(content)
+        return _bounded_extraction(extracted, "server_antiword_doc")
 
     if mime.startswith("text/") or mime in {"application/json", "application/xml", "application/yaml"} or filename.endswith(
         (".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log")
