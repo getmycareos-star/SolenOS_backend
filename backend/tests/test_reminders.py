@@ -585,3 +585,43 @@ def test_disabled_reminder_batch_does_not_starve_enabled_caregiver():
         ).count() == 1
     finally:
         db.close()
+
+
+def test_web_push_public_key_is_not_advertised_when_private_key_is_missing(monkeypatch):
+    from types import SimpleNamespace
+    from app.api import push_notifications
+
+    client = TestClient(app)
+    session = create_session(client, "Push configuration caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(
+        push_notifications,
+        "get_settings",
+        lambda: SimpleNamespace(
+            vapid_public_key="public-key",
+            vapid_private_key="",
+            vapid_subject="mailto:support@solenosai.net",
+        ),
+    )
+    response = client.get("/api/v1/notifications/push/public-key", headers=headers)
+    assert response.status_code == 503, response.text
+
+
+def test_web_push_public_key_requires_valid_vapid_subject(monkeypatch):
+    from types import SimpleNamespace
+    from app.api import push_notifications
+
+    client = TestClient(app)
+    session = create_session(client, "Push subject caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(
+        push_notifications,
+        "get_settings",
+        lambda: SimpleNamespace(
+            vapid_public_key="public-key",
+            vapid_private_key="private-key",
+            vapid_subject="support@solenosai.net",
+        ),
+    )
+    response = client.get("/api/v1/notifications/push/public-key", headers=headers)
+    assert response.status_code == 503, response.text
