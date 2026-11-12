@@ -1561,6 +1561,7 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
         seed_person_and_caregiver()
         db = TestingSessionLocal()
         foreign_person = Person(id="person-medication-foreign", name="Foreign Person")
+        foreign_person_id = foreign_person.id
         foreign_caregiver = Caregiver(
             id="caregiver-medication-foreign",
             name="Foreign Caregiver",
@@ -1568,7 +1569,6 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
             relationship="Family",
             person_id=foreign_person_id,
         )
-        foreign_person_id = foreign_person.id
         db.add_all([foreign_person, foreign_caregiver])
         db.commit()
         db.close()
