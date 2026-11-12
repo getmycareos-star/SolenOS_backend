@@ -3607,6 +3607,27 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
             row = _jsonable(dict(raw))
             if str(row.get("status") or "open").casefold() not in {"open", "unanswered", "pending"}:
                 continue
+            evidence_ids = row.get("evidence_ids")
+            rationale = row.get("necessity_rationale")
+            if not isinstance(evidence_ids, list) or not evidence_ids:
+                continue
+            if not isinstance(rationale, str) or not rationale.strip():
+                continue
+            valid_dependency = False
+            for context_item in (row.get("context") or []):
+                if not isinstance(context_item, dict):
+                    continue
+                nested = context_item.get("necessity_assessment")
+                nested_dependency = nested.get("decision_dependency") if isinstance(nested, dict) else None
+                direct_dependency = context_item.get("decision_dependency")
+                if any(
+                    isinstance(value, str) and value.strip()
+                    for value in (direct_dependency, nested_dependency)
+                ):
+                    valid_dependency = True
+                    break
+            if not valid_dependency:
+                continue
             output.append({
                 "question": row.get("question") or "Persisted open question",
                 "subject_type": row.get("subject_type") or "care_record",
