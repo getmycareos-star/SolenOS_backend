@@ -428,3 +428,72 @@ def test_clean_digital_pdf_extracts_real_text_without_ocr(client):
     assert retrieved.status_code == 200, retrieved.text
     assert "Discharge summary: patient walked 20 metres" in retrieved.json()["extracted_text"]
     assert "Medication: metformin 500 mg" in retrieved.json()["extracted_text"]
+
+
+def _docx_bytes(text):
+    import zipfile
+    output = io.BytesIO()
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:body><w:p><w:r><w:t>' + text + '</w:t></w:r></w:p></w:body></w:document>'
+    )
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document_xml)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("filename", "mime", "content", "method", "expected"),
+    [
+        (
+            "care-plan.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            _docx_bytes("Patient needs help with morning dressing."),
+            "server_docx_xml",
+            "Patient needs help with morning dressing.",
+        ),
+        (
+            "care-note.rtf",
+            "application/rtf",
+            b"{\\rtf1\\ansi Patient\\'92s mobility\\par Needs a walking frame.}",
+            "server_rtf_text",
+            "Patient’s mobility\\nNeeds a walking frame.",
+        ),
+        (
+            "clinic-email.eml",
+            "message/rfc822",
+            b"From: clinic@example.org\\r\\nTo: family@example.org\\r\\nSubject: Follow-up\\r\\nMIME-Version: 1.0\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\nPlease arrange a review next Tuesday.",
+            "server_email_text",
+            "Please arrange a review next Tuesday.",
+        ),
+    ],
+)
+def test_supported_office_and_email_formats_extract_from_saved_original(
+    client, filename, mime, content, method, expected
+):
+    test_client, session = client
+    evidence_id = persist_document(session, content, filename, mime)
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_method"] == method
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert expected in retrieved.json()["extracted_text"]
+
+
+def test_legacy_doc_is_preserved_but_reports_explicit_unsupported_extraction(client):
+    test_client, session = client
+    evidence_id = persist_document(
+        session,
+        b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-word-binary",
+        "legacy.doc",
+        "application/msword",
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 415, response.text
+    assert ".doc files are preserved" in response.json()["detail"]
