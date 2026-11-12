@@ -281,7 +281,7 @@ def test_worker_waits_quietly_when_job_table_is_not_yet_migrated(tmp_path, monke
 def test_document_worker_defers_intelligence_until_failed_extraction_pages_are_retried(monkeypatch, tmp_path):
     from app.api import document_lifecycle, document_intelligence
 
-    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    _isolated_job_store(tmp_path, monkeypatch)
     extraction = {
         "analysis_id": "analysis-incomplete",
         "extraction_status": "partial",
