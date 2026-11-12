@@ -3,10 +3,12 @@ import hashlib
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
-from app.models.care_continuity import CareDeltaRun
+from app.models.care_continuity import CareDeltaRun, EvidenceObservation
+from app.models.care import CareEvent, Evidence
 from app.schemas.care_delta import CareDeltaReconcileRequest
 from app.services.delta_engine import reconcile_event
 
@@ -61,6 +63,55 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, db: Sessi
             delta = json.loads(row.delta_json)
         except (TypeError, json.JSONDecodeError):
             delta = None
+        source_ids = [str(value) for value in (row.evidence_ids or []) if value]
+        changed_observation_count = 0
+        changed_source_count = 0
+        freshness_reasons = []
+        if row.source_event_id:
+            source_event = db.query(CareEvent).filter(
+                CareEvent.person_id == scoped_person_id,
+                CareEvent.id == row.source_event_id,
+            ).first()
+            if source_event is None:
+                changed_source_count += 1
+                freshness_reasons.append("source_event_unavailable")
+            elif row.created_at:
+                for source_time in (source_event.updated_at, source_event.recorded_at):
+                    if source_time:
+                        run_time = row.created_at
+                        if source_time.tzinfo is None:
+                            source_time = source_time.replace(tzinfo=timezone.utc)
+                        if run_time.tzinfo is None:
+                            run_time = run_time.replace(tzinfo=timezone.utc)
+                        if source_time > run_time:
+                            changed_source_count += 1
+                            freshness_reasons.append("source_event_changed_after_review")
+                            break
+            source_ids = list(dict.fromkeys(source_ids + [str(value) for value in (source_event.evidence_ids or []) if source_event] if source_event else source_ids))
+        if source_ids:
+            evidence_rows = db.query(Evidence).filter(
+                Evidence.person_id == scoped_person_id,
+                Evidence.id.in_(source_ids),
+            ).all()
+            if len(evidence_rows) != len(set(source_ids)):
+                changed_source_count += len(set(source_ids) - {str(item.id) for item in evidence_rows})
+                freshness_reasons.append("linked_source_unavailable")
+            if row.created_at and inspect(db.get_bind()).has_table("evidence_observations"):
+                observation_rows = db.query(EvidenceObservation).filter(
+                    EvidenceObservation.person_id == scoped_person_id,
+                    EvidenceObservation.evidence_id.in_(source_ids),
+                    EvidenceObservation.recorded_at > row.created_at,
+                ).all()
+                changed_observation_count = len(observation_rows)
+                if changed_observation_count:
+                    changed_source_count += changed_observation_count
+                    freshness_reasons.append("source_observation_added_or_corrected_after_review")
+        source_freshness = {
+            "status": "stale" if changed_source_count else "current" if (source_ids or row.source_event_id) else "not_checked",
+            "changed_source_count": changed_source_count,
+            "changed_observation_count": changed_observation_count,
+            "reasons": sorted(set(freshness_reasons)),
+        }
         output.append({
             "id": row.id,
             "person_id": row.person_id,
@@ -71,6 +122,7 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, db: Sessi
             "model_name": row.model_name,
             "created_by_caregiver_id": row.created_by_caregiver_id,
             "created_at": row.created_at,
+            "source_freshness": source_freshness,
             "delta": delta,
         })
     return output
