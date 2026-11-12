@@ -723,7 +723,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     total_pages = len(re.findall(r"(?m)^\[Page\s+\d+", source_text)) or 1
     unreadable_pages = _unreadable_page_numbers(source_text)
     unprocessed_pages = [
-        int(value) for value in re.findall(r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed:, source_text)
+        int(value) for value in re.findall(r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed:", source_text)
     ]
     processed_pages = sorted(set(range(1, total_pages + 1)) - set(unprocessed_pages))
     extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
