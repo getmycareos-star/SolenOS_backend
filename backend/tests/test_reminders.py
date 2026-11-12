@@ -688,19 +688,26 @@ def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
 
 
 def test_push_subscription_endpoint_cannot_be_claimed_by_another_care_record(monkeypatch):
+    import base64
     from types import SimpleNamespace
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
     from app.api import push_notifications
 
-    monkeypatch.setattr(
-        push_notifications,
-        "get_settings",
-        lambda: SimpleNamespace(
-            vapid_public_key="public-key",
-            vapid_private_key="private-key",
-            vapid_subject="mailto:support@solenosai.net",
-            secret_key="test-secret-key-for-push-subscription-isolation",
-        ),
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = base64.urlsafe_b64encode(
+        private_key.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    ).rstrip(b"=").decode("ascii")
+    private_pem = private_key.private_bytes(
+        Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
+    ).decode("ascii")
+    settings = SimpleNamespace(
+        vapid_public_key=public_key,
+        vapid_private_key=private_pem,
+        vapid_subject="mailto:support@solenosai.net",
+        secret_key="test-secret-key-for-push-subscription-isolation",
     )
+    monkeypatch.setattr(push_notifications, "get_settings", lambda: settings)
     client = TestClient(app)
     first = create_session(client, "Push subscription owner")
     second = create_session(client, "Push subscription attacker")
