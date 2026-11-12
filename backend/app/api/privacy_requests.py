@@ -1094,6 +1094,7 @@ def fulfil_approved_deletion(
             name: inspector.get_foreign_keys(name) for name in raw_tables
         }
         reachable_depth = {"persons": 0, "caregivers": 0}
+        dependency_graph_converged = False
         for _ in range(len(raw_tables) + 1):
             changed_depth = False
             for child_name, foreign_keys in raw_foreign_keys.items():
@@ -1102,11 +1103,17 @@ def fulfil_approved_deletion(
                     if parent_name not in reachable_depth:
                         continue
                     candidate_depth = reachable_depth[parent_name] + 1
-                    if child_name not in reachable_depth or candidate_depth < reachable_depth[child_name]:
+                    if child_name not in reachable_depth or candidate_depth > reachable_depth[child_name]:
                         reachable_depth[child_name] = candidate_depth
                         changed_depth = True
             if not changed_depth:
+                dependency_graph_converged = True
                 break
+        if not dependency_graph_converged:
+            raise HTTPException(
+                status_code=409,
+                detail="Legacy data dependency cycle prevents a safe deletion order; request was not fulfilled.",
+            )
 
         for raw_table_name in sorted(
             raw_tables,
