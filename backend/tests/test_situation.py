@@ -421,8 +421,15 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     subject_type="mobility",
                     subject_id=person_id,
                     claim_id="mobility-claim-for-question",
-                    evidence_ids=[],
+                    evidence_ids=[first_evidence_id],
                     status="open",
+                    necessity="necessary",
+                    necessity_rationale="A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
+                    context=[{
+                        "caregiver_attention_required": True,
+                        "necessity_rationale": "A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
+                        "decision_dependency": "The current mobility handoff cannot accurately describe the observed mobility concern without this clarification.",
+                    }],
                 ),
                 OpenQuestion(
                     id="unlinked-mobility-question",
@@ -558,9 +565,9 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         }
         assert threads["persisted-appetite-thread"]["linked_evidence_ids"] == [second_evidence_id]
         mobility_questions = threads["persisted-mobility-thread"]["openQuestions"]
-        # These fixture questions have no evidence-backed necessity assessment;
-        # preserve the conflict and source records without making them caregiver tasks.
-        assert mobility_questions == []
+        # Only the source-grounded, explicitly necessary question is exposed;
+        # the unrelated unassessed question remains internal.
+        assert mobility_questions == ["Has the unsteadiness also happened indoors?"]
         assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
         assert threads["persisted-mobility-thread"]["conflicts"][0]["resolution_status"] == "unresolved"
         assert threads["persisted-appetite-thread"]["openQuestions"] == []
