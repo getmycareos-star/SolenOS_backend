@@ -206,7 +206,6 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
                     "source_references": [],
                 }],
             },
-            "validated_aggregates": [],
         }
 
     monkeypatch.setattr(worker, "_classify_task", classify)
@@ -235,7 +234,6 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
     assert output.output_metadata["source_freshness_assessment_ids"] == ["freshness-assessment-123456"]
     assert output.output_metadata["source_freshness_status"] == "available"
     assert output.output_metadata["claim_provenance"]["claims"][0]["support_status"] == "not_matched_to_saved_wording"
-    assert output.output_metadata["validated_aggregates"] == []
     safety = db.query(QwenSafetyEvaluation).filter_by(output_id=output.id).one()
     assert safety.decision == "review_required"
     assert safety.human_review_required is True
