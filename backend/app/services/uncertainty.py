@@ -79,6 +79,17 @@ def _question_is_answered_by_current_lcr(
         ))
         if not field_tokens or not field_tokens.issubset(question_tokens) or not evidence_ids:
             continue
+        # An accepted assertion cannot settle a source question while the
+        # same LCR field still has an unresolved competing report.
+        conflict = db.query(ContradictionModel.id).filter(
+            ContradictionModel.person_id == person_id,
+            ContradictionModel.subject_type == assertion.subject_type,
+            ContradictionModel.subject_id == assertion.subject_id,
+            ContradictionModel.field == assertion.field,
+            ContradictionModel.resolution_status.in_(("unresolved", "reopened", "qualified", "partially_resolved")),
+        ).first()
+        if conflict is not None:
+            continue
         valid_ids = {
             str(row[0]) for row in db.query(EvidenceModel.id).filter(
                 EvidenceModel.person_id == person_id,
