@@ -625,6 +625,8 @@ def test_document_candidate_overflow_is_preserved_and_revealed_in_review_batches
         assert first_payload["has_more_candidates"] is True
         assert first_payload["remaining_candidate_count"] == 12
         assert first_payload["intelligence_status"] == "partial"
+        assert first_payload["unprocessed_page_numbers"] == []
+        assert first_payload["retryable_page_numbers"] == []
         assert processed_pages == list(range(1, 7))
 
         blocked = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
@@ -671,7 +673,7 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
     quote = "Donepezil 10 mg once daily."
-    source = "[Page 1]\\nMedication list: " + quote
+    source = "[Page 1]\nMedication list: " + quote
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
         return {
