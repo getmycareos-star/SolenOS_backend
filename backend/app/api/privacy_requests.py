@@ -1158,9 +1158,17 @@ def fulfil_approved_deletion(
                 if parent_component != child_component:
                     component_children[parent_component].add(child_component)
 
+        direct_scope_roots = set()
+        for raw_table_name in raw_tables:
+            raw_column_names = {
+                column["name"] for column in inspector.get_columns(raw_table_name)
+            }
+            if {"person_id", "caregiver_id"} & raw_column_names:
+                direct_scope_roots.add(raw_table_name)
+        root_table_names = {"persons", "caregivers"} | direct_scope_roots
         root_components = {
             component_for[root]
-            for root in ("persons", "caregivers")
+            for root in root_table_names
             if root in component_for
         }
         reachable_components = set(root_components)
