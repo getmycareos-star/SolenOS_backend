@@ -1236,3 +1236,107 @@ def test_handoff_claim_provenance_links_each_exact_quote_to_its_own_source():
     assert provenance["claims"][0]["source_references"][0]["related_evidence"][0]["reported_by_label"] == "Daughter"
     assert provenance["claims"][1]["support_status"] == "matched_historical_only"
     assert provenance["claims"][1]["source_references"][0]["source_state_label"]
+
+def test_observation_correction_marks_prepared_handoff_source_stale(client, monkeypatch):
+    from app.api import handoff_drafts
+    from app.models.care_continuity import EvidenceObservation
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    now = datetime.now(timezone.utc)
+    source_text = "She felt unsteady near the kitchen."
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            id="handoff-corrected-observation-evidence",
+            person_id=person_id,
+            type="caregiver_report",
+            source_text=source_text,
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_label="Daughter",
+        )
+        event = CareEvent(
+            id="handoff-corrected-observation-event",
+            person_id=person_id,
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=now - timedelta(hours=2),
+            title="Unsteadiness near the kitchen",
+            description=source_text,
+            evidence_ids=["handoff-corrected-observation-evidence"],
+            created_by_caregiver_id=caregiver_id,
+        )
+        original = EvidenceObservation(
+            id="handoff-corrected-observation-original",
+            person_id=person_id,
+            evidence_id=evidence.id,
+            observation_kind="caregiver_report",
+            epistemic_status="reported",
+            subject_label="person receiving care",
+            attribute="unsteadiness",
+            value_text="unsteady",
+            source_passage=source_text,
+            source_span_start=0,
+            source_span_end=len(source_text),
+            extraction_method="human_entered",
+            extraction_version="test-v1",
+            created_by_caregiver_id=caregiver_id,
+            recorded_at=now - timedelta(hours=1),
+        )
+        db.add_all([evidence, event, original])
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(
+        handoff_drafts,
+        "_generate_grounded_handoff",
+        lambda *args, **kwargs: {"status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": "test", "sections": []},
+    )
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "family_transition", "window_days": 30},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+    event_reference = next(
+        item for item in prepared.json()["source_references"]
+        if item["source_id"] == event.id
+    )
+    assert event_reference["details"]["source_observation_history"]["records"][0]["source_state"] == "current_version"
+
+    db = TestSessionLocal()
+    try:
+        corrected = EvidenceObservation(
+            id="handoff-corrected-observation-current",
+            person_id=person_id,
+            evidence_id=evidence.id,
+            supersedes_observation_id=original.id,
+            correction_rationale="The caregiver corrected the original interpretation.",
+            observation_kind="caregiver_report",
+            epistemic_status="reported",
+            subject_label="person receiving care",
+            attribute="unsteadiness",
+            value_text="steady",
+            source_passage=source_text,
+            source_span_start=0,
+            source_span_end=len(source_text),
+            extraction_method="human_entered",
+            extraction_version="test-v1",
+            created_by_caregiver_id=caregiver_id,
+            recorded_at=datetime.now(timezone.utc),
+        )
+        db.add(corrected)
+        db.commit()
+    finally:
+        db.close()
+
+    retrieved = test_client.get(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers=headers,
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert retrieved.json()["source_freshness"]["status"] == "stale"
