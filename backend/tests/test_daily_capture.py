@@ -2232,3 +2232,41 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
         assert all(row["epistemic_status"] == "caregiver_reported" for row in lcr_rows)
     finally:
         teardown_db()
+
+
+def test_daily_care_persistence_failure_never_returns_a_saved_receipt(monkeypatch):
+    from sqlalchemy.orm import Session
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+
+        def fail_commit(_self):
+            raise RuntimeError("injected database persistence failure")
+
+        monkeypatch.setattr(Session, "commit", fail_commit)
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "daily-care-persist-failure-001",
+                "notes": "Mum slept poorly last night.",
+            },
+        )
+        assert response.status_code >= 500
+        assert not (response.status_code == 200 and response.json().get("success") is True)
+
+        monkeypatch.undo()
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareEvent).filter_by(person_id="person-daily-test").count() == 0
+            assert db.query(Evidence).filter_by(person_id="person-daily-test").count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
