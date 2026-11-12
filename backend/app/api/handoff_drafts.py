@@ -139,6 +139,7 @@ SOURCES = {
         "event_time_fields": ("decided_at",),
         "recorded_time_fields": ("created_at", "updated_at"),
         "detail_fields": ("decision_status",),
+        "include_unresolved_outside_window": True,
     },
     "open_questions": {
         "label": "Open questions",
@@ -227,6 +228,7 @@ SOURCES = {
         "recorded_time_fields": ("created_at", "updated_at"),
         "due_time_fields": ("deadline",),
         "detail_fields": ("source_authority", "actor_label", "subject_label", "action_type", "modality", "condition_text", "trigger_text", "deadline", "status", "source_evidence_id"),
+        "include_unresolved_outside_window": True,
     },
     "evidence_freshness_assessments": {
         "label": "Evidence freshness assessments",
@@ -1671,6 +1673,12 @@ def prepare_handoff_draft(
                     unresolved = or_(
                         table.c.resolution_status.is_(None),
                         table.c.resolution_status.notin_(("resolved", "completed", "closed", "dismissed")),
+                    )
+                    query = query.where(or_(unresolved, in_window))
+                elif spec.get("include_unresolved_outside_window") and "decision_status" in table.c:
+                    unresolved = or_(
+                        table.c.decision_status.is_(None),
+                        table.c.decision_status.notin_(("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed")),
                     )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_unresolved_outside_window") and "status" in table.c:
