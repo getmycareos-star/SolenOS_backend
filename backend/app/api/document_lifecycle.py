@@ -832,7 +832,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         Evidence.uploaded_by_caregiver_id == caregiver_id,
         Evidence.type == "document",
     ).with_for_update().first()
-    if evidence is None:
+    if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Saved document not found in this care record")
     upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
     if upload is None:
