@@ -848,19 +848,44 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         db.rollback()
         learning_pipeline_status = "unavailable"
 
-    # Analyze the saved capture through the shared Railway-local Qwen gateway.
-    # This response is a review aid only; candidate output is never written as
-    # an authoritative LCR fact. A Qwen outage cannot undo the saved capture.
-    source_text = json.dumps(detail, ensure_ascii=False, default=str)[:12_000]
+    # Extraction reads the saved evidence row, not the browser request body.
+    source_text = (
+        evidence.source_text
+        if evidence is not None
+        else (event.description or "")
+    )[:12_000]
     qwen_status = "unavailable"
     qwen_candidates = None
     try:
-        qwen_candidates = extract_review_candidates(source_text, source_event_id=event.id)
+        qwen_candidates = extract_review_candidates(
+            source_text,
+            source_event_id=event.id,
+            source_evidence_id=evidence.id if evidence is not None else None,
+        )
         qwen_status = "available"
     except Exception:
-        qwen_status = "unavailable"
+        logger.exception("Daily Care extraction failed after durable source save %s", event.id)
+
+    observations = (
+        qwen_candidates.get("observations", [])
+        if isinstance(qwen_candidates, dict)
+        else []
+    )
+    stage_statuses = {
+        "extraction": "available" if qwen_status == "available" else "failed",
+        "assessment": "pending" if qwen_status == "available" else "failed",
+        "review": "required" if observations else "not_required",
+    }
+    execution_status = {
+        "source_preservation": "verified",
+        "evidence": "verified" if evidence is not None else "not_applicable",
+        **stage_statuses,
+        "reconciliation": "pending",
+        "longitudinal_retrieval": "unavailable",
+    }
 
     analysis_id = None
+    analysis_persisted = False
     try:
         analysis = persist_capture_analysis(
             db,
@@ -871,17 +896,17 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             source_text=source_text,
             extraction_status=qwen_status,
             candidates=qwen_candidates if qwen_status == "available" else None,
+            execution_status=execution_status,
+            commit=True,
         )
         analysis_id = analysis.id
+        analysis_persisted = True
     except Exception:
-        # The care event has already been committed. Roll back only the
-        # secondary review transaction and return the durable event receipt.
         db.rollback()
-        qwen_status = "unavailable"
-        qwen_candidates = None
+        logger.exception("Could not persist Daily Care extraction review for event %s", event.id)
 
-    change_intelligence_status = "available"
     execution = None
+    change_intelligence_status = "unavailable"
     try:
         execution = execute_care_continuity_reconciliation(
             db,
@@ -890,35 +915,61 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             caregiver_id=caregiver_id,
             source_event_id=event.id,
             source_evidence_id=evidence.id if evidence is not None else None,
+            stage_statuses=stage_statuses,
         )
+        execution_status = dict(execution["stages"])
+        execution_status["reconciliation"] = "completed"
+        if analysis_persisted and analysis_id:
+            persisted_analysis = db.query(CaptureAnalysisModel).filter(
+                CaptureAnalysisModel.id == analysis_id,
+                CaptureAnalysisModel.person_id == person_id,
+                CaptureAnalysisModel.caregiver_id == caregiver_id,
+            ).first()
+            if persisted_analysis is not None:
+                persisted_analysis.execution_status = dict(execution_status)
+                db.add(persisted_analysis)
         db.commit()
-        execution["stages"]["reconciliation"] = "committed"
+        execution["stages"]["reconciliation"] = "completed"
+        change_intelligence_status = "available"
     except Exception:
         db.rollback()
-        change_intelligence_status = "unavailable"
-        execution = {
-            "contract_version": "1.0",
-            "workflow": event_type,
-            "person_id": person_id,
-            "source_event_id": event.id,
-            "source_evidence_id": evidence.id if evidence is not None else None,
-            "stages": {
-                "source_preservation": "verified",
-                "evidence": "verified" if evidence is not None else "unavailable",
-                "reconciliation": "unavailable",
-            },
-            "transaction_owner": "caller",
+        execution_status = {
+            "source_preservation": "verified",
+            "evidence": "verified" if evidence is not None else "not_applicable",
+            **stage_statuses,
+            "reconciliation": "failed",
+            "longitudinal_retrieval": "unavailable",
         }
+        change_intelligence_status = "unavailable"
         logger.exception(
             "Shared care-continuity execution failed after durable capture event %s",
             event.id,
         )
+        try:
+            failed_analysis = (
+                db.query(CaptureAnalysisModel)
+                .filter(
+                    CaptureAnalysisModel.id == analysis_id,
+                    CaptureAnalysisModel.person_id == person_id,
+                    CaptureAnalysisModel.caregiver_id == caregiver_id,
+                )
+                .first()
+                if analysis_id else None
+            )
+            if failed_analysis is not None:
+                failed_analysis.execution_status = dict(execution_status)
+                db.add(failed_analysis)
+                db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Could not persist failed execution status for event %s", event.id)
 
     return {
         "success": True,
         "id": event.id,
         "change_intelligence_status": change_intelligence_status,
         "care_continuity_execution": execution,
+        "execution_status": execution_status,
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
         "evidence_ids": list(event.evidence_ids or []),
@@ -927,10 +978,9 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
         "qwen_analysis_id": analysis_id,
-        "qwen_review_required": True,
+        "qwen_review_required": execution_status["review"] == "required",
         "qwen_written_to_lcr": False,
     }
-
 
 def _validate_quick_check_in(payload: dict) -> None:
     quick = payload.get("quick_check_in")
