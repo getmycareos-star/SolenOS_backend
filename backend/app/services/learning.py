@@ -32,6 +32,8 @@ class LearningEngine:
         source_type: str,
         source_id: str = None,
         caregiver_id: str = None,
+        *,
+        commit: bool = True,
     ):
         event = LearningEventModel(
             person_id=person_id,
@@ -42,7 +44,8 @@ class LearningEngine:
             caregiver_id=caregiver_id,
         )
         self.db.add(event)
-        self.db.commit()
+        if commit:
+            self.db.commit()
 
     def after_save(self, person_id: str):
         self.evaluate_understanding(person_id)
@@ -50,7 +53,7 @@ class LearningEngine:
     def evaluate_understanding(self, person_id: str):
         pass
 
-    def apply_correction(self, correction):
+    def apply_correction(self, correction, *, commit: bool = True):
         target_type = correction.target_type
         target_id = correction.target_id
         corrected_text = correction.corrected_text
@@ -63,7 +66,8 @@ class LearningEngine:
                 old_description = insight.description
                 insight.description = corrected_text
                 insight.updated_at = datetime.utcnow()
-                self.db.commit()
+                if commit:
+                    self.db.commit()
 
                 memory = ReasoningMemoryModel(
                     person_id=person_id,
@@ -81,7 +85,8 @@ class LearningEngine:
                     source_evidence_ids=[],
                 )
                 self.db.add(memory)
-                self.db.commit()
+                if commit:
+                    self.db.commit()
 
     def record_feedback(self, person_id: str, category: str, detail: str, caregiver_id: str):
         memory = ReasoningMemoryModel(
