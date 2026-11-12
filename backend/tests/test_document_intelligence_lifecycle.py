@@ -586,7 +586,10 @@ def test_document_candidate_overflow_is_preserved_and_revealed_in_review_batches
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
     source = "\n\n".join(
-        f"[Page {page}]\nPatient record for page {page}."
+        f"[Page {page}]\n" + "\n".join(
+            f"Patient record for page {page}. Observation {item_number}."
+            for item_number in range(1, 13)
+        )
         for page in range(1, 7)
     )
     processed_pages = []
