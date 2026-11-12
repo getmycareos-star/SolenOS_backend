@@ -65,6 +65,7 @@ from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
 from app.services.qwen_background_worker import qwen_worker_loop
+from app.services.reminder_delivery import reminder_delivery_loop
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,8 @@ async def lifespan(app: FastAPI):
         tasks.append(app.state.qwen_worker_task)
         app.state.open_loop_maintenance_task = asyncio.create_task(open_loop_maintenance_loop())
         tasks.append(app.state.open_loop_maintenance_task)
+        app.state.reminder_delivery_task = asyncio.create_task(reminder_delivery_loop())
+        tasks.append(app.state.reminder_delivery_task)
         yield
     finally:
         for task in tasks:
