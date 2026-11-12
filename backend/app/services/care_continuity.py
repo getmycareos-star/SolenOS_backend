@@ -235,6 +235,10 @@ def set_assertion_status(db: Session, assertion_id: str, person_id: str, status:
         assertion.review_after_days = review_after_days
     assertion.assertion_status = status
     assertion.updated_by_caregiver_id = updated_by_caregiver_id
+    # SessionLocal is configured with autoflush=False. Flush the review decision
+    # before reconciliation queries so the accepted assertion is visible to the
+    # same transaction's evidence-sufficiency checks.
+    db.flush()
     # Assertion review is a source-workflow event. Reconcile the affected care
     # record in the same transaction so accepted evidence can settle exact
     # information gaps and obsolete requests are lifecycle-managed immediately.
