@@ -4661,8 +4661,8 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
 class NotificationPreferenceUpdate(BaseModel):
     quiet_hours_enabled: Optional[bool] = None
     reminders_enabled: Optional[bool] = None
-    quiet_hours_start: Optional[str] = Field(default=None, pattern=r"^(?:[01]\\d|2[0-3]):[0-5]\\d$")
-    quiet_hours_end: Optional[str] = Field(default=None, pattern=r"^(?:[01]\\d|2[0-3]):[0-5]\\d$")
+    quiet_hours_start: Optional[str] = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    quiet_hours_end: Optional[str] = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     timezone_name: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
     @field_validator("timezone_name")
