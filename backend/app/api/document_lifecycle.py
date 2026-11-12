@@ -655,6 +655,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "unreadable_page_numbers": details.get("unreadable_page_numbers", []),
         "unprocessed_page_numbers": details.get("unprocessed_page_numbers", []),
         "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
+        "model_provenance": intelligence.get("model_provenance"),
+        "processing_history": intelligence.get("processing_history", []),
         "source_text_sha256": hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest(),
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
