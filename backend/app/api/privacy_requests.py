@@ -44,7 +44,7 @@ class PrivacyRequestCreate(BaseModel):
     authority_basis: AuthorityBasis
     authority_attested: bool
     note: Optional[str] = Field(default=None, max_length=1000)
-    correction_target_type: Optional[Literal["insight", "care_event_description"]] = None
+    correction_target_type: Optional[Literal["insight", "care_event_description", "evidence_source"]] = None
     correction_target_id: Optional[str] = Field(default=None, max_length=255)
     correction_text: Optional[str] = Field(default=None, max_length=10000)
     correction_reason: Optional[str] = Field(default=None, max_length=2000)
@@ -166,10 +166,15 @@ def submit_privacy_request(
                 Insight.id == payload.correction_target_id,
                 Insight.person_id == person_id,
             ).first()
-        else:
+        elif payload.correction_target_type == "care_event_description":
             target = db.query(CareEvent).filter(
                 CareEvent.id == payload.correction_target_id,
                 CareEvent.person_id == person_id,
+            ).first()
+        else:
+            target = db.query(Evidence).filter(
+                Evidence.id == payload.correction_target_id,
+                Evidence.person_id == person_id,
             ).first()
         if target is None:
             raise HTTPException(status_code=404, detail="Correction target was not found in this care record")
@@ -178,8 +183,14 @@ def submit_privacy_request(
             "target_id": target.id,
             "corrected_text": payload.correction_text,
             "reason": payload.correction_reason,
-            "original_value": target.description or "",
-            "target_updated_at": target.updated_at.isoformat() if getattr(target, "updated_at", None) else None,
+            "original_value": (
+                target.source_text if payload.correction_target_type == "evidence_source"
+                else target.description or ""
+            ),
+            "target_updated_at": (
+                target.source_text_sha256 if payload.correction_target_type == "evidence_source"
+                else target.updated_at.isoformat() if getattr(target, "updated_at", None) else None
+            ),
         }
 
     now = datetime.now(timezone.utc)
@@ -728,8 +739,8 @@ def fulfil_approved_correction(
     if not isinstance(correction_request, dict):
         raise HTTPException(status_code=422, detail="Correction details were not supplied with the request")
     target_type = correction_request.get("target_type")
-    if target_type not in {"insight", "care_event_description"}:
-        raise HTTPException(status_code=422, detail="Supported correction targets are insight descriptions and care-event descriptions")
+    if target_type not in {"insight", "care_event_description", "evidence_source"}:
+        raise HTTPException(status_code=422, detail="Unsupported correction target")
     target_id = str(correction_request.get("target_id") or "").strip()
     corrected_text = str(correction_request.get("corrected_text") or "").strip()
     if not target_id or not corrected_text:
@@ -743,7 +754,7 @@ def fulfil_approved_correction(
             .first()
         )
         persisted_target_type = "insight"
-    else:
+    elif target_type == "care_event_description":
         target = (
             db.query(CareEvent)
             .filter(CareEvent.id == target_id, CareEvent.person_id == row.person_id)
@@ -751,12 +762,26 @@ def fulfil_approved_correction(
             .first()
         )
         persisted_target_type = "care_event"
+    else:
+        target = (
+            db.query(Evidence)
+            .filter(Evidence.id == target_id, Evidence.person_id == row.person_id)
+            .with_for_update()
+            .first()
+        )
+        persisted_target_type = "evidence_source"
     if target is None:
         raise HTTPException(status_code=404, detail="Correction target was not found in this care record")
-    original_text = target.description or ""
+    original_text = (
+        target.source_text if persisted_target_type == "evidence_source"
+        else target.description or ""
+    )
     requested_original = str(correction_request.get("original_value") or "")
     requested_updated_at = correction_request.get("target_updated_at")
-    current_updated_at = target.updated_at.isoformat() if getattr(target, "updated_at", None) else None
+    current_updated_at = (
+        target.source_text_sha256 if persisted_target_type == "evidence_source"
+        else target.updated_at.isoformat() if getattr(target, "updated_at", None) else None
+    )
     if original_text != requested_original or current_updated_at != requested_updated_at:
         raise HTTPException(
             status_code=409,
@@ -777,10 +802,11 @@ def fulfil_approved_correction(
         caregiver_id=row.caregiver_id,
     )
     db.add(correction)
-    target.description = corrected_text
-    if isinstance(target, Insight):
-        target.updated_at = now
-    elif hasattr(target, "updated_at"):
+    # Evidence source text is immutable. For that target, the correction is
+    # retained as an append-only annotation linked by target_type/target_id;
+    # the original evidence bytes/text and fingerprint remain unchanged.
+    if persisted_target_type != "evidence_source":
+        target.description = corrected_text
         target.updated_at = now
     row.request_status = "fulfilled"
     row.resolved_at = now
