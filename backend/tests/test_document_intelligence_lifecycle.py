@@ -237,7 +237,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
             assertion = assertions[0]
             assert assertion.assertion_status == "accepted"
             assert assertion.assertion_kind == "document_reviewed_observation"
-            assert assertion.field == "document_observation_statement"
+            assert assertion.field == "observation"
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quotes[1]
             assert "page 1" in assertion.source_label
@@ -419,7 +419,7 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
             ).one()
             assert f"page {body['observations'][0]['page_number']}" in assertion.source_label
             assert "duplicate copy; not independent corroboration" in assertion.source_label
-            assert assertion.field == "document_medication_statement"
+            assert assertion.field == "medication"
             assert "Strength: 500 mg" in assertion.asserted_value
             assert "Dosage instructions:" in assertion.asserted_value
         current_care = client.get(
@@ -429,7 +429,7 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         assert current_care.status_code == 200, current_care.text
         lcr_item = next(
             item for item in current_care.json()["items"]
-            if item["title"] == "document_medication_statement"
+            if item["title"] == "medication"
         )
         assert "Strength: 500 mg" in lcr_item["description"]
         assert "Dosage instructions:" in lcr_item["description"]
@@ -497,7 +497,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
             assertion = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"]
             ).one()
-            assert assertion.field == "document_medication_statement"
+            assert assertion.field == "medication"
             assert "Strength: 1000 mg" in assertion.asserted_value
             assert "Dosage instructions: Metformin 1000 mg twice daily" in assertion.asserted_value
             assert quote == assertion.source_text
@@ -511,7 +511,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         assert current_care.status_code == 200, current_care.text
         lcr_item = next(
             item for item in current_care.json()["items"]
-            if item["title"] == "document_medication_statement"
+            if item["title"] == "medication"
         )
         assert "Event date: 2026-10-12" in lcr_item["description"]
         assert "Source-recorded date: 2026-10-13" in lcr_item["description"]
