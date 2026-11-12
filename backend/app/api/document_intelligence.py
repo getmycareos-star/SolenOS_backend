@@ -20,7 +20,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.document_lifecycle import _verify_persisted_extraction
+from app.api.document_lifecycle import _verify_persisted_extraction, _ocr_quality_by_page
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
@@ -179,6 +179,10 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "processed_page_numbers": intelligence.get("processed_page_numbers", []),
         "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers", []),
         "unreadable_page_numbers": intelligence.get("unreadable_page_numbers", []),
+        "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
+        "model_provenance": intelligence.get("model_provenance"),
+        "processing_history": intelligence.get("processing_history", []),
+        "candidate_overflow": bool(intelligence.get("candidate_overflow")),
         "extraction_method": metadata.get("extraction_method"),
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
