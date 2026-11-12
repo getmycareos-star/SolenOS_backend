@@ -351,6 +351,7 @@ def _persist_document_follow_up(
         actor=caregiver_id,
         created_at=now,
     ))
+    db.flush()
     return str(loop.id)
 
 
