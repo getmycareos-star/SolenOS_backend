@@ -581,7 +581,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert execution["source_evidence_id"] == evidence_id
         assertion_id = accepted.json()["source_record_ref"]["record_id"]
         assert execution["source_assertion_id"] == assertion_id
-        assert execution["stages"]["reconciliation"] == "committed"
+        assert execution["stages"]["reconciliation"] == "staged_in_caller_transaction"
         assert execution["transaction_owner"] == "caller"
         assert accepted.json()["change_intelligence_status"] == "available"
 
