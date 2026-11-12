@@ -15,11 +15,12 @@ router = APIRouter(tags=["care reminders"])
 
 
 def _cancel_pending_reminder_pushes(db: Session, reminder_id: str) -> None:
-    db.query(CarePushDelivery).join(
-        CareNotification, CareNotification.id == CarePushDelivery.notification_id
-    ).filter(
+    reminder_notification_ids = db.query(CareNotification.id).filter(
         CareNotification.source_event_id == reminder_id,
         CareNotification.category == "reminder_due",
+    ).subquery()
+    db.query(CarePushDelivery).filter(
+        CarePushDelivery.notification_id.in_(reminder_notification_ids),
         CarePushDelivery.status == "pending",
     ).update(
         {CarePushDelivery.status: "cancelled"},
