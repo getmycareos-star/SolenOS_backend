@@ -959,17 +959,36 @@ async def upload_evidence(
         _ensure_document_intake_job(db, scoped_person_id, scoped_caregiver_id, evidence.id)
         if evidence_type == "document" else None
     )
+    # Capture scalar values before commit expires ORM instances. The durable
+    # upload response must not depend on refreshing an Evidence object after a
+    # concurrent document-intake worker has started processing its job.
+    evidence_id = str(evidence.id)
+    document_job_id = str(document_job.id) if document_job else None
+    document_job_status = str(document_job.status) if document_job else (
+        "queue_unavailable" if evidence_type == "document" else "not_applicable"
+    )
+    duplicate_of_evidence_id = str(duplicate_upload.evidence_id) if duplicate_upload else None
     db.commit()
+    persisted_evidence_id = db.query(EvidenceModel.id).filter(
+        EvidenceModel.id == evidence_id,
+        EvidenceModel.person_id == scoped_person_id,
+        EvidenceModel.uploaded_by_caregiver_id == scoped_caregiver_id,
+    ).scalar()
+    if persisted_evidence_id is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The uploaded file could not be confirmed in the care record. Please retry.",
+        )
     return {
-        "evidence_id": evidence.id,
+        "evidence_id": evidence_id,
         "size_bytes": len(data),
         "mime_type": mime_type,
         "sha256": digest,
         "persisted": True,
-        "document_processing_job_id": document_job.id if document_job else None,
-        "processing_status": document_job.status if document_job else ("queue_unavailable" if evidence_type == "document" else "not_applicable"),
+        "document_processing_job_id": document_job_id,
+        "processing_status": document_job_status,
         "duplicate_detected": duplicate_upload is not None,
-        "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
+        "duplicate_of_evidence_id": duplicate_of_evidence_id,
         "source_integrity": {
             "binary_sha256_computed_at_ingest": True,
             "original_binary_persisted": True,
