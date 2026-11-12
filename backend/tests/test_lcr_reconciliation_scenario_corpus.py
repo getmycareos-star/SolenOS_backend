@@ -124,7 +124,7 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
         "person_id": person_id,
         "initial_lcr": {
             "assertions": [
-                {"topic": "sleep", "value": "usual_sleep_stable", "status": "reported"},
+                {"topic": assertion_name, "value": initial_value, "status": "reported"},
                 {"topic": "medication", "value": "current_prescription_unknown", "status": "unknown"},
             ],
             "historical_record_ids": [],
@@ -132,7 +132,7 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
         "incoming_events": events,
         "expected_final_state": {
             "assertions": [
-                {"topic": observation_topic, "value": later_value, "status": "reported",
+                {"topic": assertion_name, "value": later_value, "status": "reported",
                  "source_event_id": f"{case_id}-07"},
                 {"topic": "confusion", "value": "increased confusion", "status": "reported",
                  "source_event_id": f"{case_id}-08"},
