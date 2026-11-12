@@ -679,7 +679,9 @@ class UncertaintyEngine:
             # archive. Closed/superseded questions remain available through
             # the explicit status filter and answer-history route.
             query = query.filter(OpenQuestionModel.status.in_(["open", "unresolved"]))
-        return query.order_by(OpenQuestionModel.asked_at.desc()).all()
+        from app.services.care_continuity import has_valid_caregiver_necessity
+        rows = query.order_by(OpenQuestionModel.asked_at.desc()).all()
+        return [row for row in rows if has_valid_caregiver_necessity(row)]
 
     def create_contradiction(self, contradiction: ContradictionCreate) -> ContradictionModel:
         from app.models.care import CareEvent, Evidence
