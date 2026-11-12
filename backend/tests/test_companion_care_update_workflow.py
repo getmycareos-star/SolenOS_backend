@@ -86,6 +86,10 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
         payload = {"person_id": first["person"]["id"], "text": source, "client_turn_id": "companion-conversation-only-0001"}
         response = client.post("/api/v1/conversation/message", headers=headers, json=payload)
         assert response.status_code == 200, response.text
+        first_prompt = "\n".join(str(item.get("content", "")) for item in captured[0])
+        assert "new observation, event, or change" in first_prompt
+        assert "Daily Care" in first_prompt
+        assert "Do not collect a second structured care entry in chat" in first_prompt
         body = response.json()
         assert body["care_update_candidates"] == []
         assert body["written_to_lcr"] is False
