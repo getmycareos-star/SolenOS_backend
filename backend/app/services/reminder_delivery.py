@@ -159,7 +159,12 @@ def deliver_due_reminders(db=None, now=None):
 def deliver_pending_web_pushes(db=None, now=None):
     """Send privacy-preserving Web Push payloads and persist provider receipts/retries."""
     settings = get_settings()
-    if not settings.vapid_public_key.strip() or not settings.vapid_private_key.strip():
+    subject = settings.vapid_subject.strip()
+    if (
+        not settings.vapid_public_key.strip()
+        or not settings.vapid_private_key.strip()
+        or not (subject.startswith("mailto:") or subject.startswith("https://"))
+    ):
         return 0
     try:
         from pywebpush import WebPushException, webpush
