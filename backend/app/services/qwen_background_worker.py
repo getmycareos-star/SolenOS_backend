@@ -37,7 +37,22 @@ def _process_document_evidence(evidence_id: str, person_id: str, caregiver_id: s
     session = SessionLocal()
     try:
         extraction = extract_saved_document(evidence_id, scoped_request, session)
-        intelligence = analyze_saved_document(evidence_id, scoped_request, session)
+        extraction_pending_pages = extraction.get("unprocessed_page_numbers") or []
+        if extraction_pending_pages:
+            # Do not interpret an incomplete PDF. Let the durable job retry
+            # failed extraction pages first; Qwen only sees the completed
+            # persisted source text on a later worker pass.
+            intelligence = {
+                "analysis_id": extraction.get("analysis_id"),
+                "intelligence_status": "partial",
+                "observations": [],
+                "processed_page_count": 0,
+                "total_page_count": extraction.get("page_count"),
+                "unprocessed_page_numbers": extraction_pending_pages,
+                "deferred_until_extraction_complete": True,
+            }
+        else:
+            intelligence = analyze_saved_document(evidence_id, scoped_request, session)
         return extraction, intelligence
     finally:
         session.close()
