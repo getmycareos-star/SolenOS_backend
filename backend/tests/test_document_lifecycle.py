@@ -894,3 +894,33 @@ def test_situation_rejects_snap_evidence_from_another_anonymous_session(client):
         },
     )
     assert response.status_code == 400, response.text
+
+
+def test_document_processing_status_does_not_leak_across_anonymous_sessions(client):
+    test_client, first = client
+    first_auth = {"Authorization": f"Bearer {first['access_token']}"}
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=first_auth,
+        data={
+            "person_id": first["person"]["id"],
+            "caregiver_id": first["caregiver"]["id"],
+            "evidence_type": "document",
+            "capture_method": "upload",
+        },
+        files={"file": ("private-note.txt", b"Private care note.", "text/plain")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+    assert uploaded.json()["document_processing_job_id"]
+
+    second = test_client.post("/api/v1/sessions/anonymous", json={
+        "name": "Different care recipient",
+        "caregiver_name": "Different caregiver",
+    })
+    assert second.status_code == 201, second.text
+    second_auth = {"Authorization": f"Bearer {second.json()['access_token']}"}
+    status = test_client.get("/api/v1/documents/intelligence", headers=second_auth)
+    assert status.status_code == 200, status.text
+    assert all(item["evidence_id"] != evidence_id for item in status.json()["processing_jobs"])
+    assert all(item["source_evidence_id"] != evidence_id for item in status.json()["items"])
