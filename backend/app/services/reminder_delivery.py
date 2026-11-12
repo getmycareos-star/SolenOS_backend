@@ -7,6 +7,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import exists
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import SessionLocal
@@ -27,15 +28,19 @@ def deliver_due_reminders(db=None, now=None):
     try:
         due = (
             session.query(CareReminder)
-            .filter(CareReminder.status == "open", CareReminder.due_at <= current)
+            .filter(
+                CareReminder.status == "open",
+                CareReminder.due_at <= current,
+                ~exists().where(
+                    CareNotification.id == ("reminder-due:" + CareReminder.id)
+                ),
+            )
             .order_by(CareReminder.due_at.asc(), CareReminder.created_at.asc())
             .limit(BATCH_SIZE)
             .all()
         )
         for reminder in due:
             notification_id = f"reminder-due:{reminder.id}"
-            if session.get(CareNotification, notification_id) is not None:
-                continue
             preference = (
                 session.query(CareNotificationPreference)
                 .filter(
