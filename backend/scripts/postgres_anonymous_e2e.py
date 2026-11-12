@@ -1622,6 +1622,85 @@ def main():
         require(status == 200 and len(terminal_events) == 1,
                 f"Conflicting terminal transitions must produce exactly one terminal audit event: {status}: {lifecycle_history}")
 
+        # Exercise the complete reminder lifecycle on PostgreSQL before a real
+        # Uvicorn restart. Every record must remain scoped to its server-issued
+        # caregiver identity and be recoverable through authenticated HTTP.
+        reminder_due_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        reminder_payload = {
+            "person_id": person_a,
+            "title": "PostgreSQL E2E open reminder",
+            "note": "Synthetic persistence fixture only.",
+            "due_at": reminder_due_at,
+        }
+        reminder_status, open_reminder = request(
+            "POST", "/api/v1/reminders", body=reminder_payload, token=token_a,
+        )
+        require(reminder_status == 201 and open_reminder.get("status") == "open",
+                f"PostgreSQL reminder creation failed: {reminder_status}: {open_reminder}")
+        open_reminder_id = open_reminder["id"]
+        require(open_reminder.get("created_by_caregiver_id") == caregiver_a,
+                "Reminder creator was not derived from the authenticated caregiver")
+
+        snooze_until = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        snooze_status, snoozed_reminder = request(
+            "PATCH", f"/api/v1/reminders/{open_reminder_id}/snooze",
+            body={"snooze_until": snooze_until}, token=token_a,
+        )
+        require(snooze_status == 200
+                and snoozed_reminder.get("status") == "open"
+                and snoozed_reminder.get("snooze_count") == 1
+                and snoozed_reminder.get("snoozed_by_caregiver_id") == caregiver_a,
+                f"PostgreSQL reminder snooze lifecycle failed: {snooze_status}: {snoozed_reminder}")
+
+        completion_status, completed_reminder = request(
+            "PATCH", f"/api/v1/reminders/{open_reminder_id}/complete",
+            body={"completion_note": "Synthetic completion after snooze."}, token=token_a,
+        )
+        require(completion_status == 200
+                and completed_reminder.get("status") == "completed"
+                and completed_reminder.get("completed_by_caregiver_id") == caregiver_a
+                and completed_reminder.get("completion_note") == "Synthetic completion after snooze.",
+                f"PostgreSQL reminder completion failed: {completion_status}: {completed_reminder}")
+
+        cancel_status, cancelled_reminder = request(
+            "POST", "/api/v1/reminders", body={
+                **reminder_payload,
+                "title": "PostgreSQL E2E cancelled reminder",
+                "due_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }, token=token_a,
+        )
+        require(cancel_status == 201, f"Second reminder creation failed: {cancel_status}: {cancelled_reminder}")
+        cancelled_reminder_id = cancelled_reminder["id"]
+        cancel_status, cancelled_reminder = request(
+            "PATCH", f"/api/v1/reminders/{cancelled_reminder_id}/cancel", token=token_a,
+        )
+        require(cancel_status == 200
+                and cancelled_reminder.get("status") == "cancelled"
+                and cancelled_reminder.get("cancelled_by_caregiver_id") == caregiver_a,
+                f"PostgreSQL reminder cancellation failed: {cancel_status}: {cancelled_reminder}")
+
+        foreign_reminder_list_status, foreign_reminder_list = request(
+            "GET", f"/api/v1/reminders/{person_a}", token=token_b,
+        )
+        require(foreign_reminder_list_status == 403,
+                f"Another care record read the reminder list: {foreign_reminder_list_status}: {foreign_reminder_list}")
+        foreign_reminder_status, foreign_reminder = request(
+            "PATCH", f"/api/v1/reminders/{open_reminder_id}/complete",
+            body={}, token=token_b,
+        )
+        require(foreign_reminder_status == 404,
+                f"Another care record accessed a reminder by ID: {foreign_reminder_status}: {foreign_reminder}")
+
+        reminder_list_status, reminder_list = request(
+            "GET", f"/api/v1/reminders/{person_a}", token=token_a,
+        )
+        require(reminder_list_status == 200
+                and {item.get("id") for item in reminder_list}
+                    >= {open_reminder_id, cancelled_reminder_id}
+                and next(item for item in reminder_list if item.get("id") == open_reminder_id).get("status") == "completed"
+                and next(item for item in reminder_list if item.get("id") == cancelled_reminder_id).get("status") == "cancelled",
+                f"PostgreSQL reminder lifecycle did not persist before restart: {reminder_list_status}: {reminder_list}")
+
         stop_server(server)
         server = start_server()
 
@@ -1641,6 +1720,22 @@ def main():
                 and post_restart_login.get("access_token") != second_device.get("access_token"),
                 "Post-restart independent login changed the account/person/caregiver identity or reused the old session")
         token_a = post_restart_login["access_token"]
+        post_restart_reminder_status, post_restart_reminders = request(
+            "GET", f"/api/v1/reminders/{person_a}", token=token_a,
+        )
+        persisted_reminders = {
+            item.get("id"): item for item in (post_restart_reminders or [])
+        }
+        require(
+            post_restart_reminder_status == 200
+            and open_reminder_id in persisted_reminders
+            and cancelled_reminder_id in persisted_reminders
+            and persisted_reminders[open_reminder_id].get("status") == "completed"
+            and persisted_reminders[open_reminder_id].get("snooze_count") == 1
+            and persisted_reminders[open_reminder_id].get("completion_note") == "Synthetic completion after snooze."
+            and persisted_reminders[cancelled_reminder_id].get("status") == "cancelled",
+            f"Reminder lifecycle did not survive Uvicorn restart and fresh account login: {post_restart_reminder_status}: {post_restart_reminders}",
+        )
         status, post_restart_identity = request("GET", "/api/situation", token=token_a)
         require(status == 200
                 and post_restart_identity.get("care_recipient_display_name") == updated_name,
