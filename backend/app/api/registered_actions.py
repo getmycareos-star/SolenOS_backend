@@ -132,6 +132,7 @@ class RegisteredActionRead(BaseModel):
     action_type: str
     status: str
     modality: str
+    requires_confirmation: bool = False
     deadline: Optional[datetime] = None
     created_by_caregiver_id: str
     responsible_caregiver_id: Optional[str] = None
