@@ -144,7 +144,7 @@ def persist_source_grounded_daily_observations(
                     key=lambda match: abs(match.start() - observation_start),
                 )
         context_parts = [
-            "Source-grounded extraction from a caregiver report; not an independently verified clinical fact."
+            "Source-grounded extraction from a caregiver report; not independently verified as a clinical fact."
         ]
         if time_reference:
             context_parts.append(f"Caregiver time wording: {time_reference.group(0)}.")
