@@ -243,3 +243,53 @@ def test_qwen_context_sources_are_tied_to_their_own_record_reference():
     ]
     provenance = build_claim_provenance("She felt unsteady near the kitchen.", records)
     assert provenance["claims"][0]["source_references"][0]["record_id"] == "event-1"
+
+def test_same_day_identical_reports_with_different_times_are_not_guessed_as_one_or_two_incidents():
+    aggregate = build_distinct_event_aggregate(
+        [
+            {
+                "id": "same-day-a", "event_type": "mobility", "status": "recorded",
+                "occurred_at": datetime(2026, 11, 4, 8, tzinfo=timezone.utc),
+                "title": "Unsteadiness near the kitchen", "description": "She felt unsteady.",
+            },
+            {
+                "id": "same-day-b", "event_type": "mobility", "status": "recorded",
+                "occurred_at": datetime(2026, 11, 4, 10, tzinfo=timezone.utc),
+                "title": "Unsteadiness near the kitchen", "description": "She felt unsteady.",
+            },
+        ],
+        topic="unsteadiness",
+        start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
+        window_label="this calendar month",
+    )
+    assert aggregate["status"] == "ambiguous_duplicate_candidates"
+    assert aggregate["count"] is None
+    assert aggregate["source_references"] == []
+
+
+def test_reviewed_shared_origin_evidence_does_not_inflate_distinct_incident_count():
+    aggregate = build_distinct_event_aggregate(
+        [
+            {
+                "id": "shared-origin-a", "event_type": "mobility", "status": "recorded",
+                "occurred_at": datetime(2026, 11, 3, 8, tzinfo=timezone.utc),
+                "title": "Unsteadiness reported by family", "description": "She felt unsteady.",
+                "evidence_ids": ["note-original"],
+            },
+            {
+                "id": "shared-origin-b", "event_type": "mobility", "status": "recorded",
+                "occurred_at": datetime(2026, 11, 3, 8, tzinfo=timezone.utc),
+                "title": "Unsteadiness copied into another note", "description": "A copied report.",
+                "evidence_ids": ["note-copy"],
+            },
+        ],
+        topic="unsteadiness",
+        start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
+        window_label="this calendar month",
+        shared_origin_evidence_pairs={frozenset(("note-original", "note-copy"))},
+    )
+    assert aggregate["status"] == "validated"
+    assert aggregate["count"] == 1
+    assert aggregate["duplicate_event_ids"] == ["shared-origin-b"]
