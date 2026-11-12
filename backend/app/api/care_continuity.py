@@ -1398,6 +1398,149 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
     }
 
 
+
+@router.post("/medications", status_code=201)
+def create_medication_record(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    """Create a caregiver-reported medication record as append-only LCR assertions.
+
+    New assertions remain reported until the caregiver explicitly reviews them.
+    No historical medication event is promoted and no clinical verification is implied.
+    """
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to add a medication record")
+    name = str(payload.get("name") or "").strip()
+    dose = str(payload.get("dose") or "").strip() or None
+    note = str(payload.get("note") or "").strip()
+    try:
+        review_days = int(payload.get("review_after_days", 30))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Review period must be a positive number of days") from exc
+    if not name or len(name) > 240:
+        raise HTTPException(status_code=422, detail="Enter a medication name (up to 240 characters)")
+    if dose and len(dose) > 240:
+        raise HTTPException(status_code=422, detail="Dose must be 240 characters or fewer")
+    if note and len(note) > 2000:
+        raise HTTPException(status_code=422, detail="Note must be 2,000 characters or fewer")
+    if review_days < 1 or review_days > 3650:
+        raise HTTPException(status_code=422, detail="Review period must be between 1 and 3650 days")
+
+    subject_id = str(uuid.uuid4())
+    source_text = (
+        f"Caregiver reported {name!r} as currently being used."
+        + (f" Reported dose: {dose}." if dose else "")
+        + (f" Caregiver note: {note}" if note else "")
+    )
+    base = {
+        "subject_type": "medication",
+        "subject_id": subject_id,
+        "assertion_kind": "current_state",
+        "epistemic_state": "reported",
+        "source_label": "Caregiver report",
+        "source_text": source_text,
+        "review_after_days": review_days,
+    }
+    assertions = []
+    previous_defer = db.info.get("defer_document_review_commit")
+    db.info["defer_document_review_commit"] = True
+    try:
+        for field_name, value in (
+            ("medication_name", name),
+            ("medication_status", "active"),
+            ("dose", dose),
+        ):
+            if value is None:
+                continue
+            assertion = create_resource(
+                "assertions",
+                {**base, "field": field_name, "asserted_value": value},
+                request,
+                db,
+            )
+            assertions.append(assertion)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if previous_defer is None:
+            db.info.pop("defer_document_review_commit", None)
+        else:
+            db.info["defer_document_review_commit"] = previous_defer
+
+    return {
+        "medication_id": subject_id,
+        "name": name,
+        "dose": dose,
+        "status": "active",
+        "record_status": "awaiting_caregiver_review",
+        "assertions": assertions,
+        "interpretation_limit": (
+            "This is a caregiver report, not an independently verified prescription. "
+            "It will not appear among current medication choices until explicitly reviewed."
+        ),
+    }
+
+
+@router.post("/medications/{subject_id}/review")
+def review_medication_record(subject_id: str, request: Request, db: Session = Depends(get_db)):
+    """Explicitly accept the caregiver's own medication report as current, append-only review."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to review a medication record")
+    rows = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.subject_type == "medication",
+        CareAssertion.subject_id == subject_id,
+        CareAssertion.assertion_kind == "current_state",
+    ).order_by(CareAssertion.recorded_at.asc(), CareAssertion.id.asc()).all()
+    fields = {str(row.field).strip().lower(): row for row in rows}
+    name_claim = fields.get("medication_name") or fields.get("name")
+    status_claim = fields.get("medication_status") or fields.get("status")
+    if not name_claim or not status_claim:
+        raise HTTPException(status_code=404, detail="Medication report not found or incomplete in this care record")
+    if str(status_claim.asserted_value).strip().casefold() != "active":
+        raise HTTPException(status_code=409, detail="Only an explicitly reported active medication can be reviewed as current")
+    if any(row.assertion_status in {"rejected", "superseded", "retracted"} for row in rows):
+        raise HTTPException(status_code=409, detail="This medication report is no longer reviewable; create a new report instead")
+
+    previous_defer = db.info.get("defer_document_review_commit")
+    db.info["defer_document_review_commit"] = True
+    reviewed = []
+    try:
+        for row in rows:
+            if row.assertion_status == "accepted":
+                reviewed.append({"id": row.id, "assertion_status": "accepted"})
+                continue
+            result = review_assertion_status(
+                row.id,
+                {"assertion_status": "accepted", "review_after_days": row.review_after_days or 30},
+                request,
+                db,
+            )
+            reviewed.append({"id": row.id, "assertion_status": result.get("assertion_status")})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if previous_defer is None:
+            db.info.pop("defer_document_review_commit", None)
+        else:
+            db.info["defer_document_review_commit"] = previous_defer
+
+    return {
+        "medication_id": subject_id,
+        "name": name_claim.asserted_value,
+        "record_status": "caregiver_reviewed_current_report",
+        "assertions": reviewed,
+        "interpretation_limit": (
+            "The caregiver explicitly reviewed this report. This is not independent clinical "
+            "verification, proof of a prescription, or proof that medicine was administered."
+        ),
+    }
+
+
 @router.get("/current-care")
 def current_care_projection(
     request: Request,
