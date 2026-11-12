@@ -12,9 +12,11 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.change_enums import SignificanceVerdict
+from app.core.uncertainty_enums import GapLifecycleStatus
 from app.models.care import Caregiver
 from app.models.change import Change
 from app.models.notifications import CareNotification
+from app.models.uncertainty import InformationGap
 
 
 def create_attention_change_notifications(
@@ -69,6 +71,49 @@ def create_attention_change_notifications(
                 category="care_change",
                 priority="normal",
                 source_event_id=change.id,
+                created_at=timestamp,
+            ))
+            created += 1
+
+    # Only explicitly critical gaps or high-priority gaps past their declared
+    # deadline interrupt the caregiver. Other uncertainty remains in the LCR.
+    gaps = db.query(InformationGap).filter(
+        InformationGap.person_id == person_id,
+        InformationGap.lifecycle_status.in_([
+            GapLifecycleStatus.OPEN,
+            GapLifecycleStatus.REOPENED,
+            GapLifecycleStatus.PARTIALLY_RESOLVED,
+        ]),
+    ).all()
+    for gap in gaps:
+        priority = getattr(gap.priority, "value", gap.priority)
+        expected_by = gap.expected_by
+        if expected_by is not None and expected_by.tzinfo is None:
+            expected_by = expected_by.replace(tzinfo=timezone.utc)
+        overdue_high = priority == "high" and expected_by is not None and expected_by <= timestamp
+        if priority != "critical" and not overdue_high:
+            continue
+        for caregiver in caregivers:
+            exists = db.query(CareNotification.id).filter(
+                CareNotification.person_id == person_id,
+                CareNotification.caregiver_id == caregiver.id,
+                CareNotification.category == "care_attention",
+                CareNotification.source_event_id == gap.id,
+            ).first()
+            if exists:
+                continue
+            db.add(CareNotification(
+                id=str(uuid.uuid4()),
+                person_id=person_id,
+                caregiver_id=caregiver.id,
+                title="A care detail needs your attention",
+                body=(
+                    "An important care detail is still missing or incomplete. "
+                    "Open the Living Care Record to review what needs confirmation."
+                ),
+                category="care_attention",
+                priority="high",
+                source_event_id=gap.id,
                 created_at=timestamp,
             ))
             created += 1
