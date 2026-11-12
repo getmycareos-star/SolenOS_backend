@@ -31,6 +31,56 @@ from app.core.uncertainty_enums import (
 )
 
 
+_QUESTION_FILLER_TOKENS = {
+    "a", "an", "and", "are", "about", "be", "been", "being", "can", "could",
+    "did", "do", "does", "for", "from", "had", "has", "have", "he", "her",
+    "hers", "him", "his", "how", "if", "in", "into", "is", "it", "its",
+    "me", "of", "on", "or", "our", "please", "she", "should", "tell", "that",
+    "the", "their", "them", "they", "this", "to", "us", "was", "we", "were",
+    "what", "when", "where", "which", "who", "why", "will", "would", "you",
+    "your", "know", "confirm", "currently",
+}
+_QUESTION_SYNONYMS = {
+    "meds": "medication",
+    "medicine": "medication",
+    "medicines": "medication",
+    "dosage": "dose",
+    "now": "current",
+    "presently": "current",
+    "different": "changed",
+    "change": "changed",
+    "changes": "changed",
+    "changing": "changed",
+    "sleeping": "sleep",
+    "slept": "sleep",
+    "taking": "take",
+    "taken": "take",
+    "followed": "follow",
+    "following": "follow",
+}
+
+
+def _question_duplicate_key(value: str) -> str:
+    """Build a conservative, deterministic question-intent key.
+
+    Generic question framing and a small synonym set are normalized, while
+    temporal words, dates, negation and meaningful qualifiers remain. This
+    catches obvious rephrasings without collapsing questions about different
+    dates or circumstances. It is not a semantic model.
+    """
+    normalized = " ".join((value or "").casefold().split())
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    canonical = [
+        _QUESTION_SYNONYMS.get(token, token)
+        for token in tokens
+        if token not in _QUESTION_FILLER_TOKENS
+    ]
+    if len(canonical) < 2:
+        return normalized
+    return " ".join(sorted(set(canonical)))
+
+
+
 def _has_decision_dependency(context) -> bool:
     """Only a structured, explicit current-decision dependency can justify a request."""
     for item in context or []:
@@ -175,7 +225,7 @@ def persist_source_clarification_questions(
         OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
     existing_by_text = {
-        " ".join((row.question or "").casefold().split()): row
+        _question_duplicate_key(row.question or ""): row
         for row in existing_rows
     }
     persisted: List[OpenQuestionModel] = []
@@ -184,8 +234,9 @@ def persist_source_clarification_questions(
         if not isinstance(value, str):
             continue
         question_text = " ".join(value.strip().split())[:300]
-        normalized = question_text.casefold()
-        if len(question_text) < 5 or normalized in seen:
+        normalized = " ".join(question_text.casefold().split())
+        duplicate_key = _question_duplicate_key(question_text)
+        if len(question_text) < 5 or duplicate_key in seen:
             continue
         # Operational extraction warnings belong in the document review panel,
         # not in the caregiver's list of questions.
@@ -198,7 +249,7 @@ def persist_source_clarification_questions(
             )
         ):
             continue
-        seen.add(normalized)
+        seen.add(duplicate_key)
         # Do not retain a candidate as an open question when an accepted,
         # source-backed current-state LCR assertion already covers its field.
         if _question_is_answered_by_current_lcr(db, person_id, question_text):
@@ -210,7 +261,7 @@ def persist_source_clarification_questions(
             "reason": "Suggested while reviewing saved care information. Please check the wording before relying on it.",
             "grounding_status": "source_record_linked; question wording not independently verified",
         }
-        existing = existing_by_text.get(normalized)
+        existing = existing_by_text.get(duplicate_key)
         if existing is None:
             existing = OpenQuestionModel(
                 person_id=person_id,
@@ -225,7 +276,7 @@ def persist_source_clarification_questions(
             )
             db.add(existing)
             db.flush()
-            existing_by_text[normalized] = existing
+            existing_by_text[duplicate_key] = existing
         else:
             existing.evidence_ids = list(dict.fromkeys(
                 list(existing.evidence_ids or []) + linked_ids
