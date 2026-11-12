@@ -585,14 +585,14 @@ def test_document_candidate_overflow_is_preserved_and_revealed_in_review_batches
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
-    source = "\\n\\n".join(
-        f"[Page {page}]\\nPatient record for page {page}."
+    source = "\n\n".join(
+        f"[Page {page}]\nPatient record for page {page}."
         for page in range(1, 7)
     )
     processed_pages = []
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
-        page_number = int(re.search(r"page (\\d+)", page_text).group(1))
+        page_number = int(re.search(r"page (\d+)", page_text).group(1))
         processed_pages.append(page_number)
         observations = []
         for item_number in range(1, 13):
