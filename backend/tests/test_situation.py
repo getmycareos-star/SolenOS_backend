@@ -495,9 +495,12 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             first_evidence_id, resumed_evidence_id
         }
         assert threads["persisted-appetite-thread"]["linked_evidence_ids"] == [second_evidence_id]
-        assert threads["persisted-mobility-thread"]["openQuestions"] == [
-            "Has the unsteadiness also happened indoors?"
-        ]
+        mobility_questions = threads["persisted-mobility-thread"]["openQuestions"]
+        assert "Has the unsteadiness also happened indoors?" in mobility_questions
+        assert any(
+            question.startswith("Two different reports conflict about walking_stability.")
+            for question in mobility_questions
+        )
         assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
         assert threads["persisted-mobility-thread"]["conflicts"][0]["resolution_status"] == "unresolved"
         assert threads["persisted-appetite-thread"]["openQuestions"] == []
