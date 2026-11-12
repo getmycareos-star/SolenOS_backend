@@ -27,6 +27,7 @@ def execute_care_continuity_reconciliation(
     person_id: str,
     *,
     workflow: str,
+    caregiver_id: str | None = None,
     source_event_id: str | None = None,
     source_evidence_id: str | None = None,
     source_message_id: str | None = None,
@@ -44,8 +45,10 @@ def execute_care_continuity_reconciliation(
         raise CareContinuityExecutionError("A workflow identifier is required")
     if not source_event_id and not source_evidence_id and not source_message_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
-    if source_message_id and not source_conversation_id:
-        raise CareContinuityExecutionError("A Companion source message must include its conversation reference")
+    if source_message_id and (not source_conversation_id or not caregiver_id):
+        raise CareContinuityExecutionError(
+            "A Companion source message must include its conversation and caregiver references"
+        )
 
     person = db.query(Person).filter(Person.id == person_id).first()
     if person is None:
@@ -86,6 +89,7 @@ def execute_care_continuity_reconciliation(
         conversation = db.query(ConversationSession).filter(
             ConversationSession.id == source_conversation_id,
             ConversationSession.person_id == person_id,
+            ConversationSession.caregiver_id == caregiver_id,
         ).first()
         if conversation is None:
             raise CareContinuityExecutionError(
@@ -111,6 +115,7 @@ def execute_care_continuity_reconciliation(
         "contract_version": "1.0",
         "workflow": workflow,
         "person_id": person_id,
+        "caregiver_id": caregiver_id,
         "source_event_id": source_event_id,
         "source_evidence_id": source_evidence_id,
         "source_message_id": source_message_id,
