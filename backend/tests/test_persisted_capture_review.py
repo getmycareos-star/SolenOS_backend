@@ -9,6 +9,8 @@ import app.services.care_execution as care_execution
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care import Evidence
+from app.services.capture_review import persist_capture_analysis
 from app.models.care_continuity import CareAssertion
 
 pytestmark = pytest.mark.session_security
