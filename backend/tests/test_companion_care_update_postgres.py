@@ -66,6 +66,12 @@ def test_postgres_companion_messages_remain_conversation_only(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(
+        collaboration,
+        "_ollama_chat",
+        lambda base, model, messages, options=None: "I can help you understand the care information already saved.",
+    )
 
     def extraction_must_not_run(*args, **kwargs):
         raise AssertionError("PostgreSQL Companion endpoint must not invoke care-update extraction")
