@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, inspect, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -4661,6 +4661,19 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
 class NotificationPreferenceUpdate(BaseModel):
     quiet_hours_enabled: Optional[bool] = None
     reminders_enabled: Optional[bool] = None
+    quiet_hours_start: Optional[str] = Field(default=None, pattern=r"^(?:[01]\\d|2[0-3]):[0-5]\\d$")
+    quiet_hours_end: Optional[str] = Field(default=None, pattern=r"^(?:[01]\\d|2[0-3]):[0-5]\\d$")
+    timezone_name: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("timezone_name")
+    @classmethod
+    def validate_timezone_name(cls, value):
+        if value is not None:
+            try:
+                ZoneInfo(value)
+            except ZoneInfoNotFoundError as exc:
+                raise ValueError("timezone_name must be a valid IANA timezone") from exc
+        return value
 
 
 def _notification_json(item: CareNotification) -> dict:
@@ -4684,6 +4697,9 @@ def _notification_preferences(db: Session, person_id: str, caregiver_id: str) ->
     ).first()
     return {
         "quiet_hours_enabled": bool(preference.quiet_hours_enabled) if preference else False,
+        "quiet_hours_start": preference.quiet_hours_start if preference else "21:00",
+        "quiet_hours_end": preference.quiet_hours_end if preference else "08:00",
+        "timezone_name": preference.timezone_name if preference else "UTC",
         "reminders_enabled": bool(preference.reminders_enabled) if preference else True,
         "updated_at": preference.updated_at.isoformat() if preference and preference.updated_at else None,
         "configured": preference is not None,
@@ -4792,8 +4808,13 @@ def update_care_notification_preferences(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    if payload.quiet_hours_enabled is None and payload.reminders_enabled is None:
+    if all(value is None for value in (
+        payload.quiet_hours_enabled, payload.reminders_enabled,
+        payload.quiet_hours_start, payload.quiet_hours_end, payload.timezone_name,
+    )):
         raise HTTPException(status_code=422, detail="Choose at least one notification preference to update")
+    if payload.quiet_hours_start is not None and payload.quiet_hours_end is not None and payload.quiet_hours_start == payload.quiet_hours_end:
+        raise HTTPException(status_code=422, detail="Quiet-hours start and end must be different")
     person_id, caregiver_id = _scope(request, db)
     preference = db.query(CareNotificationPreference).filter(
         CareNotificationPreference.person_id == person_id,
@@ -4804,6 +4825,9 @@ def update_care_notification_preferences(
             person_id=person_id,
             caregiver_id=caregiver_id,
             quiet_hours_enabled=False,
+            quiet_hours_start="21:00",
+            quiet_hours_end="08:00",
+            timezone_name="UTC",
             reminders_enabled=True,
         )
         db.add(preference)
@@ -4811,6 +4835,12 @@ def update_care_notification_preferences(
         preference.quiet_hours_enabled = payload.quiet_hours_enabled
     if payload.reminders_enabled is not None:
         preference.reminders_enabled = payload.reminders_enabled
+    if payload.quiet_hours_start is not None:
+        preference.quiet_hours_start = payload.quiet_hours_start
+    if payload.quiet_hours_end is not None:
+        preference.quiet_hours_end = payload.quiet_hours_end
+    if payload.timezone_name is not None:
+        preference.timezone_name = payload.timezone_name
     preference.updated_at = datetime.now(timezone.utc)
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
