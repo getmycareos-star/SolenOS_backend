@@ -1102,6 +1102,10 @@ def fulfil_approved_deletion(
         for _ in range(len(dependency_tables) + 1):
             changed_depth = False
             for child_name, foreign_keys in dependency_foreign_keys.items():
+                # The two subject roots are fixed graph origins, not dependants
+                # of one another even if the schema contains a reverse FK.
+                if child_name in {"persons", "caregivers"}:
+                    continue
                 for foreign_key in foreign_keys:
                     parent_name = foreign_key.get("referred_table")
                     if parent_name not in reachable_depth:
