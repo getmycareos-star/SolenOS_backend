@@ -150,7 +150,7 @@ async def _classify_task(task_text: str, context_text: str) -> str:
     return value
 
 
-async def process_one_qwen_job() -> bool:
+async def process_one_qwen_job(job_id: str | None = None) -> bool:
     db = SessionLocal()
     job = None
     try:
@@ -172,6 +172,7 @@ async def process_one_qwen_job() -> bool:
                     (QwenBackgroundJob.status == "processing") & (QwenBackgroundJob.locked_at < stale_before),
                 ),
                 QwenBackgroundJob.available_at <= now,
+                *([QwenBackgroundJob.id == job_id] if job_id else []),
             )
             .order_by(QwenBackgroundJob.available_at.asc(), QwenBackgroundJob.created_at.asc())
             .with_for_update(skip_locked=True)
