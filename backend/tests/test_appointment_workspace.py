@@ -1738,3 +1738,27 @@ def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_re
     assert loop.cancellation_reason is None
     assert db.query(OpenLoopEvent).filter_by(loop_id=loop_id).count() == 3
     db.close()
+
+    reported_complete = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "preparation",
+        "payload": {"follow_ups": [{
+            "action": "Confirm the discharge summary reached the primary clinician",
+            "owner": "Family caregiver",
+            "due": "2026-11-16T10:00:00Z",
+            "status": "Completed",
+        }]},
+        "change_reason": "Record reported follow-up completion",
+    })
+    assert reported_complete.status_code == 201, reported_complete.text
+    completed_workspace_id = reported_complete.json()["id"]
+    db = TestSessionLocal()
+    reported_loop = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == session["person"]["id"],
+        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+        OpenLoopRecord.source_id.like(f"{completed_workspace_id}:%"),
+    ).one()
+    assert reported_loop.status == "open"
+    assert reported_loop.outcome_status == "outcome_reported"
+    assert reported_loop.outcome_evidence[0]["epistemic_status"] == "caregiver_reported"
+    assert reported_loop.closure_result is None
+    db.close()
