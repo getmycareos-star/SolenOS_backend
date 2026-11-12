@@ -955,6 +955,19 @@ def review_document_candidate(
 
     # Persist the assertion, append-only review event, candidate state and
     # reconciliation in one transaction for accepted document candidates.
+    if payload.decision == "accept" and assertion_id:
+        db.add(assertion_row)
+        db.flush()
+        persisted_assertion = db.query(CareAssertion.id).filter(
+            CareAssertion.id == assertion_id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if persisted_assertion is None:
+            db.rollback()
+            raise HTTPException(
+                status_code=503,
+                detail="The accepted document assertion was not retained by reconciliation. Retry the review.",
+            )
     db.commit()
     if execution is not None:
         execution["stages"]["reconciliation"] = "committed"
