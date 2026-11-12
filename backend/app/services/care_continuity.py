@@ -264,11 +264,20 @@ def next_best_questions(
     ).all()
     for item in gaps:
         priority = getattr(item.priority, "value", item.priority)
+        reason = item.description or f"The record identifies {item.field} as missing or incomplete."
+        expected_by = _utc(item.expected_by)
+        overdue_high_priority_gap = priority == "high" and expected_by is not None and expected_by <= now
+        necessity = "necessary" if priority == "critical" or overdue_high_priority_gap else "not_assessed"
         candidates.append({
             "question": f"What is currently known about {item.field}?",
             "subject_type": item.subject_type, "subject_id": item.subject_id,
             "priority": priority if priority in {"critical", "high", "medium", "low", "informational"} else "informational",
-            "reason": item.description or f"The record identifies {item.field} as missing or incomplete.",
+            "reason": reason,
+            "necessity": necessity,
+            "necessity_rationale": (
+                reason if necessity == "necessary"
+                else None
+            ),
             "evidence_ids": item.evidence_ids or [], "source_kind": "information_gap", "source_id": item.id,
             "_weight": _priority_weight(priority),
         })
@@ -295,6 +304,8 @@ def next_best_questions(
     output = []
     for item in candidates[:50]:
         clean = {key: value for key, value in item.items() if key != "_weight"}
+        clean.setdefault("necessity", "not_assessed")
+        clean.setdefault("necessity_rationale", None)
         persisted_id = None
         if persist:
             existing = db.query(OpenQuestion).filter(
@@ -318,6 +329,8 @@ def next_best_questions(
                     subject_id=clean["subject_id"],
                     status="open",
                     priority=Priority(clean["priority"]),
+                    necessity=clean["necessity"],
+                    necessity_rationale=clean["necessity_rationale"],
                     evidence_ids=clean["evidence_ids"],
                     context=[source_context],
                 )
@@ -347,6 +360,11 @@ def next_best_questions(
                     matching["reason"] = source_context["reason"]
                 existing.context = contexts
                 existing.priority = Priority(clean["priority"]) if _priority_weight(clean["priority"]) > _priority_weight(existing.priority) else existing.priority
+                # Only promote an unanswered question when an explicit information
+                # gap is critical or its high-priority deadline has passed.
+                if clean["necessity"] == "necessary":
+                    existing.necessity = "necessary"
+                    existing.necessity_rationale = clean["necessity_rationale"]
                 persisted_id = existing.id
         clean["persisted_question_id"] = persisted_id
         output.append(clean)
