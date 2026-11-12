@@ -3574,9 +3574,21 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
             context=[{
                 "caregiver_attention_required": True,
                 "necessity_rationale": "The current care handoff depends on which discharge instruction is active.",
+                "decision_dependency": "The current handoff cannot identify the active discharge instruction without this information.",
             }],
         )
-        db.add_all([person, caregiver, gap, necessary_gap])
+        db.add_all([person, caregiver])
+        db.flush()
+        discharge_evidence = Evidence(
+            id="finding6-discharge-evidence",
+            person_id=person.id,
+            type="document",
+            source_text="Persisted discharge instruction source used for the current handoff.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        necessary_gap.evidence_ids = [discharge_evidence.id]
+        db.add_all([discharge_evidence, gap, necessary_gap])
         db.commit()
 
         candidates = next_best_questions(db, person.id, persist=True, commit=False)
@@ -3635,6 +3647,7 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         necessary_gap.context = [{
             "caregiver_attention_required": True,
             "necessity_rationale": "The upcoming handoff again depends on the active discharge instruction.",
+            "decision_dependency": "The active discharge instruction is again required for the upcoming handoff.",
         }]
         db.flush()
         next_best_questions(db, person.id, persist=True, commit=False)
