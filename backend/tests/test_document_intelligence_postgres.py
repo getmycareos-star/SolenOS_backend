@@ -127,14 +127,22 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
     quote_two = "The patient ate half of lunch during the observation period."
 
     def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
-        # The durable worker may pass normalized/chunked extraction text. Keep
-        # the fixture strict about both source quotes without requiring byte-
-        # for-byte equality with the original upload.
-        assert quote_one in text and quote_two in text
-        return {"observations": [
-            {"subject": "Patient", "observation": quote_one, "source_quote": quote_one, "extraction_method": "test_verbatim"},
-            {"subject": "Patient", "observation": quote_two, "source_quote": quote_two, "extraction_method": "test_verbatim"},
-        ], "open_questions": ["Was this usual for the person?"]}
+        # The durable worker processes bounded page/chunk windows. Each call
+        # must return only verbatim candidates present in that exact chunk;
+        # requiring every quote in every chunk incorrectly fails valid splits.
+        observations = []
+        for quote in (quote_one, quote_two):
+            if quote in text:
+                observations.append({
+                    "subject": "Patient",
+                    "observation": quote,
+                    "source_quote": quote,
+                    "extraction_method": "test_verbatim",
+                })
+        return {
+            "observations": observations,
+            "open_questions": ["Was this usual for the person?"] if observations else [],
+        }
 
     monkeypatch.setattr(document_intelligence, "extract_review_candidates", deterministic_candidates)
     try:
