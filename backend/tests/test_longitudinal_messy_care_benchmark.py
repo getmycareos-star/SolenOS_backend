@@ -1130,6 +1130,38 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             db.add_all([evidence, care_event])
             db.flush()
 
+            if event_spec.get("classification") == "duplicate_same_occurrence":
+                original_id = event_spec.get("duplicate_of")
+                original_event = db.query(CareEvent).filter(
+                    CareEvent.id == original_id,
+                    CareEvent.person_id == person.id,
+                ).first()
+                original_assertions = db.query(CareAssertion).filter(
+                    CareAssertion.person_id == person.id,
+                    CareAssertion.source_event_id == original_id,
+                ).all()
+                print("DUPLICATE_MATCH_DIAGNOSTIC", {
+                    "incoming_event_id": event_id,
+                    "incoming_occurred_at": care_event.occurred_at.isoformat() if care_event.occurred_at else None,
+                    "original_event_id": original_id,
+                    "original_occurred_at": original_event.occurred_at.isoformat() if original_event and original_event.occurred_at else None,
+                    "original_assertions": [
+                        {
+                            "id": item.id,
+                            "subject_type": item.subject_type,
+                            "subject_id": item.subject_id,
+                            "field": item.field,
+                            "assertion_kind": item.assertion_kind,
+                            "asserted_value": item.asserted_value,
+                            "source_label": item.source_label,
+                            "created_by_caregiver_id": item.created_by_caregiver_id,
+                            "observed_at": item.observed_at.isoformat() if item.observed_at else None,
+                            "assertion_status": item.assertion_status,
+                        }
+                        for item in original_assertions
+                    ],
+                })
+
             if event_spec.get("corrects_event_id"):
                 original_event = db.query(CareEvent).filter(
                     CareEvent.id == event_spec["corrects_event_id"],
