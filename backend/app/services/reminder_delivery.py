@@ -113,7 +113,7 @@ def deliver_due_reminders(db=None, now=None):
             session.query(CarePushDelivery)
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
             .filter(
-                CarePushDelivery.status == "pending",
+                CarePushDelivery.status.in_(("pending", "retry_scheduled")),
                 CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
             )
             .all()
@@ -217,7 +217,7 @@ def deliver_pending_web_pushes(db=None, now=None):
             session.query(CarePushDelivery)
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
             .filter(
-                CarePushDelivery.status == "pending",
+                CarePushDelivery.status.in_(("pending", "retry_scheduled")),
                 CareNotification.status == "active",
                 CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
             )
@@ -235,7 +235,7 @@ def deliver_pending_web_pushes(db=None, now=None):
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
             .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
             .filter(
-                CarePushDelivery.status == "pending",
+                CarePushDelivery.status.in_(("pending", "retry_scheduled")),
                 or_(
                     CareNotification.status != "active",
                     CarePushSubscription.revoked_at.is_not(None),
@@ -311,7 +311,7 @@ def deliver_pending_web_pushes(db=None, now=None):
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
             .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
             .filter(
-                CarePushDelivery.status == "pending",
+                CarePushDelivery.status.in_(("pending", "retry_scheduled")),
                 CareNotification.status == "active",
                 CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
                 CarePushDelivery.next_attempt_at <= current,
@@ -427,6 +427,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 if delivery.attempt_count >= 5:
                     delivery.status = "failed"
                 else:
+                    delivery.status = "retry_scheduled"
                     delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
                 session.commit()
         return accepted
