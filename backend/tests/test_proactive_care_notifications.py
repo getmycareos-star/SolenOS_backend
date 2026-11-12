@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -5,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.core.change_enums import ChangeDirection, ChangeType, SignificanceVerdict
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority
-from app.models.care import Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Person
 from app.models.change import Change
 from app.models.notifications import CareNotification
 from app.models.uncertainty import InformationGap
@@ -33,6 +35,15 @@ def test_only_active_evidence_backed_meaningful_changes_create_deduplicated_in_a
         ]
         db.add_all(caregivers)
         db.flush()
+        db.add(CareEvent(
+            id="source-event-1",
+            person_id=person.id,
+            event_type="sleep_change",
+            occurred_at=datetime.now(timezone.utc),
+            title="Saved sleep observation",
+            created_by_caregiver_id="caregiver-one",
+        ))
+        db.flush()
 
         meaningful = Change(
             id="meaningful-change",
@@ -41,7 +52,7 @@ def test_only_active_evidence_backed_meaningful_changes_create_deduplicated_in_a
             subject_id=person.id,
             change_type=ChangeType.EMERGENCE,
             change_direction=ChangeDirection.INCREASE,
-            evidence_ids=["source-evidence-1"],
+            evidence_ids=["source-event-1"],
             significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
             attention_candidate=True,
             is_active=True,
