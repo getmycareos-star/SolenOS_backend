@@ -27,6 +27,8 @@ from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
 from app.api.care_delta import _scoped_identity
 from app.models.care_continuity import EvidenceClaimDependency, EvidenceClaimAssessment, CareAssertion
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
@@ -213,23 +215,26 @@ def review_question_answer(
 
         # Acceptance means the submitted report is admitted to the LCR as a
         # source-attributed assertion. It does NOT mean the reported value is verified.
-        resulting_claim = CareAssertion(
-            person_id=engine.person_id,
-            subject_type=source_claim.subject_type,
-            subject_id=source_claim.subject_id,
-            field=source_claim.field,
-            assertion_kind=source_claim.assertion_kind,
-            asserted_value=answer_event.answer,
-            source_label="Reviewed caregiver clarification",
-            source_text=f"Caregiver answer: {answer_event.answer}\nSource or basis: {answer_event.answer_provenance}",
-            evidence_ids=evidence_ids,
-            assertion_status="reported",
-            observed_at=source_claim.observed_at,
-            review_after_days=review.review_after_days,
-            created_by_caregiver_id=answer_event.answered_by_caregiver_id,
+        resulting_claim = create_assertion(
+            engine.db,
+            CareAssertionCreate(
+                person_id=engine.person_id,
+                subject_type=source_claim.subject_type,
+                subject_id=source_claim.subject_id,
+                field=source_claim.field,
+                assertion_kind=source_claim.assertion_kind,
+                epistemic_state="reported",
+                asserted_value=answer_event.answer,
+                source_label="Reviewed caregiver clarification",
+                source_text=f"Caregiver answer: {answer_event.answer}\nSource or basis: {answer_event.answer_provenance}",
+                evidence_ids=evidence_ids,
+                observed_at=source_claim.observed_at,
+                review_after_days=review.review_after_days,
+                created_by_caregiver_id=answer_event.answered_by_caregiver_id,
+                updated_by_caregiver_id=engine.caregiver_id,
+            ),
+            commit=False,
         )
-        engine.db.add(resulting_claim)
-        engine.db.flush()
 
         latest_assessment = engine.db.query(EvidenceClaimAssessment).filter(
             EvidenceClaimAssessment.person_id == engine.person_id,
