@@ -4477,7 +4477,7 @@ def test_blocked_medication_and_appointment_actions_create_scoped_necessary_ques
             normalized_action="Take Metformin 500 mg once daily",
             original_text="Take Metformin 500 mg once daily",
             modality="required",
-            status="needs_clarification",
+            status="pending_confirmation",
             is_medication_action=True,
             requires_confirmation=True,
             created_by_caregiver_id=caregiver.id,
