@@ -382,6 +382,89 @@ def next_best_questions(
     return output
 
 
+
+def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, int]:
+    """Reassess source-linked questions without treating silence as an answer.
+
+    OpenQuestion changes are captured by the existing append-only CareStateRevision
+    listener. Automatic transitions therefore remain auditable in the same
+    transaction as source reconciliation; this function never commits.
+    """
+    candidates = next_best_questions(db, person_id, persist=False, commit=False)
+    candidate_by_source = {}
+    for candidate in candidates:
+        for source_id in (candidate.get("source_ids") or [candidate.get("source_id")]):
+            if source_id:
+                candidate_by_source[(candidate.get("source_kind"), str(source_id))] = candidate
+
+    questions = db.query(OpenQuestion).filter(
+        OpenQuestion.person_id == person_id,
+        OpenQuestion.status.in_(["open", "unresolved", "closed"]),
+    ).order_by(OpenQuestion.asked_at.asc(), OpenQuestion.id.asc()).all()
+
+    now = datetime.now(timezone.utc)
+    counts = {"kept": 0, "suppressed": 0, "superseded": 0, "reopened": 0, "untouched": 0}
+    managed_sources = {"information_gap", "contradiction", "stale_or_unreviewed_assertion"}
+
+    for question in questions:
+        contexts = [item for item in (question.context or []) if isinstance(item, dict)]
+        linked = [
+            (str(context.get("source_kind") or ""), str(source_id))
+            for context in contexts
+            for source_id in (context.get("source_ids") or [context.get("source_id")])
+            if source_id and str(context.get("source_kind") or "") in managed_sources
+        ]
+        if not linked:
+            counts["untouched"] += 1
+            continue
+
+        matching = [candidate_by_source[key] for key in linked if key in candidate_by_source]
+        necessary = next((
+            item for item in matching
+            if item.get("necessity") == "necessary"
+            and isinstance(item.get("necessity_rationale"), str)
+            and item["necessity_rationale"].strip()
+        ), None)
+
+        if necessary:
+            question.necessity = "necessary"
+            question.necessity_rationale = necessary["necessity_rationale"].strip()
+            question.evidence_ids = list(dict.fromkeys(
+                list(question.evidence_ids or []) + list(necessary.get("evidence_ids") or [])
+            )) or None
+            if question.status == "closed" and str(question.closed_reason or "").startswith("automatically_"):
+                question.status = "open"
+                question.closed_at = None
+                question.closed_reason = None
+                counts["reopened"] += 1
+            else:
+                counts["kept"] += 1
+            continue
+
+        # Only questions created from these system-managed candidate sources are
+        # auto-transitioned. User-authored clarification requests remain intact.
+        if question.status not in {"open", "unresolved"}:
+            counts["untouched"] += 1
+            continue
+
+        has_active_candidate = bool(matching)
+        question.status = "closed"
+        question.closed_at = now
+        if has_active_candidate:
+            question.necessity = "not_assessed"
+            question.necessity_rationale = (
+                "Automatically suppressed: current evidence does not establish that caregiver input is necessary."
+            )
+            question.closed_reason = "automatically_suppressed: current evidence does not establish that caregiver input is necessary"
+            counts["suppressed"] += 1
+        else:
+            question.closed_reason = "automatically_superseded: the linked source is no longer an active clarification candidate"
+            counts["superseded"] += 1
+
+    db.flush()
+    return counts
+
+
 def create_action_outcome(db: Session, payload: CareActionOutcomeCreate) -> CareActionOutcome:
     if payload.evidence_ids:
         evidence_rows = db.query(Evidence.id).filter(
