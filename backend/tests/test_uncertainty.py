@@ -3000,3 +3000,89 @@ def test_normal_reconciliation_persists_only_actionable_source_linked_questions(
         assert not any("sleep_observation" in row.question for row in db.query(OpenQuestion).filter_by(person_id=person.id).all())
     finally:
         teardown_db()
+
+def test_qwen_cross_workflow_claim_sources_keep_events_documents_and_appointments_separate():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.api.collaboration import _enrich_qwen_claim_source_records
+        from app.models.capture_analysis import CaptureAnalysis
+        from app.models.time_location import Appointment
+        from app.services.claim_provenance import context_lines_to_source_records
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="qwen-provenance-person", name="Qwen Provenance Person")
+        caregiver = Caregiver(
+            id="qwen-provenance-caregiver",
+            name="Qwen Provenance Caregiver",
+            email="qwen-provenance@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="qwen-provenance-evidence",
+            person_id=person.id,
+            type="document",
+            source_text="She felt unsteady near the kitchen.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_label="Daughter",
+            original_author="Daughter",
+            extra_metadata='{"filename":"family-note.pdf"}',
+        )
+        event = CareEvent(
+            id="qwen-provenance-event",
+            person_id=person.id,
+            event_type="mobility",
+            status="recorded",
+            occurred_at=datetime(2026, 11, 2, 8, tzinfo=timezone.utc),
+            title="Unsteadiness near the kitchen",
+            description="She felt unsteady near the kitchen.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        analysis = CaptureAnalysis(
+            id="qwen-provenance-analysis",
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_evidence_id=evidence.id,
+            source_text="She felt unsteady near the kitchen.",
+            extraction_status="available",
+            candidates={"kind": "document_extraction_v1", "filename": "family-note.pdf"},
+        )
+        appointment = Appointment(
+            id="qwen-provenance-appointment",
+            person_id=person.id,
+            title="Mobility review",
+            scheduled_at=datetime(2026, 11, 18, 10, tzinfo=timezone.utc),
+            status="scheduled",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, event, analysis, appointment])
+        db.commit()
+
+        records = context_lines_to_source_records([
+            "Recorded care event [qwen-provenance-event]: Unsteadiness near the kitchen — She felt unsteady near the kitchen.",
+            "Persisted extracted document [qwen-provenance-analysis] from evidence [qwen-provenance-evidence]: extracted_text=She felt unsteady near the kitchen.",
+            "Recorded appointment [qwen-provenance-appointment]: Mobility review; status=scheduled; scheduled=2026-11-18T10:00:00+00:00",
+        ])
+        enriched = _enrich_qwen_claim_source_records(db, person.id, records)
+        by_type = {item["record_type"]: item for item in enriched}
+
+        event_source = by_type["care_event"]
+        assert event_source["record_id"] == event.id
+        assert event_source["entered_by"] == caregiver.name
+        assert event_source["related_evidence"][0]["label"] == "family-note.pdf"
+        assert event_source["related_evidence"][0]["reported_by"] == "Daughter"
+
+        document_source = by_type["document_extraction"]
+        assert document_source["record_id"] == analysis.id
+        assert document_source["related_evidence"][0]["record_id"] == evidence.id
+
+        appointment_source = by_type["appointment"]
+        assert appointment_source["record_id"] == appointment.id
+        assert appointment_source["entered_by"] == caregiver.name
+        assert appointment_source["related_evidence"][0]["record_id"] == evidence.id
+        db.close()
+    finally:
+        teardown_db()
