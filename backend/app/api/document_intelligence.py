@@ -561,8 +561,33 @@ def review_document_candidate(
         quote = candidate.get("source_quote")
         if not isinstance(quote, str) or not quote or quote not in (analysis.source_text or ""):
             raise HTTPException(status_code=409, detail="The candidate quotation is not present in the preserved extraction")
+        canonical = candidate.get("canonical_candidate")
+        canonical = canonical if isinstance(canonical, dict) else {}
+        span_start = canonical.get("source_span_start")
+        span_end = canonical.get("source_span_end")
+        source_text = analysis.source_text or ""
+        if (
+            not isinstance(span_start, int)
+            or not isinstance(span_end, int)
+            or span_start < 0
+            or span_end <= span_start
+            or span_end > len(source_text)
+            or source_text[span_start:span_end] != quote
+            or canonical.get("source_excerpt") != quote
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The candidate does not have a unique, verifiable source span; no LCR assertion was created",
+            )
         subject = str(candidate.get("subject") or "").strip()
         observation = str(candidate.get("observation") or "").strip()
+        if not subject or not observation:
+            raise HTTPException(status_code=422, detail="The candidate is incomplete and cannot be accepted")
+        if status != "corrected_pending_approval" and observation not in quote:
+            raise HTTPException(
+                status_code=409,
+                detail="The extracted observation is not supported by its preserved source passage; no LCR assertion was created",
+            )
         if not subject or not observation:
             raise HTTPException(status_code=422, detail="The candidate is incomplete and cannot be accepted")
         document_field = _document_assertion_field(candidate)
