@@ -970,7 +970,11 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             CareAssertion.subject_type == domain.rstrip("s"),
                             CareAssertion.subject_id == subject_id,
                             CareAssertion.field == field,
-                            CareAssertion.assertion_kind == assertion_kind,
+                            # A duplicate source occurrence may have been first recorded
+                            # as a current-state assertion and later classified as a
+                            # time-bound observation. Duplicate identity is the same
+                            # person, subject, value, reporter and observed instant;
+                            # assertion kind must not let the same event be promoted twice.
                             CareAssertion.asserted_value == str(current),
                             (CareAssertion.created_by_caregiver_id == created_by_caregiver_id)
                             if created_by_caregiver_id else (CareAssertion.source_label == source),
