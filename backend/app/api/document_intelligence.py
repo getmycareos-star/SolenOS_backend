@@ -927,20 +927,51 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             ),
             None,
         )
-        if matching_medication is None:
+        # An exact duplicate upload may arrive after the first copy already
+        # created a conflict question and the medication projection stopped
+        # presenting either side as a current choice. Reuse that question's
+        # subject mapping rather than losing the medication relationship.
+        existing_source_question = None
+        for question in db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person_id,
+            OpenQuestion.subject_type == "medication",
+            OpenQuestion.intended_answerer_role == "professional",
+            OpenQuestion.status == "open",
+        ).all():
+            context_items = question.context if isinstance(question.context, list) else []
+            if any(
+                isinstance(item, dict) and item.get("source_sha256") == upload.sha256
+                for item in context_items
+            ):
+                existing_source_question = question
+                question_context = next(
+                    item for item in context_items
+                    if isinstance(item, dict) and item.get("source_sha256") == upload.sha256
+                )
+                candidate["matched_lcr_medication_id"] = str(question.subject_id)
+                candidate["matched_lcr_medication_name"] = question_context.get("existing_medication_name")
+                candidate["matched_lcr_medication_review_after_days"] = question_context.get("existing_medication_review_after_days")
+                candidate["professional_confirmation_question_id"] = str(question.id)
+                break
+        if matching_medication is None and existing_source_question is None:
             continue
-        question_id = _persist_medication_document_conflict_question(
-            db,
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            evidence_id=evidence_id,
-            analysis_id=analysis.id,
-            upload=upload,
-            candidate=candidate,
-            active_medication=matching_medication,
-        )
-        if question_id:
-            candidate["professional_confirmation_question_id"] = question_id
+        if matching_medication is not None:
+            candidate["matched_lcr_medication_id"] = str(matching_medication.get("medication_id"))
+            candidate["matched_lcr_medication_name"] = matching_medication.get("name")
+            candidate["matched_lcr_medication_review_after_days"] = matching_medication.get("review_after_days")
+            question_id = _persist_medication_document_conflict_question(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=evidence_id,
+                analysis_id=analysis.id,
+                upload=upload,
+                candidate=candidate,
+                active_medication=matching_medication,
+            )
+            if question_id:
+                candidate["professional_confirmation_question_id"] = question_id
+        if candidate.get("professional_confirmation_question_id"):
             candidate.setdefault("warnings", []).append(
                 "This document appears to conflict with the current medication record. The instruction is unconfirmed; a prescribing professional or pharmacist must confirm it before any medication decision."
             )
