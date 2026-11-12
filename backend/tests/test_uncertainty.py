@@ -158,7 +158,7 @@ def test_create_information_gap():
                 "necessity_rationale": "The next care decision depends on the sleep schedule.",
                 "decision_dependency": "A documented schedule is required to evaluate the new care plan.",
             }],
-            evidence_ids=[],
+            evidence_ids=["nonexistent-source-evidence"],
         )
         db.add(ungrounded_gap)
         db.flush()
