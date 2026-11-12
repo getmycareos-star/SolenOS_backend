@@ -1186,3 +1186,53 @@ def test_qwen_handoff_generation_bounds_context_and_attaches_only_selected_sourc
     assert result["sections"][0]["source_ref"] == "care_events:event-9"
     assert result["sections"][0]["text"] == records[9]["text"][:1200]
 
+def test_handoff_claim_provenance_links_each_exact_quote_to_its_own_source():
+    from app.api.handoff_drafts import _handoff_claim_provenance
+
+    content = {
+        "generation": {
+            "sections": [
+                {
+                    "section": "Recent observations",
+                    "text": "Caregiver reported a quiet morning.",
+                    "source_ref": "care_events:event-1",
+                },
+                {
+                    "section": "Earlier history",
+                    "text": "A clinic note mentioned unsteadiness.",
+                    "source_ref": "evidence:note-2",
+                },
+            ]
+        }
+    }
+    snapshot = {
+        "source_records": [
+            {
+                "source_type": "care_event",
+                "source_table": "care_events",
+                "source_id": "event-1",
+                "text": "Caregiver reported a quiet morning.",
+                "event_at": "2026-11-10T08:00:00+00:00",
+                "recorded_at": "2026-11-10T08:05:00+00:00",
+                "stale_warning": False,
+                "evidence_ids": ["note-1"],
+                "evidence_sources": [{"evidence_id": "note-1", "reported_by_label": "Daughter"}],
+            },
+            {
+                "source_type": "evidence",
+                "source_table": "evidence",
+                "source_id": "note-2",
+                "text": "A clinic note mentioned unsteadiness.",
+                "event_at": "2026-10-01T08:00:00+00:00",
+                "recorded_at": "2026-10-01T08:05:00+00:00",
+                "stale_warning": True,
+            },
+        ]
+    }
+    provenance = _handoff_claim_provenance(content, snapshot)
+    assert provenance["coverage"] == "all_sections_linked"
+    assert provenance["claims"][0]["support_status"] == "matched_saved_wording"
+    assert provenance["claims"][0]["source_references"][0]["record_id"] == "event-1"
+    assert provenance["claims"][0]["source_references"][0]["related_evidence"][0]["reported_by_label"] == "Daughter"
+    assert provenance["claims"][1]["support_status"] == "matched_historical_only"
+    assert provenance["claims"][1]["source_references"][0]["source_state_label"]
