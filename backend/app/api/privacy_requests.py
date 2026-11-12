@@ -974,7 +974,15 @@ def fulfil_approved_deletion(
     # alter a nullable person_id. Erasure is verified by immutable row identity,
     # not only by a mutable ownership column.
     evidence_ids_to_erase = db.execute(
-        select(Evidence.id).where(Evidence.person_id == person_id)
+        text("SELECT id FROM evidence WHERE person_id = :person_id"),
+        {"person_id": person_id},
+    ).scalars().all()
+    evidence_upload_ids_to_erase = db.execute(
+        text(
+            "SELECT evidence_id FROM evidence_uploads "
+            "WHERE evidence_id IN (SELECT id FROM evidence WHERE person_id = :person_id)"
+        ),
+        {"person_id": person_id},
     ).scalars().all()
 
     bind = db.get_bind()
@@ -991,6 +999,26 @@ def fulfil_approved_deletion(
                 status_code=409,
                 detail="Deletion is blocked by an active or unclassified legal hold.",
             )
+
+    # Delete document bytes only after the legal-hold gate has passed and before
+    # deleting their parent evidence rows.
+    for upload_evidence_id in evidence_upload_ids_to_erase:
+        db.execute(
+            text("DELETE FROM evidence_uploads WHERE evidence_id = :evidence_id"),
+            {"evidence_id": str(upload_evidence_id)},
+        )
+    remaining_upload_count = db.execute(
+        text(
+            "SELECT COUNT(*) FROM evidence_uploads "
+            "WHERE evidence_id IN (SELECT id FROM evidence WHERE person_id = :person_id)"
+        ),
+        {"person_id": person_id},
+    ).scalar_one()
+    if remaining_upload_count:
+        raise HTTPException(
+            status_code=409,
+            detail="Evidence upload bytes remain before care-record erasure; request was not fulfilled",
+        )
 
     # Build the directly scoped deletion set from registered ORM tables. The
     # foreign-key closure also captures dependent rows without person_id columns
@@ -1180,6 +1208,15 @@ def fulfil_approved_deletion(
                 status_code=409,
                 detail="Evidence rows remain after the care-record deletion pass; request was not fulfilled",
             )
+        for upload_evidence_id in evidence_upload_ids_to_erase:
+            if db.execute(
+                text("SELECT 1 FROM evidence_uploads WHERE evidence_id = :evidence_id"),
+                {"evidence_id": str(upload_evidence_id)},
+            ).first():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Evidence upload bytes remain after the care-record deletion pass; request was not fulfilled",
+                )
 
         # Explicitly remove the two root identity rows after the dependent-row
         # closure. Foreign-key violations fail closed rather than reporting a
@@ -1290,6 +1327,29 @@ def fulfil_approved_deletion(
                 status_code=409,
                 detail="Evidence rows remain after committed deletion verification; request was not marked fulfilled",
             )
+
+        # Verify document bytes again after the evidence/root deletion commits.
+        # This catches any database-side cascade or transaction interaction that
+        # might otherwise leave an upload row after the first deletion pass.
+        if evidence_ids_to_erase:
+            remaining_uploads = db.query(EvidenceUpload.evidence_id).filter(
+                EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
+            ).all()
+            if remaining_uploads:
+                db.query(EvidenceUpload).filter(
+                    EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
+                ).delete(synchronize_session=False)
+                db.flush()
+                db.commit()
+                db.expire_all()
+                remaining_uploads = db.query(EvidenceUpload.evidence_id).filter(
+                    EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
+                ).all()
+                if remaining_uploads:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Evidence upload bytes remain after committed deletion verification; request was not fulfilled",
+                    )
 
         # Both root identities are now absent. Only now persist the redacted
         # request receipt and terminal audit event.
