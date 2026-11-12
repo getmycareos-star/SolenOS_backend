@@ -967,7 +967,8 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
     import json
     from app.models.care import CareEvent, Caregiver, Correction, Evidence
     from app.models.care_continuity import CareAssertion, CareDeltaRun
-    from app.models.uncertainty import Contradiction, OpenQuestion
+    from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
+    from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
     from app.services import delta_engine
 
     with TestingSessionLocal() as db:
@@ -989,6 +990,18 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             assertion_status="reported",
             observed_at=NOW - timedelta(days=90),
             created_by_caregiver_id=caregiver.id,
+        ))
+        db.add(InformationGap(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="current_prescription",
+            field="current_prescription",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.ABSENT,
+            priority=Priority.INFORMATIONAL,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="Current prescriber-confirmed medication and dose were not supplied.",
+            evidence_ids=[],
         ))
         db.flush()
         ordered_events = sorted(
@@ -1203,6 +1216,14 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
         ).all()
         assert medication_assertions == []
+        initial_medication_gap = db.query(InformationGap).filter(
+            InformationGap.person_id == person.id,
+            InformationGap.subject_type == "medication",
+            InformationGap.subject_id == "current_prescription",
+        ).one()
+        assert initial_medication_gap.epistemic_state == EpistemicState.UNKNOWN
+        assert initial_medication_gap.lifecycle_status == GapLifecycleStatus.OPEN
+        assert initial_medication_gap.gap_reason == GapReason.ABSENT
 
         # Every persisted assertion must cite only evidence belonging to its own
         # source event, never unrelated evidence from another event in the run.
