@@ -12,7 +12,7 @@ from app.models.care import CareEvent, Evidence as EvidenceModel
 from app.schemas.capture_review import CaptureCandidateReview
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
-from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(tags=["capture review"])
 
@@ -208,18 +208,30 @@ def review_capture_candidate(
     analysis.candidates = candidates_payload
     analysis.review_history = history
     db.add(analysis)
-    db.commit()
-    db.refresh(analysis)
 
     change_intelligence_status = "not_required"
     if payload.decision == "accept":
         try:
-            reconcile_person_change_intelligence(db, person_id)
-            db.commit()
+            execute_care_continuity_reconciliation(
+                db,
+                person_id,
+                workflow="daily_capture_review",
+                source_event_id=analysis.source_event_id,
+                source_evidence_id=analysis.source_evidence_id,
+            )
             change_intelligence_status = "available"
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            change_intelligence_status = "unavailable"
+            raise HTTPException(
+                status_code=503,
+                detail="Care-continuity reconciliation failed; the review was not committed. Retry the review.",
+            ) from exc
+
+    # The accepted assertion, review decision, and reconciliation are committed
+    # together. A failure cannot leave a caregiver-visible accepted review with
+    # a silently stale longitudinal projection.
+    db.commit()
+    db.refresh(analysis)
 
     return {
         "analysis_id": analysis.id,
