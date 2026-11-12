@@ -232,7 +232,7 @@ def persist_source_clarification_questions(
     for row in existing_rows:
         existing_by_text.setdefault(_clarification_question_key(row.question or ""), row)
     persisted: List[OpenQuestionModel] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, ...]] = set()
     for value in (questions or [])[:20]:
         if not isinstance(value, str):
             continue
