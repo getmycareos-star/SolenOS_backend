@@ -274,6 +274,8 @@ def next_best_questions(
             and entry.get("caregiver_attention_required") is True
             and isinstance(entry.get("necessity_rationale"), str)
             and entry.get("necessity_rationale", "").strip()
+            and isinstance(entry.get("decision_dependency"), str)
+            and entry.get("decision_dependency", "").strip()
         ), None)
         necessity = "necessary" if explicit_assessment else "not_assessed"
         necessity_rationale = (
@@ -281,11 +283,16 @@ def next_best_questions(
             if explicit_assessment else
             "An information gap remains part of the care record. Missing information alone does not establish that asking the caregiver is necessary."
         )
+        decision_dependency = (
+            explicit_assessment["decision_dependency"].strip()
+            if explicit_assessment else None
+        )
         candidates.append({
             "question": f"What is currently known about {item.field}?",
             "subject_type": item.subject_type, "subject_id": item.subject_id,
             "priority": priority if priority in {"critical", "high", "medium", "low", "informational"} else "informational",
             "necessity": necessity, "necessity_rationale": necessity_rationale,
+            "decision_dependency": decision_dependency,
             "reason": item.description or f"The record identifies {item.field} as missing or incomplete.",
             "evidence_ids": item.evidence_ids or [], "source_kind": "information_gap", "source_id": item.id,
             "_weight": _priority_weight(priority),
@@ -348,6 +355,11 @@ def next_best_questions(
                 "source_id": clean["source_id"],
                 "source_ids": clean.get("source_ids") or [clean["source_id"]],
                 "reason": clean["reason"],
+                "necessity_assessment": {
+                    "necessity": clean.get("necessity", "not_assessed"),
+                    "necessity_rationale": clean.get("necessity_rationale"),
+                    "decision_dependency": clean.get("decision_dependency"),
+                },
             }
             if existing is None:
                 question = OpenQuestion(
