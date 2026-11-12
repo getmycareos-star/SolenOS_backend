@@ -99,6 +99,14 @@ class EvidenceAction(BaseModel):
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
     idempotency_key: Optional[str] = Field(default=None, max_length=160)
     verification_rule: Optional[str] = Field(default=None, max_length=4000)
+    response_outcome: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("response_outcome")
+    @classmethod
+    def valid_response_outcome(cls, value):
+        if value is not None and value not in {"response_received", "callback_promised"}:
+            raise ValueError("response_outcome must identify a received response or a promised callback")
+        return value
 
 
 class DependencyInput(BaseModel):
@@ -605,9 +613,21 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
             # Do not reveal whether an unrecognized evidence ID belongs to another person.
             raise HTTPException(status_code=404, detail="Referenced source evidence was not found in this care record")
     before = _snapshot(loop)
-    loop.response_evidence = [*(loop.response_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
+    response_outcome = payload.response_outcome or "response_received"
+    recorded_response = {
+        "text": payload.text,
+        "evidence": payload.evidence,
+        "response_outcome": response_outcome,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "reported_by": "session_caregiver",
+        "independently_verified": False,
+    }
+    loop.response_evidence = [*(loop.response_evidence or []), recorded_response]
     loop.last_contact_at = datetime.now(timezone.utc)
-    if loop.loop_type == "professional_input" and not payload.evidence:
+    if response_outcome == "callback_promised":
+        # A callback promise is an intermediate reported response, not a completed
+        # follow-up or confirmed appointment. Keep the same loop waiting on the
+        # external party and preserve the caregiver's report as its provenance.
         loop.status = "waiting"
     else:
         loop.status = "open"
