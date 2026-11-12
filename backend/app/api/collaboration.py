@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, inspect, or_, text
@@ -3377,7 +3377,7 @@ def _stored_claim_provenance(row: ConversationMessage) -> dict | None:
 
 
 @router.post("/conversation/message")
-async def companion_message(payload: CompanionCreate, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
     companion_request_started = _time.perf_counter()
     companion_request_id = getattr(request.state, "request_id", None)
