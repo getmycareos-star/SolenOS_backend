@@ -646,6 +646,7 @@ def accept_primary_transfer(transfer_id: str, request: Request, db: Session = De
     old_grant.can_manage_members = False
     old_grant.updated_at = now
     new_grant.role = "primary"
+    new_grant.access_scope = "full_record"
     new_grant.can_manage_members = True
     new_grant.updated_at = now
     transfer.status = "accepted"
