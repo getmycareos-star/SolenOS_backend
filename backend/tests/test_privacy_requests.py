@@ -31,6 +31,13 @@ def override_get_db():
 
 
 def setup_function():
+    # This file is also run against a dedicated, disposable PostgreSQL database.
+    # Reset only that isolated database's public schema between tests so reviewer
+    # queues cannot see previous test rows and FK dependencies cannot break teardown.
+    if TEST_POSTGRES_URL:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
+            connection.exec_driver_sql("CREATE SCHEMA public")
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
@@ -39,7 +46,8 @@ def setup_function():
 def teardown_function():
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
-    Base.metadata.drop_all(bind=engine)
+    if not TEST_POSTGRES_URL:
+        Base.metadata.drop_all(bind=engine)
 
 
 def create_session(client, name):

@@ -1067,7 +1067,10 @@ def fulfil_approved_deletion(
                 {"subject_id": person_id},
             )
 
-        # Preserve only the privacy request receipt and redacted security audit.
+        # Redact existing audit records now, but do not mark this request fulfilled
+        # until a separate post-commit check proves both root identities are gone.
+        # If a database-side dependency leaves either root row behind, the request
+        # remains approved and can be retried without a false completed receipt.
         db.query(AuditLogEvent).filter(
             AuditLogEvent.person_id == person_id
         ).update(
@@ -1081,6 +1084,39 @@ def fulfil_approved_deletion(
             },
             synchronize_session=False,
         )
+        db.commit()
+
+        # Verify after commit. Retry each root deletion in its own transaction
+        # before creating the immutable fulfilled receipt.
+        db.expire_all()
+        if db.query(Person).filter(Person.id == person_id).count() != 0:
+            db.execute(
+                text("DELETE FROM persons WHERE id = :person_id"),
+                {"person_id": person_id},
+            )
+            db.commit()
+            db.expire_all()
+        if db.query(Person).filter(Person.id == person_id).count() != 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Person record remains after committed deletion verification",
+            )
+
+        if db.query(Caregiver).filter(Caregiver.id == caregiver_id).count() != 0:
+            db.execute(
+                text("DELETE FROM caregivers WHERE id = :caregiver_id"),
+                {"caregiver_id": caregiver_id},
+            )
+            db.commit()
+            db.expire_all()
+        if db.query(Caregiver).filter(Caregiver.id == caregiver_id).count() != 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Caregiver record remains after committed deletion verification",
+            )
+
+        # Both root identities are now absent. Only now persist the redacted
+        # request receipt and terminal audit event.
         pseudonym = "erased:" + hashlib.sha256(
             f"{request_id}:{person_id}:{caregiver_id}".encode("utf-8")
         ).hexdigest()
@@ -1123,27 +1159,6 @@ def fulfil_approved_deletion(
             },
         ))
         db.commit()
-
-        # Re-check the root identity after commit, not only inside the write
-        # transaction. A successful receipt must never outlive a retained person row.
-        db.expire_all()
-        if db.query(Person).filter(Person.id == person_id).count() != 0:
-            db.execute(
-                text("DELETE FROM persons WHERE id = :person_id"),
-                {"person_id": person_id},
-            )
-            db.commit()
-            db.expire_all()
-        if db.query(Person).filter(Person.id == person_id).count() != 0:
-            raise HTTPException(
-                status_code=409,
-                detail="Person record remains after committed deletion verification",
-            )
-        if db.query(Caregiver).filter(Caregiver.id == caregiver_id).count() != 0:
-            raise HTTPException(
-                status_code=409,
-                detail="Caregiver record remains after committed deletion verification",
-            )
         db.refresh(row)
     except Exception:
         db.rollback()
