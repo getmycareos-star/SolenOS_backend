@@ -26,6 +26,23 @@ def _value_key(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
+def has_valid_caregiver_necessity(question: Any) -> bool:
+    """Fail closed unless a caregiver request has rationale, dependency and source evidence."""
+    evidence_ids = list(getattr(question, "evidence_ids", None) or [])
+    rationale = getattr(question, "necessity_rationale", None)
+    if not evidence_ids or not isinstance(rationale, str) or not rationale.strip():
+        return False
+    for item in (getattr(question, "context", None) or []):
+        if not isinstance(item, dict):
+            continue
+        direct = item.get("decision_dependency")
+        nested = item.get("necessity_assessment")
+        nested_value = nested.get("decision_dependency") if isinstance(nested, dict) else None
+        if any(isinstance(value, str) and value.strip() for value in (direct, nested_value)):
+            return True
+    return False
+
+
 def _open_question_state(question: OpenQuestion) -> Dict[str, Any]:
     return {
         "id": question.id,
