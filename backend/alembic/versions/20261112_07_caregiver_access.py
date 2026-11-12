@@ -72,6 +72,12 @@ def upgrade():
             FROM caregiver_roles
             WHERE is_current = TRUE
               AND CAST(role_type AS VARCHAR) IN ('PRIMARY_FAMILY_CAREGIVER', 'primary_family_caregiver')
+            UNION
+            SELECT p.person_id, p.id AS caregiver_profile_id
+            FROM caregiver_profiles p
+            JOIN caregiver_accounts a
+              ON a.person_id = p.person_id
+             AND a.caregiver_id = p.session_caregiver_id
         ),
         primary_counts AS (
             SELECT person_id, COUNT(*) AS primary_count
