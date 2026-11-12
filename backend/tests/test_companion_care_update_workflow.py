@@ -165,7 +165,7 @@ def test_rejection_never_creates_assertion_or_allows_later_acceptance(monkeypatc
         session = create_session(client, "Caregiver rejection")
         send_response = send(client, session, source)
         assert send_response.status_code == 200, send_response.text
-        proposal = pending(client, session)[0]
+        proposal = create_legacy_proposal_for_review(session, send_response, source)
         rejected = review(client, session, proposal["id"], {"decision": "reject"})
         assert rejected.status_code == 200 and rejected.json()["written_to_lcr"] is False
         rejection_replay = review(client, session, proposal["id"], {"decision": "reject"})
