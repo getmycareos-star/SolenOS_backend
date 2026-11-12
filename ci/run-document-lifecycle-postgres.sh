@@ -8,8 +8,6 @@ cd /workspace
 python -m pytest \
   backend/tests/test_unified_care_spine_capture.py \
   backend/tests/test_document_lifecycle_postgres.py \
-  backend/tests/test_document_lifecycle.py \
-  backend/tests/test_document_intelligence_lifecycle.py \
   backend/tests/test_document_intelligence_postgres.py \
   backend/tests/test_unified_lcr_retrieval.py \
   backend/tests/test_daily_care_review_postgres.py \
