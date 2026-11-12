@@ -215,6 +215,15 @@ def canonical_candidate(
     observation = str(item.get("observation") or "")
     field_type = classify_field(subject, observation, excerpt)
     page_number = page_for_excerpt(source_text, excerpt)
+    # Persist absolute character offsets into the immutable extracted source.
+    # Ambiguous repeated passages intentionally receive no span and cannot be
+    # silently represented as a precise source location.
+    source_span_start = source_text.find(excerpt) if excerpt else -1
+    if source_span_start < 0 or source_text.count(excerpt) != 1:
+        source_span_start = None
+        source_span_end = None
+    else:
+        source_span_end = source_span_start + len(excerpt)
     warnings = candidate_warnings(field_type, observation, excerpt, subject)
     if page_number is None:
         warnings.append("The exact excerpt could not be assigned to one unambiguous page.")
@@ -231,6 +240,9 @@ def canonical_candidate(
         "document_id": document_id,
         "page_number": page_number,
         "source_excerpt": excerpt,
+        "source_span_start": source_span_start,
+        "source_span_end": source_span_end,
+        "source_span_unit": "unicode_code_points",
         "field_type": field_type,
         "extracted_value": observation or None,
         "event_date": None if len(set(_date_tokens(excerpt))) > 1 else _date_from_excerpt(excerpt),
