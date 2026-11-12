@@ -55,7 +55,7 @@ _HEDGE_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 
-_CLAUSE_BOUNDARY = re.compile(r"\\b(and|but|or|however|although|yet)\\b|[.;!?]", re.IGNORECASE)
+_CLAUSE_BOUNDARY = re.compile(r"\b(and|but|or|however|although|yet)\b|[.;!?]", re.IGNORECASE)
 
 
 def _source_hedge_for_observation(quote: str, observation: str):
