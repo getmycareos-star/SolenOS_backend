@@ -33,6 +33,8 @@ from app.models.care_continuity import (
     CareAssertion,
     CareActionOutcome,
     CareDeltaRun,
+    EvidenceReviewRecord,
+    EvidenceClaimAssessment,
     EvidenceCompletenessAssessment,
     EvidenceFreshnessAssessment,
     EvidenceFreshnessPolicy,
@@ -1479,6 +1481,18 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         EvidenceObservation.person_id == person_id,
         EvidenceObservation.evidence_id == evidence_id,
     ).first()
+    review_dependency = db.query(EvidenceReviewRecord.id).filter(
+        EvidenceReviewRecord.person_id == person_id,
+        EvidenceReviewRecord.evidence_id == evidence_id,
+    ).first()
+    claim_assessments = db.query(EvidenceClaimAssessment).filter(
+        EvidenceClaimAssessment.person_id == person_id,
+    ).all()
+    claim_assessment_dependency = any(
+        evidence_id in str(item)
+        for row in claim_assessments
+        for item in (row.evidence_links or [])
+    )
     relationship_dependency = db.query(EvidenceSourceRelationship.id).filter(
         EvidenceSourceRelationship.person_id == person_id,
         or_(
@@ -1486,7 +1500,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
             EvidenceSourceRelationship.related_evidence_id == evidence_id,
         ),
     ).first()
-    if observation_dependency or relationship_dependency:
+    if observation_dependency or review_dependency or claim_assessment_dependency or relationship_dependency:
         raise HTTPException(
             status_code=409,
             detail="This document has structured evidence-history links that must be resolved before deletion. The original file has not been removed.",
