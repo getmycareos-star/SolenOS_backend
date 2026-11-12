@@ -60,6 +60,8 @@ def sync_appointment_followups(
         title = " ".join(action.split())[:240]
         stable_key = hashlib.sha256(title.casefold().encode("utf-8")).hexdigest()[:24]
         source_id = f"{workspace_id}:{stable_key}"
+        if source_id in current_source_ids:
+            continue
         current_source_ids.add(source_id)
         owner = item.get("owner")
         owner_label = owner.strip()[:200] if isinstance(owner, str) and owner.strip() else None
@@ -128,7 +130,11 @@ def sync_appointment_followups(
         loop.deadline_source = "explicit_user" if due_at else None
         loop.deadline_timezone = str(due_at.tzinfo) if due_at else None
         loop.source_fingerprint = fingerprint
-        loop.evidence = list(loop.evidence or []) + evidence
+        existing_evidence = list(loop.evidence or [])
+        for evidence_item in evidence:
+            if evidence_item not in existing_evidence:
+                existing_evidence.append(evidence_item)
+        loop.evidence = existing_evidence
         loop.updated_at = now
         loop.version = (loop.version or 0) + 1
         db.add(OpenLoopEvent(
