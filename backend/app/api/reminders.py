@@ -8,9 +8,23 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.reminder import CareReminder
+from app.models.notifications import CareNotification, CarePushDelivery
 from app.schemas.reminder import CareReminderComplete, CareReminderCreate, CareReminderRead, CareReminderSnooze
 
 router = APIRouter(tags=["care reminders"])
+
+
+def _cancel_pending_reminder_pushes(db: Session, reminder_id: str) -> None:
+    db.query(CarePushDelivery).join(
+        CareNotification, CareNotification.id == CarePushDelivery.notification_id
+    ).filter(
+        CareNotification.source_event_id == reminder_id,
+        CareNotification.category == "reminder_due",
+        CarePushDelivery.status == "pending",
+    ).update(
+        {CarePushDelivery.status: "cancelled"},
+        synchronize_session=False,
+    )
 
 
 def _session_scope(request: Request, db: Session) -> tuple[str, str]:
@@ -98,6 +112,7 @@ def complete_reminder(
         raise HTTPException(status_code=409, detail="A cancelled reminder cannot be completed")
     if reminder.status == "open":
         reminder.status = "completed"
+        _cancel_pending_reminder_pushes(db, reminder.id)
         reminder.completed_at = datetime.now(timezone.utc)
         reminder.completed_by_caregiver_id = caregiver_id
     if payload.completion_note is not None:
@@ -133,6 +148,7 @@ def snooze_reminder(
     from datetime import timedelta
     if snooze_until > now + timedelta(days=30):
         raise HTTPException(status_code=422, detail="Snooze time cannot be more than 30 days away")
+    _cancel_pending_reminder_pushes(db, reminder.id)
     reminder.due_at = snooze_until
     reminder.notification_deferred_until = None
     reminder.snoozed_at = now
@@ -157,6 +173,7 @@ def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(ge
     if reminder.status == "completed":
         raise HTTPException(status_code=409, detail="A completed reminder cannot be cancelled")
     if reminder.status == "open":
+        _cancel_pending_reminder_pushes(db, reminder.id)
         reminder.status = "cancelled"
         reminder.cancelled_at = datetime.now(timezone.utc)
         reminder.cancelled_by_caregiver_id = caregiver_id
