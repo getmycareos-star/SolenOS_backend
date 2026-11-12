@@ -234,23 +234,28 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     _verify_persisted_extraction(analysis, upload, db)
     metadata = _metadata(analysis)
     existing = _intelligence(analysis)
+    resume_intelligence = {}
     if existing:
-        try:
-            persist_source_clarification_questions(
-                db,
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                source_kind="document_extraction",
-                source_record_type="evidence",
-                source_record_id=str(evidence.id),
-                evidence_ids=[str(evidence.id)],
-                questions=existing.get("open_questions") or [],
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception("Could not backfill saved document clarification questions for evidence %s", evidence.id)
-        return _response(analysis)
+        pending_pages = existing.get("unprocessed_page_numbers")
+        if existing.get("status") == "partial" and isinstance(pending_pages, list) and pending_pages:
+            resume_intelligence = existing
+        else:
+            try:
+                persist_source_clarification_questions(
+                    db,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_kind="document_extraction",
+                    source_record_type="evidence",
+                    source_record_id=str(evidence.id),
+                    evidence_ids=[str(evidence.id)],
+                    questions=existing.get("open_questions") or [],
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("Could not backfill saved document clarification questions for evidence %s", evidence.id)
+            return _response(analysis)
 
     source_text = (analysis.source_text or "").strip()
     if not source_text:
@@ -261,16 +266,39 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     all_open_questions = []
     page_inputs = split_document_pages(source_text)
     unreadable_pages = unreadable_page_numbers(source_text)
-    all_page_numbers = sorted({int(match.group(1)) for match in re.finditer(r"(?m)^\[Page\s+(\d+)", source_text)})
+    all_page_numbers = sorted({int(match.group(1)) for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)", source_text)})
     if not page_inputs:
         raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
-    selected_pages = page_inputs[:MAX_DOCUMENT_QWEN_PAGES]
+
+    if resume_intelligence:
+        page_window_start = resume_intelligence.get("next_page_window_start")
+        chunk_offset = resume_intelligence.get("next_chunk_offset", 0)
+        if not isinstance(page_window_start, int) or page_window_start < 0:
+            pending = set(resume_intelligence.get("unprocessed_page_numbers") or [])
+            page_window_start = next(
+                (index for index, (number, _) in enumerate(page_inputs) if number in pending),
+                0,
+            )
+        if not isinstance(chunk_offset, int) or chunk_offset < 0:
+            chunk_offset = 0
+    else:
+        page_window_start = 0
+        chunk_offset = 0
+
+    selected_pages = page_inputs[page_window_start:page_window_start + MAX_DOCUMENT_QWEN_PAGES]
     qwen_chunks = chunk_document_pages(selected_pages)
-    selected_chunks = qwen_chunks[:MAX_DOCUMENT_QWEN_CHUNKS]
-    unprocessed_pages = sorted(
-        {number for number, _ in page_inputs[MAX_DOCUMENT_QWEN_PAGES:]}
-        | {number for number, _ in qwen_chunks[MAX_DOCUMENT_QWEN_CHUNKS:]}
-    )
+    selected_chunks = qwen_chunks[chunk_offset:chunk_offset + MAX_DOCUMENT_QWEN_CHUNKS]
+    next_chunk_offset = chunk_offset + len(selected_chunks)
+    if next_chunk_offset < len(qwen_chunks):
+        next_page_window_start = page_window_start
+        next_chunk_offset_to_store = next_chunk_offset
+        unprocessed_pages = {number for number, _ in qwen_chunks[next_chunk_offset:]}
+        unprocessed_pages.update(number for number, _ in page_inputs[page_window_start + len(selected_pages):])
+    else:
+        next_page_window_start = page_window_start + len(selected_pages)
+        next_chunk_offset_to_store = 0
+        unprocessed_pages = {number for number, _ in page_inputs[next_page_window_start:]}
+    unprocessed_pages = sorted(unprocessed_pages)
     for page_number, page_text in selected_chunks:
         try:
             page_result = extract_review_candidates(
@@ -292,10 +320,15 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     for value in page_questions
                     if isinstance(value, str) and value.strip()
                 )
-    candidate_overflow = len(raw_observations) > 60
-    raw_observations = raw_observations[:60]
-    grounded = []
-    seen_quotes = set()
+    prior_observations = copy.deepcopy(resume_intelligence.get("observations") or [])
+    candidate_overflow = len(prior_observations) + len(raw_observations) > 60
+    raw_observations = raw_observations[:max(0, 60 - len(prior_observations))]
+    grounded = prior_observations
+    seen_quotes = {
+        item.get("source_quote")
+        for item in prior_observations
+        if isinstance(item, dict) and isinstance(item.get("source_quote"), str)
+    }
     for item in raw_observations:
         if not isinstance(item, dict):
             continue
@@ -352,19 +385,24 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     metadata["document_intelligence"] = {
         "version": 1,
         "observations": grounded,
-        "open_questions": [
+        "open_questions": list(dict.fromkeys([
+            *[
+                value for value in (resume_intelligence.get("open_questions") or [])
+                if isinstance(value, str)
+                and value.strip()
+                and not value.startswith("Only the first ")
+                and not value.startswith("Qwen reached the ")
+                and not value.startswith("Pages ")
+                and not value.startswith("Document understanding has more readable pages")
+            ],
             *[
                 value.strip()[:300]
                 for value in all_open_questions[:3]
                 if isinstance(value, str) and value.strip()
             ],
             *(
-                [f"Only the first {MAX_DOCUMENT_QWEN_PAGES} readable pages were selected for Qwen. Remaining pages {', '.join(map(str, unprocessed_pages))} need another extraction pass."]
-                if len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES else []
-            ),
-            *(
-                [f"Qwen reached the {MAX_DOCUMENT_QWEN_CHUNKS}-chunk processing limit. Remaining source text on pages {', '.join(map(str, unprocessed_pages))} was not processed and needs another extraction pass."]
-                if len(qwen_chunks) > MAX_DOCUMENT_QWEN_CHUNKS else []
+                [f"Document understanding has more readable pages to process. Remaining pages {', '.join(map(str, unprocessed_pages))} will be processed on retry."]
+                if unprocessed_pages else []
             ),
             *(
                 [f"Pages {', '.join(map(str, unreadable_pages))} have no readable extracted text. Review the original pages manually; no facts were inferred from them."]
@@ -374,14 +412,15 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 ["The candidate review limit was reached; additional extracted candidates were not included and require a follow-up extraction."]
                 if candidate_overflow else []
             ),
-        ],
-        "processed_page_count": len({number for number, _ in selected_chunks}),
+        ])),
+        "processed_page_count": len(set(resume_intelligence.get("processed_page_numbers") or []) | {number for number, _ in selected_chunks}),
         "total_readable_page_count": len(page_inputs),
         "total_page_count": len(all_page_numbers) or len(page_inputs),
-        "processed_page_numbers": sorted({number for number, _ in selected_chunks}),
+        "processed_page_numbers": sorted(set(resume_intelligence.get("processed_page_numbers") or []) | {number for number, _ in selected_chunks}),
         "unprocessed_page_numbers": unprocessed_pages,
         "unreadable_page_numbers": unreadable_pages,
-        "status": "partial" if (len(page_inputs) > MAX_DOCUMENT_QWEN_PAGES or len(qwen_chunks) > MAX_DOCUMENT_QWEN_CHUNKS or unreadable_pages or candidate_overflow) else "available",
+        "next_page_window_start": next_page_window_start,
+        "next_chunk_offset": next_chunk_offset_to_store,
         "model_authority": "review_only",
         "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
     }
