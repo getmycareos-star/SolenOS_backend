@@ -25,6 +25,7 @@ from app.api.document_intelligence import router as document_intelligence_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_continuity import router as care_continuity_router, RESOURCES as CARE_CONTINUITY_RESOURCES
 from app.api.reminders import router as reminders_router
+from app.api.push_notifications import router as push_notifications_router
 from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
 from app.api.companion_review import router as companion_review_router
@@ -236,6 +237,7 @@ app.include_router(document_intelligence_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
+app.include_router(push_notifications_router, prefix="/api/v1")
 app.include_router(handoffs_router, prefix="/api/v1")
 app.include_router(handoff_drafts_router, prefix="/api/v1")
 app.include_router(appointment_workspace_router, prefix="/api/v1")
