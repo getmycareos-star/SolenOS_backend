@@ -632,3 +632,17 @@ def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(clie
 
     with TestSessionLocal() as db:
         assert db.query(Evidence).filter_by(person_id=session["person"]["id"]).count() == 1
+
+
+def test_outlook_msg_is_preserved_but_reports_explicit_unsupported_extraction(client):
+    test_client, session = client
+    evidence_id = persist_document(
+        session,
+        b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-outlook-binary",
+        "clinic-message.msg",
+        "application/vnd.ms-outlook",
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 415, response.text
+    assert ".msg files are preserved" in response.json()["detail"]
