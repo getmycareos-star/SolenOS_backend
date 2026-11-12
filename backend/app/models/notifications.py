@@ -87,6 +87,31 @@ class CarePushDelivery(Base):
     last_error_message = Column(Text, nullable=True)
 
 
+class NotificationDeliveryAttempt(Base):
+    """Append-only record of each provider delivery attempt."""
+
+    __tablename__ = "notification_delivery_attempts"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    actor_id = Column(String(255), nullable=True, index=True)
+    subject_id = Column(String(255), nullable=True, index=True)
+    person_id = Column(String(255), nullable=True, index=True)
+    caregiver_id = Column(String(255), nullable=True, index=True)
+    notification_id = Column(String(255), nullable=False, index=True)
+    attempt_number = Column(Integer, nullable=False)
+    channel = Column(Text, nullable=False)
+    attempted_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    result = Column(Text, nullable=False)
+    failure_code = Column(Text, nullable=True)
+    provider_reference = Column(Text, nullable=True)
+    request_id = Column(String(255), nullable=True, index=True)
+    correlation_id = Column(String(255), nullable=True, index=True)
+    policy_version = Column(String(100), nullable=True)
+    record_metadata = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class DeliveryFailureEvent(Base):
     """Durable, redacted record of one failed delivery attempt."""
     __tablename__ = "delivery_failure_events"
