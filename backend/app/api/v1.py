@@ -675,6 +675,22 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     and existing_analysis.extraction_status == "available"
                     and reviewable_candidates
                 ),
+                "execution_status": (
+                    existing_analysis.execution_status
+                    if existing_analysis and existing_analysis.execution_status
+                    else {
+                        "source_preservation": "verified",
+                        "evidence": "verified" if linked_evidence_ids else "not_applicable",
+                        "extraction": (
+                            "available" if existing_analysis and existing_analysis.extraction_status == "available"
+                            else "failed"
+                        ),
+                        "assessment": "pending",
+                        "review": "required" if reviewable_candidates else "not_required",
+                        "reconciliation": "pending",
+                        "longitudinal_retrieval": "not_verified",
+                    }
+                ),
                 "qwen_written_to_lcr": False,
             }
         detail["capture_request_fingerprint"] = capture_request_fingerprint
