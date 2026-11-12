@@ -115,6 +115,8 @@ def deliver_due_reminders(db=None, now=None):
                 .first()
             )
             if preference is not None and not preference.reminders_enabled:
+                reminder.notification_deferred_until = datetime(9999, 12, 31, tzinfo=timezone.utc)
+                session.commit()
                 continue
             release_at = quiet_hours_release_at(preference, current)
             if release_at is not None:
