@@ -480,14 +480,18 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                         page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
                 except HTTPException as exc:
                     if exc.status_code == 503:
-                        # OCR infrastructure outage is not evidence that the page is unreadable.
+                        # An unavailable OCR engine is not evidence that the page is unreadable.
                         raise
                     if exc.status_code == 413:
                         page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR page limit exceeded]")
                     else:
-                        page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
+                        # OCR execution failed. Keep the page retryable; do not
+                        # misreport an engine error as a successful empty OCR result.
+                        page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR engine error]")
                 except Exception:
-                    page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
+                    # Rendering or OCR exceptions are processing failures, not
+                    # evidence that the page contains no readable information.
+                    page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR processing error]")
                 finally:
                     if image is not None:
                         image.close()
@@ -517,8 +521,26 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                     raise HTTPException(status_code=413, detail="Images are limited to 20 megapixels for OCR")
                 adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
                 try:
-                    extracted = _ocr_image(adjusted)
-                    quality_marker = _ocr_quality_marker(adjusted)
+                    try:
+                        extracted = _ocr_image(adjusted)
+                        quality_marker = _ocr_quality_marker(adjusted)
+                    except HTTPException as exc:
+                        if exc.status_code == 503:
+                            raise
+                        if exc.status_code == 413:
+                            extracted = ""
+                            quality_marker = None
+                            image_processing_failure = "image exceeds the OCR processing limit"
+                        else:
+                            extracted = ""
+                            quality_marker = None
+                            image_processing_failure = "OCR engine error"
+                    except Exception:
+                        extracted = ""
+                        quality_marker = None
+                        image_processing_failure = "OCR processing error"
+                    else:
+                        image_processing_failure = None
                 finally:
                     if used_scan_adjustments:
                         adjusted.close()
@@ -526,10 +548,15 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             raise
         except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The saved image could not be decoded for OCR") from exc
+        if image_processing_failure:
+            return _bounded_extraction(
+                f"[Image OCR]\n[Page 1 OCR]\n[Page not processed: {image_processing_failure}]",
+                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
+            )
         if not extracted:
-            raise HTTPException(
-                status_code=422,
-                detail="No readable text was found in the image. The original document remains preserved.",
+            return _bounded_extraction(
+                "[Image OCR]\n[Page 1 OCR]\n[No readable text detected on this page]",
+                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
             )
         page_content = "\n".join(value for value in (quality_marker, extracted) if value)
         return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{page_content}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
