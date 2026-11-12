@@ -437,6 +437,7 @@ def _persist_medication_document_conflict_question(
         "existing_medication_assertion_id": active_status_claim.id,
         "existing_medication_name": active_medication.get("name"),
         "existing_medication_dose": active_medication.get("dose"),
+        "existing_medication_review_after_days": active_medication.get("review_after_days"),
         "interpretation": "unconfirmed_document_candidate_against_current_lcr_medication",
     }]
     question = OpenQuestion(
