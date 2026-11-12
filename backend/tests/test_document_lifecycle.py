@@ -524,3 +524,16 @@ def test_snap_care_photo_upload_is_persisted_without_document_ocr(client):
     # Document OCR is intentionally not run against Snap care-photo evidence.
     extraction = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert extraction.status_code == 404, extraction.text
+
+
+def test_extraction_limit_fails_explicitly_without_silent_truncation(client):
+    test_client, session = client
+    evidence_id = persist_document(session, b"A" * 100_001, "long-care-note.txt", "text/plain")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 413, response.text
+    assert "processing limit" in response.json()["detail"]
+    # The original evidence remains retrievable after the extraction limit is reached.
+    original = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert original.status_code == 200, original.text
+    assert len(original.content) == 100_001
