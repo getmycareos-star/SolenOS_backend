@@ -1050,6 +1050,14 @@ def fulfil_approved_deletion(
                 status_code=409,
                 detail="Person record remains after deletion attempt; request was not marked fulfilled",
             )
+        remaining_caregiver = db.query(Caregiver).filter(Caregiver.id == caregiver_id).first()
+        if remaining_caregiver is not None:
+            db.query(Caregiver).filter(Caregiver.id == caregiver_id).delete(synchronize_session=False)
+        if db.query(Caregiver).filter(Caregiver.id == caregiver_id).count() != 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Caregiver record remains after deletion attempt; request was not marked fulfilled",
+            )
 
         # Released/expired holds are no longer a deletion blocker and must not
         # retain the deleted subject identifier.
@@ -1130,6 +1138,11 @@ def fulfil_approved_deletion(
             raise HTTPException(
                 status_code=409,
                 detail="Person record remains after committed deletion verification",
+            )
+        if db.query(Caregiver).filter(Caregiver.id == caregiver_id).count() != 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Caregiver record remains after committed deletion verification",
             )
         db.refresh(row)
     except Exception:
