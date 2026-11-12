@@ -189,14 +189,6 @@ async def process_one_qwen_job() -> bool:
                     raise ValueError("document_intake_evidence_id_invalid")
                 extraction = extract_saved_document(evidence_id, scoped_request, db)
                 intelligence = analyze_saved_document(evidence_id, scoped_request, db)
-                resume_count = 0
-                while (
-                    intelligence.get("intelligence_status") == "partial"
-                    and intelligence.get("unprocessed_page_numbers")
-                    and resume_count < 10
-                ):
-                    intelligence = analyze_saved_document(evidence_id, scoped_request, db)
-                    resume_count += 1
                 completed.append({
                     "evidence_id": evidence_id,
                     "analysis_id": extraction.get("analysis_id"),
@@ -205,8 +197,33 @@ async def process_one_qwen_job() -> bool:
                     "processed_page_count": intelligence.get("processed_page_count"),
                     "total_page_count": intelligence.get("total_page_count"),
                     "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers") or [],
-                    "resume_passes": resume_count,
                 })
+                pending_pages = intelligence.get("unprocessed_page_numbers") or []
+                if intelligence.get("intelligence_status") == "partial" and pending_pages:
+                    # Yield the worker between page windows so a long packet
+                    # does not block reminders or other caregiver jobs.
+                    job.status = "queued"
+                    job.attempt_count = 0
+                    job.available_at = datetime.now(timezone.utc) + timedelta(seconds=3)
+                    job.locked_at = None
+                    job.result_text = json.dumps(completed)
+                    db.add(QwenJobEvent(
+                        job_id=job.id,
+                        person_id=job.person_id,
+                        caregiver_id=job.caregiver_id,
+                        event_type="document_intake_page_window_completed",
+                        from_status="processing",
+                        to_status="queued",
+                        metadata_json={
+                            "source_evidence_id": evidence_id,
+                            "processed_page_count": intelligence.get("processed_page_count"),
+                            "total_page_count": intelligence.get("total_page_count"),
+                            "unprocessed_page_numbers": pending_pages,
+                            "written_to_lcr": False,
+                        },
+                    ))
+                    db.commit()
+                    return True
             job.status = "completed"
             job.workflow = "document_intake"
             job.result_text = json.dumps(completed)
