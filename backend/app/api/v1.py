@@ -945,8 +945,8 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 if isinstance(candidate, dict):
                     candidate["review_status"] = "recorded_as_reported_observation"
             assessment_status = (
-                "completed" if persisted_observation_count
-                else "no_supported_observations"
+                "available" if persisted_observation_count
+                else "not_applicable"
             )
         except Exception:
             db.rollback()
