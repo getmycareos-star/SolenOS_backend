@@ -181,6 +181,7 @@ from app.api.collaboration import (
 )
 from app.models.capture_analysis import CaptureAnalysis
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
+from app.api.document_intelligence import _existing_assertion_for_exact_document_duplicate
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgresql+psycopg://"):
@@ -467,5 +468,79 @@ def test_postgres_corrected_document_version_link_is_explicit_and_non_destructiv
             comparison = compare_document_version(current.id, _request(person_id, caregiver_id), db)
             assert comparison["comparison_status"] == "pending"
             assert comparison["lcr_changed"] is False
+    finally:
+        engine.dispose()
+
+
+def test_postgres_exact_duplicate_documents_reuse_one_lcr_assertion():
+    """Exact duplicate uploads cannot create a second assertion for the same source passage."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-duplicate-person-{suffix}"
+    caregiver_id = f"doc-duplicate-caregiver-{suffix}"
+    source_quote = "The follow-up clinic review is recommended."
+    original_bytes = (source_quote + " " + suffix).encode("utf-8")
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document duplicate fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Document duplicate caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            first = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "discharge-summary.txt", original_bytes
+            )
+            second = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "discharge-summary-copy.txt", original_bytes
+            )
+            assert first["sha256"] == second["sha256"]
+            assert second["duplicate_detected"] is True
+            assert second["duplicate_of_evidence_id"] == first["evidence_id"]
+            db.add(CareAssertion(
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="appointment",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="Subject: Follow-up clinic review\nStatement: " + source_quote + "\nEvent date: Not stated or unresolved\nSource-recorded date: Not stated in document",
+                source_label="Caregiver-reviewed document",
+                source_text=source_quote,
+                evidence_ids=[first["evidence_id"]],
+                assertion_status="accepted",
+                created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+        with Session() as db:
+            second_evidence = db.query(Evidence).filter_by(id=second["evidence_id"], person_id=person_id).one()
+            second_upload = db.query(EvidenceUpload).filter_by(evidence_id=second["evidence_id"]).one()
+            reused = _existing_assertion_for_exact_document_duplicate(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=second["evidence_id"],
+                upload=second_upload,
+                field="appointment",
+                source_quote=source_quote,
+                asserted_value=db.query(CareAssertion).filter_by(person_id=person_id).one().asserted_value,
+            )
+            assert reused is not None
+            assert first["evidence_id"] in (reused.evidence_ids or [])
+            assert second_evidence.id not in (reused.evidence_ids or [])
+            with pytest.raises(HTTPException) as conflict:
+                _existing_assertion_for_exact_document_duplicate(
+                    db,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    evidence_id=second["evidence_id"],
+                    upload=second_upload,
+                    field="appointment",
+                    source_quote=source_quote,
+                    asserted_value="A different interpretation of the same exact source.",
+                )
+            assert conflict.value.status_code == 409
     finally:
         engine.dispose()
