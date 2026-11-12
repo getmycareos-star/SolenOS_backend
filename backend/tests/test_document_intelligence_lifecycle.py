@@ -526,15 +526,15 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
-    source = "\\n\\n".join(
-        f"[Page {page}]\\nPatient was observed completing activity on page {page}."
+    source = "\n\n".join(
+        f"[Page {page}]\nPatient was observed completing activity on page {page}."
         for page in range(1, 27)
     )
     processed_pages = []
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
         quote = page_text.splitlines()[-1]
-        page_number = int(re.search(r"page (\\d+)", quote).group(1))
+        page_number = int(re.search(r"page (\d+)", quote).group(1))
         processed_pages.append(page_number)
         return {
             "observations": [{
