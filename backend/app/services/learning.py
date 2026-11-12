@@ -6,7 +6,7 @@ from app.models.memory import (
     Observation as ObservationModel,
     LearningEvent as LearningEventModel,
 )
-from app.models.care import Insight as InsightModel
+from app.models.care import CareEvent as CareEventModel, Insight as InsightModel
 from app.models.care_continuity import CareAssertion, CareRecordRelationship
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
@@ -62,6 +62,42 @@ class LearningEngine:
         corrected_text = correction.corrected_text
         reason = correction.reason
         person_id = correction.person_id
+
+        if target_type == "care_event":
+            original = self.db.query(CareEventModel).filter(
+                CareEventModel.id == target_id,
+                CareEventModel.person_id == person_id,
+            ).with_for_update().first()
+            if original is None:
+                raise ValueError("Correction target event was not found for this care recipient")
+
+            # The correction is an append-only relationship. Never rewrite or
+            # delete the original caregiver event.
+            existing_link = self.db.query(CareRecordRelationship).filter(
+                CareRecordRelationship.person_id == person_id,
+                CareRecordRelationship.source_type == "correction",
+                CareRecordRelationship.source_id == correction.id,
+                CareRecordRelationship.relationship_type == "corrects",
+                CareRecordRelationship.target_type == "care_event",
+                CareRecordRelationship.target_id == target_id,
+            ).first()
+            if existing_link is None:
+                self.db.add(CareRecordRelationship(
+                    person_id=person_id,
+                    source_type="correction",
+                    source_id=correction.id,
+                    relationship_type="corrects",
+                    target_type="care_event",
+                    target_id=target_id,
+                    provenance=(
+                        "Caregiver-submitted correction; original care event retained "
+                        "unchanged and correction remains a separate reported record."
+                    ),
+                    created_by_caregiver_id=correction.caregiver_id,
+                ))
+            if commit:
+                self.db.commit()
+            return
 
         if target_type == "care_assertion":
             original = self.db.query(CareAssertion).filter(
