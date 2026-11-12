@@ -609,7 +609,6 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 extraction = db.query(CaptureAnalysis).filter(
                     CaptureAnalysis.id == source_id,
                     CaptureAnalysis.person_id == draft.person_id,
-                    CaptureAnalysis.caregiver_id == draft.caregiver_id,
                     CaptureAnalysis.extraction_status == "available",
                 ).first()
                 document_id = (item.get("details") or {}).get("document_id")
@@ -630,7 +629,6 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 document = db.query(Evidence).filter(
                     Evidence.id == source_id,
                     Evidence.person_id == draft.person_id,
-                    Evidence.uploaded_by_caregiver_id == draft.caregiver_id,
                     Evidence.type == "document",
                 ).first()
                 upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == source_id).first()
