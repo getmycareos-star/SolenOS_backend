@@ -7,7 +7,8 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
-from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation
+from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
+from app.models.caregiver_intelligence import CaregiverResponsibility
 from app.models.anonymous_session import AnonymousSession
 
 pytestmark = pytest.mark.session_security
@@ -214,3 +215,140 @@ def test_non_administrator_cannot_invite_or_revoke_members():
         headers=james_headers,
     )
     assert denied_revoke.status_code == 403
+
+
+def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_source():
+    client = TestClient(app)
+    primary = create_primary(client)
+    owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "james@example.com"},
+    ).json()
+    accepted_invite = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite["invitation_token"],
+            "email": "james@example.com",
+            "password": "a-long-test-password-123",
+            "name": "James",
+        },
+    )
+    assert accepted_invite.status_code == 201, accepted_invite.text
+    james = accepted_invite.json()
+    james_headers = {"Authorization": f"Bearer {james['access_token']}"}
+
+    responsibility = client.post(
+        "/api/v1/caregiver-responsibilities",
+        headers=owner_headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "caregiver_id": primary["caregiver"]["profile_id"],
+            "responsibility_type": "clinic_follow_up",
+            "scope": "Confirm the clinic appointment with the practice",
+            "effective_start": "2026-11-12T09:00:00+00:00",
+            "status": "active",
+            "acceptance_status": "explicit",
+            "assignment_source": "caregiver_confirmed",
+        },
+    )
+    assert responsibility.status_code == 200, responsibility.text
+    source_id = responsibility.json()["id"]
+
+    transfer = client.post(
+        "/api/v1/caregiver-access/responsibility-transfers",
+        headers=owner_headers,
+        json={
+            "source_responsibility_id": source_id,
+            "to_caregiver_profile_id": james["caregiver_profile_id"],
+            "related_record_type": "open_loop",
+            "related_record_id": "existing-clinic-follow-up",
+            "reason": "James accepted day-to-day clinic coordination.",
+        },
+    )
+    assert transfer.status_code == 201, transfer.text
+    transfer_id = transfer.json()["id"]
+
+    # The original owner remains assigned until James explicitly accepts.
+    db = TestSessionLocal()
+    try:
+        original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
+        assert original.status.value == "active"
+        assert original.caregiver_id == primary["caregiver"]["profile_id"]
+    finally:
+        db.close()
+
+    accepted = client.post(
+        f"/api/v1/caregiver-access/responsibility-transfers/{transfer_id}/accept",
+        headers=james_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["accepted"] is True
+    assert accepted.json()["related_record_id"] == "existing-clinic-follow-up"
+
+    db = TestSessionLocal()
+    try:
+        original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
+        replacement = db.query(CaregiverResponsibility).filter_by(id=accepted.json()["new_responsibility_id"]).one()
+        persisted_transfer = db.query(CaregiverResponsibilityTransfer).filter_by(id=transfer_id).one()
+        assert original.status.value == "historical"
+        assert original.effective_end is not None
+        assert replacement.status.value == "active"
+        assert replacement.caregiver_id == james["caregiver_profile_id"]
+        assert replacement.acceptance_status.value == "explicit"
+        assert persisted_transfer.status == "accepted"
+        assert persisted_transfer.related_record_id == "existing-clinic-follow-up"
+        assert db.query(CaregiverResponsibility).filter_by(
+            person_id=primary["person"]["id"],
+            responsibility_type="clinic_follow_up",
+            status="active",
+        ).count() == 1
+    finally:
+        db.close()
+
+
+def test_responsibility_transfer_cannot_be_accepted_by_wrong_caregiver():
+    client = TestClient(app)
+    primary = create_primary(client)
+    owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "james@example.com"},
+    ).json()
+    james = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite["invitation_token"],
+            "email": "james@example.com",
+            "password": "a-long-test-password-123",
+            "name": "James",
+        },
+    ).json()
+    responsibility = client.post(
+        "/api/v1/caregiver-responsibilities",
+        headers=owner_headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "caregiver_id": primary["caregiver"]["profile_id"],
+            "responsibility_type": "paperwork",
+            "effective_start": "2026-11-12T09:00:00+00:00",
+            "status": "active",
+        },
+    ).json()
+    transfer = client.post(
+        "/api/v1/caregiver-access/responsibility-transfers",
+        headers=owner_headers,
+        json={
+            "source_responsibility_id": responsibility["id"],
+            "to_caregiver_profile_id": james["caregiver_profile_id"],
+        },
+    ).json()
+
+    wrong_accept = client.post(
+        f"/api/v1/caregiver-access/responsibility-transfers/{transfer['id']}/accept",
+        headers=owner_headers,
+    )
+    assert wrong_accept.status_code == 404
