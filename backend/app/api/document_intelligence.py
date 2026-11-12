@@ -36,6 +36,8 @@ from app.models.care_continuity import CareAssertion
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
+from app.models.uncertainty import OpenQuestion
+from app.core.uncertainty_enums import Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
@@ -333,145 +335,6 @@ def _persist_document_follow_up(
             "source_id": source_id,
             "evidence": evidence,
             "uncertainty": "unknown",
-            "created_at": now.isoformat(),
-        },
-        evidence=evidence,
-        idempotency_key=source_id,
-        actor=caregiver_id,
-        created_at=now,
-    ))
-    return str(loop.id)
-
-
-def _persist_document_medication_conflict_follow_up(
-    db: Session,
-    *,
-    person_id: str,
-    caregiver_id: str,
-    evidence_id: str,
-    analysis_id: str,
-    upload: EvidenceUpload,
-    candidate: dict,
-    subject: str,
-    observation: str,
-    quote: str,
-) -> str | None:
-    """Create a professional-confirmation loop when a document conflicts with an active medication assertion."""
-    if candidate.get("field_type") != "medication":
-        return None
-    new_text = " ".join((observation, quote)).casefold()
-    change_language = re.search(
-        r"\b(discontinued|discontinue|stopped|stop|held|hold|suspend|dose changed|new dose|dose increased|dose decreased|dose reduced)\b",
-        new_text,
-    )
-    if not change_language:
-        return None
-    normalized_subject = re.sub(r"[^a-z0-9]+", "", subject.casefold())
-    if not normalized_subject:
-        return None
-    active_assertions = db.query(CareAssertion).filter(
-        CareAssertion.person_id == person_id,
-        CareAssertion.field == "medication",
-        CareAssertion.assertion_status == "accepted",
-    ).order_by(CareAssertion.recorded_at.desc()).all()
-    existing_assertion = None
-    for row in active_assertions:
-        first_line = str(row.asserted_value or "").splitlines()[0]
-        existing_subject = first_line.split(":", 1)[1].strip() if first_line.casefold().startswith("medication:") else first_line
-        normalized_existing = re.sub(r"[^a-z0-9]+", "", existing_subject.casefold())
-        if normalized_existing == normalized_subject:
-            old_text = str(row.asserted_value or "").casefold()
-            if not re.search(r"\b(discontinued|discontinue|stopped|stop|held|hold)\b", old_text):
-                existing_assertion = row
-                break
-    if existing_assertion is None:
-        return None
-
-    source_fingerprint = hashlib.sha256(
-        f"{upload.sha256}|{existing_assertion.id}|{quote}|medication_conflict".encode("utf-8")
-    ).hexdigest()
-    source_id = f"document-medication-conflict:{source_fingerprint}"
-    existing_loop = db.query(OpenLoopRecord).join(
-        OpenLoopOccurrence, OpenLoopOccurrence.loop_id == OpenLoopRecord.id
-    ).filter(
-        OpenLoopRecord.person_id == person_id,
-        OpenLoopRecord.loop_type == "professional_input",
-        OpenLoopOccurrence.source_type == "document_medication_conflict",
-        OpenLoopOccurrence.source_id == source_id,
-    ).first()
-    if existing_loop is not None:
-        return str(existing_loop.id)
-
-    now = datetime.now(timezone.utc)
-    evidence = [{
-        "kind": "document_medication_instruction",
-        "evidence_id": evidence_id,
-        "analysis_id": analysis_id,
-        "page_number": candidate.get("page_number"),
-        "source_quote": quote,
-    }]
-    for source_id_value in (existing_assertion.evidence_ids or []):
-        evidence.append({
-            "kind": "existing_medication_assertion_source",
-            "evidence_id": str(source_id_value),
-            "assertion_id": str(existing_assertion.id),
-        })
-    title = "Confirm the current medication instructions"
-    description = (
-        f"The hospital document lists {subject} as changed or discontinued: {quote}\n\n"
-        f"The existing care record has a previously accepted medication entry: {existing_assertion.asserted_value}\n\n"
-        "These sources disagree. The current instruction has not been confirmed. Contact the prescribing professional or pharmacist before administering this medicine. SolenOS has not advised stopping, restarting, or changing it."
-    )
-    loop = OpenLoopRecord(
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        loop_type="professional_input",
-        title=title,
-        description=description,
-        evidence=evidence,
-        uncertainty="uncertain",
-        source_type="document_medication_conflict",
-        source_id=source_id,
-        source_fingerprint=source_fingerprint,
-        owner_role="prescribing_professional",
-        missing_information=["Current prescribing instruction"],
-        status="open",
-        priority="normal",
-        created_at=now,
-        updated_at=now,
-        version=1,
-    )
-    db.add(loop)
-    db.flush()
-    occurrence = OpenLoopOccurrence(
-        loop_id=loop.id,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        source_type="document_medication_conflict",
-        source_id=source_id,
-        source_fingerprint=source_fingerprint,
-        evidence=evidence,
-        idempotency_key=source_id,
-        occurred_at=now,
-        created_at=now,
-    )
-    db.add(occurrence)
-    db.add(OpenLoopEvent(
-        loop_id=loop.id,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        event_type="created_from_medication_document_conflict",
-        before_state=None,
-        after_state={
-            "id": loop.id,
-            "loop_type": "professional_input",
-            "title": title,
-            "description": description,
-            "status": "open",
-            "source_type": "document_medication_conflict",
-            "source_id": source_id,
-            "evidence": evidence,
-            "uncertainty": "uncertain",
             "created_at": now.isoformat(),
         },
         evidence=evidence,
@@ -1198,7 +1061,6 @@ def review_document_candidate(
     original = dict(candidate)
     assertion_id = None
     follow_up_id = None
-    medication_confirmation_id = None
     if payload.decision == "reject":
         candidate["review_status"] = "rejected_by_caregiver"
     elif payload.decision == "correct":
@@ -1347,18 +1209,6 @@ def review_document_candidate(
                 observation=observation,
                 quote=quote,
             )
-            medication_confirmation_id = _persist_document_medication_conflict_follow_up(
-                db,
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                evidence_id=evidence_id,
-                analysis_id=analysis_id,
-                upload=upload,
-                candidate=candidate,
-                subject=subject,
-                observation=observation,
-                quote=quote,
-            )
         except Exception as exc:
             db.rollback()
             logger.exception("Accepted document follow-up could not be persisted atomically")
@@ -1368,9 +1218,6 @@ def review_document_candidate(
             ) from exc
         if follow_up_id:
             candidate["accepted_follow_up_id"] = follow_up_id
-        if medication_confirmation_id:
-            candidate["medication_confirmation_follow_up_id"] = medication_confirmation_id
-
         candidate["review_status"] = "accepted_by_caregiver"
         candidate["accepted_assertion_id"] = assertion_id
         candidate["accepted_at"] = datetime.now(timezone.utc).isoformat()
@@ -1488,7 +1335,6 @@ def review_document_candidate(
         "source_record_ref": {"record_type": "care_assertion", "record_id": assertion_id} if assertion_id else None,
         "written_to_lcr": bool(assertion_id),
         "follow_up_record_ref": {"record_type": "open_loop", "record_id": follow_up_id} if follow_up_id else None,
-        "medication_confirmation_record_ref": {"record_type": "open_loop", "record_id": medication_confirmation_id} if medication_confirmation_id else None,
         "review_required": payload.decision == "correct",
         "change_intelligence_status": change_intelligence_status,
         "care_continuity_execution": execution,
