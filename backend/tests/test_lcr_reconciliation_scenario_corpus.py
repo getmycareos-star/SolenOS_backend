@@ -105,7 +105,7 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
         events[2]["missing_information"] = ["whether dose was later administered"]
     elif family == "baseline_pattern_changes":
         events[0]["baseline"] = "usual sleep was stable in prior documented period"
-        events[6]["claim"] = "sleep improved relative to the documented baseline"
+        events[6]["claim"] = f"{later_claim} compared with the documented baseline"
     elif family == "medication_safety":
         events[1]["claim"] = "document mentions medication A; no prescribing instruction supplied"
         events[3]["claim"] = "caregiver believes medication may have changed; prescriber confirmation absent"
