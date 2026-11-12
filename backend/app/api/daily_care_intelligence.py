@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,8 @@ from app.services.care_continuity import create_assertion
 from app.services.qwen_gateway import qwen_chat
 from app.services.lcr_context import build_lcr_context
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/daily-care/intelligence", tags=["daily-care-qwen"])
 
