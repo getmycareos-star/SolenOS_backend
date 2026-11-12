@@ -13,7 +13,7 @@ from app.services.qwen_gateway import get_ollama_config, qwen_chat
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.models.care import CareEvent, Evidence
+from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
@@ -650,6 +650,87 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             Evidence.id.in_(evidence_ids),
         ).all())
     source_evidence_rows = list({str(row.id): row for row in source_evidence_rows}.values())
+    source_event_row = (
+        db.query(CareEvent).filter(
+            CareEvent.person_id == person_id,
+            CareEvent.id == source_event_id,
+        ).first() if source_event_id else None
+    )
+    source_evidence_by_id = {str(row.id): row for row in source_evidence_rows}
+    prior_event_by_id = {str(row.id): row for row in prior_events}
+    active_assertion_by_id = {
+        str(item.get("assertion_id")): item
+        for item in active_state if item.get("assertion_id")
+    }
+    caregiver_ids = {
+        str(value)
+        for value in (
+            getattr(source_event_row, "created_by_caregiver_id", None),
+            *[getattr(item, "created_by_caregiver_id", None) for item in prior_events],
+            *[getattr(item, "uploaded_by_caregiver_id", None) for item in source_evidence_rows],
+            *[getattr(item, "reported_by_caregiver_id", None) for item in source_evidence_rows],
+        )
+        if value
+    }
+    caregiver_names = {
+        str(item.id): item.name
+        for item in db.query(Caregiver).filter(
+            Caregiver.person_id == person_id,
+            Caregiver.id.in_(caregiver_ids or {"__no_delta_caregiver__"}),
+        ).all()
+    }
+
+    def enrich_delta_source_references(references: list[dict[str, str]]) -> list[dict[str, str]]:
+        enriched = []
+        for reference in references:
+            record_type = reference.get("record_type")
+            record_id = str(reference.get("record_id") or "")
+            item = dict(reference)
+            if record_type == "care_event":
+                event = source_event_row if source_event_row and str(source_event_row.id) == record_id else prior_event_by_id.get(record_id)
+                if event is not None:
+                    item.update({
+                        "label": event.title or "Care update",
+                        "source_excerpt": " — ".join(part for part in (event.title or "", event.description or "") if part)[:700],
+                        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                        "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
+                        "entered_by": caregiver_names.get(str(event.created_by_caregiver_id or "")),
+                    })
+                elif record_id == str(source_event_id or ""):
+                    item.update({
+                        "label": "New care update",
+                        "source_excerpt": content[:700],
+                        "occurred_at": event_date.isoformat() if event_date else None,
+                    })
+            elif record_type == "care_assertion":
+                assertion = active_assertion_by_id.get(record_id)
+                if assertion:
+                    item.update({
+                        "label": str(assertion.get("field") or "Care record detail"),
+                        "source_excerpt": str(assertion.get("value") or "")[:700],
+                        "occurred_at": assertion.get("observed_at"),
+                        "recorded_at": assertion.get("recorded_at"),
+                    })
+            elif record_type == "evidence":
+                evidence = source_evidence_by_id.get(record_id)
+                if evidence:
+                    metadata = evidence.extra_metadata or {}
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except (TypeError, ValueError):
+                            metadata = {}
+                    item.update({
+                        "label": (metadata.get("filename") if isinstance(metadata, dict) else None) or "Original note or document",
+                        "source_excerpt": (evidence.source_text or "")[:700],
+                        "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
+                        "recorded_at": evidence.ingested_at.isoformat() if evidence.ingested_at else (evidence.uploaded_at.isoformat() if evidence.uploaded_at else None),
+                        "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
+                        "entered_by": caregiver_names.get(str(evidence.uploaded_by_caregiver_id or "")),
+                    })
+            enriched.append(item)
+        return enriched
+
     persisted_evidence = [
         evidence_record_to_uncertainty_item(row)
         for row in source_evidence_rows
@@ -659,14 +740,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     for domain in ("medications", "conditions", "symptoms", "tests", "follow_ups", "clinical_gaps"):
         for finding_index, item in enumerate(result.get(domain, [])):
             excerpt = str(item.get("evidence_excerpt") or "").strip()
-            references = _match_source_references(
+            references = enrich_delta_source_references(_match_source_references(
                 excerpt,
                 new_content=content,
                 source_event_id=source_event_id,
                 active_state=active_state,
                 prior_events=prior_events,
                 evidence_rows=source_evidence_rows,
-            )
+            ))
             item["source_record_refs"] = references
             item["source_reference_status"] = "matched" if references else "not_matched"
             if not references:
@@ -704,14 +785,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         references = []
         every_excerpt_linked = bool(excerpts)
         for excerpt in excerpts:
-            excerpt_refs = _match_source_references(
+            excerpt_refs = enrich_delta_source_references(_match_source_references(
                 str(excerpt),
                 new_content=content,
                 source_event_id=source_event_id,
                 active_state=active_state,
                 prior_events=prior_events,
                 evidence_rows=source_evidence_rows,
-            )
+            ))
             if not excerpt_refs:
                 every_excerpt_linked = False
             references.extend(excerpt_refs)
