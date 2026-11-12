@@ -632,6 +632,13 @@ class UncertaintyEngine:
         from app.services.care_continuity import _open_question_state, _record_open_question_revision
         before_state = _open_question_state(db_question)
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
+        # Keep caller-supplied answer evidence distinct from evidence inherited
+        # to validate the question's necessity. Otherwise a necessary question's
+        # original source can be mistaken for evidence of the caregiver's answer.
+        explicit_answer_evidence_ids = (
+            list(update_data.get("evidence_ids") or [])
+            if "evidence_ids" in update_data else []
+        )
         if "evidence_ids" in update_data:
             update_data["evidence_ids"] = self._validate_person_evidence(
                 db_question.person_id, update_data["evidence_ids"]
@@ -698,7 +705,7 @@ class UncertaintyEngine:
             or "evidence_ids" in update_data
         )
         if new_status == "answered" and answer_content_changed:
-            supplied_evidence_ids = update_data.get("evidence_ids") or []
+            supplied_evidence_ids = explicit_answer_evidence_ids
             if supplied_evidence_ids:
                 answer_evidence_ids = self._validate_person_evidence(
                     db_question.person_id, supplied_evidence_ids
