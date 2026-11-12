@@ -49,7 +49,7 @@ def test_shared_coordinator_validates_lineage_and_leaves_transaction_to_caller(m
     assert result["stages"]["evidence"] == "verified"
     assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
     assert result["transaction_owner"] == "caller"
-    reconciled.assert_called_once_with(db, "person-1", None)
+    reconciled.assert_called_once_with(db, "person-1", None, protected_assertion_ids=None)
     assert db.flush.call_count == 2
     db.commit.assert_not_called()
     db.rollback.assert_not_called()
@@ -124,7 +124,7 @@ def test_shared_coordinator_validates_companion_source_message_and_caregiver(mon
 
     assert result["stages"]["source_message"] == "verified"
     assert result["stages"]["evidence"] == "not_applicable"
-    reconciled.assert_called_once_with(db, "person-1", None)
+    reconciled.assert_called_once_with(db, "person-1", None, protected_assertion_ids=None)
     db.commit.assert_not_called()
 
 
@@ -174,7 +174,7 @@ def test_shared_coordinator_validates_correction_and_reassesses_in_caller_transa
 
     assert result["correction_id"] == "correction-1"
     assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
-    reconciled.assert_called_once_with(db, "person-1", None)
+    reconciled.assert_called_once_with(db, "person-1", None, protected_assertion_ids=None)
     db.commit.assert_not_called()
 
 
@@ -225,7 +225,7 @@ def test_shared_coordinator_validates_source_assertion_scope(monkeypatch):
 
     assert result["source_assertion_id"] == "assertion-1"
     assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
-    reconciled.assert_called_once_with(db, "person-1", None)
+    reconciled.assert_called_once_with(db, "person-1", None, protected_assertion_ids=["assertion-1"])
     db.commit.assert_not_called()
 
 
@@ -398,7 +398,7 @@ def test_shared_coordinator_validates_appointment_workspace_revision_and_keeps_c
     assert result["source_appointment_workspace_id"] == "workspace-1"
     assert result["source_appointment_workspace_revision_id"] == "revision-1"
     assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
-    reconciled.assert_called_once_with(db, "person-1", None)
+    reconciled.assert_called_once_with(db, "person-1", None, protected_assertion_ids=None)
     db.commit.assert_not_called()
     db.rollback.assert_not_called()
 
@@ -469,7 +469,7 @@ def test_shared_coordinator_validates_multiple_persisted_source_events(monkeypat
     assert result["source_event_id"] is None
     assert result["source_event_ids"] == ["event-1", "event-2"]
     assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
-    reconciled.assert_called_once_with(db, "person-1", None)
+    reconciled.assert_called_once_with(db, "person-1", None, protected_assertion_ids=None)
     db.commit.assert_not_called()
     db.rollback.assert_not_called()
 
