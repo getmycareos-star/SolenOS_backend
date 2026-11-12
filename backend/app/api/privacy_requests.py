@@ -1125,6 +1125,12 @@ def fulfil_approved_deletion(
             prior.caregiver_id = None
             prior.record_metadata = {"redacted_for_privacy_erasure": True}
 
+        # The document-review history is append-only for ordinary operations.
+        # A separately reviewed privacy erasure may delete it only inside this
+        # transaction; the database trigger rejects all other deletes and every update.
+        if bind.dialect.name == "postgresql":
+            db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+
         for table in reversed(tables):
             if table.name in excluded_tables:
                 continue
