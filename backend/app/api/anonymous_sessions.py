@@ -57,6 +57,19 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
         relationship=caregiver.relationship,
     )
 
+    # The creator receives the initial server-side primary-caregiver grant.
+    # All later caregivers must be explicitly invited and authorised.
+    from app.models.caregiver_access import CaregiverAccessGrant
+    db.add(CaregiverAccessGrant(
+        person_id=person.id,
+        caregiver_id=caregiver.id,
+        caregiver_profile_id=caregiver_profile.id,
+        role="primary",
+        status="active",
+        can_manage_members=True,
+        granted_by_caregiver_id=caregiver.id,
+    ))
+
     raw_token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
     session = AnonymousSession(
