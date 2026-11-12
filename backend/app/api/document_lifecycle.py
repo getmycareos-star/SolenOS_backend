@@ -528,12 +528,14 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             raise
         except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The saved image could not be decoded for OCR") from exc
-        if not extracted:
-            raise HTTPException(
-                status_code=422,
-                detail="No readable text was found in the image. The original document remains preserved.",
-            )
-        page_content = "\n".join(value for value in (quality_marker, extracted) if value)
+        # OCR completed successfully but found no readable words. Persist
+        # this as an unreadable page, not as a failed extraction or empty success.
+        page_content = "\n".join(
+            value for value in (
+                quality_marker,
+                extracted or "[No readable text detected on this page]",
+            ) if value
+        )
         return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{page_content}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
 
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or filename.endswith(".docx"):
