@@ -949,36 +949,6 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
             continue
 
         matching = [candidate_by_source[key] for key in linked if key in candidate_by_source]
-        necessary = next((
-            item for item in matching
-            if item.get("necessity") == "necessary"
-            and isinstance(item.get("necessity_rationale"), str)
-            and item["necessity_rationale"].strip()
-        ), None)
-
-        if necessary:
-            before_state = _open_question_state(question)
-            if question.status == "closed" and str(question.closed_reason or "").startswith("automatically_"):
-                if not _question_has_new_grounding(question, necessary):
-                    counts["untouched"] += 1
-                    continue
-                question.status = "open"
-                question.closed_at = None
-                question.closed_reason = None
-                counts["reopened"] += 1
-            else:
-                counts["kept"] += 1
-            question.necessity = "necessary"
-            question.necessity_rationale = necessary["necessity_rationale"].strip()
-            question.evidence_ids = list(dict.fromkeys(
-                list(question.evidence_ids or []) + list(necessary.get("evidence_ids") or [])
-            )) or None
-            if before_state != _open_question_state(question):
-                _record_open_question_revision(
-                    db, question, before_state=before_state, change_kind="updated"
-                )
-            continue
-
         # Daily Capture and document extraction questions participate in
         # the same lifecycle. They remain internal and unassessed until a
         # deterministic necessity assessment exists. A source-backed accepted
@@ -1007,6 +977,35 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
                 db, question, before_state=before_state, change_kind="updated"
             )
             counts["superseded"] += 1
+            continue
+        necessary = next((
+            item for item in matching
+            if item.get("necessity") == "necessary"
+            and isinstance(item.get("necessity_rationale"), str)
+            and item["necessity_rationale"].strip()
+        ), None)
+
+        if necessary:
+            before_state = _open_question_state(question)
+            if question.status == "closed" and str(question.closed_reason or "").startswith("automatically_"):
+                if not _question_has_new_grounding(question, necessary):
+                    counts["untouched"] += 1
+                    continue
+                question.status = "open"
+                question.closed_at = None
+                question.closed_reason = None
+                counts["reopened"] += 1
+            else:
+                counts["kept"] += 1
+            question.necessity = "necessary"
+            question.necessity_rationale = necessary["necessity_rationale"].strip()
+            question.evidence_ids = list(dict.fromkeys(
+                list(question.evidence_ids or []) + list(necessary.get("evidence_ids") or [])
+            )) or None
+            if before_state != _open_question_state(question):
+                _record_open_question_revision(
+                    db, question, before_state=before_state, change_kind="updated"
+                )
             continue
 
         # Only questions created from these system-managed candidate sources are
