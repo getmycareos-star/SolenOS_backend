@@ -760,3 +760,51 @@ def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
         assert event.evidence[0]["completion_inferred"] is False
     finally:
         db.close()
+
+
+def test_follow_up_callback_promise_remains_waiting_and_unverified():
+    client = TestClient(app)
+    _, headers = session(client, "Callback follow-up recipient")
+    loop = create_loop(client, headers, "follow_up", title="Arrange specialist appointment")
+
+    payload = {
+        "text": "Sarah reports the clinic said someone would call her back. No callback has yet been reported.",
+        "response_outcome": "callback_promised",
+        "evidence": [{"kind": "caregiver_recorded", "text": "Sarah's report; not independent clinic evidence."}],
+        "idempotency_key": "clinic-callback-promised-once",
+    }
+    response = client.post(
+        f"/api/v1/open-loops/{loop['id']}/responses",
+        headers=headers,
+        json=payload,
+    )
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["id"] == loop["id"]
+    assert saved["status"] == "waiting"
+    assert saved["outcome_status"] == "outcome_unknown"
+    assert len(saved["response_evidence"]) == 1
+    event = saved["response_evidence"][0]
+    assert event["response_outcome"] == "callback_promised"
+    assert event["reported_by"] == "session_caregiver"
+    assert event["independently_verified"] is False
+
+    replay = client.post(
+        f"/api/v1/open-loops/{loop['id']}/responses",
+        headers=headers,
+        json=payload,
+    )
+    assert replay.status_code == 200, replay.text
+    assert len(replay.json()["response_evidence"]) == 1
+
+
+def test_follow_up_rejects_unknown_response_outcome():
+    client = TestClient(app)
+    _, headers = session(client, "Invalid callback outcome recipient")
+    loop = create_loop(client, headers, "follow_up")
+    response = client.post(
+        f"/api/v1/open-loops/{loop['id']}/responses",
+        headers=headers,
+        json={"text": "A clinic response was reported.", "response_outcome": "appointment_booked"},
+    )
+    assert response.status_code == 422, response.text
