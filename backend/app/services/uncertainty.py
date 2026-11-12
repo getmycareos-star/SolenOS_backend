@@ -38,7 +38,7 @@ _QUESTION_FILLER_TOKENS = {
     "me", "of", "on", "or", "our", "please", "she", "should", "tell", "that",
     "the", "their", "them", "they", "this", "to", "take", "us", "was", "we", "were",
     "what", "when", "where", "which", "who", "why", "will", "would", "you",
-    "your", "know", "confirm", "currently",
+    "your", "know", "confirm",
 }
 _QUESTION_SYNONYMS = {
     "meds": "medication",
@@ -46,6 +46,7 @@ _QUESTION_SYNONYMS = {
     "medicines": "medication",
     "dosage": "dose",
     "now": "current",
+    "currently": "current",
     "presently": "current",
     "different": "changed",
     "change": "changed",
