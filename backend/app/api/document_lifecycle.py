@@ -201,7 +201,56 @@ def _bounded_extraction(text: str, method: str) -> tuple[str, str]:
     return text, method
 
 
-def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str, str]:
+def _scan_adjusted_image(image: Image.Image, evidence: Evidence | None) -> tuple[Image.Image, bool]:
+    """Create an in-memory OCR derivative; never mutate or replace the persisted original."""
+    if evidence is None:
+        return image, False
+    try:
+        metadata = evidence.extra_metadata if isinstance(evidence.extra_metadata, dict) else __import__("json").loads(evidence.extra_metadata or "{}")
+    except (TypeError, ValueError):
+        return image, False
+    if not isinstance(metadata, dict):
+        return image, False
+    capture = metadata.get("capture") if isinstance(metadata.get("capture"), dict) else {}
+    if capture.get("method") != "scan":
+        return image, False
+    scan = metadata.get("scan_processing") if isinstance(metadata.get("scan_processing"), dict) else {}
+    rotation = scan.get("rotation_degrees", 0)
+    try:
+        rotation = float(rotation or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Saved scan rotation metadata is invalid")
+    if not (-360 <= rotation <= 360):
+        raise HTTPException(status_code=422, detail="Saved scan rotation is outside the supported range")
+    crop = scan.get("crop_insets_percent") if isinstance(scan.get("crop_insets_percent"), dict) else {}
+    insets = {}
+    for side in ("top", "right", "bottom", "left"):
+        try:
+            value = float(crop.get(side, 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Saved scan crop metadata is invalid")
+        if not (0 <= value <= 80):
+            raise HTTPException(status_code=422, detail="Saved scan crop metadata is outside the supported range")
+        insets[side] = value
+    if insets["left"] + insets["right"] >= 80 or insets["top"] + insets["bottom"] >= 80:
+        raise HTTPException(status_code=422, detail="Saved scan crop leaves too little page area")
+    adjusted = ImageOps.exif_transpose(image).convert("RGB")
+    if rotation:
+        # Browser canvas uses positive clockwise angles; Pillow's positive angle is counter-clockwise.
+        adjusted = adjusted.rotate(-rotation, expand=True, fillcolor="white")
+    width, height = adjusted.size
+    left = round(width * insets["left"] / 100)
+    right = round(width * (100 - insets["right"]) / 100)
+    top = round(height * insets["top"] / 100)
+    bottom = round(height * (100 - insets["bottom"]) / 100)
+    if left or top or right < width or bottom < height:
+        adjusted = adjusted.crop((left, top, right, bottom))
+    if adjusted.width * adjusted.height > MAX_IMAGE_PIXELS:
+        adjusted.thumbnail((int(MAX_IMAGE_PIXELS ** 0.5), int(MAX_IMAGE_PIXELS ** 0.5)))
+    return adjusted, True
+
+
+def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evidence | None = None) -> tuple[str, str]:
     content = _verified_content(upload) if content is None else content
     mime = (upload.mime_type or "").split(";", 1)[0].lower()
     filename = (upload.filename or "").lower()
@@ -292,7 +341,12 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
             with Image.open(io.BytesIO(content)) as image:
                 if image.width * image.height > MAX_IMAGE_PIXELS:
                     raise HTTPException(status_code=413, detail="Images are limited to 20 megapixels for OCR")
-                extracted = _ocr_image(image)
+                adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
+                try:
+                    extracted = _ocr_image(adjusted)
+                finally:
+                    if used_scan_adjustments:
+                        adjusted.close()
         except HTTPException:
             raise
         except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
@@ -463,7 +517,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             db.refresh(row)
             return _response(row)
 
-    source_text, method = _extract(upload, content)
+    source_text, method = _extract(upload, content, evidence)
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
