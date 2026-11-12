@@ -11,7 +11,7 @@ from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProp
 from app.models.care_continuity import CareAssertion
 from app.models.care import CareEvent
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
-from app.models.collaboration import ConversationMessage
+from app.models.collaboration import ConversationMessage, ConversationSession
 
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
@@ -62,6 +62,35 @@ def review(client, session, proposal_id, payload):
 
 
 def pending(client, session):
+    # This helper deliberately seeds a legacy review proposal after verifying
+    # that the Companion message endpoint did not create one automatically.
+    db = TestingSessionLocal()
+    try:
+        conversation = db.query(ConversationSession).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).order_by(ConversationSession.created_at.desc()).first()
+        assert conversation is not None
+        source_message = db.query(ConversationMessage).filter_by(
+            session_id=conversation.id, role="user",
+        ).order_by(ConversationMessage.created_at.desc()).first()
+        assert source_message is not None
+        existing = db.query(AIOutputLCRProposal).filter_by(
+            source_message_id=source_message.id,
+        ).count()
+        assert existing == 0, "Companion must not automatically create LCR proposals"
+        extraction = care_updates.extract_companion_care_candidates(source_message.content)
+        care_updates.persist_companion_candidates(
+            db,
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            conversation_id=conversation.id,
+            message_id=source_message.id,
+            source_text=source_message.content,
+            extraction=extraction,
+        )
+    finally:
+        db.close()
     response = client.get(
         "/api/v1/companion/care-updates",
         headers={"Authorization": f"Bearer {session['access_token']}"},
