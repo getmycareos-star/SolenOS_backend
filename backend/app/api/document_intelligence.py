@@ -1446,6 +1446,7 @@ def review_document_candidate(
             candidate["accepted_follow_up_id"] = follow_up_id
         candidate["review_status"] = "accepted_by_caregiver"
         candidate["accepted_assertion_id"] = assertion_id
+        candidate["accepted_assertion_status"] = assertion_row.assertion_status
         candidate["accepted_at"] = datetime.now(timezone.utc).isoformat()
 
     canonical = candidate.get("canonical_candidate")
