@@ -850,6 +850,45 @@ def test_outlook_msg_extracts_headers_and_body_from_a_real_msg_round_trip(tmp_pa
     assert "Appointment confirmed for Tuesday." in extracted
 
 
+def test_real_outlook_msg_upload_extract_and_original_download(client, tmp_path):
+    from aspose.email_foss.msg import MapiMessage
+
+    test_client, session = client
+    msg_path = tmp_path / "clinic-appointment.msg"
+    message = MapiMessage.create(
+        "Clinic appointment",
+        "The follow-up appointment is confirmed for Tuesday.",
+    )
+    message.save(str(msg_path))
+    original = msg_path.read_bytes()
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+        },
+        files={"file": ("clinic-appointment.msg", original, "application/vnd.ms-outlook")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+    assert uploaded.json()["persisted"] is True
+    assert uploaded.json()["sha256"] == hashlib.sha256(original).hexdigest()
+
+    extracted = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert extracted.status_code == 201, extracted.text
+    assert extracted.json()["source_evidence_id"] == evidence_id
+    assert "Subject: Clinic appointment" in extracted.json()["extracted_text"]
+    assert "The follow-up appointment is confirmed for Tuesday." in extracted.json()["extracted_text"]
+
+    downloaded = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert downloaded.status_code == 200
+    assert downloaded.content == original
+
+
 def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatch):
     import hashlib
     import app.api.document_lifecycle as lifecycle
