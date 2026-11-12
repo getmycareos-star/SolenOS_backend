@@ -384,7 +384,7 @@ def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = De
             db,
             db_evidence.person_id,
             workflow="add_record_evidence",
-            caregiver_id=evidence.uploaded_by_caregiver_id,
+            source_caregiver_id=evidence.uploaded_by_caregiver_id,
             source_evidence_id=db_evidence.id,
         )
         db.commit()
@@ -887,7 +887,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             db,
             person_id,
             workflow=event_type,
-            caregiver_id=caregiver_id,
+            source_caregiver_id=caregiver_id,
             source_event_id=event.id,
             source_evidence_id=evidence.id if evidence is not None else None,
         )
@@ -1151,7 +1151,7 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
             db,
             db_correction.person_id,
             workflow="care_record_correction",
-            caregiver_id=correction.caregiver_id,
+            source_caregiver_id=correction.caregiver_id,
             correction_id=db_correction.id,
         )
         db.commit()
