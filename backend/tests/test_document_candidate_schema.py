@@ -252,3 +252,13 @@ def test_repeated_source_quote_has_no_false_unique_span():
     assert candidate["source_span_start"] is None
     assert candidate["source_span_end"] is None
     assert any("unique source span is unavailable" in warning for warning in candidate["warnings"])
+
+
+def test_ocr_quality_metadata_is_not_sent_as_document_source_text():
+    source = (
+        "[Page 3 OCR]\\n"
+        "[OCR quality: mean_token_confidence=62; low_confidence_tokens=4; token_count=18; metric=tesseract_engine_heuristic_not_probability]\\n"
+        "Patient walked 20 metres with a frame."
+    )
+    assert split_document_pages(source) == [(3, "Patient walked 20 metres with a frame.")]
+    assert page_for_excerpt(source, "Patient walked 20 metres with a frame.") == 3
