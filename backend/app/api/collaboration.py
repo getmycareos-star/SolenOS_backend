@@ -31,6 +31,8 @@ from app.models.care import CareEvent, Caregiver, Person
 from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import (
     CareAssertion,
+    EvidenceObservation,
+    EvidenceSourceRelationship,
     EvidenceFreshnessAssessment,
     EvidenceFreshnessPolicy,
     EvidenceSourceRelationship,
@@ -1317,6 +1319,24 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         raise HTTPException(
             status_code=409,
             detail="This document supports information in the Living Care Record. Resolve those source links before deleting the document.",
+        )
+    # These source-lineage records are append-only under the current governance
+    # contract. Do not claim deletion while any of them still depends on the file.
+    observation_dependency = db.query(EvidenceObservation.id).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id == evidence_id,
+    ).first()
+    relationship_dependency = db.query(EvidenceSourceRelationship.id).filter(
+        EvidenceSourceRelationship.person_id == person_id,
+        or_(
+            EvidenceSourceRelationship.source_evidence_id == evidence_id,
+            EvidenceSourceRelationship.related_evidence_id == evidence_id,
+        ),
+    ).first()
+    if observation_dependency or relationship_dependency:
+        raise HTTPException(
+            status_code=409,
+            detail="This document has structured evidence-history links that must be resolved before deletion. The original file has not been removed.",
         )
     child_version = db.query(EvidenceModel.id).filter(EvidenceModel.parent_evidence_id == evidence_id).first()
     if child_version:
