@@ -384,12 +384,7 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
     import app.services.reminder_delivery as delivery_service
     from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
 
-    settings = SimpleNamespace(
-        vapid_public_key="public-vapid-key",
-        vapid_private_key="-----BEGIN PRIVATE KEY-----\\nprivate\\n-----END PRIVATE KEY-----",
-        vapid_subject="mailto:support@solenosai.net",
-        secret_key="quiet-hours-test-secret",
-    )
+    settings = _valid_vapid_settings("quiet-hours-test-secret")
     monkeypatch.setattr(push_api, "get_settings", lambda: settings)
     monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
     sent = []
