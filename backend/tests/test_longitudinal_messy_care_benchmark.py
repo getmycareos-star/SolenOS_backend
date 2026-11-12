@@ -1348,13 +1348,17 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 {event["evidence_id"] for event in ordered_events}
             )
 
-        actual_questions = {
-            row.question for row in db.query(OpenQuestion).filter(
-                OpenQuestion.person_id == person.id,
-                OpenQuestion.status == "open",
-            ).all()
-        }
-        assert actual_questions == set(scenario["expected_final_state"]["unresolved_questions"])
+        actual_questions = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).all()
+        # The benchmark's generated clinical-gap questions have no separate,
+        # source-backed necessity assessment. Preserve their InformationGap
+        # records, but do not turn model wording into caregiver tasks.
+        assert actual_questions == [], (
+            f"{scenario['scenario_id']}: unassessed model-generated questions "
+            "must remain internal and must not become caregiver work"
+        )
 
 
 def test_correction_supersedes_assertion_and_preserves_append_only_history():
