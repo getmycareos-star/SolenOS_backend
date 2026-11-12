@@ -4849,11 +4849,14 @@ def update_care_notification_preferences(
         payload.quiet_hours_enabled, payload.quiet_hours_start,
         payload.quiet_hours_end, payload.timezone_name,
     )):
-        pending_pushes = db.query(CarePushDelivery).join(
-            CareNotification, CareNotification.id == CarePushDelivery.notification_id
-        ).filter(
+        # SQLAlchemy cannot bulk-update a Query that contains a JOIN.
+        # Scope deliveries through a same-recipient notification-ID subquery instead.
+        scoped_notification_ids = db.query(CareNotification.id).filter(
             CareNotification.person_id == person_id,
             CareNotification.caregiver_id == caregiver_id,
+        )
+        pending_pushes = db.query(CarePushDelivery).filter(
+            CarePushDelivery.notification_id.in_(scoped_notification_ids),
             CarePushDelivery.status == "pending",
         )
         if payload.reminders_enabled is False:
