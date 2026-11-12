@@ -6,6 +6,9 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
 from email import policy
