@@ -15,6 +15,10 @@ class CareReminderComplete(BaseModel):
     completion_note: Optional[str] = Field(default=None, max_length=2000)
 
 
+class CareReminderSnooze(BaseModel):
+    snooze_until: datetime
+
+
 class CareReminderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -26,6 +30,9 @@ class CareReminderRead(BaseModel):
     note: Optional[str] = None
     due_at: datetime
     status: Literal["open", "completed", "cancelled"]
+    snoozed_at: Optional[datetime] = None
+    snoozed_by_caregiver_id: Optional[str] = None
+    snooze_count: int = 0
     completed_at: Optional[datetime] = None
     completed_by_caregiver_id: Optional[str] = None
     completion_note: Optional[str] = None
@@ -36,7 +43,7 @@ class CareReminderRead(BaseModel):
     delivery_mode: Literal["in_app_notification_feed"] = "in_app_notification_feed"
     notification_delivery_status: Literal["in_app_feed_only"] = "in_app_feed_only"
 
-    @field_validator("due_at", "completed_at", "cancelled_at", "created_at", "updated_at", mode="before")
+    @field_validator("due_at", "snoozed_at", "completed_at", "cancelled_at", "created_at", "updated_at", mode="before")
     @classmethod
     def normalize_sqlite_timestamps(cls, value):
         if isinstance(value, datetime) and value.tzinfo is None:
