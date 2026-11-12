@@ -159,7 +159,7 @@ def test_three_incident_statement_is_supported_only_by_three_distinct_dated_even
             "evidence_ids": ["source-note-3"],
         },
         {
-            "id": "duplicate-of-incident-1", "event_type": "mobility", "status": "recorded",
+            "id": "zz-duplicate-of-incident-1", "event_type": "mobility", "status": "recorded",
             "occurred_at": datetime(2026, 11, 2, 8, tzinfo=timezone.utc),
             "title": "Unsteadiness near the kitchen", "description": "She felt unsteady.",
             "evidence_ids": ["source-note-1"],
@@ -177,7 +177,7 @@ def test_three_incident_statement_is_supported_only_by_three_distinct_dated_even
     )
     assert aggregate["status"] == "validated"
     assert aggregate["count"] == 3
-    assert aggregate["duplicate_event_ids"] == ["duplicate-of-incident-1"]
+    assert aggregate["duplicate_event_ids"] == ["zz-duplicate-of-incident-1"]
     assert [item["record_id"] for item in aggregate["source_references"]] == [
         "incident-1", "incident-2", "incident-3",
     ]
