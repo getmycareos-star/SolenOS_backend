@@ -1983,7 +1983,7 @@ def test_uncertain_medication_change_report_never_overwrites_reviewed_medication
         created = client.post(
             "/api/v1/care-continuity/medications",
             headers=headers,
-            json={"name": "Metformin", "dose": "500 mg", "note": "Existing reviewed record"},
+            json={"name": "Metformin", "dose": "500 mg", "note": "Existing reviewed record", "review_after_days": 30},
         )
         assert created.status_code == 201, created.text
         medication_id = created.json()["medication_id"]
