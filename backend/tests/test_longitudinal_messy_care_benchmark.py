@@ -1146,6 +1146,12 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
         assert len(runs) == len(ordered_events)
         assert {run.source_event_id for run in runs} == expected_event_ids
         assert all(run.evidence_ids for run in runs)
+        for run in runs:
+            receipt = json.loads(run.delta_json)
+            assert receipt["provenance"]["engine_version"] == delta_engine.DELTA_ENGINE_VERSION
+            assert receipt["provenance"]["source_event_id"] == run.source_event_id
+            assert receipt["provenance"]["evidence_ids"] == run.evidence_ids
+            assert "computed_changes" in receipt
 
         # Medication references, historical lists and missed-dose reports are not
         # sufficient to establish a current prescription.
