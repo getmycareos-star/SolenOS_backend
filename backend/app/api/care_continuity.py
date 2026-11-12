@@ -625,6 +625,7 @@ def get_claim_assessment_impact(
             "missing_evidence_ids": [],
             "unassessed_claim_evidence_ids": list(claim.evidence_ids or []),
             "changed_prerequisite_claim_ids": [],
+            "changed_observation_ids": [],
             "interpretation_limit": "This is a deterministic review trigger, not a claim-truth judgment or calibrated confidence score.",
         }
 
