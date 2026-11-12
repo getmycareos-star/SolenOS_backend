@@ -2049,6 +2049,10 @@ def main():
                 "subject_type": "routine",
                 "subject_id": "postgres-account-continuity-routine",
                 "priority": "high",
+                "necessity": "necessary",
+                "necessity_rationale": "The caregiver needs this answer to decide whether the reported evening routine change requires a follow-up.",
+                "evidence_ids": [continuity_evidence_id],
+                "context": [{"decision_dependency": "Determine whether to request a routine review from the care team."}],
             },
         )
         require(continuity_question_status == 200 and continuity_question.get("id"),
