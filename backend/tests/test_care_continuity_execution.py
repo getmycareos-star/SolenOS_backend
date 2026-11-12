@@ -96,7 +96,7 @@ def test_shared_coordinator_validates_companion_source_message_and_caregiver(mon
     conversation = SimpleNamespace(
         id="conversation-1",
         person_id="person-1",
-        caregiver_id="caregiver-1",
+        source_caregiver_id="caregiver-1",
     )
     message = SimpleNamespace(
         id="message-1",
@@ -115,7 +115,7 @@ def test_shared_coordinator_validates_companion_source_message_and_caregiver(mon
         db,
         "person-1",
         workflow="companion_care_update_review",
-        caregiver_id="caregiver-1",
+        source_caregiver_id="caregiver-1",
         source_message_id="message-1",
         source_conversation_id="conversation-1",
     )
@@ -131,7 +131,7 @@ def test_shared_coordinator_rejects_companion_message_from_another_caregiver(mon
     conversation = SimpleNamespace(
         id="conversation-1",
         person_id="person-1",
-        caregiver_id="different-caregiver",
+        source_caregiver_id="different-caregiver",
     )
     db = _session({Person: person, ConversationSession: None, ConversationMessage: None})
     reconciled = Mock()
@@ -142,7 +142,7 @@ def test_shared_coordinator_rejects_companion_message_from_another_caregiver(mon
             db,
             "person-1",
             workflow="companion_care_update_review",
-            caregiver_id="caregiver-1",
+            source_caregiver_id="caregiver-1",
             source_message_id="message-1",
             source_conversation_id="conversation-1",
         )
@@ -156,7 +156,7 @@ def test_shared_coordinator_validates_correction_and_reassesses_in_caller_transa
     correction = SimpleNamespace(
         id="correction-1",
         person_id="person-1",
-        caregiver_id="caregiver-1",
+        source_caregiver_id="caregiver-1",
     )
     db = _session({Person: person, Correction: correction})
     reconciled = Mock()
@@ -166,7 +166,7 @@ def test_shared_coordinator_validates_correction_and_reassesses_in_caller_transa
         db,
         "person-1",
         workflow="care_record_correction",
-        caregiver_id="caregiver-1",
+        source_caregiver_id="caregiver-1",
         correction_id="correction-1",
     )
 
@@ -181,7 +181,7 @@ def test_shared_coordinator_rejects_correction_from_another_caregiver(monkeypatc
     correction = SimpleNamespace(
         id="correction-1",
         person_id="person-1",
-        caregiver_id="different-caregiver",
+        source_caregiver_id="different-caregiver",
     )
     db = _session({Person: person, Correction: correction})
     reconciled = Mock()
@@ -192,7 +192,7 @@ def test_shared_coordinator_rejects_correction_from_another_caregiver(monkeypatc
             db,
             "person-1",
             workflow="care_record_correction",
-            caregiver_id="caregiver-1",
+            source_caregiver_id="caregiver-1",
             correction_id="correction-1",
         )
 
