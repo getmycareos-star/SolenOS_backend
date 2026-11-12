@@ -35,6 +35,8 @@ def test_candidate_has_canonical_provenance_and_separate_medication_fields():
     )
     assert candidate["document_id"] == "evidence-1"
     assert candidate["page_number"] == 4
+    assert candidate["source_span_unit"] == "unicode_code_points"
+    assert source[candidate["source_span_start"]:candidate["source_span_end"]] == candidate["source_excerpt"]
     assert candidate["field_type"] == "medication"
     assert candidate["medication_details"]["strength"] == "500 mg"
     assert candidate["medication_details"]["dosage_instructions"] == "Take metformin 500 mg twice daily"
@@ -236,3 +238,17 @@ def test_natural_recorded_date_is_normalized_without_becoming_event_date():
     assert candidate["event_date"] is None
     assert candidate["recorded_date"] == "2026-10-15"
     assert any("document recording date" in warning for warning in candidate["warnings"])
+
+
+
+def test_repeated_source_quote_has_no_false_unique_span():
+    excerpt = "Take metformin 500 mg twice daily."
+    source = f"[Page 1]\\n{excerpt}\\n\\n[Page 2]\\n{excerpt}"
+    candidate = canonical_candidate(
+        {"subject": "metformin", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-repeated-quote",
+        source_text=source,
+    )
+    assert candidate["source_span_start"] is None
+    assert candidate["source_span_end"] is None
+    assert any("unambiguous page" in warning for warning in candidate["warnings"])
