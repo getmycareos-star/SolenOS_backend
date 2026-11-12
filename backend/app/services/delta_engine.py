@@ -1473,6 +1473,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             run.delta_json = json.dumps(result, ensure_ascii=False, default=str)
             db.commit()
         except Exception:
+            logger.exception(
+                "Delta reconciliation persistence failed",
+                extra={
+                    "person_id": person_id,
+                    "source_event_id": source_event_id,
+                    "evidence_count": len(evidence_ids),
+                },
+            )
             db.rollback()
             raise HTTPException(status_code=500, detail="The reconciliation could not be persisted; the transaction was rolled back.")
     return result
