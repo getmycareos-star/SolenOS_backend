@@ -318,7 +318,7 @@ def test_due_reminder_batch_does_not_starve_older_delivered_rows():
         db.close()
 
 
-def test_inactive_quiet_hours_flag_does_not_drop_due_reminder():
+def test_quiet_hours_defer_due_reminder_then_release_it_without_changing_due_time():
     from app.models.notifications import CareNotification, CareNotificationPreference
     from app.models.reminder import CareReminder
     from app.services.reminder_delivery import deliver_due_reminders
@@ -327,11 +327,12 @@ def test_inactive_quiet_hours_flag_does_not_drop_due_reminder():
     session = create_session(client, "Caregiver quiet hours")
     db = TestSessionLocal()
     try:
+        original_due = datetime(2026, 1, 15, 6, 59, tzinfo=timezone.utc)
         reminder = CareReminder(
             person_id=session["person"]["id"],
             created_by_caregiver_id=session["caregiver"]["id"],
             title="Check care plan",
-            due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            due_at=original_due,
             status="open",
         )
         db.add(reminder)
@@ -340,17 +341,26 @@ def test_inactive_quiet_hours_flag_does_not_drop_due_reminder():
             caregiver_id=session["caregiver"]["id"],
             reminders_enabled=True,
             quiet_hours_enabled=True,
+            quiet_hours_start="21:00",
+            quiet_hours_end="08:00",
+            timezone_name="America/New_York",
         ))
         db.commit()
 
-        assert deliver_due_reminders(db=db) == 1
-        assert db.query(CareNotification).filter(
-            CareNotification.source_event_id == reminder.id,
-            CareNotification.category == "reminder_due",
-        ).count() == 1
+        # 02:00 in New York: the notification is deferred until quiet hours end.
+        assert deliver_due_reminders(db=db, now=datetime(2026, 1, 15, 7, 0, tzinfo=timezone.utc)) == 0
+        db.refresh(reminder)
+        assert reminder.due_at == original_due
+        assert reminder.notification_deferred_until == datetime(2026, 1, 15, 13, 0, tzinfo=timezone.utc)
+        assert db.query(CareNotification).filter(CareNotification.source_event_id == reminder.id).count() == 0
+
+        # 10:00 in New York: delivery resumes, without changing the care reminder due time.
+        assert deliver_due_reminders(db=db, now=datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)) == 1
+        db.refresh(reminder)
+        assert reminder.due_at == original_due
+        assert db.query(CareNotification).filter(CareNotification.source_event_id == reminder.id).count() == 1
     finally:
         db.close()
-
 
 
 def test_reminder_snooze_moves_due_time_and_records_caregiver_without_completing():
