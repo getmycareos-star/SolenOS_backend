@@ -1397,6 +1397,7 @@ async def post_situation(
             db,
             scoped_person_id,
             workflow="situation_capture",
+            caregiver_id=scoped_caregiver_id,
             source_event_id=result.care_event_id,
             source_evidence_id=result.evidence_id,
         )
