@@ -261,6 +261,162 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
     return [aggregate]
 
 
+def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list[dict]) -> list[dict]:
+    """Attach real source metadata only to records selected into this Qwen request."""
+    event_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "care_event"]
+    evidence_ids = {
+        str(item["record_id"]) for item in records if item.get("record_type") == "care_evidence"
+    }
+    evidence_ids.update(
+        str(evidence_id)
+        for item in records
+        for evidence_id in (item.get("related_evidence_ids") or [])
+        if evidence_id
+    )
+    document_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "document_extraction"]
+    appointment_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "appointment"]
+    handoff_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "care_handoff"]
+
+    events = {
+        str(item.id): item for item in (
+            db.query(CareEvent).filter(
+                CareEvent.person_id == person_id,
+                CareEvent.id.in_(event_ids or {"__no_matching_event__"}),
+            ).all() if event_ids else []
+        )
+    }
+    evidence = {
+        str(item.id): item for item in (
+            db.query(EvidenceModel).filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.id.in_(evidence_ids or {"__no_matching_evidence__"}),
+            ).all() if evidence_ids else []
+        )
+    }
+    documents = {
+        str(item.id): item for item in (
+            db.query(CaptureAnalysis).filter(
+                CaptureAnalysis.person_id == person_id,
+                CaptureAnalysis.id.in_(document_ids or {"__no_matching_document__"}),
+            ).all() if document_ids else []
+        )
+    }
+    appointments = {
+        str(item.id): item for item in (
+            db.query(Appointment).filter(
+                Appointment.person_id == person_id,
+                Appointment.id.in_(appointment_ids or {"__no_matching_appointment__"}),
+            ).all() if appointment_ids else []
+        )
+    }
+    handoffs = {
+        str(item.id): item for item in (
+            db.query(CaregiverHandoff).filter(
+                CaregiverHandoff.person_id == person_id,
+                CaregiverHandoff.id.in_(handoff_ids or {"__no_matching_handoff__"}),
+            ).all() if handoff_ids else []
+        )
+    }
+    caregiver_ids = set()
+    for item in events.values():
+        if item.created_by_caregiver_id:
+            caregiver_ids.add(str(item.created_by_caregiver_id))
+    for item in evidence.values():
+        caregiver_ids.update(
+            str(value) for value in (
+                item.uploaded_by_caregiver_id, item.reported_by_caregiver_id,
+                item.collected_by_caregiver_id,
+            ) if value
+        )
+    caregiver_names = {
+        str(item.id): item.name
+        for item in db.query(Caregiver).filter(
+            Caregiver.person_id == person_id,
+            Caregiver.id.in_(caregiver_ids or {"__no_matching_caregiver__"}),
+        ).all()
+    }
+
+    def evidence_summary(evidence_id: str) -> dict | None:
+        item = evidence.get(str(evidence_id))
+        if item is None:
+            return None
+        metadata = item.extra_metadata or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (TypeError, ValueError):
+                metadata = {}
+        filename = metadata.get("filename") if isinstance(metadata, dict) else None
+        return {
+            "label": filename or "Original note or document",
+            "record_id": str(item.id),
+            "source_excerpt": (item.source_text or "")[:700],
+            "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
+            "recorded_at": item.ingested_at.isoformat() if item.ingested_at else (item.uploaded_at.isoformat() if item.uploaded_at else None),
+            "reported_by": item.reported_by_label or item.original_author or caregiver_names.get(str(item.reported_by_caregiver_id or "")),
+            "entered_by": caregiver_names.get(str(item.uploaded_by_caregiver_id or "")),
+            "record_status": item.epistemic_status or item.evidence_status,
+        }
+
+    for record in records:
+        record_id = str(record.get("record_id") or "")
+        if record.get("record_type") == "care_event" and record_id in events:
+            item = events[record_id]
+            record.update({
+                "source_text": " ".join(part for part in (item.title, item.description or "") if part),
+                "source_excerpt": " — ".join(part for part in (item.title, item.description or "") if part)[:700],
+                "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
+                "recorded_at": item.recorded_at.isoformat() if item.recorded_at else None,
+                "entered_by": caregiver_names.get(str(item.created_by_caregiver_id or "")),
+                "record_status": item.status,
+                "related_evidence_ids": [str(value) for value in (item.evidence_ids or [])],
+                "related_evidence": [
+                    summary for evidence_id in (item.evidence_ids or [])
+                    if (summary := evidence_summary(str(evidence_id))) is not None
+                ],
+            })
+        elif record.get("record_type") == "care_evidence" and record_id in evidence:
+            item = evidence[record_id]
+            summary = evidence_summary(record_id) or {}
+            record.update({
+                "source_text": item.source_text or "",
+                "source_excerpt": (item.source_text or "")[:700],
+                "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
+                "recorded_at": item.ingested_at.isoformat() if item.ingested_at else (item.uploaded_at.isoformat() if item.uploaded_at else None),
+                "reported_by": summary.get("reported_by"),
+                "entered_by": summary.get("entered_by"),
+                "record_status": item.epistemic_status or item.evidence_status,
+            })
+        elif record.get("record_type") == "document_extraction" and record_id in documents:
+            item = documents[record_id]
+            source_evidence_id = str(item.source_evidence_id) if item.source_evidence_id else None
+            if source_evidence_id:
+                record["related_evidence_ids"] = [source_evidence_id]
+                summary = evidence_summary(source_evidence_id)
+                record["related_evidence"] = [summary] if summary else []
+            record.update({
+                "source_text": item.source_text or "",
+                "source_excerpt": (item.source_text or "")[:700],
+                "recorded_at": item.created_at.isoformat() if item.created_at else None,
+                "record_status": item.extraction_status,
+            })
+        elif record.get("record_type") == "appointment" and record_id in appointments:
+            item = appointments[record_id]
+            record.update({
+                "source_text": " ".join(part for part in (item.title, item.status, item.scheduled_at.isoformat() if item.scheduled_at else "") if part),
+                "source_excerpt": item.title,
+                "record_status": item.status,
+            })
+        elif record.get("record_type") == "care_handoff" and record_id in handoffs:
+            item = handoffs[record_id]
+            record.update({
+                "source_text": " ".join(part for part in (item.responsibility_type, item.scope or "", item.context or "") if part),
+                "source_excerpt": (item.context or "")[:700],
+                "record_status": "completed" if item.is_completed else "not completed",
+            })
+    return records
+
+
 class SharedFileInput(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     mimeType: str = Field(min_length=1, max_length=128)
@@ -2921,7 +3077,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             status_code=503,
             detail="Qwen could not produce a sufficiently grounded response. No suggestion was returned and nothing was written to the care record; please clarify the source or retry.",
         )
-    claim_source_records = context_lines_to_source_records(context_lines)
+    claim_source_records = _enrich_qwen_claim_source_records(
+        db, person_id, context_lines_to_source_records(context_lines)
+    )
     claim_provenance = build_claim_provenance(reply, claim_source_records, validated_aggregates)
     return {
         "workflow": payload.workflow,
