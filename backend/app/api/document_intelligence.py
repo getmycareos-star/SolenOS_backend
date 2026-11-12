@@ -964,6 +964,24 @@ def review_document_candidate(
             CareAssertion.person_id == person_id,
         ).first()
         if persisted_assertion is None:
+            logger.error(
+                "Accepted document assertion missing after reconciliation: assertion_id=%s person_id=%s "
+                "object_person_id=%s object_status=%s same_person_assertions=%s transaction_active=%s",
+                assertion_id,
+                person_id,
+                getattr(assertion_row, "person_id", None),
+                getattr(assertion_row, "assertion_status", None),
+                [
+                    {
+                        "id": row.id,
+                        "kind": row.assertion_kind,
+                        "status": row.assertion_status,
+                        "evidence_ids": row.evidence_ids,
+                    }
+                    for row in db.query(CareAssertion).filter(CareAssertion.person_id == person_id).all()
+                ],
+                db.in_transaction(),
+            )
             db.rollback()
             raise HTTPException(
                 status_code=503,
