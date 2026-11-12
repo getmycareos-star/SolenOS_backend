@@ -193,7 +193,10 @@ def _extract_legacy_doc(content: bytes) -> str:
         raise HTTPException(status_code=422, detail="The saved legacy Word document could not be read")
     if len(result.stdout) > MAX_EXTRACTED_CHARS * 4:
         raise HTTPException(status_code=413, detail="Legacy Word extraction exceeds the 100,000-character processing limit")
-    extracted = result.stdout.decode("utf-8-sig", errors="replace").strip()
+    try:
+        extracted = result.stdout.decode("utf-8-sig").strip()
+    except UnicodeDecodeError:
+        extracted = result.stdout.decode("cp1252", errors="replace").strip()
     if not extracted:
         raise HTTPException(status_code=422, detail="No readable text was found in the legacy Word document")
     return extracted
