@@ -427,7 +427,58 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+
+        # A second upload of the exact same bytes must reuse the existing
+        # source-linked assertion rather than create duplicate care knowledge.
+        duplicate_evidence_id = "duplicate-" + hashlib.sha256(source.encode("utf-8")).hexdigest()[:20]
+        duplicate_bytes = source.encode("utf-8")
         with Session() as db:
+            db.add(Evidence(
+                id=duplicate_evidence_id,
+                person_id=caregiver["person"]["id"],
+                type="document",
+                source_text="",
+                uploaded_by_caregiver_id=caregiver["caregiver"]["id"],
+                extra_metadata=json.dumps({
+                    "filename": "duplicate-copy.txt",
+                    "duplicate_of_evidence_id": evidence_id,
+                }),
+                source_type="caregiver_upload",
+                evidence_status="recorded",
+            ))
+            db.add(EvidenceUpload(
+                evidence_id=duplicate_evidence_id,
+                filename="duplicate-copy.txt",
+                mime_type="text/plain",
+                content=duplicate_bytes,
+                size_bytes=len(duplicate_bytes),
+                sha256=hashlib.sha256(duplicate_bytes).hexdigest(),
+            ))
+            db.commit()
+        duplicate_extraction = client.post(
+            f"/api/v1/documents/{duplicate_evidence_id}/extract", headers=auth
+        )
+        assert duplicate_extraction.status_code == 201, duplicate_extraction.text
+        duplicate_understanding = client.post(
+            f"/api/v1/documents/{duplicate_evidence_id}/intelligence", headers=auth
+        )
+        assert duplicate_understanding.status_code == 201, duplicate_understanding.text
+        duplicate_accepted = client.post(
+            f"/api/v1/documents/intelligence/{duplicate_understanding.json()['analysis_id']}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert duplicate_accepted.status_code == 200, duplicate_accepted.text
+        assert duplicate_accepted.json()["written_to_lcr"] is True
+
+        with Session() as db:
+            assertions = db.query(CareAssertion).filter_by(
+                person_id=caregiver["person"]["id"],
+                assertion_kind="document_reviewed_observation",
+            ).all()
+            assert len(assertions) == 1
+            assertion = assertions[0]
+            assert duplicate_accepted.json()["source_record_ref"]["record_id"] == assertion.id
             assertion = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"]
             ).one()
