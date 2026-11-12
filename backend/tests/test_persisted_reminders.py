@@ -591,3 +591,92 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
         assert len(sent) == 1
     finally:
         db.close()
+
+
+def test_web_push_failure_is_persisted_as_retry_scheduled_and_retried_once(monkeypatch):
+    from types import SimpleNamespace
+    import sys
+    import app.api.push_notifications as push_api
+    import app.services.reminder_delivery as delivery_service
+    from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
+
+    settings = _valid_vapid_settings("retry-state-test-secret")
+    monkeypatch.setattr(push_api, "get_settings", lambda: settings)
+    monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
+    calls = []
+
+    class FakeWebPushException(Exception):
+        def __init__(self):
+            super().__init__("provider unavailable")
+            self.response = SimpleNamespace(status_code=503)
+
+    def failing_webpush(**kwargs):
+        calls.append("failed")
+        raise FakeWebPushException()
+
+    fake_provider = SimpleNamespace(
+        WebPushException=FakeWebPushException,
+        webpush=failing_webpush,
+    )
+    monkeypatch.setitem(sys.modules, "pywebpush", fake_provider)
+
+    client = TestClient(app)
+    session = create_session(client, "Retry state caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    endpoint = "https://fcm.googleapis.com/fcm/send/retry-state"
+    registered = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers=headers,
+        json={"endpoint": endpoint, "keys": {"p256dh": "public-key", "auth": "auth-secret"}},
+    )
+    assert registered.status_code == 201, registered.text
+
+    db = TestSessionLocal()
+    try:
+        subscription = db.query(CarePushSubscription).one()
+        now = datetime.now(timezone.utc) + timedelta(seconds=3)
+        notification = CareNotification(
+            id="retry-state-notification",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="Private care update",
+            body="Private care details remain in the authenticated inbox.",
+            category="reminder_due",
+            priority="normal",
+            created_at=now,
+        )
+        db.add(notification)
+        db.commit()
+
+        assert delivery_service.deliver_pending_web_pushes(db=db, now=now) == 0
+        delivery = db.query(CarePushDelivery).filter_by(
+            notification_id=notification.id,
+            subscription_id=subscription.id,
+        ).one()
+        assert delivery.status == "retry_scheduled"
+        assert delivery.attempt_count == 1
+        assert delivery.last_error_code == "http_503"
+        first_retry = delivery.next_attempt_at
+        first_retry = first_retry.replace(tzinfo=timezone.utc) if first_retry.tzinfo is None else first_retry
+        assert first_retry == now + timedelta(seconds=60)
+        assert calls == ["failed"]
+
+        def successful_webpush(**kwargs):
+            calls.append("accepted")
+            return SimpleNamespace(status_code=201)
+
+        fake_provider.webpush = successful_webpush
+        assert delivery_service.deliver_pending_web_pushes(
+            db=db, now=now + timedelta(seconds=61)
+        ) == 1
+        db.refresh(delivery)
+        assert delivery.status == "accepted"
+        assert delivery.attempt_count == 2
+        assert delivery.provider_accepted_at is not None
+        assert calls == ["failed", "accepted"]
+        assert db.query(CarePushDelivery).filter_by(
+            notification_id=notification.id,
+            subscription_id=subscription.id,
+        ).count() == 1
+    finally:
+        db.close()
