@@ -321,6 +321,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "field": item.field,
         "asserted_value": item.asserted_value,
         "assertion_kind": item.assertion_kind,
+        "epistemic_state": item.epistemic_state or "reported",
         "assertion_status": item.assertion_status,
         "source_label": item.source_label,
         "source_text": item.source_text,
