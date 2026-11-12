@@ -49,9 +49,7 @@ def deliver_due_reminders(db=None, now=None):
                 )
                 .first()
             )
-            if preference is not None and (
-                not preference.reminders_enabled or preference.quiet_hours_enabled
-            ):
+            if preference is not None and not preference.reminders_enabled:
                 continue
             body = reminder.note or "This care reminder is due."
             session.add(CareNotification(
