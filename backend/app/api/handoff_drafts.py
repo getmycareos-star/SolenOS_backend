@@ -589,7 +589,11 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
                     "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
                 } for row in assertion_rows if str(row.source_event_id or "") == str(event.id) or any(str(value) in [str(evidence_id) for evidence_id in evidence_ids] for value in (row.evidence_ids or []))]
-                current = _fingerprint(_daily_care_fingerprint_payload(event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot}))
+                observation_snapshot = _evidence_observation_snapshot(db, draft.person_id, evidence_ids)
+                current = _fingerprint(_daily_care_fingerprint_payload(
+                    event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot},
+                    observation_snapshot,
+                ))
             elif item.get("source_type") == "document_extracted_text":
                 extraction = db.query(CaptureAnalysis).filter(
                     CaptureAnalysis.id == source_id,
@@ -607,7 +611,10 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
                     "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
                 } for row in assertion_rows if str(document_id) in [str(value) for value in (row.evidence_ids or [])]]
-                current = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256, assertion_snapshot))
+                observation_snapshot = _evidence_observation_snapshot(db, draft.person_id, [str(document_id)] if document_id else [])
+                current = _fingerprint(_document_extraction_fingerprint_payload(
+                    extraction, upload.sha256, assertion_snapshot, observation_snapshot,
+                ))
             elif item.get("source_type") == "uploaded_document":
                 document = db.query(Evidence).filter(
                     Evidence.id == source_id,
@@ -628,7 +635,10 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     "id": row.id, "status": row.assertion_status, "asserted_value": row.asserted_value,
                     "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
                 } for row in assertion_rows if str(source_id) in [str(value) for value in (row.evidence_ids or [])]]
-                current = _fingerprint(_document_upload_fingerprint_payload(document, upload, assertion_snapshot))
+                observation_snapshot = _evidence_observation_snapshot(db, draft.person_id, [str(source_id)])
+                current = _fingerprint(_document_upload_fingerprint_payload(
+                    document, upload, assertion_snapshot, observation_snapshot,
+                ))
             else:
                 if source_table not in SOURCES or not inspector.has_table(source_table):
                     unknown.append(f"{source_table}:{source_id}")
@@ -1163,6 +1173,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "asserted_value": row.asserted_value, "source_event_id": row.source_event_id,
                 "recorded_at": _iso(row.recorded_at), "created_by_caregiver_id": row.created_by_caregiver_id,
             } for row in daily_assertions]
+            observation_snapshot = _evidence_observation_snapshot(db, person_id, linked_ids)
             sources = [{
                 "evidence_id": row.id,
                 "source_type": row.source_type,
@@ -1179,7 +1190,10 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "original_source_reference": row.original_source_reference,
                 "source_text_sha256": row.source_text_sha256,
             } for row in linked]
-            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot}))
+            daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(
+                event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot},
+                observation_snapshot,
+            ))
             source_revision_value = event.updated_at or event.recorded_at
             output.append({
                 "source_type": "daily_care_observation",
@@ -1198,6 +1212,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     "review_status": "caregiver_reviewed_assertion_exists" if any(row["status"] == "caregiver_reviewed" for row in assertion_references) else "caregiver_reported_not_independently_verified",
                     "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
                     "assertion_references": assertion_references,
+                    "source_observation_history": observation_snapshot,
                     "capture_analysis_references": [row["id"] for row in analysis_snapshot],
                     "capture_analysis_review_history": [row["review_history"] for row in analysis_snapshot if row["review_history"]],
                     "revision_status": "capture_analysis_review_history_preserved; care_event_version_not_exposed",
