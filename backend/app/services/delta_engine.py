@@ -1432,10 +1432,17 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 })
             db.flush()
         except Exception as exc:
-            # Keep the API response generic, but retain the original database or
-            # validation exception in server logs so persistence regressions are
-            # diagnosable without exposing care content to the caller.
-            logger.exception("Delta reconciliation persistence failed")
+            original_error = getattr(exc, "orig", None)
+            diagnostics = getattr(original_error, "diag", None)
+            logger.error(
+                "Delta reconciliation persistence failed",
+                extra={
+                    "exception_type": type(exc).__name__,
+                    "database_sqlstate": getattr(original_error, "pgcode", None),
+                    "database_constraint": getattr(diagnostics, "constraint_name", None),
+                    "evidence_count": len(evidence_ids),
+                },
+            )
             db.rollback()
             raise HTTPException(
                 status_code=500,
