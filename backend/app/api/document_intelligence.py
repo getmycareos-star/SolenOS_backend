@@ -188,13 +188,21 @@ def _existing_assertion_for_exact_document_duplicate(
     field: str,
     source_quote: str,
     asserted_value: str,
+    subject_type: str = "person",
+    subject_id: str | None = None,
+    assertion_kind: str = "document_reviewed_observation",
 ):
     """Reuse a prior assertion only when the uploaded binaries are exact duplicates."""
-    existing = db.query(CareAssertion).filter(
+    existing_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         CareAssertion.field == field,
-        CareAssertion.assertion_kind == "document_reviewed_observation",
+        CareAssertion.assertion_kind == assertion_kind,
+        CareAssertion.subject_type == subject_type,
         CareAssertion.source_text == source_quote,
+    )
+    if subject_id is not None:
+        existing_query = existing_query.filter(CareAssertion.subject_id == subject_id)
+    existing = existing_query.order_by(CareAssertion.recorded_at.desc()).all()
     ).order_by(CareAssertion.recorded_at.desc()).all()
     duplicate_group_ids = {
         str(row[0])
