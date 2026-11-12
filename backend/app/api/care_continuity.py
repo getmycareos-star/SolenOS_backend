@@ -910,7 +910,7 @@ RESOURCES = {
 WRITABLE = {
     "facts": {"subject_type", "subject_id", "fact_type", "fact_value", "epistemic_status",
               "effective_at", "superseded_by_fact_id", "review_notes"},
-    "assertions": {"subject_type", "subject_id", "field", "assertion_kind", "asserted_value", "source_event_id", "source_label", "source_text", "evidence_ids", "observed_at", "review_after_days"},
+    "assertions": {"subject_type", "subject_id", "field", "assertion_kind", "asserted_value", "source_event_id", "source_label", "source_text", "evidence_ids", "observed_at", "review_after_days", "epistemic_state"},
     "fact-evidence": {"fact_id", "evidence_id", "evidence_role", "source_span"},
     "relationships": {"source_type", "source_id", "relationship_type", "target_type", "target_id", "provenance"},
     "delta-items": {"delta_run_id", "item_type", "target_type", "target_id", "before_state",
@@ -3347,6 +3347,23 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     if missing:
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
     if resource == "assertions":
+        epistemic_state = str(data.get("epistemic_state") or "reported").strip().lower()
+        if epistemic_state not in {"reported", "observed", "verified", "inferred", "uncertain", "conflicting", "missing"}:
+            raise HTTPException(status_code=422, detail="Unsupported assertion epistemic state")
+        if epistemic_state in {"verified", "inferred", "conflicting", "missing"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Verified, inferred, conflicting and missing states must be produced by their authorized review or reconciliation workflow",
+            )
+        if epistemic_state == "observed" and (
+            not data.get("observed_at")
+            or not (data.get("source_text") or data.get("evidence_ids"))
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Observed assertions require an observation time and source text or linked evidence",
+            )
+        data["epistemic_state"] = epistemic_state
         assertion_kind = data.get("assertion_kind", "current_state")
         if assertion_kind not in {"current_state", "time_bound_observation", "document_reviewed_observation"}:
             raise HTTPException(status_code=422, detail="Unsupported assertion kind")
