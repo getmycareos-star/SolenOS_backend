@@ -3324,3 +3324,56 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 3
     finally:
         teardown_db()
+
+
+def test_source_extraction_questions_reject_cross_person_evidence():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.services.uncertainty import persist_source_clarification_questions
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person_a = Person(id="person-source-scope-a", name="Person A")
+        caregiver_a = Caregiver(
+            id="caregiver-source-scope-a",
+            name="Caregiver A",
+            email="source-scope-a@example.com",
+            relationship="Family",
+            person_id=person_a.id,
+        )
+        person_b = Person(id="person-source-scope-b", name="Person B")
+        caregiver_b = Caregiver(
+            id="caregiver-source-scope-b",
+            name="Caregiver B",
+            email="source-scope-b@example.com",
+            relationship="Family",
+            person_id=person_b.id,
+        )
+        evidence_b = Evidence(
+            id="evidence-source-scope-b",
+            person_id=person_b.id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="This source belongs to another person.",
+            uploaded_by_caregiver_id=caregiver_b.id,
+            reported_by_caregiver_id=caregiver_b.id,
+        )
+        db.add_all([person_a, caregiver_a, person_b, caregiver_b, evidence_b])
+        db.commit()
+
+        with pytest.raises(ValueError, match="missing or belongs to another care record"):
+            persist_source_clarification_questions(
+                db,
+                person_id=person_a.id,
+                caregiver_id=caregiver_a.id,
+                source_kind="document_extraction",
+                source_record_type="evidence",
+                source_record_id=evidence_b.id,
+                evidence_ids=[evidence_b.id],
+                questions=["Who confirmed this information?"],
+            )
+        assert db.query(OpenQuestion).filter_by(person_id=person_a.id).count() == 0
+    finally:
+        teardown_db()
