@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -206,7 +207,7 @@ def _scan_adjusted_image(image: Image.Image, evidence: Evidence | None) -> tuple
     if evidence is None:
         return image, False
     try:
-        metadata = evidence.extra_metadata if isinstance(evidence.extra_metadata, dict) else __import__("json").loads(evidence.extra_metadata or "{}")
+        metadata = evidence.extra_metadata if isinstance(evidence.extra_metadata, dict) else json.loads(evidence.extra_metadata or "{}")
     except (TypeError, ValueError):
         return image, False
     if not isinstance(metadata, dict):
