@@ -91,9 +91,10 @@ def test_draft_returns_audience_specific_template_and_explicit_unassessed_sectio
     sections = {section["key"]: section for section in body["template_sections"]}
     assert expected_sections.issubset(sections)
     assert all(section["required_fields"] for section in body["template_sections"])
-    # Appointment records can support appointment details, but no medication adapter exists.
+    # Medication records are only populated through the dedicated caregiver-reviewed adapter.
     if audience == "professional":
-        assert sections["medication_reconciliation"]["coverage_status"] == "not_assessed"
+        assert sections["medication_reconciliation"]["coverage_status"] in {"no_records_returned", "unavailable"}
+        assert body["source_statuses"]["allergies"]["status"] == "unavailable"
     else:
         assert sections["health_medication"]["coverage_status"] == "no_records_returned"
     assert all("still requires review" in section["coverage_note"] for section in body["template_sections"])
@@ -623,7 +624,7 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
 
 def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
-    from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
+    from app.models.privacy_delivery import HandoffDraft
 
     test_client, session = client
     person_id = session["person"]["id"]
@@ -1406,3 +1407,175 @@ def test_handoff_includes_only_valid_necessary_open_questions(client):
     ]
     assert "handoff-necessary-question" in question_refs
     assert "handoff-unassessed-question" not in question_refs
+
+
+def test_caregiver_approved_professional_export_returns_pdf_and_requires_approval(client, monkeypatch):
+    from app.api import handoff_drafts
+    from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
+
+    test_client, session = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", lambda *args, **kwargs: {
+        "status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": "test", "sections": [],
+    })
+    monkeypatch.setattr(handoff_drafts, "_draft_source_freshness", lambda *args, **kwargs: {"status": "current"})
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 14},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+
+    blocked = test_client.get(f"/api/v1/handoff-drafts/{draft_id}/export.pdf", headers=headers)
+    assert blocked.status_code == 409
+
+    edited = test_client.put(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers=headers,
+        json={"content": {
+            "template_sections": prepared.json()["template_sections"],
+            "sections": prepared.json()["sections"],
+            "generation": prepared.json()["generation"],
+            "caregiver_notes": ["Caregiver note: this is my report, not an independently verified fact."],
+        }},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["revision_number"] == 2
+    saved = test_client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=headers)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["caregiver_notes"][0]["attribution"] == "caregiver_authored_unverified"
+    tampered = test_client.put(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers=headers,
+        json={"content": {
+            "template_sections": saved.json()["template_sections"],
+            "sections": saved.json()["sections"] + [{"title": "Fabricated source", "items": []}],
+            "generation": saved.json()["generation"],
+            "caregiver_notes": saved.json()["caregiver_notes"],
+        }},
+    )
+    assert tampered.status_code == 422
+
+    approved = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve-export",
+        headers=headers,
+        json={"approved": True},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["approved"] is True
+    assert approved.json()["review_status"] == "approved"
+
+    exported = test_client.get(f"/api/v1/handoff-drafts/{draft_id}/export.pdf", headers=headers)
+    assert exported.status_code == 200, exported.text
+    assert exported.headers["content-type"].startswith("application/pdf")
+    assert exported.content.startswith(b"%PDF-1.4")
+    assert b"CAREGIVER-REVIEWED" not in exported.content
+    assert b"SOLENOS CARE SUMMARY" in exported.content
+    assert "no-store" in exported.headers.get("cache-control", "")
+
+
+def test_caregiver_approved_export_refuses_stale_source(client, monkeypatch):
+    from app.api import handoff_drafts
+
+    test_client, session = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", lambda *args, **kwargs: {
+        "status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": "test", "sections": [],
+    })
+    monkeypatch.setattr(handoff_drafts, "_draft_source_freshness", lambda *args, **kwargs: {"status": "stale"})
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 14},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+    approved = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve-export",
+        headers=headers,
+        json={"approved": True},
+    )
+    assert approved.status_code == 409
+
+
+def test_professional_handoff_includes_only_reviewed_current_medication_reports(client, monkeypatch):
+    from app.models.care_continuity import CareAssertion
+    from app.api import handoff_drafts
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    now = datetime.now(timezone.utc)
+    db = TestSessionLocal()
+    try:
+        db.add_all([
+            CareAssertion(
+                id="professional-medication-name",
+                person_id=person_id,
+                subject_type="medication",
+                subject_id="professional-med-1",
+                field="name",
+                asserted_value="Example prescribed medicine",
+                source_label="Caregiver report",
+                assertion_status="accepted",
+                epistemic_state="reported",
+                observed_at=now,
+                review_after_days=30,
+                created_by_caregiver_id=session["caregiver"]["id"],
+            ),
+            CareAssertion(
+                id="professional-medication-status",
+                person_id=person_id,
+                subject_type="medication",
+                subject_id="professional-med-1",
+                field="status",
+                asserted_value="active",
+                source_label="Caregiver report",
+                assertion_status="accepted",
+                epistemic_state="reported",
+                observed_at=now,
+                review_after_days=30,
+                created_by_caregiver_id=session["caregiver"]["id"],
+            ),
+            CareAssertion(
+                id="professional-medication-unreviewed",
+                person_id=person_id,
+                subject_type="medication",
+                subject_id="professional-med-2",
+                field="name",
+                asserted_value="Unreviewed medicine",
+                source_label="Document extraction",
+                assertion_status="reported",
+                epistemic_state="reported",
+                observed_at=now,
+                review_after_days=30,
+                created_by_caregiver_id=session["caregiver"]["id"],
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(
+        handoff_drafts,
+        "_generate_grounded_handoff",
+        lambda *args, **kwargs: {"status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": "test", "sections": []},
+    )
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 14},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_statuses"]["medications"]["status"] == "available"
+    medication_refs = [
+        item for item in body["source_references"]
+        if item["source_type"] == "caregiver_reviewed_medication_report"
+    ]
+    assert len(medication_refs) == 1
+    assert medication_refs[0]["details"]["reported_name"] == "Example prescribed medicine"
+    assert medication_refs[0]["details"]["interpretation_limit"].startswith("Caregiver-reviewed current report")
+    assert "Unreviewed medicine" not in str(body["sections"])
+    assert body["source_statuses"]["allergies"]["status"] == "unavailable"
+
