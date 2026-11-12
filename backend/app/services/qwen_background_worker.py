@@ -289,12 +289,17 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     ))
                     db.commit()
                     return True
-                if pending_pages and not retryable_pages and not retry_exhausted_pages:
+                exhausted_page_keys = {str(page) for page in retry_exhausted_pages}
+                remaining_window_pages = [
+                    page for page in pending_pages
+                    if str(page) not in exhausted_page_keys
+                ]
+                if pending_pages and not retryable_pages and remaining_window_pages:
                     # A bounded page window is unfinished work, not a completed
-                    # document and not an OCR failure. Requeue immediately so
-                    # the next worker pass resumes at the persisted next page
-                    # window without blocking this worker or asking the
-                    # caregiver to manage processing.
+                    # document and not an OCR failure. Keep processing later
+                    # windows even when an earlier page has exhausted its retry
+                    # budget; the document remains incomplete until every
+                    # other page has been processed.
                     job.status = "queued"
                     job.attempt_count = 0
                     job.available_at = datetime.now(timezone.utc)
@@ -313,6 +318,8 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                             "processed_page_count": intelligence.get("processed_page_count"),
                             "total_page_count": intelligence.get("total_page_count"),
                             "unprocessed_page_numbers": pending_pages,
+                            "retry_exhausted_page_numbers": retry_exhausted_pages,
+                            "remaining_window_page_numbers": remaining_window_pages,
                             "written_to_lcr": False,
                         },
                     ))
