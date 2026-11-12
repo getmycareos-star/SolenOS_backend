@@ -5,6 +5,7 @@ import pytest
 
 from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
+from app.models.care_continuity import CareAssertion
 from app.services import care_continuity_execution as execution
 
 
@@ -261,6 +262,44 @@ def test_shared_coordinator_rejects_unknown_stage_status_before_reconciliation(m
             workflow="daily_capture",
             source_event_id="event-1",
             stage_statuses={"unknown": "done"},
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_validates_source_assertion_scope(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    assertion = SimpleNamespace(id="assertion-1", person_id="person-1")
+    db = _session({Person: person, CareAssertion: assertion})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    result = execution.execute_care_continuity_reconciliation(
+        db,
+        "person-1",
+        workflow="care_assertion_review",
+        source_assertion_id="assertion-1",
+    )
+
+    assert result["source_assertion_id"] == "assertion-1"
+    assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
+    reconciled.assert_called_once_with(db, "person-1", None)
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_assertion_from_another_person(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    db = _session({Person: person, CareAssertion: None})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="another care record"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="care_assertion_review",
+            source_assertion_id="assertion-from-another-person",
         )
 
     reconciled.assert_not_called()
