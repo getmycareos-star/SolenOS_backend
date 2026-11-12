@@ -27,6 +27,7 @@ from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
 from app.api.care_delta import _scoped_identity
 from app.models.care_continuity import EvidenceClaimDependency, EvidenceClaimAssessment, CareAssertion
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
@@ -272,9 +273,27 @@ def review_question_answer(
         claim_assessment_id=claim_assessment.id if claim_assessment else None,
         resulting_claim_id=resulting_claim.id if resulting_claim else None,
     )
+    execution = None
     try:
         engine.db.add(event)
+        if review.decision == "accepted":
+            try:
+                execution = execute_care_continuity_reconciliation(
+                    engine.db,
+                    engine.person_id,
+                    workflow="clarification_answer_review",
+                    source_evidence_ids=evidence_ids,
+                )
+            except Exception as exc:
+                engine.db.rollback()
+                raise HTTPException(
+                    status_code=503,
+                    detail="Care-continuity reconciliation failed; the clarification review was not committed. Retry the review.",
+                ) from exc
         engine.db.commit()
+        if execution is not None:
+            execution["stages"]["reconciliation"] = "committed"
+            event.care_continuity_execution = execution
         engine.db.refresh(event)
         return event
     except IntegrityError as exc:
