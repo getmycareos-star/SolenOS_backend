@@ -1139,14 +1139,19 @@ def fulfil_approved_deletion(
                 {"person_id": person_id},
             )
         if inspector.has_table("evidence"):
+            # Use the ORM column type for the primary scoped delete. Raw SQL
+            # string binds can fail to match UUID-backed person_id columns on
+            # some dialects, leaving an orphan while the request is fulfilled.
+            db.query(Evidence).filter(Evidence.person_id == person_id).delete(
+                synchronize_session=False
+            )
             db.execute(
                 text("DELETE FROM evidence WHERE person_id = :person_id"),
                 {"person_id": person_id},
             )
-            remaining_evidence = db.execute(
-                text("SELECT COUNT(*) FROM evidence WHERE person_id = :person_id"),
-                {"person_id": person_id},
-            ).scalar_one()
+            remaining_evidence = db.query(Evidence).filter(
+                Evidence.person_id == person_id
+            ).count()
             if int(remaining_evidence):
                 raise HTTPException(
                     status_code=409,
