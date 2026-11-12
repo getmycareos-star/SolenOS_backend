@@ -3616,6 +3616,43 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         from app.services.uncertainty import UncertaintyEngine
         visible = UncertaintyEngine(db, person_id=person.id).list_open_questions(person.id)
         assert [item.id for item in visible] == [necessary.id]
+
+        # When the explicit decision dependency disappears, the question is
+        # automatically suppressed, not marked answered. A later necessity
+        # reassessment reopens the same record and preserves revision history.
+        from app.services.care_continuity import reassess_open_question_lifecycle
+        from app.models.care_continuity import CareStateRevision
+        necessary_gap.context = []
+        db.flush()
+        lifecycle = reassess_open_question_lifecycle(db, person.id)
+        db.flush()
+        assert lifecycle["suppressed"] == 1
+        db.refresh(necessary)
+        assert necessary.status == "closed"
+        assert necessary.closed_reason.startswith("automatically_suppressed")
+        assert necessary.answered_at is None
+
+        necessary_gap.context = [{
+            "caregiver_attention_required": True,
+            "necessity_rationale": "The upcoming handoff again depends on the active discharge instruction.",
+        }]
+        db.flush()
+        next_best_questions(db, person.id, persist=True, commit=False)
+        db.flush()
+        db.refresh(necessary)
+        assert necessary.status == "open"
+        assert necessary.closed_at is None
+        assert necessary.closed_reason is None
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.question == necessary.question,
+        ).count() == 1
+        db.commit()
+        assert db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person.id,
+            CareStateRevision.target_type == "open_questions",
+            CareStateRevision.target_id == necessary.id,
+        ).count() >= 2
         db.close()
     finally:
         teardown_db()
