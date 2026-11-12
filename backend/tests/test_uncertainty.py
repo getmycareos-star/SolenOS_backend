@@ -333,6 +333,7 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
             evidence_ids=[current_source.id],
             assertion_status="accepted",
             epistemic_state="reported",
+            review_after_days=30,
             created_by_caregiver_id=caregiver.id,
             updated_by_caregiver_id=caregiver.id,
         )
