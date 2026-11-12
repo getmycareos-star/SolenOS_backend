@@ -1179,7 +1179,7 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
         EvidenceModel.person_id == person_id,
         EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         EvidenceModel.type == "document",
-        EvidenceModel.evidence_status != "deleted_by_caregiver",
+        (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
     ).first()
     if replacement is None:
         raise HTTPException(status_code=404, detail="Document not found")
