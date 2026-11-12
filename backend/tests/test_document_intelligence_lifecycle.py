@@ -578,3 +578,70 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+def test_candidate_overflow_resumes_only_overflow_pages_without_duplicate_candidates(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    observations = [
+        f"Patient reported observation {index}."
+        for index in range(1, 62)
+    ]
+    source = "[Page 1]\\n" + "\\n".join(observations)
+    processed_pages = []
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        processed_pages.append(1)
+        return {
+            "observations": [
+                {
+                    "subject": "Patient",
+                    "observation": quote,
+                    "source_quote": quote,
+                    "extraction_method": "test_verbatim",
+                }
+                for quote in observations
+            ],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Candidate overflow caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+
+        first = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert first.status_code == 201, first.text
+        assert first.json()["intelligence_status"] == "partial"
+        assert first.json()["candidate_overflow"] is True
+        assert first.json()["candidate_overflow_page_numbers"] == [1]
+        assert first.json()["unprocessed_page_numbers"] == [1]
+        assert first.json()["processed_page_numbers"] == []
+        assert len(first.json()["observations"]) == 60
+
+        resumed = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert resumed.status_code == 201, resumed.text
+        assert resumed.json()["intelligence_status"] == "available"
+        assert resumed.json()["candidate_overflow"] is False
+        assert resumed.json()["candidate_overflow_page_numbers"] == []
+        assert resumed.json()["unprocessed_page_numbers"] == []
+        assert resumed.json()["processed_page_numbers"] == [1]
+        assert len(resumed.json()["observations"]) == 61
+        assert processed_pages == [1, 1]
+        assert not any(
+            question.startswith("The candidate review limit was reached;")
+            for question in resumed.json()["open_questions"]
+        )
+
+        repeated = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert repeated.status_code == 201, repeated.text
+        assert len(repeated.json()["observations"]) == 61
+        assert processed_pages == [1, 1]
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
