@@ -1020,3 +1020,62 @@ def test_upload_and_extract_bmp_and_tiff_document_scans(client):
 
     source.close()
 
+
+
+def test_scanned_pdf_processes_more_than_25_pages(client, monkeypatch):
+    from pypdf import PdfWriter
+    import app.api.document_lifecycle as lifecycle
+
+    test_client, session = client
+    writer = PdfWriter()
+    for _ in range(30):
+        writer.add_blank_page(width=612, height=792)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    evidence_id = persist_document(session, buffer.getvalue(), "30-page-scan.pdf", "application/pdf")
+    calls = []
+    monkeypatch.setattr(lifecycle, "_ocr_image", lambda image: calls.append(1) or "Patient walked 20 metres")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 201, response.text
+    assert len(calls) == 30
+    retrieved = test_client.get(f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth)
+    assert retrieved.status_code == 200, retrieved.text
+    assert "[Page 30 OCR]" in retrieved.json()["extracted_text"]
+    assert retrieved.json()["page_count"] == 30
+
+
+def test_scanned_pdf_preserves_readable_pages_when_one_page_ocr_fails(client, monkeypatch):
+    from pypdf import PdfWriter
+    import app.api.document_lifecycle as lifecycle
+
+    test_client, session = client
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=612, height=792)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    evidence_id = persist_document(session, buffer.getvalue(), "partial-scan.pdf", "application/pdf")
+    calls = {"count": 0}
+
+    def ocr_one_page_at_a_time(_image):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("synthetic page OCR failure")
+        return "Patient walked 20 metres"
+
+    monkeypatch.setattr(lifecycle, "_ocr_image", ocr_one_page_at_a_time)
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_status"] == "partial"
+    retrieved = test_client.get(f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth)
+    assert retrieved.status_code == 200, retrieved.text
+    extracted = retrieved.json()["extracted_text"]
+    assert "[Page 1 OCR]" in extracted and "Patient walked 20 metres" in extracted
+    assert "[Page 2 OCR]" in extracted and "[No readable text detected on this page]" in extracted
+    assert "[Page 3 OCR]" in extracted and "Patient walked 20 metres" in extracted
