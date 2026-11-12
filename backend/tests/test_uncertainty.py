@@ -3589,6 +3589,20 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         assert necessary.necessity_rationale == "The current care handoff depends on which discharge instruction is active."
         assert necessary.context[0]["source_id"] == necessary_gap.id
 
+        # The shared reconciliation path communicates only the explicitly
+        # necessary, source-linked question through the existing notification feed.
+        from app.models.notifications import CareNotification
+        from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+        reconcile_person_change_intelligence(db, person.id)
+        db.flush()
+        attention_items = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_attention",
+        ).all()
+        assert len(attention_items) == 1
+        assert attention_items[0].source_event_id == necessary.id
+        assert attention_items[0].caregiver_id == caregiver.id
+
         # The caregiver-facing question projection fails closed: only questions
         # with an explicit necessity assessment and rationale are returned.
         unassessed = OpenQuestion(
