@@ -806,7 +806,7 @@ def test_postgres_corrected_filename_suggests_predecessor_without_auto_linking()
         engine.dispose()
 
 
-def test_postgres_transient_page_failure_is_counted_and_eventually_stops_retrying():
+def test_postgres_transient_page_failure_is_counted_and_eventually_stops_retrying(monkeypatch):
     """Repeated identical OCR timeouts remain partial and exhaust a bounded page retry budget."""
     from app.api import document_lifecycle
 
@@ -835,7 +835,7 @@ def test_postgres_transient_page_failure_is_counted_and_eventually_stops_retryin
                 b"Original document bytes remain unchanged during OCR timeout retries.",
             )
 
-        document_lifecycle._extract = fail_ocr
+        monkeypatch.setattr(document_lifecycle, "_extract", fail_ocr)
         with Session() as db:
             first = extract_saved_document(uploaded["evidence_id"], _request(person_id, caregiver_id), db)
             assert first["extraction_status"] == "partial"
@@ -862,5 +862,4 @@ def test_postgres_transient_page_failure_is_counted_and_eventually_stops_retryin
             stored_upload = db.query(EvidenceUpload).filter_by(evidence_id=uploaded["evidence_id"]).one()
             assert bytes(stored_upload.content) == b"Original document bytes remain unchanged during OCR timeout retries."
     finally:
-        document_lifecycle._extract = document_lifecycle._extract
         engine.dispose()
