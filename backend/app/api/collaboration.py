@@ -4681,6 +4681,15 @@ def _notification_lifecycle_status(db: Session, item: CareNotification) -> str:
             return "source_unavailable"
         if change.superseded_by_change_id:
             return "superseded"
+        source_ids = list(dict.fromkeys(
+            str(value) for value in (change.evidence_ids or []) if value
+        ))
+        valid_source_count = db.query(CareEvent.id).filter(
+            CareEvent.person_id == item.person_id,
+            CareEvent.id.in_(source_ids),
+        ).count() if source_ids else 0
+        if not source_ids or valid_source_count != len(source_ids):
+            return "source_unavailable"
         verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
         if not change.is_active or not change.attention_candidate or verdict != SignificanceVerdict.MEANINGFUL_CANDIDATE.value:
             return "resolved"
@@ -4691,6 +4700,15 @@ def _notification_lifecycle_status(db: Session, item: CareNotification) -> str:
             OpenQuestion.person_id == item.person_id,
         ).first()
         if question is None:
+            return "source_unavailable"
+        source_ids = list(dict.fromkeys(
+            str(value) for value in (question.evidence_ids or []) if value
+        ))
+        valid_source_count = db.query(EvidenceModel.id).filter(
+            EvidenceModel.person_id == item.person_id,
+            EvidenceModel.id.in_(source_ids),
+        ).count() if source_ids else 0
+        if not source_ids or valid_source_count != len(source_ids):
             return "source_unavailable"
         if question.necessity != "necessary" or question.status not in {"open", "unresolved"}:
             return "resolved"
