@@ -299,6 +299,8 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
         db.add_all([
             OpenQuestion(
                 person_id="benchmark-person-a",
+                subject_type="appointment",
+                subject_id="appointment-1",
                 question="Confirm the clinic result",
                 status="open",
                 necessity="necessary",
@@ -309,6 +311,8 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
             ),
             OpenQuestion(
                 person_id="benchmark-person-a",
+                subject_type="appointment",
+                subject_id="appointment-2",
                 question="Confirm the clinic result",
                 status="open",
                 necessity="not_assessed",
@@ -317,6 +321,8 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
             ),
             OpenQuestion(
                 person_id="benchmark-person-a",
+                subject_type="document",
+                subject_id="doc-1",
                 question="Is the care plan current?",
                 status="closed",
                 necessity="not_assessed",
@@ -326,6 +332,8 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
             ),
             OpenQuestion(
                 person_id="benchmark-person-b",
+                subject_type="appointment",
+                subject_id="foreign-appointment",
                 question="Foreign person's duplicate",
                 status="open",
                 necessity="necessary",
