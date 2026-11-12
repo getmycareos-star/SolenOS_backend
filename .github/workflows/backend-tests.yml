@@ -292,6 +292,10 @@ jobs:
       - name: Run authenticated appointment, outcome and Daily Capture PostgreSQL benchmarks
         run: python -m pytest backend/tests/test_appointment_workspace_postgres.py -q -s
 
+      - name: Restore complete Alembic schema after isolated PostgreSQL integration tests
+        working-directory: backend
+        run: alembic upgrade head
+
       - name: Run real HTTP + PostgreSQL identity and persistence E2E
         env:
           SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
