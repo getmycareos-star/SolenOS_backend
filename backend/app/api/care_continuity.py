@@ -3303,7 +3303,7 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
             raise HTTPException(status_code=422, detail="review_after_days must be between 1 and 3650")
     if previous.get("assertion_kind") == "current_state" and review_days is None:
         raise HTTPException(status_code=422, detail="Current-state assertions require a caregiver-selected review window")
-    if previous.get("assertion_status") == "accepted" and previous.get("review_after_days") == review_days:
+    if previous.get("assertion_status") == "accepted" and previous.get("review_after_days") == review_days and not payload.get("force_review"):
         return previous
 
     current = dict(previous)
