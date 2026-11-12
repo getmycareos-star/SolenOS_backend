@@ -33,8 +33,8 @@ class CareReminderRead(BaseModel):
     cancelled_by_caregiver_id: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
-    delivery_mode: Literal["in_app_list_only"] = "in_app_list_only"
-    notification_delivery_status: Literal["not_sent"] = "not_sent"
+    delivery_mode: Literal["in_app_notification_feed"] = "in_app_notification_feed"
+    notification_delivery_status: Literal["in_app_feed_only"] = "in_app_feed_only"
 
     @field_validator("due_at", "completed_at", "cancelled_at", "created_at", "updated_at", mode="before")
     @classmethod
