@@ -169,7 +169,9 @@ from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
 
 from app.models.care import Caregiver, Evidence, Person
+from app.models.care_continuity import CareAssertion
 from app.models.collaboration import EvidenceUpload
+from app.models.qwen_background_job import QwenBackgroundJob
 from app.api.collaboration import (
     upload_evidence,
     delete_uploaded_document,
