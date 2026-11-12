@@ -1,12 +1,12 @@
 """Allow document review event deletion only during approved privacy erasure.
 
-Revision ID: 20261112_02_privacy_review_erasure
+Revision ID: 20261112_02_privacy_erasure
 Revises: 20261112_01_care_execution_status
 """
 from alembic import op
 
-revision = "20261112_02_privacy_review_erasure"
-down_revision = "20261112_01_care_execution_status"
+revision = "20261112_02_privacy_erasure"
+down_revision = "20261112_01_care_exec"
 branch_labels = None
 depends_on = None
 
