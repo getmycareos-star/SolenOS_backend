@@ -143,6 +143,16 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         for evidence_id in (row.evidence_ids or [])
         if evidence_id
     ))
+    correction_evidence_ids = set()
+    if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_observations"):
+        source_observations = db.query(EvidenceObservation).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id.in_(all_event_evidence_ids),
+        ).all()
+        correction_evidence_ids = {
+            str(item.evidence_id)
+            for item in source_observations if item.supersedes_observation_id
+        }
     shared_origin_pairs = set()
     if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
         shared_rows = db.query(EvidenceSourceRelationship).filter(
@@ -168,6 +178,7 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             "description": row.description or "",
             "tags": " ".join(str(tag) for tag in (row.tags or [])),
             "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
+            "source_correction_requires_review": bool(correction_evidence_ids.intersection(str(value) for value in (row.evidence_ids or []))),
             "entered_by": names.get(str(row.created_by_caregiver_id)),
         } for row in selected],
         topic="unsteadiness",
