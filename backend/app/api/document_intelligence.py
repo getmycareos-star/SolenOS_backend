@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.document_lifecycle import _verify_persisted_extraction
-from app.api.care_continuity import reconcile_person_change_intelligence
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
@@ -702,21 +702,31 @@ def review_document_candidate(
     analysis.candidates = updated
     analysis.review_history = history
     db.add(analysis)
-    db.commit()
-    db.refresh(analysis)
-    change_intelligence_status = None
+    change_intelligence_status = "not_required"
     if payload.decision == "accept":
         try:
-            reconcile_person_change_intelligence(db, person_id)
-            db.commit()
+            execute_care_continuity_reconciliation(
+                db,
+                person_id,
+                workflow="document_candidate_review",
+                source_evidence_id=evidence_id,
+            )
             change_intelligence_status = "available"
-        except Exception:
+        except Exception as exc:
             db.rollback()
             logger.exception(
-                "Change intelligence reconciliation failed after document assertion review %s",
+                "Shared care-continuity execution failed after document assertion review %s",
                 assertion_id,
             )
-            change_intelligence_status = "unavailable"
+            raise HTTPException(
+                status_code=503,
+                detail="Care-continuity reconciliation failed; the review was not committed. Retry the review.",
+            ) from exc
+
+    # Persist the assertion, append-only review event, candidate state and
+    # reconciliation in one transaction for accepted document candidates.
+    db.commit()
+    db.refresh(analysis)
     return {
         "analysis_id": analysis_id,
         "candidate": candidate,
