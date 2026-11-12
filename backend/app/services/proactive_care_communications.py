@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.change_enums import SignificanceVerdict
-from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.care_continuity import CareAssertion
 from app.models.change import Change
 from app.models.notifications import CareNotification
@@ -123,6 +123,9 @@ def create_proactive_care_notifications(
     else:
         timestamp = timestamp.astimezone(timezone.utc)
 
+    # Serialize notification creation per care recipient so concurrent
+    # reconciliations cannot race the source-event deduplication check.
+    db.query(Person.id).filter(Person.id == person_id).with_for_update().first()
     caregivers = db.query(Caregiver).filter(Caregiver.person_id == person_id).all()
     if not caregivers:
         return 0
