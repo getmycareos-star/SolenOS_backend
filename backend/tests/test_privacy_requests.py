@@ -412,6 +412,20 @@ def test_privacy_review_approval_does_not_claim_or_start_fulfilment(monkeypatch,
     assert body["fulfilment_started"] is False
     assert body["resolved_at"] is None
     assert "no data was exported, corrected, or deleted" in body["message"].casefold()
+
+    # Approval is a one-way state transition. A replay must not rewrite the
+    # reviewer decision or append a second review audit event.
+    duplicate_review = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Attempted duplicate approval.",
+            "authority_evidence_checked": "Attempted duplicate authority check.",
+        },
+    )
+    assert duplicate_review.status_code == 409, duplicate_review.text
+
     for unavailable_field in (
         "export_url",
         "download_url",
