@@ -170,8 +170,6 @@ def persist_source_clarification_questions(
 
     existing_rows = db.query(OpenQuestionModel).filter(
         OpenQuestionModel.person_id == person_id,
-        OpenQuestionModel.subject_type == "person",
-        OpenQuestionModel.subject_id == person_id,
         OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
     existing_by_text = {
@@ -203,6 +201,42 @@ def persist_source_clarification_questions(
         # source-backed current-state LCR assertion already covers its field.
         if _question_is_answered_by_current_lcr(db, person_id, question_text):
             continue
+        # Only inherit necessity from one unambiguous, same-record LCR gap
+        # that already carries a structured decision dependency and evidence.
+        # Source extraction wording or model confidence alone never qualifies.
+        question_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", question_text.casefold())
+            if len(token) > 2
+        }
+        necessity_gaps = []
+        for gap in db.query(InformationGapModel).filter(
+            InformationGapModel.person_id == person_id,
+            InformationGapModel.lifecycle_status == GapLifecycleStatus.OPEN,
+        ).all():
+            field_tokens = {
+                token for token in re.findall(
+                    r"[a-z0-9]+", (gap.field or "").replace("_", " ").casefold()
+                ) if len(token) > 2
+            }
+            if not field_tokens or not field_tokens.issubset(question_tokens):
+                continue
+            for assessment in (gap.context or []):
+                if not isinstance(assessment, dict):
+                    continue
+                rationale = assessment.get("necessity_rationale")
+                dependency = assessment.get("decision_dependency")
+                gap_evidence_ids = list(dict.fromkeys(
+                    str(value) for value in (gap.evidence_ids or []) if value
+                ))
+                if (
+                    assessment.get("caregiver_attention_required") is True
+                    and isinstance(rationale, str) and rationale.strip()
+                    and isinstance(dependency, str) and dependency.strip()
+                    and gap_evidence_ids
+                ):
+                    necessity_gaps.append((gap, rationale.strip(), dependency.strip(), gap_evidence_ids))
+        matched_gap = necessity_gaps[0] if len(necessity_gaps) == 1 else None
+
         source_context = {
             "source_kind": source_kind,
             "source_id": source_record_id,
@@ -210,17 +244,45 @@ def persist_source_clarification_questions(
             "reason": "Suggested while reviewing saved care information. Please check the wording before relying on it.",
             "grounding_status": "source_record_linked; question wording not independently verified",
         }
+        contexts_to_add = [source_context]
+        assessed_evidence_ids = list(linked_ids)
+        subject_type = "person"
+        subject_id = person_id
+        necessity = "not_assessed"
+        necessity_rationale = None
+        priority = Priority.INFORMATIONAL
+        if matched_gap:
+            gap, necessity_rationale, dependency, gap_evidence_ids = matched_gap
+            subject_type, subject_id = gap.subject_type, gap.subject_id
+            assessed_evidence_ids = list(dict.fromkeys(assessed_evidence_ids + gap_evidence_ids))
+            necessity = "necessary"
+            priority = gap.priority
+            contexts_to_add.append({
+                "source_kind": "information_gap",
+                "source_id": gap.id,
+                "source_record_refs": source_refs,
+                "necessity_assessment": {
+                    "status": "necessary",
+                    "field": gap.field,
+                    "necessity_rationale": necessity_rationale,
+                    "decision_dependency": dependency,
+                    "evidence_ids": gap_evidence_ids,
+                    "assessment_method": "deterministic_match_to_open_lcr_gap",
+                },
+            })
         existing = existing_by_text.get(normalized)
         if existing is None:
             existing = OpenQuestionModel(
                 person_id=person_id,
                 question=question_text,
-                subject_type="person",
-                subject_id=person_id,
+                subject_type=subject_type,
+                subject_id=subject_id,
                 status="open",
-                priority=Priority.INFORMATIONAL,
-                evidence_ids=linked_ids or None,
-                context=[source_context],
+                priority=priority,
+                necessity=necessity,
+                necessity_rationale=necessity_rationale,
+                evidence_ids=assessed_evidence_ids or None,
+                context=contexts_to_add,
                 created_by_caregiver_id=caregiver_id,
             )
             db.add(existing)
@@ -228,16 +290,23 @@ def persist_source_clarification_questions(
             existing_by_text[normalized] = existing
         else:
             existing.evidence_ids = list(dict.fromkeys(
-                list(existing.evidence_ids or []) + linked_ids
+                list(existing.evidence_ids or []) + assessed_evidence_ids
             )) or None
+            if matched_gap and existing.necessity != "necessary":
+                existing.subject_type = subject_type
+                existing.subject_id = subject_id
+                existing.necessity = necessity
+                existing.necessity_rationale = necessity_rationale
+                existing.priority = priority
             contexts = list(existing.context or [])
-            context_key = (source_kind, source_record_id)
-            if not any(
-                (item.get("source_kind"), item.get("source_id")) == context_key
-                for item in contexts if isinstance(item, dict)
-            ):
-                contexts.append(source_context)
-                existing.context = contexts
+            for new_context in contexts_to_add:
+                context_key = (new_context.get("source_kind"), new_context.get("source_id"))
+                if not any(
+                    (item.get("source_kind"), item.get("source_id")) == context_key
+                    for item in contexts if isinstance(item, dict)
+                ):
+                    contexts.append(new_context)
+            existing.context = contexts
         persisted.append(existing)
     db.flush()
     return persisted
