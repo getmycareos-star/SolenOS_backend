@@ -395,12 +395,24 @@ def test_open_question_lifecycle():
             },
         )
         assert unsupported_necessity.status_code == 422, unsupported_necessity.text
+        missing_dependency = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "necessity": "necessary",
+                "necessity_rationale": "The current handoff decision depends on whether the appointment occurred.",
+                "evidence_ids": [necessity_evidence_id],
+            },
+        )
+        assert missing_dependency.status_code == 422, missing_dependency.text
         assessed_necessity = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
                 "necessity": "necessary",
                 "necessity_rationale": "The current handoff decision depends on whether the appointment occurred.",
                 "evidence_ids": [necessity_evidence_id],
+                "context": [{
+                    "decision_dependency": "The current handoff cannot state attendance status without the source-backed answer."
+                }],
             },
         )
         assert assessed_necessity.status_code == 200, assessed_necessity.text
