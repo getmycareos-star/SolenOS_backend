@@ -1001,9 +1001,21 @@ def reassess_open_loops(request: Request, db: Session = Depends(get_db)):
         # Every explicit reassessment is recorded, even when the decision is
         # unchanged. This makes "nothing changed" an auditable result rather
         # than an invisible operation.
+        as_of = datetime.now(timezone.utc)
+        deadline = loop.deadline_at
+        deadline_utc = (
+            deadline.replace(tzinfo=timezone.utc)
+            if deadline is not None and deadline.tzinfo is None
+            else deadline.astimezone(timezone.utc) if deadline is not None else None
+        )
         _audit(db, loop, "reassessed", before, [{
-            "as_of": datetime.now(timezone.utc).isoformat(),
+            "as_of": as_of.isoformat(),
             "state_changed": state_changed,
+            "deadline_passed": bool(deadline_utc and deadline_utc <= as_of),
+            "deadline_within_24_hours": bool(
+                deadline_utc and as_of < deadline_utc <= as_of + timedelta(hours=24)
+            ),
+            "completion_inferred": False,
         }])
         if state_changed:
             changed.append(loop.id)
