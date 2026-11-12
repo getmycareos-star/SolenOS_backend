@@ -719,3 +719,19 @@ def test_push_subscription_endpoint_cannot_be_claimed_by_another_care_record(mon
         json=payload,
     )
     assert cross_record.status_code == 409, cross_record.text
+
+
+def test_web_push_worker_does_not_attempt_delivery_with_incomplete_vapid_configuration(monkeypatch):
+    from types import SimpleNamespace
+    import app.services.reminder_delivery as delivery_service
+
+    monkeypatch.setattr(
+        delivery_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            vapid_public_key="public-key",
+            vapid_private_key="",
+            vapid_subject="mailto:support@solenosai.net",
+        ),
+    )
+    assert delivery_service.deliver_pending_web_pushes(db=object()) == 0
