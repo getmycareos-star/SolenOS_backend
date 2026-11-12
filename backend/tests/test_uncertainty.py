@@ -3087,3 +3087,116 @@ def test_qwen_cross_workflow_claim_sources_keep_events_documents_and_appointment
         db.close()
     finally:
         teardown_db()
+
+def test_monthly_incident_aggregate_uses_person_scoped_events_and_blocks_corrected_sources():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care import CareEvent
+        from app.models.care_continuity import EvidenceObservation
+        from app.api.collaboration import _requested_event_aggregates
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="monthly-aggregate-person", name="Monthly Aggregate Person")
+        caregiver = Caregiver(
+            id="monthly-aggregate-caregiver",
+            name="Monthly Aggregate Caregiver",
+            email="monthly-aggregate@example.com",
+            relationship="Family",
+            person_id=person.id,
+            timezone="UTC",
+        )
+        evidence = Evidence(
+            id="monthly-aggregate-evidence",
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="She felt unsteady near the kitchen.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        now = datetime.now(timezone.utc)
+        event_rows = [
+            CareEvent(
+                id="monthly-aggregate-event-1",
+                person_id=person.id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=now - timedelta(minutes=3),
+                title="Unsteadiness near the kitchen",
+                description="She felt unsteady.",
+                evidence_ids=[evidence.id],
+                created_by_caregiver_id=caregiver.id,
+            ),
+            CareEvent(
+                id="monthly-aggregate-event-2",
+                person_id=person.id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=now - timedelta(minutes=2),
+                title="Lost balance while standing",
+                description="She lost balance.",
+                created_by_caregiver_id=caregiver.id,
+            ),
+            CareEvent(
+                id="monthly-aggregate-event-3",
+                person_id=person.id,
+                event_type="mobility",
+                status="completed",
+                occurred_at=now - timedelta(minutes=1),
+                title="Stumbled near the bathroom",
+                description="She stumbled.",
+                created_by_caregiver_id=caregiver.id,
+            ),
+        ]
+        db.add_all([person, caregiver, evidence, *event_rows])
+        db.commit()
+
+        question = "How many incidents of unsteadiness has my mother had this month?"
+        initial = _requested_event_aggregates(db, person.id, caregiver.id, question)
+        assert initial[0]["status"] == "validated"
+        assert initial[0]["count"] == 3
+        assert len(initial[0]["source_references"]) == 3
+
+        original_text = evidence.source_text
+        original_observation = EvidenceObservation(
+            id="monthly-aggregate-observation-original",
+            person_id=person.id,
+            evidence_id=evidence.id,
+            observation_kind="caregiver_report",
+            epistemic_status="reported",
+            subject_label="person receiving care",
+            attribute="unsteadiness",
+            value_text="unsteady",
+            source_passage=original_text,
+            source_span_start=0,
+            source_span_end=len(original_text),
+            extraction_method="human_entered",
+            extraction_version="test-v1",
+            created_by_caregiver_id=caregiver.id,
+            recorded_at=now - timedelta(seconds=30),
+        )
+        corrected_observation = EvidenceObservation(
+            id="monthly-aggregate-observation-corrected",
+            person_id=person.id,
+            evidence_id=evidence.id,
+            supersedes_observation_id=original_observation.id,
+            correction_rationale="The caregiver corrected the source interpretation.",
+            observation_kind="caregiver_report",
+            epistemic_status="reported",
+            subject_label="person receiving care",
+            attribute="unsteadiness",
+            value_text="steady",
+            source_passage=original_text,
+            source_span_start=0,
+            source_span_end=len(original_text),
+            extraction_method="human_entered",
+            extraction_version="test-v1",
+            created_by_caregiver_id=caregiver.id,
+            recorded_at=now,
+        )
+        db.add_all([original_observation, corrected_observation])
+        db.commit()
+        after_correction = _requested_event_aggregates(db, person.id, caregiver.id, question)
+        assert after_correction[0]["status"] == "source_correction_requires_review"
+        assert after_correction[0]["count"] is None
+    finally:
+        teardown_db()
