@@ -24,6 +24,7 @@ def upgrade():
             sa.Column("caregiver_id", sa.String(), sa.ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False),
             sa.Column("caregiver_profile_id", sa.String(), sa.ForeignKey("caregiver_profiles.id", ondelete="SET NULL"), nullable=True),
             sa.Column("role", sa.String(32), nullable=False, server_default="family"),
+            sa.Column("access_scope", sa.String(32), nullable=False, server_default="full_record"),
             sa.Column("status", sa.String(16), nullable=False, server_default="active"),
             sa.Column("can_manage_members", sa.Boolean(), nullable=False, server_default=sa.false()),
             sa.Column("granted_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
@@ -48,8 +49,11 @@ def upgrade():
     # already have created the current ORM shape (including access_scope), while
     # older deployed schemas may not have that column yet.
     grant_columns = {item["name"] for item in inspect(bind).get_columns("caregiver_access_grants")}
-    access_scope_column = ", access_scope" if "access_scope" in grant_columns else ""
-    access_scope_value = ", 'full_record'" if "access_scope" in grant_columns else ""
+    if "access_scope" not in grant_columns:
+        op.add_column(
+            "caregiver_access_grants",
+            sa.Column("access_scope", sa.String(32), nullable=False, server_default="full_record"),
+        )
 
     if bind.dialect.name == "sqlite":
         grant_id = "lower(hex(randomblob(16)))"
@@ -58,13 +62,14 @@ def upgrade():
 
     op.execute(sa.text(f"""
         INSERT INTO caregiver_access_grants
-            (id, person_id, caregiver_id, caregiver_profile_id, role{access_scope_column}, status, can_manage_members, granted_at)
+            (id, person_id, caregiver_id, caregiver_profile_id, role, access_scope, status, can_manage_members, granted_at)
         SELECT
             {grant_id},
             ranked.person_id,
             ranked.caregiver_id,
             p.id,
-            CASE WHEN ranked.position = 1 THEN 'primary' ELSE 'family' END{access_scope_value},
+            CASE WHEN ranked.position = 1 THEN 'primary' ELSE 'family' END,
+            'full_record',
             'active',
             CASE WHEN ranked.position = 1 THEN TRUE ELSE FALSE END,
             ranked.first_created_at
