@@ -1345,6 +1345,23 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
 
     active_records: list[dict[str, Any]] = []
     pending_records: list[dict[str, Any]] = []
+
+    def latest_caregiver_review(assertion: CareAssertion) -> datetime | None:
+        if assertion.assertion_status != "accepted":
+            return None
+        if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+            return None
+        revisions = _table(db, "care_assertion_revisions")
+        return db.execute(
+            select(revisions.c.changed_at)
+            .where(
+                revisions.c.person_id == person_id,
+                revisions.c.assertion_id == assertion.id,
+            )
+            .order_by(desc(revisions.c.revision_number))
+            .limit(1)
+        ).scalar_one_or_none()
+
     for subject_id, claims in grouped.items():
         by_field: dict[str, list[CareAssertion]] = {}
         for claim in claims:
@@ -1370,7 +1387,7 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
                 return None
             if candidate.epistemic_state not in {"reported", "observed", "verified"}:
                 return None
-            if get_freshness(candidate).get("status") != "within_review_window":
+            if get_freshness(candidate, reviewed_at=latest_caregiver_review(candidate)).get("status") != "within_review_window":
                 return None
             return candidate
 
@@ -1386,8 +1403,6 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
                 candidate = live[0]
                 if candidate.epistemic_state not in {"reported", "observed"}:
                     return None
-                if get_freshness(candidate).get("status") != "within_review_window":
-                    return None
                 return candidate
             pending_name = pending_claim(("name", "medication_name"))
             pending_status = pending_claim(("status", "medication_status"))
@@ -1398,6 +1413,15 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
                     "name": str(pending_name.asserted_value).strip(),
                     "dose": str(pending_dose.asserted_value).strip() if pending_dose else None,
                     "record_status": "awaiting_caregiver_review",
+                    "review_overdue": (
+                        pending_name.review_after_days is not None
+                        and pending_name.recorded_at is not None
+                        and (datetime.now(timezone.utc) - (
+                            pending_name.recorded_at.replace(tzinfo=timezone.utc)
+                            if pending_name.recorded_at.tzinfo is None
+                            else pending_name.recorded_at.astimezone(timezone.utc)
+                        )).days > pending_name.review_after_days
+                    ),
                     "source_label": pending_name.source_label,
                     "recorded_at": pending_name.recorded_at,
                 })
