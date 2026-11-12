@@ -27,10 +27,13 @@ from app.core.database import get_db
 from app.services.epistemic_contract import assertion_information_status
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Insight, Person
 from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import (
     CareAssertion,
+    CareActionOutcome,
+    CareDeltaRun,
+    EvidenceCompletenessAssessment,
     EvidenceFreshnessAssessment,
     EvidenceFreshnessPolicy,
     EvidenceSourceRelationship,
@@ -1350,6 +1353,38 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         raise HTTPException(
             status_code=409,
             detail="This document has structured evidence-history links that must be resolved before deletion. The original file has not been removed.",
+        )
+    # Check every persisted record family that can carry source evidence into
+    # a caregiver-facing projection or longitudinal assessment. Append-only
+    # dependencies are blocked rather than silently detached.
+    linked_event = any(
+        evidence_id in (row.evidence_ids or [])
+        for row in db.query(CareEvent).filter(CareEvent.person_id == person_id).all()
+    )
+    linked_insight = any(
+        evidence_id in (row.evidence_ids or [])
+        for row in db.query(Insight).filter(Insight.person_id == person_id).all()
+    )
+    linked_outcome = any(
+        evidence_id in (row.evidence_ids or [])
+        for row in db.query(CareActionOutcome).filter(CareActionOutcome.person_id == person_id).all()
+    )
+    linked_delta = any(
+        evidence_id in (row.evidence_ids or [])
+        for row in db.query(CareDeltaRun).filter(CareDeltaRun.person_id == person_id).all()
+    )
+    linked_completeness = any(
+        evidence_id in (row.evidence_ids or [])
+        for row in db.query(EvidenceCompletenessAssessment).filter(EvidenceCompletenessAssessment.person_id == person_id).all()
+    )
+    linked_freshness = db.query(EvidenceFreshnessAssessment.id).filter(
+        EvidenceFreshnessAssessment.person_id == person_id,
+        EvidenceFreshnessAssessment.evidence_id == evidence_id,
+    ).first()
+    if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness:
+        raise HTTPException(
+            status_code=409,
+            detail="This document supports other care-history or assessment records. Resolve those source dependencies before deletion. The original file has not been removed.",
         )
     child_version = db.query(EvidenceModel.id).filter(EvidenceModel.parent_evidence_id == evidence_id).first()
     if child_version:
