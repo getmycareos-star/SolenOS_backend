@@ -153,8 +153,6 @@ def create_proactive_care_notifications(
     # Serialize per person so concurrent reconciliation cannot race deduplication.
     db.query(Person.id).filter(Person.id == person_id).with_for_update().first()
     caregivers = db.query(Caregiver).filter(Caregiver.person_id == person_id).all()
-    if not caregivers:
-        return 0
 
     active_change_ids: set[str] = set()
     changes = db.query(Change).filter(
