@@ -57,6 +57,7 @@ from app.models.uncertainty import (
 from app.core.uncertainty_enums import GapLifecycleStatus
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.accounts import router as accounts_router
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.api.privacy_requests import router as privacy_requests_router
 from app.api.identity_security import router as identity_security_router
 from app.api.security_incidents import router as security_incidents_router
@@ -329,6 +330,24 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             )
         scoped_person_id = session.person_id
         scoped_caregiver_id = session.caregiver_id
+        access_grant = (
+            db.query(CaregiverAccessGrant)
+            .filter(
+                CaregiverAccessGrant.person_id == scoped_person_id,
+                CaregiverAccessGrant.caregiver_id == scoped_caregiver_id,
+                CaregiverAccessGrant.status == "active",
+                CaregiverAccessGrant.revoked_at.is_(None),
+            )
+            .first()
+        )
+        if access_grant is None:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "This caregiver no longer has access to this care record."},
+            )
+        request.state.caregiver_access_grant_id = access_grant.id
+        request.state.caregiver_access_role = access_grant.role
+        request.state.caregiver_can_manage_members = bool(access_grant.can_manage_members)
         request.state.anonymous_session_id = session.id
         request.state.scoped_person_id = scoped_person_id
         request.state.scoped_caregiver_id = scoped_caregiver_id
