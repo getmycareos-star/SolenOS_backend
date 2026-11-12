@@ -68,6 +68,7 @@ def sync_appointment_followups(
         due_text = item.get("due") if isinstance(item.get("due"), str) else None
         due_at = _aware_due(due_text)
         source_status = item.get("status") if isinstance(item.get("status"), str) else "not_recorded"
+        reported_complete = source_status.strip().casefold() in {"completed", "complete", "done"}
         evidence = [{
             "record_type": "appointment_workspace", "record_id": workspace_id,
             "source_type": SOURCE_TYPE, "reported_owner": owner_label,
@@ -90,7 +91,13 @@ def sync_appointment_followups(
         if loop is None:
             loop = OpenLoopRecord(
                 person_id=person_id, caregiver_id=caregiver_id, loop_type="follow_up",
-                title=title, description=title, status="open", outcome_status="outcome_unknown",
+                title=title, description=title, status="open",
+                outcome_status="outcome_reported" if reported_complete else "outcome_unknown",
+                outcome_evidence=evidence if reported_complete else [],
+                verification_rule=(
+                    "Completion was reported in the appointment workspace; keep it reported until supported by completion evidence."
+                    if reported_complete else None
+                ),
                 owner_role=None, owner_label=owner_label, source_type=SOURCE_TYPE, source_id=source_id,
                 source_fingerprint=fingerprint, evidence=evidence, uncertainty="reported",
                 deadline_at=due_at, deadline_source="explicit_user" if due_at else None,
@@ -131,6 +138,15 @@ def sync_appointment_followups(
         loop.deadline_source = "explicit_user" if due_at else None
         loop.deadline_timezone = str(due_at.tzinfo) if due_at else None
         loop.source_fingerprint = fingerprint
+        loop.outcome_status = "outcome_reported" if reported_complete else "outcome_unknown"
+        loop.outcome_evidence = (
+            list(loop.outcome_evidence or []) + [item for item in evidence if item not in (loop.outcome_evidence or [])]
+            if reported_complete else []
+        )
+        loop.verification_rule = (
+            "Completion was reported in the appointment workspace; keep it reported until supported by completion evidence."
+            if reported_complete else None
+        )
         existing_evidence = list(loop.evidence or [])
         for evidence_item in evidence:
             if evidence_item not in existing_evidence:
