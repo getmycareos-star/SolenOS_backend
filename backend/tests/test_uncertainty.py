@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.action import Action
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationSession, ConversationMessage
@@ -4414,5 +4415,141 @@ def test_source_questions_deduplicate_rephrasing_but_preserve_distinct_time_peri
         } == {first_event.id, second_event.id}
         assert "since Friday" in distinct_period.question
         assert distinct_period.id != merged.id
+    finally:
+        teardown_db()
+
+
+def test_blocked_medication_and_appointment_actions_create_scoped_necessary_questions():
+    setup_db()
+    try:
+        from app.services.care_continuity import (
+            next_best_questions,
+            has_valid_caregiver_necessity,
+            reassess_open_question_lifecycle,
+        )
+
+        db = TestingSessionLocal()
+        person = Person(id="finding6-action-person", name="Action Person")
+        caregiver = Caregiver(
+            id="finding6-action-caregiver",
+            name="Action Caregiver",
+            email="finding6-action@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="finding6-action-other", name="Other Action Person")
+        other_caregiver = Caregiver(
+            id="finding6-action-other-caregiver",
+            name="Other Action Caregiver",
+            email="finding6-action-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        medication_source = Evidence(
+            id="finding6-medication-action-source",
+            person_id=person.id,
+            type="document",
+            source_text="Medication instruction requires confirmation from the prescribing clinician.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        appointment_source = Evidence(
+            id="finding6-appointment-action-source",
+            person_id=person.id,
+            type="note",
+            source_text="Appointment follow-up instruction requires confirmation.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver, medication_source, appointment_source])
+        db.flush()
+        medication_action = Action(
+            id="finding6-medication-action",
+            person_id=person.id,
+            source_evidence_id=medication_source.id,
+            source_passage=medication_source.source_text,
+            source_authority="unknown",
+            actor_type="unknown",
+            subject_type="medication",
+            subject_id="metformin",
+            subject_label="Metformin",
+            action_type="take",
+            normalized_action="Take Metformin 500 mg once daily",
+            original_text="Take Metformin 500 mg once daily",
+            modality="required",
+            status="needs_clarification",
+            is_medication_action=True,
+            requires_confirmation=True,
+            created_by_caregiver_id=caregiver.id,
+        )
+        appointment_action = Action(
+            id="finding6-appointment-action",
+            person_id=person.id,
+            source_evidence_id=appointment_source.id,
+            source_passage=appointment_source.source_text,
+            source_authority="unknown",
+            actor_type="unknown",
+            subject_type="appointment",
+            subject_id="follow-up-appointment",
+            subject_label="follow-up appointment",
+            action_type="attend",
+            normalized_action="Confirm the follow-up appointment",
+            original_text="Confirm the follow-up appointment",
+            modality="required",
+            status="needs_clarification",
+            requires_confirmation=True,
+            created_by_caregiver_id=caregiver.id,
+        )
+        foreign_action = Action(
+            id="finding6-foreign-action",
+            person_id=other_person.id,
+            source_evidence_id=medication_source.id,
+            source_passage=medication_source.source_text,
+            source_authority="unknown",
+            actor_type="unknown",
+            subject_type="medication",
+            subject_id="metformin",
+            subject_label="Metformin",
+            action_type="take",
+            normalized_action="Take Metformin",
+            original_text="Take Metformin",
+            modality="required",
+            status="needs_clarification",
+            is_medication_action=True,
+            requires_confirmation=True,
+            created_by_caregiver_id=other_caregiver.id,
+        )
+        db.add_all([medication_action, appointment_action, foreign_action])
+        db.commit()
+
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        action_candidates = [item for item in candidates if item.get("source_kind") == "registered_action"]
+        assert {item["source_id"] for item in action_candidates} == {
+            medication_action.id, appointment_action.id
+        }
+        assert all(item["necessity"] == "necessary" for item in action_candidates)
+        assert all(item["evidence_ids"] for item in action_candidates)
+
+        questions = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).all()
+        assert len(questions) == 2
+        medication_question = next(item for item in questions if item.intended_answerer_role == "professional")
+        assert "prescribing clinician" in medication_question.question
+        assert has_valid_caregiver_necessity(medication_question, db, person.id)
+        assert not db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == other_person.id
+        ).count()
+
+        medication_action.status = "approved"
+        db.flush()
+        counts = reassess_open_question_lifecycle(db, person.id)
+        db.refresh(medication_question)
+        assert medication_question.status == "closed"
+        assert medication_question.closed_reason.startswith("automatically_superseded")
+        assert counts["superseded"] >= 1
+        db.commit()
+        db.close()
     finally:
         teardown_db()
