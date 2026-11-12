@@ -76,6 +76,14 @@ def execute_care_continuity_reconciliation(
                 "The source evidence is missing or belongs to another care record"
             )
 
+    if event is not None and caregiver_id and str(event.created_by_caregiver_id) != str(caregiver_id):
+        raise CareContinuityExecutionError(
+            "The source event was not created by the authenticated caregiver"
+        )
+    if evidence is not None and caregiver_id and str(evidence.uploaded_by_caregiver_id) != str(caregiver_id):
+        raise CareContinuityExecutionError(
+            "The source evidence was not uploaded by the authenticated caregiver"
+        )
     if event is not None and evidence is not None:
         linked_ids = list(event.evidence_ids or [])
         if source_evidence_id not in linked_ids:
