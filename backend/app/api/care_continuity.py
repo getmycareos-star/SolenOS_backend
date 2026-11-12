@@ -1294,8 +1294,11 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
             # Competing reports remain unresolved. Never select a winner by recency.
             if len(live_values) != 1:
                 return None
-            candidate = candidates[0]
-            if candidate.assertion_status not in {"accepted", "caregiver_reviewed"}:
+            candidate = next(
+                (item for item in candidates if item.assertion_status in {"accepted", "caregiver_reviewed"}),
+                None,
+            )
+            if candidate is None:
                 return None
             if get_freshness(candidate).get("status") != "within_review_window":
                 return None
