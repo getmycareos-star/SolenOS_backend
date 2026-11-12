@@ -3611,6 +3611,16 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
             rationale = row.get("necessity_rationale")
             if not isinstance(evidence_ids, list) or not evidence_ids:
                 continue
+            found_evidence_ids = {
+                str(value) for value in db.query(Evidence.id).filter(
+                    Evidence.person_id == scoped_person_id,
+                    Evidence.id.in_([str(value) for value in evidence_ids if value]),
+                ).all()
+            }
+            if found_evidence_ids != {str(value) for value in evidence_ids if value}:
+                continue
+            if not isinstance(evidence_ids, list) or not evidence_ids:
+                continue
             if not isinstance(rationale, str) or not rationale.strip():
                 continue
             valid_dependency = False
