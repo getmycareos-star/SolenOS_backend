@@ -30,7 +30,7 @@ from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
-from app.services.qwen_gateway import extract_review_candidates
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config
 from app.services.uncertainty import persist_source_clarification_questions
 from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, medication_details_for_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
@@ -180,6 +180,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers", []),
         "unreadable_page_numbers": intelligence.get("unreadable_page_numbers", []),
         "extraction_method": metadata.get("extraction_method"),
+        "model_provenance": intelligence.get("model_provenance"),
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
         "open_questions": intelligence.get("open_questions", []),
@@ -489,8 +490,26 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
 
 
     metadata = copy.deepcopy(metadata)
+    try:
+        configured_model = get_ollama_config()[1]
+    except HTTPException:
+        configured_model = os.getenv("OLLAMA_MODEL", "").strip() or None
+    source_text_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
     metadata["document_intelligence"] = {
         "version": 1,
+        "model_provenance": {
+            "provider": "private_ollama" if configured_model else "unavailable_or_test_stub",
+            "model_tag": configured_model,
+            "model_digest": None,
+            "model_digest_status": "not_exposed_by_ollama_chat_response",
+            "processing_version": "document_intelligence_v1",
+            "prompt_version": "source_grounded_review_candidates_v1",
+            "extraction_source": "persisted_server_extraction",
+            "source_evidence_id": str(evidence.id),
+            "source_text_sha256": source_text_hash,
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "model_authority": "review_only",
+        },
         "observations": grounded,
         "open_questions": list(dict.fromkeys([
             *[
@@ -531,7 +550,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         "candidate_overflow": candidate_overflow,
         "status": "partial" if (unprocessed_pages or unreadable_pages or candidate_overflow) else "available",
         "model_authority": "review_only",
-        "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+        "source_text_sha256": source_text_hash,
     }
     analysis.candidates = metadata
     db.add(analysis)
