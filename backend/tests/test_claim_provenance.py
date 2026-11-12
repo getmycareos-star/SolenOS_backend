@@ -294,3 +294,30 @@ def test_reviewed_shared_origin_evidence_does_not_inflate_distinct_incident_coun
     assert aggregate["status"] == "validated"
     assert aggregate["count"] == 1
     assert aggregate["duplicate_event_ids"] == ["shared-origin-b"]
+
+def test_corrected_linked_observation_blocks_a_current_incident_total():
+    aggregate = build_distinct_event_aggregate(
+        [{
+            "id": "corrected-incident",
+            "event_type": "mobility",
+            "status": "recorded",
+            "occurred_at": datetime(2026, 11, 2, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness near the kitchen",
+            "description": "Original interpretation from the note.",
+            "evidence_ids": ["corrected-source"],
+            "source_correction_requires_review": True,
+        }],
+        topic="unsteadiness",
+        start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
+        window_label="this calendar month",
+    )
+    assert aggregate["status"] == "source_correction_requires_review"
+    assert aggregate["count"] is None
+    provenance = build_claim_provenance(
+        "Your mother has had one incident of unsteadiness this month.",
+        [],
+        [aggregate],
+    )
+    assert provenance["claims"][0]["support_status"] == "aggregate_not_validated"
+    assert "corrected" in provenance["claims"][0]["aggregate_review"]["interpretation_limit"]
