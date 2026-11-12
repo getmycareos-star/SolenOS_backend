@@ -1204,6 +1204,9 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             assert actual is not None, (
                 f"{scenario['scenario_id']}: missing expected assertion {expected_assertion}"
             )
+            assert actual.epistemic_state == "reported", (
+                f"{scenario['scenario_id']}: source-grounded time-bound observation was misclassified"
+            )
 
         duplicate_ids = {
             event["id"] for event in ordered_events
