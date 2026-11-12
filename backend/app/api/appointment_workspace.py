@@ -356,7 +356,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         question_source_status = "failed"
     if question_rows is not None:
         question_rows = [
-            item for item in question_rows if has_valid_caregiver_necessity(item)
+            item for item in question_rows if has_valid_caregiver_necessity(item, db, person_id)
         ][:30]
         question_source_status = "available" if question_rows else "empty"
     question_items = [{
