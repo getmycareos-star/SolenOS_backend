@@ -98,6 +98,64 @@ def test_post_situation_creates_evidence_and_event():
 
 
 
+
+@pytest.mark.session_security
+def test_saved_snap_care_photo_is_linked_to_situation_without_document_ocr():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.collaboration import EvidenceUpload
+        import hashlib
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Snap Photo Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+        photo_bytes = b"\\x89PNG\\r\\n\\x1a\\n" + b"care-photo-original-bytes"
+        uploaded = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "care_photo",
+            },
+            files={"file": ("care-photo.png", photo_bytes, "image/png")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        response = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
+                "raw_input": "",
+                "documents": [{
+                    "id": "snap-photo",
+                    "name": "care-photo.png",
+                    "mime_type": "image/png",
+                    "extracted_text": "",
+                    "evidence_id": evidence_id,
+                    "extraction_source": "unknown",
+                }],
+            },
+        )
+        assert response.status_code == 200, response.text
+        event_id = response.json()["care_event_id"]
+        with TestingSessionLocal() as db:
+            evidence = db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).one()
+            original = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+            event = db.query(CareEvent).filter_by(id=event_id, person_id=person_id).one()
+            assert evidence.type == "care_photo"
+            assert original.content == photo_bytes
+            assert original.sha256 == hashlib.sha256(photo_bytes).hexdigest()
+            assert evidence_id in event.evidence_ids
+            assert db.query(Evidence).filter_by(person_id=person_id).count() == 1
+    finally:
+        teardown_db()
+
+
 @pytest.mark.session_security
 def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
     setup_db()
