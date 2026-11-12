@@ -1406,3 +1406,25 @@ def test_handoff_includes_only_valid_necessary_open_questions(client):
     ]
     assert "handoff-necessary-question" in question_refs
     assert "handoff-unassessed-question" not in question_refs
+
+def test_professional_audience_is_only_a_read_only_caregiver_prepared_draft(client):
+    """Audience formatting must not be mistaken for clinician authentication or delivery."""
+    test_client, session = client
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 14},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["audience"] == "professional"
+    assert body["read_only"] is True
+    assert body["creates_handoff"] is False
+    assert body["updates_lcr"] is False
+    # The template is a checklist, not evidence that a medication reconciliation occurred.
+    medication = next(
+        section for section in body["template_sections"]
+        if section["key"] == "medication_reconciliation"
+    )
+    assert medication["coverage_status"] == "not_assessed"
+    assert medication["coverage_status"] != "available"
