@@ -752,52 +752,15 @@ def analyze_and_persist_uncertainty(
         ),
         commit=False,
     )
+    # Model-generated clarification wording is retained with the internal
+    # uncertainty assessment, but it is not a caregiver request. A separate
+    # evidence-backed necessity assessment must promote it through the shared
+    # question lifecycle before it can appear in caregiver-facing projections.
+    internal_candidates = list(analysis.get("clarification_questions") or [])
+    analysis["internal_clarification_candidates"] = internal_candidates
+    analysis["clarification_questions"] = []
+    analysis["clarification_candidate_status"] = "not_assessed_not_caregiver_work"
     try:
-        # Clarification questions are durable care-continuity records, not merely
-        # text in an API response. Deduplicate against existing open questions and
-        # commit them atomically with the assessment/supersession transition.
-        for question_data in analysis.get("clarification_questions", []):
-            question_text = str(question_data.get("question") or "").strip()
-            if not question_text:
-                continue
-            target_field = str(question_data.get("target_field") or request.field)
-            priority_value = str(question_data.get("priority") or "medium").lower()
-            priority = Priority.HIGH if priority_value == "high" else (
-                Priority.CRITICAL if priority_value == "critical" else Priority.MEDIUM
-            )
-            existing_question = engine.db.query(OpenQuestionModel).filter(
-                OpenQuestionModel.person_id == request.person_id,
-                OpenQuestionModel.subject_type == request.subject_type,
-                OpenQuestionModel.subject_id == request.subject_id,
-                OpenQuestionModel.question == question_text,
-                OpenQuestionModel.status == "open",
-            ).first()
-            context_link = {
-                "origin": "uncertainty_analysis",
-                "assessment_id": persisted.id,
-                "target_field": target_field,
-                "reason": str(question_data.get("reason") or "Clarification required by the uncertainty assessment."),
-            }
-            if existing_question is not None:
-                existing_context = list(existing_question.context or [])
-                if not any(
-                    isinstance(item, dict) and item.get("assessment_id") == persisted.id
-                    for item in existing_context
-                ):
-                    existing_context.append(context_link)
-                    existing_question.context = existing_context
-                continue
-            engine.db.add(OpenQuestionModel(
-                person_id=request.person_id,
-                question=question_text,
-                subject_type=request.subject_type,
-                subject_id=request.subject_id,
-                status="open",
-                priority=priority,
-                evidence_ids=None,
-                context=[context_link],
-                created_by_caregiver_id=engine.caregiver_id,
-            ))
         engine.db.commit()
         engine.db.refresh(persisted)
     except Exception:
