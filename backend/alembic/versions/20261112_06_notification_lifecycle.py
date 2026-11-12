@@ -2,6 +2,7 @@
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 revision = "20261112_06_notification_lifecycle"
 down_revision = "20261112_05_quiet_release"
@@ -10,22 +11,22 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column(
-        "care_notifications",
-        sa.Column("status", sa.String(length=16), nullable=False, server_default="active"),
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("care_notifications")}
+
+    # The application metadata may have created part of the schema in test
+    # environments. Add only fields that are not already present.
+    additions = (
+        ("status", sa.Column("status", sa.String(length=16), nullable=False, server_default="active")),
+        ("updated_at", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())),
+        ("resolved_at", sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True)),
+        ("resolution_reason", sa.Column("resolution_reason", sa.String(length=80), nullable=True)),
     )
-    op.add_column(
-        "care_notifications",
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-    )
-    op.add_column(
-        "care_notifications",
-        sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.add_column(
-        "care_notifications",
-        sa.Column("resolution_reason", sa.String(length=80), nullable=True),
-    )
+    for name, column in additions:
+        if name not in columns:
+            op.add_column("care_notifications", column)
+            columns.add(name)
 
     # Preserve historical notifications but supersede duplicate active messages
     # before enforcing one active message per caregiver/source/category.
@@ -48,6 +49,7 @@ def upgrade():
         FROM ranked
         WHERE notification.id = ranked.id
           AND ranked.position > 1
+          AND notification.status = 'active'
     """))
     op.execute(sa.text("""
         UPDATE care_push_deliveries
@@ -63,27 +65,34 @@ def upgrade():
           )
     """))
 
-    op.create_index(
-        "uq_care_notifications_active_source",
-        "care_notifications",
-        ["person_id", "caregiver_id", "category", "source_event_id"],
-        unique=True,
-        postgresql_where=sa.text(
-            "status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"
-        ),
-    )
-    op.create_index(
-        "ix_care_notifications_scope_status_created",
-        "care_notifications",
-        ["person_id", "caregiver_id", "status", "created_at"],
-        unique=False,
-    )
+    existing_indexes = {item["name"] for item in inspect(bind).get_indexes("care_notifications")}
+    if "uq_care_notifications_active_source" not in existing_indexes:
+        op.create_index(
+            "uq_care_notifications_active_source",
+            "care_notifications",
+            ["person_id", "caregiver_id", "category", "source_event_id"],
+            unique=True,
+            postgresql_where=sa.text(
+                "status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"
+            ),
+        )
+    if "ix_care_notifications_scope_status_created" not in existing_indexes:
+        op.create_index(
+            "ix_care_notifications_scope_status_created",
+            "care_notifications",
+            ["person_id", "caregiver_id", "status", "created_at"],
+            unique=False,
+        )
 
 
 def downgrade():
-    op.drop_index("ix_care_notifications_scope_status_created", table_name="care_notifications")
-    op.drop_index("uq_care_notifications_active_source", table_name="care_notifications")
-    op.drop_column("care_notifications", "resolution_reason")
-    op.drop_column("care_notifications", "resolved_at")
-    op.drop_column("care_notifications", "updated_at")
-    op.drop_column("care_notifications", "status")
+    bind = op.get_bind()
+    existing_indexes = {item["name"] for item in inspect(bind).get_indexes("care_notifications")}
+    if "ix_care_notifications_scope_status_created" in existing_indexes:
+        op.drop_index("ix_care_notifications_scope_status_created", table_name="care_notifications")
+    if "uq_care_notifications_active_source" in existing_indexes:
+        op.drop_index("uq_care_notifications_active_source", table_name="care_notifications")
+    columns = {column["name"] for column in inspect(bind).get_columns("care_notifications")}
+    for name in ("resolution_reason", "resolved_at", "updated_at", "status"):
+        if name in columns:
+            op.drop_column("care_notifications", name)
