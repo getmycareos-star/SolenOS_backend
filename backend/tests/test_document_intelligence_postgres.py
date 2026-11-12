@@ -37,6 +37,7 @@ from app.api.document_intelligence import (
 )
 from app.models.care import Caregiver, Person
 from app.models.care_continuity import CareAssertion
+from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.uncertainty import OpenQuestion
 from app.models.collaboration import EvidenceUpload
 from app.services.lcr_context import build_lcr_context
@@ -106,6 +107,13 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
 
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
+    from app.services import qwen_background_worker as worker
+    monkeypatch.setattr(worker, "SessionLocal", Session)
+
+    async def idle_document_worker():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(main_module, "qwen_worker_loop", idle_document_worker)
     api_client = TestClient(app)
     original = (
         b"Discharge summary: Patient walked 20 metres with a frame on 12 October. "
@@ -168,7 +176,28 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             ))
             assert uploaded["persisted"] is True
             evidence_id = uploaded["evidence_id"]
+            processing_job_id = uploaded["document_processing_job_id"]
+            assert processing_job_id
+            assert uploaded["processing_status"] == "queued"
             assert uploaded["sha256"] == hashlib.sha256(original).hexdigest()
+
+        with Session() as db:
+            processing_job = db.query(QwenBackgroundJob).filter_by(id=processing_job_id).one()
+            assert processing_job.workflow == "document_intake"
+            assert processing_job.status == "queued"
+            assert json.loads(processing_job.evidence_ids_json) == [evidence_id]
+
+        # Execute the real durable worker against PostgreSQL. Only the candidate
+        # model output is deterministic; upload, extraction, persistence and job
+        # lifecycle all use the real database and service implementations.
+        assert asyncio.run(worker.process_one_qwen_job()) is True
+        with Session() as db:
+            completed_job = db.query(QwenBackgroundJob).filter_by(id=processing_job_id).one()
+            assert completed_job.status == "completed"
+            worker_result = json.loads(completed_job.result_text)
+            assert worker_result[0]["evidence_id"] == evidence_id
+            assert worker_result[0]["intelligence_status"] == "available"
+            assert worker_result[0]["candidate_count"] == 2
 
         # Extraction and candidate generation are persisted in the same analysis row.
         with Session() as db:
