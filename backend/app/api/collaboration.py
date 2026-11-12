@@ -644,6 +644,7 @@ async def upload_evidence(
     capture_method: str = Form("upload"),
     capture_timestamp: str = Form(""),
     capture_page_number: Optional[int] = Form(None),
+    ingestion_key: str = Form(""),
     db: Session = Depends(get_db),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
@@ -772,6 +773,51 @@ async def upload_evidence(
     client_text_submitted = bool((extracted_text or "").strip())
     bounded_text = ""
     digest = hashlib.sha256(data).hexdigest()
+    ingestion_key = (ingestion_key or "").strip()
+    if ingestion_key and (len(ingestion_key) > 128 or not re.fullmatch(r"[A-Za-z0-9._:-]+", ingestion_key)):
+        raise HTTPException(status_code=422, detail="Upload retry key is invalid")
+    request_fingerprint = hashlib.sha256(json.dumps({
+        "sha256": digest,
+        "evidence_type": evidence_type,
+        "capture_method": capture_method,
+        "capture_timestamp": capture_timestamp_value,
+        "capture_page_number": capture_page_number,
+        "rotation_degrees": rotation_degrees,
+        "crop_insets_percent": crop_insets,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    if ingestion_key:
+        prior = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == scoped_person_id,
+            EvidenceModel.ingestion_key == ingestion_key,
+        ).first()
+        if prior is not None:
+            if prior.uploaded_by_caregiver_id != scoped_caregiver_id or prior.ingestion_request_sha256 != request_fingerprint:
+                raise HTTPException(status_code=409, detail="This upload retry key was already used for a different upload. Start a new capture instead of reusing it.")
+            prior_blob = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == prior.id).first()
+            if prior_blob is None or prior_blob.sha256 != digest or len(prior_blob.content) != prior_blob.size_bytes:
+                raise HTTPException(status_code=409, detail="The original upload linked to this retry key is unavailable or failed integrity validation.")
+            prior_meta = {}
+            try:
+                prior_meta = prior.extra_metadata if isinstance(prior.extra_metadata, dict) else json.loads(prior.extra_metadata or "{}")
+            except (TypeError, ValueError):
+                pass
+            return {
+                "evidence_id": prior.id,
+                "size_bytes": prior_blob.size_bytes,
+                "mime_type": prior_blob.mime_type,
+                "sha256": prior_blob.sha256,
+                "persisted": True,
+                "idempotent_replay": True,
+                "duplicate_detected": bool(prior_meta.get("duplicate_detected")),
+                "duplicate_of_evidence_id": prior_meta.get("duplicate_of_evidence_id"),
+                "source_integrity": {
+                    "binary_sha256_computed_at_ingest": True,
+                    "original_binary_persisted": True,
+                    "text_extraction_available": bool(prior.source_text),
+                    "text_extraction_status": "server_extraction_pending",
+                    "client_supplied_document_text_ignored": client_text_submitted,
+                },
+            }
     # Serialize duplicate lookup + insertion for this person/content pair.
     # Without a transaction-scoped lock, two simultaneous uploads can both
     # observe no prior row and both incorrectly report themselves as originals.
@@ -831,6 +877,8 @@ async def upload_evidence(
         }),
         source_type="caregiver_upload",
         evidence_status="recorded",
+        ingestion_key=ingestion_key or None,
+        ingestion_request_sha256=request_fingerprint if ingestion_key else None,
     )
     db.add(evidence)
     db.flush()
