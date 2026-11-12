@@ -216,6 +216,24 @@ def deliver_pending_web_pushes(db=None, now=None):
                     except IntegrityError:
                         session.rollback()
 
+        # Cancel any stale pending deliveries created before the in-app-only
+        # category boundary was introduced. They must never be retried to devices.
+        in_app_only_pending = (
+            session.query(CarePushDelivery)
+            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
+            .filter(
+                CarePushDelivery.status == "pending",
+                CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
+            )
+            .all()
+        )
+        for delivery in in_app_only_pending:
+            delivery.status = "cancelled"
+            delivery.last_error_code = "in_app_only_category"
+            delivery.last_error_message = "This care message stays in the in-app inbox."
+        if in_app_only_pending:
+            session.commit()
+
         due = (
             session.query(CarePushDelivery, CareNotification, CarePushSubscription)
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
