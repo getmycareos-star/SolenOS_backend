@@ -319,6 +319,11 @@ def test_duplicate_upload_is_preserved_and_linked_to_original(client):
         data=payload,
         files={"file": ("discharge-copy.txt", b"identical original document bytes", "text/plain")},
     )
+    assert original.status_code == 201, original.text
+    with TestSessionLocal() as db:
+        original_evidence_id = original.json()["evidence_id"]
+        assert db.query(Evidence).filter_by(id=original_evidence_id).one()
+        assert db.query(EvidenceUpload).filter_by(evidence_id=original_evidence_id).one()
     duplicate = test_client.post(
         "/api/v1/upload",
         headers=auth,
@@ -661,6 +666,10 @@ def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(clie
     first_id = first.json()["evidence_id"]
     first_job_id = first.json()["document_processing_job_id"]
     assert first_job_id
+    with TestSessionLocal() as db:
+        first_evidence = db.query(Evidence).filter_by(id=first_id).one()
+        assert first_evidence.ingestion_key == form["ingestion_key"]
+        assert db.query(EvidenceUpload).filter_by(evidence_id=first_id).one()
 
     replay = test_client.post(
         "/api/v1/upload",
@@ -953,6 +962,10 @@ def test_document_processing_status_does_not_leak_across_anonymous_sessions(clie
     })
     assert second.status_code == 201, second.text
     second_auth = {"Authorization": f"Bearer {second.json()['access_token']}"}
+    cross_record_retry = test_client.post(
+        f"/api/v1/documents/{evidence_id}/queue", headers=second_auth, json={}
+    )
+    assert cross_record_retry.status_code == 404
     status = test_client.get("/api/v1/documents/intelligence", headers=second_auth)
     assert status.status_code == 200, status.text
     assert all(item["evidence_id"] != evidence_id for item in status.json()["processing_jobs"])
