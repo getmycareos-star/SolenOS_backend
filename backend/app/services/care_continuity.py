@@ -222,20 +222,15 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
 
 def _latest_assertion_review_at(db: Session, assertion: CareAssertion) -> Optional[datetime]:
     """Read the append-only review timestamp without mutating source event time."""
-    try:
-        if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
-            return None
-        revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
-        return db.execute(
-            select(revisions.c.changed_at).where(
-                revisions.c.person_id == assertion.person_id,
-                revisions.c.assertion_id == assertion.id,
-            ).order_by(desc(revisions.c.revision_number)).limit(1)
-        ).scalar_one_or_none()
-    except Exception:
-        # A missing optional test fixture must not turn a readable care record
-        # into a failed request. Production migrations create this table.
+    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
         return None
+    revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+    return db.execute(
+        select(revisions.c.changed_at).where(
+            revisions.c.person_id == assertion.person_id,
+            revisions.c.assertion_id == assertion.id,
+        ).order_by(desc(revisions.c.revision_number)).limit(1)
+    ).scalar_one_or_none()
 
 
 def _append_assertion_revision(
@@ -246,40 +241,35 @@ def _append_assertion_revision(
     changed_by_caregiver_id: Optional[str],
 ) -> Optional[datetime]:
     """Persist an immutable assertion review/version in the existing revision table."""
-    try:
-        if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
-            return None
-        revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
-        latest = db.execute(select(func.max(revisions.c.revision_number)).where(
-            revisions.c.person_id == assertion.person_id,
-            revisions.c.assertion_id == assertion.id,
-        )).scalar_one_or_none()
-        changed_at = datetime.now(timezone.utc)
-        current_payload = {
-            "id": assertion.id,
-            "person_id": assertion.person_id,
-            "assertion_status": assertion.assertion_status,
-            "review_after_days": assertion.review_after_days,
-            "epistemic_state": assertion.epistemic_state,
-            "asserted_value": assertion.asserted_value,
-            "evidence_ids": list(assertion.evidence_ids or []),
-        }
-        db.execute(insert(revisions).values(
-            id=str(uuid.uuid4()),
-            person_id=assertion.person_id,
-            assertion_id=assertion.id,
-            revision_number=int(latest or 0) + 1,
-            previous_payload=previous_payload,
-            current_payload=current_payload,
-            revision_reason=reason,
-            changed_by_caregiver_id=changed_by_caregiver_id,
-            changed_at=changed_at,
-        ))
-        return changed_at
-    except Exception:
-        # The primary assertion status remains authoritative. Reconciliation
-        # still uses recorded_at when a test or legacy schema lacks revisions.
+    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
         return None
+    revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+    latest = db.execute(select(func.max(revisions.c.revision_number)).where(
+        revisions.c.person_id == assertion.person_id,
+        revisions.c.assertion_id == assertion.id,
+    )).scalar_one_or_none()
+    changed_at = datetime.now(timezone.utc)
+    current_payload = {
+        "id": assertion.id,
+        "person_id": assertion.person_id,
+        "assertion_status": assertion.assertion_status,
+        "review_after_days": assertion.review_after_days,
+        "epistemic_state": assertion.epistemic_state,
+        "asserted_value": assertion.asserted_value,
+        "evidence_ids": list(assertion.evidence_ids or []),
+    }
+    db.execute(insert(revisions).values(
+        id=str(uuid.uuid4()),
+        person_id=assertion.person_id,
+        assertion_id=assertion.id,
+        revision_number=int(latest or 0) + 1,
+        previous_payload=previous_payload,
+        current_payload=current_payload,
+        revision_reason=reason,
+        changed_by_caregiver_id=changed_by_caregiver_id,
+        changed_at=changed_at,
+    ))
+    return changed_at
 
 
 def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str, updated_by_caregiver_id: Optional[str] = None, review_after_days: Optional[int] = None) -> CareAssertion:
