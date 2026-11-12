@@ -298,7 +298,7 @@ def next_best_questions(
                 OpenQuestion.subject_type == clean["subject_type"],
                 OpenQuestion.subject_id == clean["subject_id"],
                 OpenQuestion.question == clean["question"],
-                OpenQuestion.status == "open",
+                OpenQuestion.status.in_(["open", "unresolved"]),
             ).first()
             source_context = {
                 "source_kind": clean["source_kind"],
@@ -321,8 +321,8 @@ def next_best_questions(
                 db.flush()
                 persisted_id = question.id
             else:
-                # Refresh an existing open question with newly linked source records.
-                # Never change an answered, declined, or closed question here.
+                # Refresh an existing unanswered question with newly linked source records.
+                # Keep unresolved questions unresolved; never rewrite their status.
                 existing.evidence_ids = list(dict.fromkeys(
                     list(existing.evidence_ids or []) + list(clean["evidence_ids"] or [])
                 ))

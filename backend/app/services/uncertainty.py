@@ -102,7 +102,7 @@ def persist_source_clarification_questions(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.subject_type == "person",
         OpenQuestionModel.subject_id == person_id,
-        OpenQuestionModel.status == "open",
+        OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
     existing_by_text = {
         " ".join((row.question or "").casefold().split()): row
@@ -346,9 +346,9 @@ class UncertaintyEngine:
         if not question_text:
             raise ValueError("A clarification question must contain non-empty text.")
         payload["question"] = question_text
-        # Suppress only an exact normalized duplicate that is still open for the
-        # same person, subject, and claim. Similar wording is not treated as
-        # equivalent, and answered/declined questions do not block a new review.
+        # Suppress an exact normalized duplicate that is still open or unresolved for
+        # the same person, subject, and claim. Answered/declined questions do not
+        # block a new review; an unanswered question must be reopened or updated.
         question_key = re.sub(r"[\W_]+", " ", question_text.casefold()).strip()
         existing_open = (
             self.db.query(OpenQuestionModel)
@@ -357,7 +357,7 @@ class UncertaintyEngine:
                 OpenQuestionModel.subject_type == payload["subject_type"],
                 OpenQuestionModel.subject_id == payload["subject_id"],
                 OpenQuestionModel.claim_id == claim_id,
-                OpenQuestionModel.status == "open",
+                OpenQuestionModel.status.in_(["open", "unresolved"]),
             )
             .order_by(OpenQuestionModel.asked_at.desc(), OpenQuestionModel.id.asc())
             .limit(200)
@@ -368,7 +368,7 @@ class UncertaintyEngine:
             for row in existing_open
         ):
             raise ValueError(
-                "An equivalent open clarification question already exists for this claim and subject; review its status and answer history before asking again."
+                "An equivalent unanswered clarification question already exists for this claim and subject; review its status and answer history before asking again."
             )
         db_question = OpenQuestionModel(**payload)
         try:

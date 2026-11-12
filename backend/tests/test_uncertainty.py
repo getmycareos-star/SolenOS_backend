@@ -2191,12 +2191,33 @@ def test_duplicate_open_clarification_question_is_suppressed_but_answered_questi
         assert created.status_code == 200, created.text
         question_id = created.json()["id"]
 
+        skipped = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={"status": "unresolved", "closed_reason": "The caregiver does not know the answer yet."},
+        )
+        assert skipped.status_code == 200, skipped.text
+        assert skipped.json()["status"] == "unresolved"
+
+        duplicate_while_unresolved = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**payload, "question": " WAS THE appointment attended? "},
+        )
+        assert duplicate_while_unresolved.status_code == 422, duplicate_while_unresolved.text
+        assert "equivalent unanswered clarification question already exists" in duplicate_while_unresolved.text
+
+        reopened = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={"status": "open"},
+        )
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["status"] == "open"
+
         duplicate = client.post(
             "/api/v1/uncertainty/questions",
             json={**payload, "question": " WAS THE appointment attended? "},
         )
         assert duplicate.status_code == 422, duplicate.text
-        assert "equivalent open clarification question already exists" in duplicate.text
+        assert "equivalent unanswered clarification question already exists" in duplicate.text
 
         answer_source = client.post(
             "/api/v1/evidence",
