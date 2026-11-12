@@ -1058,6 +1058,7 @@ def review_document_candidate(
 
     original = dict(candidate)
     assertion_id = None
+    follow_up_id = None
     if payload.decision == "reject":
         candidate["review_status"] = "rejected_by_caregiver"
     elif payload.decision == "correct":
@@ -1183,7 +1184,6 @@ def review_document_candidate(
             assertion_row = db.query(CareAssertion).filter(
                 CareAssertion.id == assertion_row.id,
                 CareAssertion.person_id == person_id,
-                CareAssertion.created_by_caregiver_id == caregiver_id,
             ).with_for_update().first()
             if assertion_row is None:
                 raise HTTPException(status_code=404, detail="Source-linked assertion not found in this care record")
@@ -1194,6 +1194,28 @@ def review_document_candidate(
         db.flush()
         if assertion_row.assertion_status != "accepted":
             raise HTTPException(status_code=503, detail="The caregiver review was not applied to the Living Care Record")
+        try:
+            follow_up_id = _persist_document_follow_up(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=evidence_id,
+                analysis_id=analysis_id,
+                upload=upload,
+                candidate=candidate,
+                subject=subject,
+                observation=observation,
+                quote=quote,
+            )
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Accepted document follow-up could not be persisted atomically")
+            raise HTTPException(
+                status_code=503,
+                detail="The document review and its follow-up were not saved. Please retry the review.",
+            ) from exc
+        if follow_up_id:
+            candidate["accepted_follow_up_id"] = follow_up_id
 
         candidate["review_status"] = "accepted_by_caregiver"
         candidate["accepted_assertion_id"] = assertion_id
@@ -1311,6 +1333,7 @@ def review_document_candidate(
         "source_evidence_id": evidence_id,
         "source_record_ref": {"record_type": "care_assertion", "record_id": assertion_id} if assertion_id else None,
         "written_to_lcr": bool(assertion_id),
+        "follow_up_record_ref": {"record_type": "open_loop", "record_id": follow_up_id} if follow_up_id else None,
         "review_required": payload.decision == "correct",
         "change_intelligence_status": change_intelligence_status,
         "care_continuity_execution": execution,
