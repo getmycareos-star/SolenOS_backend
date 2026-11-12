@@ -44,6 +44,52 @@ def _has_decision_dependency(context) -> bool:
     return False
 
 
+def _question_is_answered_by_current_lcr(
+    db: Session,
+    person_id: str,
+    question_text: str,
+) -> bool:
+    """Conservatively suppress a question when an accepted, evidenced LCR field answers it.
+
+    This is deliberately a field-label match, not semantic inference. It only
+    suppresses when every meaningful token in a structured current-state field
+    appears in the question and the assertion has same-person supporting evidence.
+    """
+    question_tokens = {
+        token for token in re.findall(r"[a-z0-9]+", question_text.casefold())
+        if len(token) > 2
+    }
+    if not question_tokens:
+        return False
+
+    assertions = db.query(CareAssertionModel).filter(
+        CareAssertionModel.person_id == person_id,
+        CareAssertionModel.subject_type == "person",
+        CareAssertionModel.subject_id == person_id,
+        CareAssertionModel.assertion_kind == "current_state",
+        CareAssertionModel.assertion_status.in_(["accepted", "caregiver_reviewed"]),
+    ).all()
+    for assertion in assertions:
+        field_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", (assertion.field or "").replace("_", " ").casefold())
+            if len(token) > 2
+        }
+        evidence_ids = list(dict.fromkeys(
+            str(value) for value in (assertion.evidence_ids or []) if value
+        ))
+        if not field_tokens or not field_tokens.issubset(question_tokens) or not evidence_ids:
+            continue
+        valid_ids = {
+            str(row[0]) for row in db.query(EvidenceModel.id).filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.id.in_(evidence_ids),
+            ).all()
+        }
+        if valid_ids == set(evidence_ids):
+            return True
+    return False
+
+
 def persist_source_clarification_questions(
     db: Session,
     *,
@@ -142,6 +188,10 @@ def persist_source_clarification_questions(
         ):
             continue
         seen.add(normalized)
+        # Do not retain a candidate as an open question when an accepted,
+        # source-backed current-state LCR assertion already covers its field.
+        if _question_is_answered_by_current_lcr(db, person_id, question_text):
+            continue
         source_context = {
             "source_kind": source_kind,
             "source_id": source_record_id,
