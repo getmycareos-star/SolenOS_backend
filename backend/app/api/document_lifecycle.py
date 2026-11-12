@@ -101,7 +101,7 @@ class _HTMLText(HTMLParser):
             self.parts.append(data)
 
     def text(self):
-    return re.sub(r" *\n *", "\n", normalized).strip()
+        return re.sub(r"\n{3,}", "\n\n", "".join(self.parts)).strip()
 
 
 def _extract_docx(content: bytes) -> str:
