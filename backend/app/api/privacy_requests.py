@@ -1115,6 +1115,22 @@ def fulfil_approved_deletion(
             },
         ))
         db.commit()
+
+        # Re-check the root identity after commit, not only inside the write
+        # transaction. A successful receipt must never outlive a retained person row.
+        db.expire_all()
+        if db.query(Person).filter(Person.id == person_id).count() != 0:
+            db.execute(
+                text("DELETE FROM persons WHERE id = :person_id"),
+                {"person_id": person_id},
+            )
+            db.commit()
+            db.expire_all()
+        if db.query(Person).filter(Person.id == person_id).count() != 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Person record remains after committed deletion verification",
+            )
         db.refresh(row)
     except Exception:
         db.rollback()
