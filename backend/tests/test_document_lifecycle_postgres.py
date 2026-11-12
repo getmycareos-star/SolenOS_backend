@@ -172,6 +172,7 @@ from app.models.care import Caregiver, Evidence, Person
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 from app.api.collaboration import (
     upload_evidence,
     delete_uploaded_document,
@@ -182,6 +183,7 @@ from app.api.collaboration import (
 from app.models.capture_analysis import CaptureAnalysis
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
 from app.api.document_intelligence import _existing_assertion_for_exact_document_duplicate
+from app.api.document_intelligence import _persist_document_follow_up
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgresql+psycopg://"):
@@ -546,5 +548,71 @@ def test_postgres_exact_duplicate_documents_reuse_one_lcr_assertion():
                     asserted_value="A different interpretation of the same exact source.",
                 )
             assert conflict.value.status_code == 409
+    finally:
+        engine.dispose()
+
+
+def test_postgres_accepted_document_follow_up_is_persisted_once_and_not_booked():
+    """A clear accepted recommendation becomes one existing Open Loop with source evidence."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-followup-person-{suffix}"
+    caregiver_id = f"doc-followup-caregiver-{suffix}"
+    quote = "The patient should have a follow-up clinic review within two weeks."
+    raw = (quote + " " + suffix).encode("utf-8")
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document follow-up fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Document follow-up caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            first = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge.pdf.txt", raw)
+            duplicate = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge-copy.pdf.txt", raw)
+            first_upload = db.query(EvidenceUpload).filter_by(evidence_id=first["evidence_id"]).one()
+            duplicate_upload = db.query(EvidenceUpload).filter_by(evidence_id=duplicate["evidence_id"]).one()
+            candidate = {
+                "field_type": "appointment",
+                "page_number": 6,
+            }
+            first_loop_id = _persist_document_follow_up(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=first["evidence_id"],
+                analysis_id="analysis-" + suffix,
+                upload=first_upload,
+                candidate=candidate,
+                subject="Clinic review",
+                observation=quote,
+                quote=quote,
+            )
+            duplicate_loop_id = _persist_document_follow_up(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=duplicate["evidence_id"],
+                analysis_id="analysis-duplicate-" + suffix,
+                upload=duplicate_upload,
+                candidate=candidate,
+                subject="Clinic review",
+                observation=quote,
+                quote=quote,
+            )
+            assert first_loop_id == duplicate_loop_id
+            db.commit()
+
+        with Session() as db:
+            loop = db.query(OpenLoopRecord).filter_by(id=first_loop_id, person_id=person_id).one()
+            assert loop.loop_type == "follow_up"
+            assert loop.status == "open"
+            assert loop.deadline_at is None
+            assert "within two weeks" in loop.description
+            assert "does not mean an appointment has been booked" in loop.description
+            assert loop.evidence[0]["evidence_id"] == first["evidence_id"]
+            assert db.query(OpenLoopOccurrence).filter_by(person_id=person_id, source_id=loop.source_id).count() == 1
+            assert db.query(OpenLoopEvent).filter_by(person_id=person_id, loop_id=loop.id).count() == 1
     finally:
         engine.dispose()
