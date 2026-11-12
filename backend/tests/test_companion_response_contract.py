@@ -316,6 +316,8 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         prompt = captured["messages"][0]["content"]
         assert "First answer the caregiver’s actual question" in prompt
         assert "never treat chat history as proof" in prompt
+        assert "offer the existing" in prompt and "Daily Care capture path" in prompt
+        assert "Do not silently save it" in prompt
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
