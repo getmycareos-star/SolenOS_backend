@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
+from app.services.care_continuity import has_valid_caregiver_necessity
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
@@ -413,6 +414,10 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         OpenQuestion.person_id == person_id, OpenQuestion.status == "open",
         OpenQuestion.necessity == "necessary",
     ).order_by(OpenQuestion.asked_at.desc()).limit(50).all()
+    open_questions = [
+        question for question in open_questions
+        if has_valid_caregiver_necessity(question)
+    ]
     unresolved_contradictions = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
         Contradiction.resolution_status.in_(["unresolved", "qualified"]),
