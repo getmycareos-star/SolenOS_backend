@@ -203,7 +203,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
     blocked_pages = _blocked_page_numbers(source_text)
     unreadable_pages = _unreadable_page_numbers(source_text)
     processed_pages = [number for number in range(1, page_count + 1) if number not in unprocessed_pages]
-    all_observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
+    stored_observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
+    all_observations = stored_observations
     extraction_complete = (
         analysis.extraction_status == "available"
         and not _unprocessed_page_numbers(source_text)
@@ -265,7 +266,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         ),
         "written_to_lcr": any(
             isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
-            for item in all_observations
+            for item in stored_observations
         ),
     }
 
