@@ -2987,6 +2987,10 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
             "priority": "high",
             "necessity": "necessary",
             "necessity_rationale": "Attendance changes the follow-up context.",
+            "evidence_ids": ["review-evidence-1"],
+            "context": [{
+                "decision_dependency": "The follow-up plan depends on whether the appointment occurred."
+            }],
         })
         assert created.status_code == 200, created.text
         question_id = created.json()["id"]
