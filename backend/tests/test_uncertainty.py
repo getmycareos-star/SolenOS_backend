@@ -3147,21 +3147,22 @@ def test_normal_reconciliation_persists_only_actionable_source_linked_questions(
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).all()
-        assert len(first) == 2
-        assert any("appetite" in row.question for row in first)
-        assert any("recent_weight" in row.question for row in first)
-        assert all(row.evidence_ids == [evidence.id] for row in first)
-        assert all(row.context and row.context[0].get("source_id") for row in first)
+        # A contradiction and a missing measurement remain in internal care
+        # intelligence; neither automatically becomes caregiver work.
+        assert first == []
+        candidates = next_best_questions(db, person.id, persist=False)
+        assert any(item["source_kind"] == "information_gap" and item["necessity"] == "not_assessed" for item in candidates)
+        assert any(item["source_kind"] == "contradiction" and item["necessity"] == "not_assessed" for item in candidates)
+        assert db.query(InformationGap).filter_by(id=gap.id).one().lifecycle_status == GapLifecycleStatus.OPEN
 
-        # Reconciliation is idempotent: it enriches existing open questions but
-        # does not multiply them on every subsequent save/reload.
+        # Reconciliation remains idempotent and does not create caregiver questions.
         reconcile_person_change_intelligence(db, person.id)
         db.commit()
         second_count = db.query(OpenQuestion).filter(
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).count()
-        assert second_count == 2
+        assert second_count == 0
         assert not any("usual_bedtime" in row.question for row in db.query(OpenQuestion).filter_by(person_id=person.id).all())
         assert not any("sleep_observation" in row.question for row in db.query(OpenQuestion).filter_by(person_id=person.id).all())
     finally:
