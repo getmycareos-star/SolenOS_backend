@@ -186,10 +186,18 @@ async def process_one_qwen_job() -> bool:
             state=SimpleNamespace(scoped_person_id=job.person_id, scoped_caregiver_id=job.caregiver_id)
         )
         result = await qwen_support_assist(payload, fake_request, db)
+        if result.get("ai_generated") is not True or result.get("provider_status") != "available":
+            raise RuntimeError("Qwen background worker received a response without confirmed live inference")
+        model_name = str(result.get("model") or os.getenv("OLLAMA_MODEL") or "").strip()
+        if not model_name:
+            raise RuntimeError("Qwen background worker cannot persist an output without model identity")
         output = QwenModelOutput(
             job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id,
-            workflow=result["workflow"], model_name=None, output_text=result["reply"],
+            workflow=result["workflow"], model_name=model_name, output_text=result["reply"],
             output_metadata={
+                "inference_provider": "ollama",
+                "model_name": model_name,
+                "live_inference_confirmed": True,
                 "persistence": "read_only_assistance",
                 "written_to_lcr": False,
                 "source_provenance_version": "qwen-source-records-v1",
