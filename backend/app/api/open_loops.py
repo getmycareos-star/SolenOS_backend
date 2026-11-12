@@ -185,7 +185,7 @@ def _snapshot(loop):
     deadline = (loop.deadline_at.replace(tzinfo=timezone.utc) if loop.deadline_at and loop.deadline_at.tzinfo is None else _utc(loop.deadline_at) if loop.deadline_at else None)
     deps = getattr(loop, "_mandatory_blockers", [])
     return {
-        "id": loop.id, "person_id": loop.person_id, "caregiver_id": loop.caregiver_id,
+        "id": loop.id, "person_id": loop.person_id, "caregiver_id": loop.caregiver_id, "assigned_caregiver_id": loop.assigned_caregiver_id,
         "loop_type": loop.loop_type, "title": loop.title, "description": loop.description,
         "status": loop.status, "outcome_status": loop.outcome_status,
         "owner_role": loop.owner_role, "owner_label": loop.owner_label,
@@ -234,7 +234,10 @@ def _get_scoped(db, person_id, caregiver_id, loop_id, *, for_update=False):
     query = db.query(OpenLoopRecord).filter(
         OpenLoopRecord.id == loop_id,
         OpenLoopRecord.person_id == person_id,
-        OpenLoopRecord.caregiver_id == caregiver_id,
+        or_(
+            OpenLoopRecord.caregiver_id == caregiver_id,
+            OpenLoopRecord.assigned_caregiver_id == caregiver_id,
+        ),
     )
     # Mutations must serialize on the parent row before reading JSON-backed
     # evidence arrays. PostgreSQL's row lock makes concurrent append operations
@@ -346,7 +349,7 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
             return _snapshot(_get_scoped(db, person_id, caregiver_id, replay.loop_id))
     recurrence = db.query(OpenLoopRecord).filter(
         OpenLoopRecord.person_id == person_id,
-        OpenLoopRecord.caregiver_id == caregiver_id,
+        or_(OpenLoopRecord.caregiver_id == caregiver_id, OpenLoopRecord.assigned_caregiver_id == caregiver_id),
         OpenLoopRecord.loop_type == payload.loop_type,
         OpenLoopRecord.source_fingerprint == fingerprint,
         OpenLoopRecord.status.notin_(TERMINAL_STATES),
@@ -364,7 +367,7 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
         db.commit()
         return {**_snapshot(recurrence), "recurrence_detected": True, "occurrence_id": occurrence.id}
     loop = OpenLoopRecord(
-        person_id=person_id, caregiver_id=caregiver_id, loop_type=payload.loop_type,
+        person_id=person_id, caregiver_id=caregiver_id, assigned_caregiver_id=caregiver_id, loop_type=payload.loop_type,
         title=payload.title.strip(), description=payload.description.strip(), evidence=payload.evidence,
         uncertainty=payload.uncertainty, source_type=payload.source_type, source_id=payload.source_id,
         source_fingerprint=fingerprint, owner_role=payload.owner_role, owner_label=payload.owner_label,
@@ -456,7 +459,7 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
                db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     query = db.query(OpenLoopRecord).filter(
-        OpenLoopRecord.person_id == person_id, OpenLoopRecord.caregiver_id == caregiver_id)
+        OpenLoopRecord.person_id == person_id, or_(OpenLoopRecord.caregiver_id == caregiver_id, OpenLoopRecord.assigned_caregiver_id == caregiver_id))
     if status:
         if status not in ALL_STATES: raise HTTPException(status_code=422, detail="Invalid status filter")
         query = query.filter(OpenLoopRecord.status == status)
@@ -494,7 +497,7 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
         for dep in deps:
             prerequisite = db.query(OpenLoopRecord).filter(
                 OpenLoopRecord.id == dep.prerequisite_id, OpenLoopRecord.person_id == person_id,
-                OpenLoopRecord.caregiver_id == caregiver_id).first()
+                or_(OpenLoopRecord.caregiver_id == caregiver_id, OpenLoopRecord.assigned_caregiver_id == caregiver_id)).first()
             if prerequisite and prerequisite.status != "closed":
                 blockers.append({"id": prerequisite.id, "title": prerequisite.title, "status": prerequisite.status})
         loop._mandatory_blockers = blockers
