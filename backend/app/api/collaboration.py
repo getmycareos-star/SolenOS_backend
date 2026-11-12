@@ -473,7 +473,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "source_text": " ".join(part for part in (
                     item.title, item.provider or "", item.healthcare_org or "", item.status,
                     item.scheduled_at.isoformat() if item.scheduled_at else "",
-                    item.preparation_notes or "", item.medication_questions or "",
+                    item.preparation_notes or "", json.dumps(item.medication_questions, ensure_ascii=False) if item.medication_questions else "",
                 ) if part),
                 "source_excerpt": " — ".join(part for part in (item.title, item.provider or "", item.preparation_notes or "") if part)[:700],
                 "record_status": item.status,
