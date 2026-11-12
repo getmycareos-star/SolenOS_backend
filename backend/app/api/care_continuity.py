@@ -1619,7 +1619,44 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
                 request,
                 db,
             )
-            reviewed.append({"id": row.id, "assertion_status": result.get("assertion_status")})
+            # Verify the persisted row, not only the helper response. This is an
+            # explicit caregiver decision, so the accepted status must survive the
+            # deferred multi-assertion transaction before reconciliation commits.
+            assertions_table = _table(db, "care_assertions")
+            persisted_status = db.execute(
+                select(assertions_table.c.assertion_status).where(
+                    assertions_table.c.id == row.id,
+                    assertions_table.c.person_id == person_id,
+                )
+            ).scalar_one_or_none()
+            if persisted_status != "accepted":
+                # The review helper's ORM/Core synchronization can leave a stale
+                # status in this multi-assertion flow. Re-apply the already
+                # authorized decision with a person-scoped Core update, then read
+                # it back before allowing the reconciliation to commit.
+                db.execute(
+                    update(assertions_table).where(
+                        assertions_table.c.id == row.id,
+                        assertions_table.c.person_id == person_id,
+                        assertions_table.c.assertion_status.notin_(("rejected", "superseded", "retracted")),
+                    ).values(
+                        assertion_status="accepted",
+                        review_after_days=row.review_after_days or 30,
+                        updated_by_caregiver_id=caregiver_id,
+                    )
+                )
+                persisted_status = db.execute(
+                    select(assertions_table.c.assertion_status).where(
+                        assertions_table.c.id == row.id,
+                        assertions_table.c.person_id == person_id,
+                    )
+                ).scalar_one_or_none()
+                if persisted_status != "accepted":
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Medication review could not be persisted; the report remains unreviewed",
+                    )
+            reviewed.append({"id": row.id, "assertion_status": persisted_status})
         execution = execute_care_continuity_reconciliation(
             db,
             person_id,
@@ -4007,7 +4044,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         data["requested_by_caregiver_id"] = caregiver_id
     # The legacy caregiver_id points to caregiver_profiles, not session caregivers.
     # New session attribution uses a separate server-bound column.
-    if "caregiver_id" in table.c and resource not in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
+    if "caregiver_id" in table.c and resource not in ("assertions", "caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
         data["caregiver_id"] = caregiver_id
     if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations") and "reported_by_caregiver_id" in table.c:
         data["reported_by_caregiver_id"] = caregiver_id
