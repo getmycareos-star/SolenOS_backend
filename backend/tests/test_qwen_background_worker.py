@@ -367,3 +367,72 @@ def test_worker_marks_permanent_document_extraction_errors_failed(tmp_path, monk
     assert failed.attempt_count == 1
     assert failed.error_code == "unsupported document"
     db.close()
+
+
+def test_document_intake_requeues_remaining_page_windows_without_blocking_worker(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    db = sessions()
+    job = QwenBackgroundJob(
+        person_id="person-test",
+        caregiver_id="caregiver-test",
+        task_text="Process saved document for caregiver review.",
+        evidence_ids_json=json.dumps(["evidence-long-packet"]),
+        workflow="document_intake",
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    from app.api import document_lifecycle, document_intelligence
+    monkeypatch.setattr(
+        document_lifecycle,
+        "extract_saved_document",
+        lambda *args, **kwargs: {"analysis_id": "analysis-long"},
+    )
+    passes = {"count": 0}
+
+    def analyze(*args, **kwargs):
+        passes["count"] += 1
+        if passes["count"] == 1:
+            return {
+                "analysis_id": "analysis-long",
+                "intelligence_status": "partial",
+                "observations": [{"observation": "page one candidate"}],
+                "processed_page_count": 12,
+                "total_page_count": 30,
+                "unprocessed_page_numbers": list(range(13, 31)),
+            }
+        return {
+            "analysis_id": "analysis-long",
+            "intelligence_status": "available",
+            "observations": [{"observation": "page one candidate"}, {"observation": "page 30 candidate"}],
+            "processed_page_count": 30,
+            "total_page_count": 30,
+            "unprocessed_page_numbers": [],
+        }
+
+    monkeypatch.setattr(document_intelligence, "analyze_saved_document", analyze)
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    queued = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert queued.status == "queued"
+    assert queued.attempt_count == 0
+    assert json.loads(queued.result_text)[0]["unprocessed_page_numbers"] == list(range(13, 31))
+    queued.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+    db.close()
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    completed = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert completed.status == "completed"
+    assert passes["count"] == 2
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id, event_type="document_intake_page_window_completed"
+    ).count() == 1
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id, event_type="document_intake_completed"
+    ).count() == 1
+    db.close()
