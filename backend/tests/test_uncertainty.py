@@ -4328,7 +4328,7 @@ def test_source_clarification_dedup_merges_rephrasing_but_preserves_time_context
             id="semantic-question-evidence-one",
             person_id=person.id,
             type="document",
-            source_text="Medication instruction document, first source.",
+            source_text="Confirm the current medication dose before administering the next dose.",
             uploaded_by_caregiver_id=caregiver.id,
             source_type="document",
         )
@@ -4354,6 +4354,7 @@ def test_source_clarification_dedup_merges_rephrasing_but_preserves_time_context
             questions=[
                 "What is her current medication dose?",
                 "Has her sleep changed since Friday?",
+                "What was her medication dose last week?",
             ],
         )
         assert len(first) == 2
@@ -4391,8 +4392,20 @@ def test_source_clarification_dedup_merges_rephrasing_but_preserves_time_context
         assert set(friday_sleep.evidence_ids or []) == {evidence_one.id, evidence_two.id}
         assert len(current_medication.context or []) == 2
         assert len(friday_sleep.context or []) == 2
+        assert current_medication.necessity == "necessary"
+        assert "explicitly says" in current_medication.necessity_rationale
+        assert any(
+            isinstance(item, dict)
+            and item.get("necessity_assessment", {}).get("assessment_method")
+            == "deterministic_explicit_source_prerequisite_v1"
+            for item in (current_medication.context or [])
+        )
+        assert friday_sleep.necessity == "not_assessed"
 
-        assert any("last week" in item.question.casefold() for item in questions)
+        last_week_question = next(
+            item for item in questions if "last week" in item.question.casefold()
+        )
+        assert last_week_question.necessity == "not_assessed"
         assert any("since Monday" in item.question for item in questions)
     finally:
         db.close()
