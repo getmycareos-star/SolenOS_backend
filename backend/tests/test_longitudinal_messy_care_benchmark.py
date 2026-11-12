@@ -1228,3 +1228,77 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).count() >= 1
+
+
+def test_correction_supersedes_assertion_and_preserves_append_only_history():
+    from app.models.care import Correction
+    from app.models.care_continuity import CareAssertion, CareRecordRelationship
+    from app.services.learning import LearningEngine
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "assertion-correction")
+        original = CareAssertion(
+            id="assertion-original-correction",
+            person_id=person.id,
+            subject_type="symptom",
+            subject_id="sleep",
+            field="symptom_reported_state",
+            assertion_kind="time_bound_observation",
+            asserted_value="poor sleep",
+            source_label="Caregiver report",
+            source_text="Daughter reported poor sleep.",
+            evidence_ids=["original-evidence"],
+            assertion_status="reported",
+            epistemic_state="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        correction = Correction(
+            id="correction-assertion-replacement",
+            person_id=person.id,
+            target_type="care_assertion",
+            target_id=original.id,
+            original_text="poor sleep",
+            corrected_text="sleep was disrupted only on Tuesday",
+            reason="The original entry described the wrong date range.",
+            caregiver_id=caregiver.id,
+        )
+        db.add_all([original, correction])
+        db.flush()
+
+        engine = LearningEngine(db)
+        engine.apply_correction(correction, commit=False)
+        db.flush()
+
+        db.refresh(original)
+        assert original.assertion_status == "superseded"
+        replacement = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id,
+            CareAssertion.id != original.id,
+            CareAssertion.subject_id == original.subject_id,
+        ).one()
+        assert replacement.asserted_value == "sleep was disrupted only on Tuesday"
+        assert replacement.assertion_status == "reported"
+        assert replacement.epistemic_state == "reported"
+        assert replacement.evidence_ids == []
+        assert replacement.source_event_id is None
+
+        links = db.query(CareRecordRelationship).filter(
+            CareRecordRelationship.person_id == person.id,
+            CareRecordRelationship.target_id == replacement.id,
+        ).all()
+        assert {(link.source_type, link.relationship_type, link.source_id) for link in links} == {
+            ("correction", "corrects", correction.id),
+            ("care_assertion", "superseded_by", original.id),
+        }
+
+        # Replaying the same correction cannot create another replacement.
+        engine.apply_correction(correction, commit=False)
+        db.flush()
+        assert db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id,
+            CareAssertion.subject_id == original.subject_id,
+        ).count() == 2
+        assert db.query(CareAssertion).filter(
+            CareAssertion.id == original.id,
+            CareAssertion.assertion_status == "superseded",
+        ).count() == 1
