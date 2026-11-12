@@ -4674,7 +4674,11 @@ def _notification_json(item: CareNotification) -> dict:
         "category": item.category,
         "priority": item.priority,
         "source_event_id": item.source_event_id,
+        "status": item.status or "active",
         "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "resolved_at": item.resolved_at.isoformat() if item.resolved_at else None,
+        "resolution_reason": item.resolution_reason,
         "is_read": item.read_at is not None,
         "read_at": item.read_at.isoformat() if item.read_at else None,
     }
@@ -4710,7 +4714,10 @@ def list_care_notifications(
         CareNotification.caregiver_id == caregiver_id,
     )
     if unread_only:
-        query = query.filter(CareNotification.read_at.is_(None))
+        query = query.filter(
+            CareNotification.status == "active",
+            CareNotification.read_at.is_(None),
+        )
     total = query.count()
     items = query.order_by(CareNotification.created_at.desc(), CareNotification.id.desc()).offset(offset).limit(limit).all()
     now = datetime.now(timezone.utc)
@@ -4732,6 +4739,7 @@ def count_unread_care_notifications(request: Request, db: Session = Depends(get_
     count = db.query(CareNotification).filter(
         CareNotification.person_id == person_id,
         CareNotification.caregiver_id == caregiver_id,
+        CareNotification.status == "active",
         CareNotification.read_at.is_(None),
     ).count()
     return {"unread_count": count}
