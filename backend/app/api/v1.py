@@ -428,6 +428,8 @@ def list_evidence(
         EvidenceModel.person_id == person_id,
         (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
     )
+    if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
+        query = query.filter(EvidenceModel.evidence_type == "document")
     if ids is not None:
         # An explicit filter is always bounded and never falls back to the
         # full evidence collection. Empty/blank filters mean no rows.
