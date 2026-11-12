@@ -761,3 +761,40 @@ def test_postgres_document_medication_conflict_creates_professional_question_wit
             ).count() == 1
     finally:
         engine.dispose()
+
+
+def test_postgres_corrected_filename_suggests_predecessor_without_auto_linking():
+    """A normalized filename match is a suggestion only; the original relationship remains unchanged."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-version-suggestion-person-{suffix}"
+    caregiver_id = f"doc-version-suggestion-caregiver-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document version suggestion fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Document version suggestion caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            original = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "Hospital discharge package.pdf",
+                b"Original discharge date: Monday. Medication status: active.",
+            )
+            corrected = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "Hospital discharge package corrected.pdf",
+                b"Corrected discharge date: Tuesday. Medication status: discontinued.",
+            )
+            assert corrected["duplicate_detected"] is False
+            assert corrected["possible_version_of_evidence_id"] == original["evidence_id"]
+
+        with Session() as db:
+            original_row = db.query(Evidence).filter_by(id=original["evidence_id"], person_id=person_id).one()
+            corrected_row = db.query(Evidence).filter_by(id=corrected["evidence_id"], person_id=person_id).one()
+            assert corrected_row.parent_evidence_id is None
+            metadata = json.loads(corrected_row.extra_metadata or "{}")
+            assert metadata["possible_version_of_evidence_id"] == original_row.id
+            assert metadata["possible_version_suggestion_reason"] == "normalized_filename_match"
+    finally:
+        engine.dispose()
