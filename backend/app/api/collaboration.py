@@ -860,25 +860,33 @@ async def upload_evidence(
                 prior_meta = prior.extra_metadata if isinstance(prior.extra_metadata, dict) else json.loads(prior.extra_metadata or "{}")
             except (TypeError, ValueError):
                 pass
+            prior_evidence_id = str(prior.id)
+            prior_size_bytes = int(prior_blob.size_bytes)
+            prior_mime_type = prior_blob.mime_type
+            prior_sha256 = prior_blob.sha256
+            prior_type = prior.type
             document_job = _ensure_document_intake_job(
-                db, scoped_person_id, scoped_caregiver_id, prior.id
-            ) if prior.type == "document" else None
+                db, scoped_person_id, scoped_caregiver_id, prior_evidence_id
+            ) if prior_type == "document" else None
+            document_job_id = str(document_job.id) if document_job else None
+            document_job_status = str(document_job.status) if document_job else ("queue_unavailable" if prior_type == "document" else "not_applicable")
+            prior_source_text = bool(prior.source_text)
             db.commit()
             return {
-                "evidence_id": prior.id,
-                "size_bytes": prior_blob.size_bytes,
-                "mime_type": prior_blob.mime_type,
-                "sha256": prior_blob.sha256,
+                "evidence_id": prior_evidence_id,
+                "size_bytes": prior_size_bytes,
+                "mime_type": prior_mime_type,
+                "sha256": prior_sha256,
                 "persisted": True,
                 "idempotent_replay": True,
-                "document_processing_job_id": document_job.id if document_job else None,
-                "processing_status": document_job.status if document_job else ("queue_unavailable" if prior.type == "document" else "not_applicable"),
+                "document_processing_job_id": document_job_id,
+                "processing_status": document_job_status,
                 "duplicate_detected": bool(prior_meta.get("duplicate_detected")),
                 "duplicate_of_evidence_id": prior_meta.get("duplicate_of_evidence_id"),
                 "source_integrity": {
                     "binary_sha256_computed_at_ingest": True,
                     "original_binary_persisted": True,
-                    "text_extraction_available": bool(prior.source_text),
+                    "text_extraction_available": prior_source_text,
                     "text_extraction_status": "server_extraction_pending",
                     "client_supplied_document_text_ignored": client_text_submitted,
                 },
@@ -955,19 +963,22 @@ async def upload_evidence(
         size_bytes=len(data),
         sha256=digest,
     ))
+    persisted_evidence_id = str(evidence.id)
     document_job = (
-        _ensure_document_intake_job(db, scoped_person_id, scoped_caregiver_id, evidence.id)
+        _ensure_document_intake_job(db, scoped_person_id, scoped_caregiver_id, persisted_evidence_id)
         if evidence_type == "document" else None
     )
+    document_job_id = str(document_job.id) if document_job else None
+    document_job_status = str(document_job.status) if document_job else ("queue_unavailable" if evidence_type == "document" else "not_applicable")
     db.commit()
     return {
-        "evidence_id": evidence.id,
+        "evidence_id": persisted_evidence_id,
         "size_bytes": len(data),
         "mime_type": mime_type,
         "sha256": digest,
         "persisted": True,
-        "document_processing_job_id": document_job.id if document_job else None,
-        "processing_status": document_job.status if document_job else ("queue_unavailable" if evidence_type == "document" else "not_applicable"),
+        "document_processing_job_id": document_job_id,
+        "processing_status": document_job_status,
         "duplicate_detected": duplicate_upload is not None,
         "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
         "source_integrity": {
