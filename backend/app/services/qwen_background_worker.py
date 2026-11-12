@@ -37,6 +37,24 @@ def _process_document_evidence(evidence_id: str, person_id: str, caregiver_id: s
     session = SessionLocal()
     try:
         extraction = extract_saved_document(evidence_id, scoped_request, session)
+        # Do not ask the interpretation model to read an incomplete document.
+        # The durable worker retries only transiently failed pages; unreadable
+        # and blocked pages remain explicitly partial with no clinical candidates.
+        if extraction.get("extraction_status") == "partial":
+            return extraction, {
+                "analysis_id": extraction.get("analysis_id"),
+                "intelligence_status": "partial",
+                "observations": [],
+                "unprocessed_page_numbers": extraction.get("unprocessed_page_numbers") or [],
+                "retryable_page_numbers": extraction.get("retryable_page_numbers") or [],
+                "retry_exhausted_page_numbers": extraction.get("retry_exhausted_page_numbers") or [],
+                "processed_page_count": max(
+                    0,
+                    len(extraction.get("processed_page_numbers") or [])
+                    - len(extraction.get("unreadable_page_numbers") or []),
+                ),
+                "total_page_count": extraction.get("page_count"),
+            }
         intelligence = analyze_saved_document(evidence_id, scoped_request, session)
         return extraction, intelligence
     finally:
@@ -233,25 +251,60 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers") or [],
                 })
                 pending_pages = intelligence.get("unprocessed_page_numbers") or []
-                if intelligence.get("intelligence_status") == "partial" and pending_pages:
-                    # Yield the worker between page windows so a long packet
-                    # does not block reminders or other caregiver jobs.
+                retryable_pages = extraction.get("retryable_page_numbers") or []
+                retry_exhausted_pages = extraction.get("retry_exhausted_page_numbers") or []
+                if retryable_pages:
+                    # Retry only transient OCR failures, with increasing delay.
+                    # Page attempts are persisted with the extraction, so a
+                    # worker restart cannot reset the retry budget.
+                    page_attempts = extraction.get("page_retry_attempts") or {}
+                    latest_page_attempt = max(
+                        [int(page_attempts.get(str(page)) or 1) for page in retryable_pages],
+                        default=1,
+                    )
+                    retry_delays = [3, 30, 300, 1800, 7200, 28800, 86400]
+                    delay_seconds = retry_delays[min(max(latest_page_attempt - 1, 0), len(retry_delays) - 1)]
                     job.status = "queued"
                     job.attempt_count = 0
-                    job.available_at = datetime.now(timezone.utc) + timedelta(seconds=3)
+                    job.available_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+                    job.locked_at = None
+                    job.error_code = None
+                    job.result_text = json.dumps(completed)
+                    db.add(QwenJobEvent(
+                        job_id=job.id,
+                        person_id=job.person_id,
+                        caregiver_id=job.caregiver_id,
+                        event_type="document_intake_page_retry_scheduled",
+                        from_status="processing",
+                        to_status="queued",
+                        metadata_json={
+                            "source_evidence_id": evidence_id,
+                            "retryable_page_numbers": retryable_pages,
+                            "retry_exhausted_page_numbers": retry_exhausted_pages,
+                            "page_retry_attempts": page_attempts,
+                            "retry_delay_seconds": delay_seconds,
+                            "unprocessed_page_numbers": pending_pages,
+                            "written_to_lcr": False,
+                        },
+                    ))
+                    db.commit()
+                    return True
+                if retry_exhausted_pages:
+                    job.status = "failed"
+                    job.error_code = "document_page_retry_exhausted"
                     job.locked_at = None
                     job.result_text = json.dumps(completed)
                     db.add(QwenJobEvent(
                         job_id=job.id,
                         person_id=job.person_id,
                         caregiver_id=job.caregiver_id,
-                        event_type="document_intake_page_window_completed",
+                        event_type="document_intake_page_retry_exhausted",
                         from_status="processing",
-                        to_status="queued",
+                        to_status="failed",
+                        error_code=job.error_code,
                         metadata_json={
                             "source_evidence_id": evidence_id,
-                            "processed_page_count": intelligence.get("processed_page_count"),
-                            "total_page_count": intelligence.get("total_page_count"),
+                            "retry_exhausted_page_numbers": retry_exhausted_pages,
                             "unprocessed_page_numbers": pending_pages,
                             "written_to_lcr": False,
                         },
