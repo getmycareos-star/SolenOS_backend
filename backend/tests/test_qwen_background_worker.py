@@ -422,3 +422,70 @@ def test_document_intake_requeues_remaining_page_windows_without_blocking_worker
         job_id=job_id, event_type="document_intake_completed"
     ).count() == 1
     db.close()
+
+def test_document_intake_finishes_later_windows_before_failing_an_exhausted_page(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    db = sessions()
+    job = QwenBackgroundJob(
+        person_id="person-test",
+        caregiver_id="caregiver-test",
+        task_text="Process saved document for caregiver review.",
+        evidence_ids_json=json.dumps(["evidence-with-one-unreadable-page"]),
+        workflow="document_intake",
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    passes = {"count": 0}
+
+    def process(evidence_id, person_id, caregiver_id):
+        passes["count"] += 1
+        if passes["count"] == 1:
+            return (
+                {"analysis_id": "analysis-long", "retry_exhausted_page_numbers": [2]},
+                {
+                    "analysis_id": "analysis-long",
+                    "intelligence_status": "partial",
+                    "observations": [],
+                    "processed_page_count": 12,
+                    "total_page_count": 30,
+                    "unprocessed_page_numbers": [2, *range(13, 31)],
+                },
+            )
+        return (
+            {"analysis_id": "analysis-long", "retry_exhausted_page_numbers": [2]},
+            {
+                "analysis_id": "analysis-long",
+                "intelligence_status": "partial",
+                "observations": [],
+                "processed_page_count": 29,
+                "total_page_count": 30,
+                "unprocessed_page_numbers": [2],
+            },
+        )
+
+    monkeypatch.setattr(worker, "_process_document_evidence", process)
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    queued = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert queued.status == "queued"
+    assert passes["count"] == 1
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id, event_type="document_intake_page_window_completed"
+    ).count() == 1
+    db.close()
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    failed = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert failed.status == "failed"
+    assert failed.error_code == "document_page_retry_exhausted"
+    assert passes["count"] == 2
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id, event_type="document_intake_page_retry_exhausted"
+    ).count() == 1
+    db.close()
+
