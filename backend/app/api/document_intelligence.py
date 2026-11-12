@@ -587,6 +587,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 and not value.startswith("Qwen reached the ")
                 and not value.startswith("Pages ")
                 and not value.startswith("Document understanding has more readable pages")
+                and not value.startswith("The candidate review limit was reached;")
             ],
             *[
                 value.strip()[:300]
