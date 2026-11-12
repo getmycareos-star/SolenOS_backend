@@ -976,6 +976,11 @@ def fulfil_approved_deletion(
     evidence_ids_to_erase = db.execute(
         select(Evidence.id).where(Evidence.person_id == person_id)
     ).scalars().all()
+    evidence_upload_ids_to_erase = db.execute(
+        select(EvidenceUpload.evidence_id)
+        .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
+        .where(Evidence.person_id == person_id)
+    ).scalars().all()
 
     bind = db.get_bind()
     inspector = sa_inspect(bind)
@@ -1143,6 +1148,13 @@ def fulfil_approved_deletion(
             db.query(EvidenceUpload).filter(
                 EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
             ).delete(synchronize_session=False)
+        # The upload bytes are a separately persisted child record. Delete by the
+        # pre-erasure evidence keys with direct SQL as a deterministic final pass.
+        for upload_evidence_id in evidence_upload_ids_to_erase:
+            db.execute(
+                text("DELETE FROM evidence_uploads WHERE evidence_id = :evidence_id"),
+                {"evidence_id": str(upload_evidence_id)},
+            )
         # Also mark any remaining ORM evidence objects for deletion. This
         # prevents a loaded identity-map row from surviving a bulk/Core delete path.
         evidence_rows = db.query(Evidence).filter(Evidence.person_id == person_id).all()
@@ -1180,6 +1192,17 @@ def fulfil_approved_deletion(
                 status_code=409,
                 detail="Evidence rows remain after the care-record deletion pass; request was not fulfilled",
             )
+        if evidence_upload_ids_to_erase:
+            remaining_uploads = db.execute(
+                select(EvidenceUpload.evidence_id).where(
+                    EvidenceUpload.evidence_id.in_(evidence_upload_ids_to_erase)
+                )
+            ).scalars().all()
+            if remaining_uploads:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Evidence upload bytes remain after the care-record deletion pass; request was not fulfilled",
+                )
 
         # Explicitly remove the two root identity rows after the dependent-row
         # closure. Foreign-key violations fail closed rather than reporting a
