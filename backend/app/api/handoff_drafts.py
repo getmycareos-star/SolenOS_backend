@@ -22,7 +22,7 @@ from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraf
 from app.models.care import Evidence, CareEvent, Caregiver
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
-from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion
+from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion, EvidenceObservation
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
@@ -994,7 +994,52 @@ def _fingerprint(value) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _daily_care_fingerprint_payload(event, linked_evidence: list, analyses: list | dict | None = None) -> dict:
+def _evidence_observation_snapshot(db: Session, person_id: str, evidence_ids: list[str]) -> dict:
+    if not evidence_ids:
+        return {"status": "available", "records": []}
+    if not inspect(db.get_bind()).has_table("evidence_observations"):
+        return {"status": "unavailable", "reason": "observation_history_not_installed", "records": []}
+    rows = db.query(EvidenceObservation).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id.in_(list(dict.fromkeys(str(value) for value in evidence_ids))),
+    ).order_by(EvidenceObservation.recorded_at.asc(), EvidenceObservation.id.asc()).all()
+    superseded_ids = {
+        str(item.supersedes_observation_id)
+        for item in rows if item.supersedes_observation_id
+    }
+    return {
+        "status": "available",
+        "records": [{
+            "observation_id": str(item.id),
+            "evidence_id": str(item.evidence_id),
+            "observation_kind": item.observation_kind,
+            "epistemic_status": item.epistemic_status,
+            "subject_label": item.subject_label,
+            "attribute": item.attribute,
+            "value_text": item.value_text,
+            "source_passage": item.source_passage,
+            "source_span_start": item.source_span_start,
+            "source_span_end": item.source_span_end,
+            "occurred_at": _iso(item.occurred_at),
+            "observed_at": _iso(item.observed_at),
+            "reported_at": _iso(item.reported_at),
+            "recorded_at": _iso(item.recorded_at),
+            "observer_label": item.observer_label,
+            "observer_caregiver_id": item.observer_caregiver_id,
+            "created_by_caregiver_id": item.created_by_caregiver_id,
+            "supersedes_observation_id": str(item.supersedes_observation_id) if item.supersedes_observation_id else None,
+            "correction_rationale": item.correction_rationale,
+            "source_state": "earlier_version" if str(item.id) in superseded_ids else "current_version",
+        } for item in rows],
+    }
+
+
+def _daily_care_fingerprint_payload(
+    event,
+    linked_evidence: list,
+    analyses: list | dict | None = None,
+    observations: dict | None = None,
+) -> dict:
     return {
         "id": event.id,
         "event_type": event.event_type,
@@ -1011,10 +1056,14 @@ def _daily_care_fingerprint_payload(event, linked_evidence: list, analyses: list
             for row in linked_evidence
         ],
         "daily_review_state": analyses or [],
+        "source_observations": observations or {"status": "not_checked", "records": []},
     }
 
 
-def _document_upload_fingerprint_payload(document, upload, assertion_snapshot: list | None = None) -> dict:
+def _document_upload_fingerprint_payload(
+    document, upload, assertion_snapshot: list | None = None,
+    observation_snapshot: dict | None = None,
+) -> dict:
     return {
         "evidence_id": document.id,
         "source_text_sha256": document.source_text_sha256,
@@ -1026,10 +1075,14 @@ def _document_upload_fingerprint_payload(document, upload, assertion_snapshot: l
         "mime_type": upload.mime_type,
         "upload_created_at": upload.created_at,
         "linked_assertions": assertion_snapshot or [],
+        "source_observations": observation_snapshot or {"status": "not_checked", "records": []},
     }
 
 
-def _document_extraction_fingerprint_payload(extraction, binary_sha256: str, assertion_snapshot: list | None = None) -> dict:
+def _document_extraction_fingerprint_payload(
+    extraction, binary_sha256: str, assertion_snapshot: list | None = None,
+    observation_snapshot: dict | None = None,
+) -> dict:
     return {
         "id": extraction.id,
         "source_evidence_id": extraction.source_evidence_id,
@@ -1041,6 +1094,7 @@ def _document_extraction_fingerprint_payload(extraction, binary_sha256: str, ass
         "updated_at": extraction.updated_at,
         "binary_sha256": binary_sha256,
         "linked_assertions": assertion_snapshot or [],
+        "source_observations": observation_snapshot or {"status": "not_checked", "records": []},
     }
 
 
