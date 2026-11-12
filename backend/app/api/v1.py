@@ -9,7 +9,7 @@ import hashlib
 from app.core.database import get_db
 from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.capture_review import persist_capture_analysis
+from app.services.capture_review import persist_capture_analysis, persist_source_grounded_daily_observations
 from app.services.uncertainty import persist_source_clarification_questions
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
@@ -898,9 +898,17 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         learning_pipeline_status = "unavailable"
 
     # Extraction reads the saved evidence row, not the browser request body.
+    natural_language_update = (
+        event_type == "daily_care_entry"
+        and detail.get("capture_kind") == "natural_language_update"
+        and isinstance(detail.get("notes"), str)
+    )
+    # The extractor must read the caregiver's actual sentence, not the JSON
+    # envelope used to persist the complete original capture and its metadata.
     source_text = (
-        evidence.source_text
-        if evidence is not None
+        detail["notes"]
+        if natural_language_update
+        else evidence.source_text if evidence is not None
         else (event.description or "")
     )[:12_000]
     qwen_status = "unavailable"
@@ -920,10 +928,43 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         if isinstance(qwen_candidates, dict)
         else []
     )
+    if natural_language_update and qwen_status == "available" and evidence is not None:
+        try:
+            persisted_observation_count = persist_source_grounded_daily_observations(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=evidence.id,
+                source_event_id=event.id,
+                source_text=source_text,
+                candidates=qwen_candidates,
+                reported_at=event.recorded_at,
+            )
+            db.commit()
+            for candidate in observations:
+                if isinstance(candidate, dict):
+                    candidate["review_status"] = "recorded_as_reported_observation"
+            assessment_status = (
+                "completed" if persisted_observation_count
+                else "no_supported_observations"
+            )
+        except Exception:
+            db.rollback()
+            assessment_status = "failed"
+            logger.exception(
+                "Could not persist source-grounded Daily Care observations for event %s",
+                event.id,
+            )
+    else:
+        assessment_status = "pending" if qwen_status == "available" else "failed"
+
     stage_statuses = {
         "extraction": "available" if qwen_status == "available" else "failed",
-        "assessment": "pending" if qwen_status == "available" else "failed",
-        "review": "required" if observations else "not_required",
+        "assessment": assessment_status,
+        "review": (
+            "not_required" if natural_language_update
+            else "required" if observations else "not_required"
+        ),
     }
     execution_status = {
         "source_preservation": "verified",
@@ -966,7 +1007,11 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 source_record_type="care_event",
                 source_record_id=event.id,
                 evidence_ids=[evidence.id] if evidence is not None else [],
-                questions=qwen_candidates.get("open_questions") or [],
+                questions=(
+                    []
+                    if natural_language_update
+                    else qwen_candidates.get("open_questions") or []
+                ),
             )
             # Persist source-linked questions independently of later Delta/
             # change-intelligence work; a reconciliation failure must not erase them.
