@@ -8,6 +8,8 @@ from app.models.memory import (
 )
 from app.models.care import Insight as InsightModel
 from app.models.care_continuity import CareAssertion, CareRecordRelationship
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 
 
 class SavePipelineEvent:
@@ -83,28 +85,29 @@ class LearningEngine:
                 return
 
             original.assertion_status = "superseded"
-            replacement = CareAssertion(
-                person_id=person_id,
-                subject_type=original.subject_type,
-                subject_id=original.subject_id,
-                field=original.field,
-                assertion_kind=original.assertion_kind,
-                asserted_value=corrected_text,
-                source_event_id=None,
-                source_label="Caregiver correction (not independently verified)",
-                source_text=(
-                    f"Correction ID: {correction.id}; target assertion: {original.id}; "
-                    f"original value: {original.asserted_value}; corrected value: {corrected_text}; "
-                    f"reason: {reason or 'Not supplied'}"
+            replacement = create_assertion(
+                self.db,
+                CareAssertionCreate(
+                    person_id=person_id,
+                    subject_type=original.subject_type,
+                    subject_id=original.subject_id,
+                    field=original.field,
+                    assertion_kind=original.assertion_kind,
+                    epistemic_state="reported",
+                    asserted_value=corrected_text,
+                    source_event_id=None,
+                    source_label="Caregiver correction (not independently verified)",
+                    source_text=(
+                        f"Correction ID: {correction.id}; target assertion: {original.id}; "
+                        f"original value: {original.asserted_value}; corrected value: {corrected_text}; "
+                        f"reason: {reason or 'Not supplied'}"
+                    ),
+                    evidence_ids=[],
+                    created_by_caregiver_id=correction.caregiver_id,
+                    updated_by_caregiver_id=correction.caregiver_id,
                 ),
-                evidence_ids=[],
-                assertion_status="reported",
-                epistemic_state="reported",
-                observed_at=None,
-                created_by_caregiver_id=correction.caregiver_id,
+                commit=False,
             )
-            self.db.add(replacement)
-            self.db.flush()
             self.db.add_all([
                 CareRecordRelationship(
                     person_id=person_id,
