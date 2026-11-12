@@ -1651,6 +1651,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     jobs = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.person_id == person_id,
         QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow != "document_lifecycle",
         QwenBackgroundJob.status.in_(["queued", "processing", "failed", "completed"]),
     ).with_for_update().all()
     jobs = [
