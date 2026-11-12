@@ -688,7 +688,7 @@ def get_situation(
         .all()
     )
     open_question_rows = [
-        row for row in open_question_rows if has_valid_caregiver_necessity(row)
+        row for row in open_question_rows if has_valid_caregiver_necessity(row, db, person_id)
     ]
     unresolved_conflict_rows = (
         db.query(ContradictionModel)
