@@ -1523,7 +1523,7 @@ def test_medication_authoring_and_review_are_person_scoped():
             name="Other Caregiver",
             email="medication-other@example.invalid",
             relationship="Family",
-            person_id=foreign_person_id,
+            person_id=foreign_person.id,
         )
         db.add_all([foreign_person, foreign_caregiver])
         db.commit()
