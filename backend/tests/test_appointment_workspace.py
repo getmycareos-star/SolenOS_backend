@@ -1488,6 +1488,44 @@ def test_fresh_companion_session_retrieves_only_accepted_appointment_assertions(
 
 
 
+def test_appointment_workspace_follow_up_is_system_tracked_without_assuming_caregiver_owner(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    saved = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={
+            "status": "follow_up_pending",
+            "payload": {
+                "visit_purpose": "Check pending result",
+                "followUps": [{
+                    "action": "Check whether the clinic has released the result",
+                    "due": "2026-11-15T09:00:00-05:00",
+                    "status": "pending",
+                }],
+            },
+        },
+    )
+    assert saved.status_code == 201, saved.text
+
+    listed = test_client.get(
+        "/api/v1/open-loops?loop_type=follow_up",
+        headers=headers,
+    )
+    assert listed.status_code == 200, listed.text
+    items = listed.json().get("items", [])
+    managed = next(
+        item for item in items
+        if item.get("source_type") == "appointment_workspace"
+        and item.get("source_id", "").startswith(saved.json()["id"] + ":")
+    )
+    assert managed["owner_role"] == "unassigned"
+    assert managed["owner_label"] is None
+    assert managed["deadline_timezone"] == "UTC-05:00"
+    assert managed["status"] == "open"
+    assert managed["outcome_status"] == "outcome_unknown"
+
+
 def test_appointment_follow_up_uses_persistent_open_loop_and_requires_verified_closure(client):
     test_client, owner, other = client
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
