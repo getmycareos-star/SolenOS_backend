@@ -542,3 +542,50 @@ def test_extraction_limit_fails_explicitly_without_silent_truncation(client):
     original = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
     assert original.status_code == 200, original.text
     assert len(original.content) == 100_001
+
+
+def test_scan_crop_and_rotation_create_ocr_derivative_without_mutating_original():
+    from types import SimpleNamespace
+    from app.api.document_lifecycle import _scan_adjusted_image
+
+    original = Image.new("RGB", (100, 200), "white")
+    evidence = SimpleNamespace(extra_metadata=__import__("json").dumps({
+        "capture": {"method": "scan"},
+        "scan_processing": {
+            "rotation_degrees": 90,
+            "crop_insets_percent": {"top": 10, "right": 20, "bottom": 10, "left": 10},
+        },
+    }))
+    derivative, changed = _scan_adjusted_image(original, evidence)
+    assert changed is True
+    assert derivative.size == (140, 80)
+    assert original.size == (100, 200)
+    assert original.getpixel((0, 0)) == (255, 255, 255)
+    derivative.close()
+    original.close()
+
+
+def test_snap_photo_does_not_receive_document_scan_adjustments():
+    from types import SimpleNamespace
+    from app.api.document_lifecycle import _scan_adjusted_image
+
+    original = Image.new("RGB", (100, 200), "white")
+    evidence = SimpleNamespace(extra_metadata='{"capture":{"method":"snap"},"scan_processing":{"rotation_degrees":90,"crop_insets_percent":{"left":20}}}')
+    derivative, changed = _scan_adjusted_image(original, evidence)
+    assert changed is False
+    assert derivative is original
+    assert derivative.size == (100, 200)
+    original.close()
+
+
+def test_invalid_scan_adjustment_metadata_is_rejected():
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.api.document_lifecycle import _scan_adjusted_image
+
+    original = Image.new("RGB", (100, 200), "white")
+    evidence = SimpleNamespace(extra_metadata='{"capture":{"method":"scan"},"scan_processing":{"rotation_degrees":999}}')
+    with pytest.raises(HTTPException) as error:
+        _scan_adjusted_image(original, evidence)
+    assert error.value.status_code == 422
+    original.close()
