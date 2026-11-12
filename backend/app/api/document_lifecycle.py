@@ -556,6 +556,16 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "source_evidence_id": analysis.source_evidence_id,
         "extraction_status": analysis.extraction_status,
         "extraction_method": details.get("extraction_method"),
+        "page_count": details.get("page_count") or 1,
+        "unreadable_page_numbers": [
+            int(match.group(1))
+            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)", analysis.source_text or "")
+            if "[No readable text detected on this page]" in (
+                (analysis.source_text or "")[match.end():re.search(r"(?m)^\\[Page\\s+\\d+", analysis.source_text or "", pos=match.end()).start()]
+                if re.search(r"(?m)^\\[Page\\s+\\d+", analysis.source_text or "", pos=match.end())
+                else (analysis.source_text or "")[match.end():]
+            )
+        ],
         "source_text_sha256": hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest(),
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
