@@ -11,6 +11,7 @@ from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
 from app.models.collaboration import ConsentRecord, EvidenceUpload
@@ -850,13 +851,19 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
     change_intelligence_status = "available"
     try:
-        reconcile_person_change_intelligence(db, person_id)
+        execution = execute_care_continuity_reconciliation(
+            db,
+            person_id,
+            workflow=event_type,
+            source_event_id=event.id,
+            source_evidence_id=evidence.id if evidence is not None else None,
+        )
         db.commit()
     except Exception:
         db.rollback()
         change_intelligence_status = "unavailable"
         logger.exception(
-            "Change intelligence reconciliation failed after durable capture event %s",
+            "Shared care-continuity execution failed after durable capture event %s",
             event.id,
         )
 
