@@ -190,15 +190,15 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
             CareAssertion.subject_type == payload.subject_type,
             CareAssertion.subject_id == payload.subject_id,
             CareAssertion.field == payload.field,
-            CareAssertion.assertion_kind == "current_state",
+            CareAssertion.assertion_kind.in_((
+                "current_state", "document_reviewed_observation", "time_bound_observation",
+            )),
             CareAssertion.id != assertion.id,
             CareAssertion.assertion_status.in_(["reported", "review_required", "accepted", "caregiver_reviewed"]),
         )
         .order_by(CareAssertion.recorded_at.asc())
         .all()
     )
-    if assertion.assertion_kind != "current_state":
-        peers = []
     conflicts = [peer for peer in peers if _value_key(peer.asserted_value) != _value_key(assertion.asserted_value)]
     if conflicts:
         evidence_ids = list(dict.fromkeys(
@@ -213,16 +213,30 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
                 Contradiction.subject_type == payload.subject_type,
                 Contradiction.subject_id == payload.subject_id,
                 Contradiction.field == payload.field,
-                Contradiction.resolution_status == "unresolved",
+                Contradiction.resolution_status.in_(("unresolved", "reopened", "qualified", "partially_resolved")),
             )
             .first()
         )
         conflict_text = "Competing source assertions require review; no assertion was selected as true. Reported values: " + " | ".join(descriptions)
         source_assertion_ids = list(dict.fromkeys([peer.id for peer in conflicts] + [assertion.id]))
+        evidence_ids = list(dict.fromkeys(
+            [item for peer in conflicts for item in (peer.evidence_ids or [])]
+            + list(payload.evidence_ids or [])
+        ))
+        # Dated document observations may describe a different point in the
+        # care journey. Preserve the conflict as qualified rather than treating
+        # the values as simultaneous; undated competing current-state reports
+        # remain unresolved. Neither path chooses a winner.
+        has_distinct_time_context = bool(assertion.event_time_text) or any(
+            bool(peer.event_time_text) for peer in conflicts
+        )
+        proposed_conflict_status = "qualified" if has_distinct_time_context else "unresolved"
         if contradiction:
             contradiction.description = conflict_text
             contradiction.evidence_ids = evidence_ids
             contradiction.source_assertion_ids = list(dict.fromkeys((contradiction.source_assertion_ids or []) + source_assertion_ids))
+            if contradiction.resolution_status != "unresolved":
+                contradiction.resolution_status = proposed_conflict_status
         else:
             contradiction = Contradiction(
                 person_id=payload.person_id,
@@ -232,7 +246,7 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
                 description=conflict_text,
                 evidence_ids=evidence_ids,
                 source_assertion_ids=source_assertion_ids,
-                resolution_status="unresolved",
+                resolution_status=proposed_conflict_status,
             )
             db.add(contradiction)
     if commit:
