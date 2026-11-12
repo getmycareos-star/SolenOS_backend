@@ -979,10 +979,10 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             id=f"baseline-{scenario['scenario_id']}",
             person_id=person.id,
             subject_type="symptom",
-            subject_id="sleep",
+            subject_id=scenario["initial_lcr"]["assertions"][0]["topic"],
             field="symptom_reported_state",
             assertion_kind="time_bound_observation",
-            asserted_value="usual sleep stable",
+            asserted_value=scenario["initial_lcr"]["assertions"][0]["value"],
             source_label="Initial LCR baseline (reported)",
             source_text="Known initial state supplied by the scenario fixture.",
             evidence_ids=[],
@@ -1017,22 +1017,12 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 "clinician_summary": claim[:140],
             }
             topic = event.get("topic")
-            if topic == "sleep" and event.get("classification") != "duplicate_same_occurrence":
-                value = "poor sleep" if "poor sleep" in claim else "sleep improved"
+            if event.get("assertion_name") and event.get("classification") != "duplicate_same_occurrence":
                 result["symptoms"] = [{
                     "change_type": "new",
-                    "name": "sleep",
+                    "name": event["assertion_name"],
                     "previous": None,
-                    "current": value,
-                    "evidence_excerpt": claim,
-                    "certainty": "supported",
-                }]
-            elif topic == "cognition":
-                result["symptoms"] = [{
-                    "change_type": "new",
-                    "name": "confusion",
-                    "previous": None,
-                    "current": "increased confusion",
+                    "current": event["assertion_value"],
                     "evidence_excerpt": claim,
                     "certainty": "supported",
                 }]
