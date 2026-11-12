@@ -723,7 +723,7 @@ def reconcile_information_gaps_from_accepted_assertions(
 
     assertions = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
-        CareAssertion.assertion_kind == "current_state",
+        CareAssertion.assertion_kind.in_(("current_state", "document_reviewed_observation")),
         CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
         CareAssertion.epistemic_state.in_(("reported", "observed", "verified")),
         CareAssertion.review_after_days.is_not(None),
