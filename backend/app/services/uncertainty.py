@@ -66,7 +66,7 @@ def _question_is_answered_by_current_lcr(
         CareAssertionModel.person_id == person_id,
         CareAssertionModel.subject_type == "person",
         CareAssertionModel.subject_id == person_id,
-        CareAssertionModel.assertion_kind == "current_state",
+        CareAssertionModel.assertion_kind.in_(["current_state", "document_reviewed_observation"]),
         CareAssertionModel.assertion_status.in_(["accepted", "caregiver_reviewed"]),
     ).all()
     for assertion in assertions:
