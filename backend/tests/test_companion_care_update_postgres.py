@@ -92,4 +92,8 @@ def test_postgres_companion_persists_conversation_without_creating_care_updates(
         assert captured
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
+        # This workflow uses a disposable PostgreSQL database shared with the
+        # other integration tests. Dropping all ORM-known tables here is unsafe:
+        # migration-owned tables such as care_delta_runs can have dependents
+        # (care_delta_items) that are intentionally outside this test's metadata.
+        # The job discards the database after the workflow completes.
