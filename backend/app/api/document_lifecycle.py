@@ -160,7 +160,7 @@ def _blocked_page_numbers(source_text: str) -> list[int]:
     return [
         int(match.group(1))
         for match in re.finditer(
-            r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed: (?:exceeds the 20-megapixel OCR limit|OCR page limit exceeded)\]",
+            r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed: (?:exceeds the 20-megapixel OCR limit|OCR page limit exceeded|image exceeds the OCR processing limit)\]",
             source_text or "",
         )
     ]
