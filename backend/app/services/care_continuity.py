@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
 from app.models.care import CareEvent, Evidence
 from app.models.action import Action
+from app.models.open_loop import OpenLoopRecord
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority, ResolutionMechanism
@@ -581,6 +582,69 @@ def next_best_questions(
             "source_ids": [str(action.id)],
             "intended_answerer_role": answerer_role,
             "_weight": 20,
+        })
+
+    # Appointment follow-ups become caregiver questions only when the
+    # saved workspace explicitly marks the item blocked and supplies a
+    # specific question, decision dependency, rationale, and same-record
+    # evidence. A due date or missing owner alone never creates a question.
+    blocked_appointment_followups = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == person_id,
+        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+        OpenLoopRecord.status == "blocked",
+    ).order_by(OpenLoopRecord.created_at.asc(), OpenLoopRecord.id.asc()).all()
+    for loop in blocked_appointment_followups:
+        assessment = next((
+            item.get("clarification_assessment")
+            for item in (loop.evidence or [])
+            if isinstance(item, dict)
+            and isinstance(item.get("clarification_assessment"), dict)
+        ), None)
+        if not isinstance(assessment, dict):
+            continue
+        question_text = assessment.get("question")
+        rationale = assessment.get("necessity_rationale")
+        dependency = assessment.get("decision_dependency")
+        evidence_ids = list(dict.fromkeys(
+            str(value) for value in (assessment.get("evidence_ids") or []) if value
+        ))
+        # Evidence IDs are persisted alongside the structured assessment in
+        # the loop's source event; validate them against this person's record.
+        if not evidence_ids:
+            evidence_ids = list(dict.fromkeys(
+                str(value)
+                for item in (loop.evidence or []) if isinstance(item, dict)
+                for value in (item.get("evidence_ids") or [])
+                if value
+            ))
+        valid_ids = {
+            str(row[0]) for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).all()
+        } if evidence_ids else set()
+        if not (
+            isinstance(question_text, str) and question_text.strip().endswith("?")
+            and isinstance(rationale, str) and rationale.strip()
+            and isinstance(dependency, str) and dependency.strip()
+            and evidence_ids and valid_ids == set(evidence_ids)
+        ):
+            continue
+        candidates.append({
+            "question": question_text.strip()[:300],
+            "subject_type": "appointment_follow_up",
+            "subject_id": str(loop.id),
+            "priority": "informational",
+            "necessity": "necessary",
+            "necessity_rationale": rationale.strip(),
+            "decision_dependency": dependency.strip(),
+            "reason": "The saved appointment follow-up is explicitly blocked pending the source-backed clarification.",
+            "evidence_ids": evidence_ids,
+            "source_kind": "appointment_workspace_follow_up",
+            "source_id": str(loop.id),
+            "source_ids": [str(loop.id)],
+            "intended_answerer_role": assessment.get("intended_answerer_role") or "not_known",
+            "_weight": 25,
         })
 
     gaps = db.query(InformationGap).filter(
