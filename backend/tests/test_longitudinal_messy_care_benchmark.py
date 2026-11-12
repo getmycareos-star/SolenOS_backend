@@ -1552,7 +1552,7 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
                 field="medication_status",
                 assertion_kind="current_state",
                 asserted_value="active",
-                source_label="Existing caregiver-reviewed medication record",
+                source_label="Existing medication record awaiting source verification",
                 source_text="Existing medication list records the evening tablet as active.",
                 evidence_ids=[saved_ids[0]],
                 assertion_status="reported",
@@ -1574,7 +1574,7 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
                 evidence_ids=[saved_ids[1]],
                 assertion_status="reported",
                 epistemic_state="reported",
-                created_by_caregiver_id=sarah.id,
+                created_by_caregiver_id=james.id,
             ),
         )
         # Helen's administration statement is a separate event report. It does
