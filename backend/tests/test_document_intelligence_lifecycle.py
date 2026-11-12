@@ -120,7 +120,8 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
 
         understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
         assert understood.status_code == 201, understood.text
-        assert understood.json()["review_required"] is True
+        assert understood.json()["review_required"] is False
+        assert understood.json()["review_available"] is True
         assert understood.json()["written_to_lcr"] is False
         assert all(item["source_quote"] in source for item in understood.json()["observations"])
 
