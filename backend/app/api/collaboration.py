@@ -360,6 +360,8 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 item.collected_by_caregiver_id,
             ) if value
         )
+    caregiver_ids.update(str(item.caregiver_id) for item in documents.values() if item.caregiver_id)
+    caregiver_ids.update(str(item.created_by_caregiver_id) for item in appointments.values() if item.created_by_caregiver_id)
     caregiver_names = {
         str(item.id): item.name
         for item in db.query(Caregiver).filter(
@@ -465,6 +467,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "source_text": item.source_text or "",
                 "source_excerpt": (item.source_text or "")[:700],
                 "recorded_at": item.created_at.isoformat() if item.created_at else None,
+                "entered_by": caregiver_names.get(str(item.caregiver_id or "")),
                 "record_status": item.extraction_status,
             })
         elif record.get("record_type") == "appointment" and record_id in appointments:
@@ -476,6 +479,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                     item.preparation_notes or "", json.dumps(item.medication_questions, ensure_ascii=False) if item.medication_questions else "",
                 ) if part),
                 "source_excerpt": " — ".join(part for part in (item.title, item.provider or "", item.preparation_notes or "") if part)[:700],
+                "entered_by": caregiver_names.get(str(item.created_by_caregiver_id or "")),
                 "record_status": item.status,
                 "related_evidence_ids": [str(value) for value in (item.evidence_ids or [])],
                 "related_evidence": [
