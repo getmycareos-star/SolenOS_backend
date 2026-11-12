@@ -321,3 +321,21 @@ def test_corrected_linked_observation_blocks_a_current_incident_total():
     )
     assert provenance["claims"][0]["support_status"] == "aggregate_not_validated"
     assert "corrected" in provenance["claims"][0]["aggregate_review"]["interpretation_limit"]
+
+def test_no_matching_events_does_not_support_a_zero_incident_claim():
+    aggregate = build_distinct_event_aggregate(
+        [],
+        topic="unsteadiness",
+        start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
+        window_label="this calendar month",
+    )
+    assert aggregate["status"] == "no_matching_records"
+    assert aggregate["count"] == 0
+    provenance = build_claim_provenance(
+        "Your mother had zero incidents of unsteadiness this month.",
+        [],
+        [aggregate],
+    )
+    assert provenance["claims"][0]["support_status"] == "aggregate_not_validated"
+    assert "does not establish that no incident occurred" in provenance["claims"][0]["aggregate_review"]["interpretation_limit"]
