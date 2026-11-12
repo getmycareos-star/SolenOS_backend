@@ -189,6 +189,7 @@ def review_qwen_assistance_proposal(
                 db,
                 person_id,
                 workflow="qwen_assistance_summary_review",
+                source_caregiver_id=caregiver_id,
                 source_event_ids=event_ids,
                 source_evidence_ids=evidence_ids,
                 source_assertion_id=assertion_id,
