@@ -121,8 +121,9 @@ def sync_appointment_followups(
             loop.status = "open"
             loop.closed_at = None
             loop.cancellation_reason = None
-            loop.closure_result = "reopened_from_new_source_revision"
-            loop.closure_actor = "solenos_reconciliation"
+            loop.closure_result = None
+            loop.closure_actor = None
+            loop.closure_evidence = []
         loop.title = title
         loop.description = title
         loop.owner_label = owner_label
