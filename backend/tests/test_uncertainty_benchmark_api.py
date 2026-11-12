@@ -125,7 +125,7 @@ def test_unknown_assessment_persists_and_projects_as_unknown(uncertainty_api_db)
 
 
 @pytest.mark.session_security
-def test_analysis_propagates_missing_evidence_into_persisted_view_and_open_questions(
+def test_analysis_preserves_missing_evidence_without_creating_caregiver_questions(
     uncertainty_api_db,
 ):
     client = _client_for(uncertainty_api_db, "a")
@@ -171,7 +171,9 @@ def test_analysis_propagates_missing_evidence_into_persisted_view_and_open_quest
         params={"subject_type": "appointment", "subject_id": "appointment-unknown-1"},
     )
     assert questions.status_code == 200, questions.text
-    assert any(item.get("status") == "open" for item in questions.json())
+    assert questions.json() == []
+    assert payload["analysis"]["clarification_questions"] == []
+    assert payload["analysis"]["clarification_candidate_status"] == "not_assessed_not_caregiver_work"
 
 
 @pytest.mark.session_security
