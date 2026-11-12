@@ -309,6 +309,10 @@ def next_best_questions(
         prior = deduplicated[key]
         prior["evidence_ids"] = list(dict.fromkeys(prior["evidence_ids"] + item["evidence_ids"]))
         prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + (item.get("source_ids") or [item["source_id"]])))
+        if item.get("necessity") == "necessary" and prior.get("necessity") != "necessary":
+            prior["necessity"] = "necessary"
+            prior["necessity_rationale"] = item.get("necessity_rationale")
+            prior["decision_dependency"] = item.get("decision_dependency")
         if item["_weight"] > prior["_weight"]:
             prior["priority"] = item["priority"]
             prior["_weight"] = item["_weight"]
@@ -398,6 +402,7 @@ def next_best_questions(
                         + list(source_context["source_ids"])
                     ))
                     matching["reason"] = source_context["reason"]
+                    matching["necessity_assessment"] = source_context["necessity_assessment"]
                 existing.context = contexts
                 existing.priority = Priority(clean["priority"]) if _priority_weight(clean["priority"]) > _priority_weight(existing.priority) else existing.priority
                 existing.necessity = clean["necessity"]
