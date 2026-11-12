@@ -1191,12 +1191,22 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
         EvidenceModel.person_id == person_id,
         EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         EvidenceModel.type == "document",
-        EvidenceModel.evidence_status != "deleted_by_caregiver",
+        (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
     ).first()
     if predecessor is None:
         raise HTTPException(status_code=409, detail="The earlier document version is no longer available")
+    for source in (predecessor, replacement):
+        upload = db.query(EvidenceUpload).filter_by(evidence_id=source.id).first()
+        if upload is None:
+            raise HTTPException(status_code=409, detail="A document original is unavailable; version comparison was blocked")
+        raw_bytes = bytes(upload.content)
+        if len(raw_bytes) != upload.size_bytes or hashlib.sha256(raw_bytes).hexdigest() != upload.sha256:
+            raise HTTPException(status_code=409, detail="A document original failed its integrity check; version comparison was blocked")
 
     def latest_candidates(source_id: str):
+        upload = db.query(EvidenceUpload).filter_by(evidence_id=source_id).first()
+        if upload is None:
+            return None
         analyses = db.query(CaptureAnalysis).filter(
             CaptureAnalysis.person_id == person_id,
             CaptureAnalysis.caregiver_id == caregiver_id,
@@ -1208,6 +1218,11 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
                 continue
             intelligence = metadata.get("document_intelligence")
             if analysis.extraction_status != "available" or not isinstance(intelligence, dict):
+                return None
+            if metadata.get("binary_sha256") != upload.sha256:
+                return None
+            source_text = analysis.source_text or ""
+            if hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest() != intelligence.get("source_text_sha256"):
                 return None
             # Candidate overflow is a review-batching state, not an
             # incomplete page extraction. Compare the complete persisted
