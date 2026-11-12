@@ -205,6 +205,23 @@ def deliver_pending_web_pushes(db=None, now=None):
         # A delivery can become stale before its retry time arrives. Cancel it
         # even when it is no longer eligible for the due query below; otherwise
         # superseded/in-app-only messages remain pending forever.
+        in_app_only_pending = (
+            session.query(CarePushDelivery)
+            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
+            .filter(
+                CarePushDelivery.status == "pending",
+                CareNotification.status == "active",
+                CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
+            )
+            .all()
+        )
+        for delivery in in_app_only_pending:
+            delivery.status = "cancelled"
+            delivery.last_error_code = "in_app_only_category"
+            delivery.last_error_message = "This care message stays in the in-app inbox."
+        if in_app_only_pending:
+            session.commit()
+
         stale_pending = (
             session.query(CarePushDelivery)
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
@@ -213,7 +230,6 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CarePushDelivery.status == "pending",
                 or_(
                     CareNotification.status != "active",
-                    CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
                     CarePushSubscription.revoked_at.is_not(None),
                 ),
             )
