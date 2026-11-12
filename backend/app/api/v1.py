@@ -953,6 +953,9 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 evidence_ids=[evidence.id] if evidence is not None else [],
                 questions=qwen_candidates.get("open_questions") or [],
             )
+            # Persist source-linked questions independently of later Delta/
+            # change-intelligence work; a reconciliation failure must not erase them.
+            db.commit()
         execution = execute_care_continuity_reconciliation(
             db,
             person_id,
