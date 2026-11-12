@@ -286,16 +286,14 @@ def _extract_legacy_doc(content: bytes) -> str:
         extracted = result.stdout.decode("utf-8-sig").strip()
     except UnicodeDecodeError:
         extracted = result.stdout.decode("cp1252", errors="replace").strip()
-        if image_processing_failure:
-            return _bounded_extraction(
-                f"[Image OCR]\n[Page 1 OCR]\n[Page not processed: {image_processing_failure}]",
-                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
-            )
-        if not extracted:
-            return _bounded_extraction(
-                "[Image OCR]\n[Page 1 OCR]\n[No readable text detected on this page]",
-                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
-            )
+    if not extracted:
+        raise HTTPException(status_code=422, detail="No readable text was found in the legacy Word document")
+    return extracted
+
+
+def _extract_rtf(content: bytes) -> str:
+    """Conservatively decode common RTF text controls without executing embedded objects."""
+    try:
         source = content.decode("latin-1")
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=422, detail="The saved RTF document could not be decoded") from exc
@@ -506,9 +504,11 @@ def _extract(
                         raise
                     if exc.status_code == 413:
                         page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR page limit exceeded]")
+                    else:
                         # OCR execution failed; this page remains retryable.
                         page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR engine error]")
                 except Exception:
+                    # Rendering or OCR exceptions are processing failures, not proof of unreadability.
                     page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR processing error]")
                 finally:
                     if image is not None:
@@ -525,51 +525,15 @@ def _extract(
             if rendered is not None:
                 rendered.close()
         extracted = "\n\n".join(page_texts).strip()
-        if not extracted:
-            raise HTTPException(
-                status_code=422,
-                detail="No readable text was found after OCR. The original document remains preserved.",
+        if image_processing_failure:
+            return _bounded_extraction(
+                f"[Image OCR]\n[Page 1 OCR]\n[Page not processed: {image_processing_failure}]",
+                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
             )
-        method = "server_pdf_text_plus_tesseract_ocr" if any(native_pages) else "server_tesseract_ocr_pdf"
-        return _bounded_extraction(extracted, method)
-    if mime.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp")):
-        try:
-            with Image.open(io.BytesIO(content)) as image:
-                if image.width * image.height > MAX_IMAGE_PIXELS:
-                    raise HTTPException(status_code=413, detail="Images are limited to 20 megapixels for OCR")
-                adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
-                try:
-                    try:
-                        extracted = _ocr_image(adjusted)
-                        quality_marker = _ocr_quality_marker(adjusted)
-                    except HTTPException as exc:
-                        if exc.status_code == 503:
-                            raise
-                        if exc.status_code == 413:
-                            extracted = ""
-                            quality_marker = None
-                            image_processing_failure = "image exceeds the OCR processing limit"
-                        else:
-                            extracted = ""
-                            quality_marker = None
-                            image_processing_failure = "OCR engine error"
-                    except Exception:
-                        extracted = ""
-                        quality_marker = None
-                        image_processing_failure = "OCR processing error"
-                    else:
-                        image_processing_failure = None
-                finally:
-                    if used_scan_adjustments:
-                        adjusted.close()
-        except HTTPException:
-            raise
-        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-            raise HTTPException(status_code=422, detail="The saved image could not be decoded for OCR") from exc
         if not extracted:
-            raise HTTPException(
-                status_code=422,
-                detail="No readable text was found in the image. The original document remains preserved.",
+            return _bounded_extraction(
+                "[Image OCR]\n[Page 1 OCR]\n[No readable text detected on this page]",
+                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
             )
         page_content = "\n".join(value for value in (quality_marker, extracted) if value)
         return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{page_content}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
@@ -821,3 +785,106 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 previous_source_text=row.source_text or "",
             )
             retry_text = _apply_capture_page_number(retry_text, evidence)
+            if retry_text.strip() != (row.source_text or "").strip() or retry_method != metadata.get("extraction_method"):
+                retry_status, retry_metadata = _extraction_metadata(upload, retry_text, retry_method)
+                attempt_count = int(metadata.get("extraction_attempt_count") or 1) + 1
+                retry_metadata["extraction_attempt_count"] = attempt_count
+                retry_metadata["last_extraction_attempt_at"] = datetime.now(timezone.utc).isoformat()
+                has_intelligence = isinstance(metadata.get("document_intelligence"), dict)
+                has_review_history = bool(row.review_history)
+                if has_intelligence or has_review_history:
+                    retry_metadata["retry_of_analysis_id"] = row.id
+                    replacement = CaptureAnalysis(
+                        person_id=person_id,
+                        caregiver_id=caregiver_id,
+                        source_event_id=None,
+                        source_evidence_id=evidence_id,
+                        source_text=retry_text,
+                        extraction_status=retry_status,
+                        candidates=retry_metadata,
+                        review_history=[],
+                    )
+                    db.add(replacement)
+                    db.flush()
+                    metadata["superseded_by_analysis_id"] = replacement.id
+                    row.candidates = metadata
+                    db.commit()
+                    db.refresh(replacement)
+                    return _response(replacement)
+                row.source_text = retry_text
+                row.extraction_status = retry_status
+                metadata.update(retry_metadata)
+                row.candidates = metadata
+                db.commit()
+                db.refresh(row)
+                return _response(row)
+            db.commit()
+            db.refresh(row)
+            return _response(row)
+        db.commit()
+        db.refresh(row)
+        return _response(row)
+
+    source_text, method = _extract(upload, content, evidence)
+    source_text = _apply_capture_page_number(source_text, evidence)
+    extraction_status, extraction_metadata = _extraction_metadata(upload, source_text, method)
+    analysis = CaptureAnalysis(
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        source_event_id=None,
+        source_evidence_id=evidence_id,
+        source_text=source_text,
+        extraction_status=extraction_status,
+        candidates=extraction_metadata,
+        review_history=[],
+    )
+    db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
+    return _response(analysis)
+
+
+@router.get("/analyses/{analysis_id}")
+def get_document_extraction(analysis_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _identity(request, db)
+    analysis = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.id == analysis_id,
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
+    ).first()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Document extraction not found")
+    details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+    if details.get("kind") != "document_extraction_v1":
+        raise HTTPException(status_code=404, detail="Document extraction not found")
+    evidence = db.query(Evidence).filter(
+        Evidence.id == analysis.source_evidence_id,
+        Evidence.person_id == person_id,
+        Evidence.uploaded_by_caregiver_id == caregiver_id,
+        Evidence.type == "document",
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Document extraction not found")
+    upload = db.query(EvidenceUpload).filter(
+        EvidenceUpload.evidence_id == analysis.source_evidence_id
+    ).first()
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Original document is unavailable")
+    content = _verify_persisted_extraction(analysis, upload, db)
+    db.commit()
+    db.refresh(analysis)
+    details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+    intelligence = details.get("document_intelligence")
+    if isinstance(intelligence, dict) and intelligence.get("source_text_sha256"):
+        current_text_hash = hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest()
+        if intelligence["source_text_sha256"] != current_text_hash:
+            raise HTTPException(status_code=409, detail="The persisted extraction text changed after document understanding")
+    return {
+        **_response(analysis),
+        "extracted_text": analysis.source_text,
+        "document": {
+            "filename": details.get("filename"),
+            "mime_type": details.get("mime_type"),
+            "binary_sha256": details.get("binary_sha256"),
+        },
+    }
