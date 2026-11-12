@@ -413,6 +413,7 @@ def next_best_questions(
                 None,
             )
             existing_before = _open_question_state(existing) if existing is not None else None
+            prior_terminal_question = None
             if existing is None:
                 automatically_closed = next(
                     (
@@ -437,6 +438,21 @@ def next_best_questions(
                     clean["persisted_question_id"] = persisted_id
                     output.append(clean)
                     continue
+                else:
+                    prior_terminal_question = next(
+                        (
+                            row for row in matching_rows
+                            if row.status in {"answered", "declined", "closed"}
+                        ),
+                        None,
+                    )
+                    if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, clean):
+                        # A repeated reconciliation must not ask again after a
+                        # caregiver answered, declined, or manually closed it.
+                        persisted_id = prior_terminal_question.id
+                        clean["persisted_question_id"] = persisted_id
+                        output.append(clean)
+                        continue
             source_context = {
                 "source_kind": clean["source_kind"],
                 "source_id": clean["source_id"],
@@ -448,6 +464,9 @@ def next_best_questions(
                     "decision_dependency": clean.get("decision_dependency"),
                 },
             }
+            if prior_terminal_question is not None:
+                source_context["prior_terminal_question_id"] = prior_terminal_question.id
+                source_context["reassessment_trigger"] = "new_persisted_source_or_evidence_after_prior_answer_or_decline"
             if existing is None:
                 question = OpenQuestion(
                     person_id=person_id,
