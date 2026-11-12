@@ -1331,6 +1331,30 @@ def review_document_candidate(
             raise HTTPException(status_code=422, detail="The candidate is incomplete and cannot be accepted")
         document_field = _document_assertion_field(candidate)
         asserted_value = _document_asserted_value(candidate, subject, observation)
+        assertion_subject_type = "person"
+        assertion_subject_id = person_id
+        assertion_kind = "document_reviewed_observation"
+        assertion_epistemic_state = "reported"
+        review_after_days = 30
+        matched_medication_id = candidate.get("matched_lcr_medication_id")
+        if candidate.get("field_type") == "medication" and matched_medication_id:
+            source_instruction = quote.casefold()
+            medication_status = None
+            if re.search(r"\b(discontinued|discontinue)\b", source_instruction):
+                medication_status = "discontinued"
+            elif re.search(r"\b(stopped|stop)\b", source_instruction):
+                medication_status = "stopped"
+            elif re.search(r"\b(held|hold)\b", source_instruction):
+                medication_status = "held"
+            if medication_status:
+                document_field = "medication_status"
+                asserted_value = medication_status
+                assertion_subject_type = "medication"
+                assertion_subject_id = str(matched_medication_id)
+                assertion_kind = "current_state"
+                assertion_epistemic_state = "reported"
+                candidate_review_days = candidate.get("matched_lcr_medication_review_after_days")
+                review_after_days = candidate_review_days if isinstance(candidate_review_days, int) and candidate_review_days > 0 else None
         duplicate_of_evidence_id = _duplicate_of(evidence)
         duplicate_label = " · duplicate copy; not independent corroboration" if duplicate_of_evidence_id else ""
         page_label = str(candidate.get("page_number") or "unresolved")
@@ -1349,6 +1373,9 @@ def review_document_candidate(
             field=document_field,
             source_quote=quote,
             asserted_value=asserted_value,
+            subject_type=assertion_subject_type,
+            subject_id=assertion_subject_id,
+            assertion_kind=assertion_kind,
         )
         # Use ORM writes on this path so the CareStateRevision listener and
         # the document review event share the same database transaction. The
@@ -1359,19 +1386,20 @@ def review_document_candidate(
                 db,
                 CareAssertionCreate(
                     person_id=person_id,
-                    subject_type="person",
-                    subject_id=person_id,
+                    subject_type=assertion_subject_type,
+                    subject_id=assertion_subject_id,
                     field=document_field,
-                    assertion_kind="document_reviewed_observation",
+                    assertion_kind=assertion_kind,
                     asserted_value=asserted_value,
                     source_label=source_label,
                     source_text=quote,
                     evidence_ids=[evidence_id],
-                    # Document observations are source-attributed and accepted
-                    # by the caregiver, but remain time-bounded reports. A
-                    # review window lets the shared reconciler cover exact LCR
-                    # gaps without treating the document as permanently current.
-                    review_after_days=30,
+                    # A document candidate accepted by the caregiver remains
+                    # a reported source, not a clinically verified instruction.
+                    # For a matched medication status conflict, retain the
+                    # existing medication's review window and subject identity.
+                    review_after_days=review_after_days,
+                    epistemic_state=assertion_epistemic_state,
                     event_time_text=candidate.get("event_date") or None,
                     created_by_caregiver_id=caregiver_id,
                     updated_by_caregiver_id=caregiver_id,
