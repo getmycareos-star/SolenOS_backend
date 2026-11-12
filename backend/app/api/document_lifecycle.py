@@ -392,6 +392,12 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                         page_texts.append(f"[Page {index + 1} OCR]\n{combined_text}")
                     else:
                         page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
+                except HTTPException as exc:
+                    if exc.status_code == 503:
+                        # A missing OCR service is a document-level dependency failure,
+                        # not an unreadable-page result.
+                        raise
+                    page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
                 except Exception:
                     # Do not expose engine internals or discard the rest of the PDF.
                     page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
