@@ -563,6 +563,8 @@ def test_snap_care_photo_upload_is_persisted_without_document_ocr(client):
         metadata = __import__("json").loads(evidence.extra_metadata or "{}")
         assert metadata["capture"]["method"] == "snap"
         assert metadata["capture"]["captured_at"] == "2026-11-12T06:00:00+00:00"
+    with TestSessionLocal() as db:
+        assert db.query(QwenBackgroundJob).filter(QwenBackgroundJob.evidence_ids_json.contains(evidence_id)).count() == 0
     # Document OCR is intentionally not run against Snap care-photo evidence.
     extraction = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert extraction.status_code == 404, extraction.text
