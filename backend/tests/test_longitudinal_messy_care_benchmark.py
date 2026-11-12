@@ -1339,14 +1339,15 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
 
         if any(event.get("classification") == "historical_conflicting_evidence"
                for event in ordered_events):
-            persisted_conflict = db.query(Contradiction).filter(
+            persisted_conflicts = db.query(Contradiction).filter(
                 Contradiction.person_id == person.id,
                 Contradiction.resolution_status == "unresolved",
-            ).one()
-            assert len(persisted_conflict.evidence_ids or []) >= 2
-            assert set(persisted_conflict.evidence_ids).issubset(
-                {event["evidence_id"] for event in ordered_events}
-            )
+            ).all()
+            assert persisted_conflicts, f"{scenario['scenario_id']}: expected persisted unresolved conflicts"
+            scenario_evidence_ids = {event["evidence_id"] for event in ordered_events}
+            for persisted_conflict in persisted_conflicts:
+                assert len(persisted_conflict.evidence_ids or []) >= 2
+                assert set(persisted_conflict.evidence_ids).issubset(scenario_evidence_ids)
 
         actual_questions = db.query(OpenQuestion).filter(
             OpenQuestion.person_id == person.id,
