@@ -236,3 +236,75 @@ def test_assertion_epistemic_state_is_separate_from_review_lifecycle():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_different_observation_times_are_qualified_not_direct_conflicts():
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.core.database import Base
+    from app.main import app  # noqa: F401 - register all models
+    from app.models.care import Person
+    from app.models.uncertainty import Contradiction
+    from app.schemas.care_continuity import CareAssertionCreate
+    from app.services.care_continuity import create_assertion
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+    try:
+        person = Person(id="temporal-context-person", name="Temporal context test")
+        db.add(person)
+        db.commit()
+
+        first_time = datetime(2026, 11, 9, 8, 0, tzinfo=timezone.utc)
+        second_time = first_time + timedelta(hours=3)
+        first = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="orientation",
+                asserted_value="Repeatedly asked where her husband was",
+                source_label="Overnight caregiver observation",
+                source_text="Observed repeated questions overnight.",
+                observed_at=first_time,
+                epistemic_state="observed",
+            ),
+        )
+        second = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="orientation",
+                asserted_value="Seemed normal during a phone call",
+                source_label="Family telephone observation",
+                source_text="She seemed normal during my telephone call.",
+                observed_at=second_time,
+                epistemic_state="observed",
+            ),
+        )
+
+        conflict = db.query(Contradiction).filter_by(
+            person_id=person.id,
+            subject_id=person.id,
+            field="orientation",
+        ).one()
+        assert conflict.resolution_status == "qualified"
+        assert set(conflict.source_assertion_ids or []) == {first.id, second.id}
+        assert first.assertion_status == "reported"
+        assert second.assertion_status == "reported"
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
