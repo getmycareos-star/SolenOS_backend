@@ -480,6 +480,7 @@ def accept_responsibility_transfer(transfer_id: str, request: Request, db: Sessi
             "creator_caregiver_id": linked_open_loop.caregiver_id,
         }
         linked_open_loop.assigned_caregiver_id = profile.session_caregiver_id
+        linked_open_loop.owner_label = profile.name
         linked_open_loop.updated_at = now
         linked_open_loop.version = int(linked_open_loop.version or 0) + 1
         db.add(OpenLoopEvent(
