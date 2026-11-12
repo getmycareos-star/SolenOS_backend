@@ -199,7 +199,7 @@ def extract_review_candidates(
     source_event_id: str,
     source_evidence_id: str | None = None,
 ) -> dict:
-    """Return only verbatim-grounded, explicitly review-required candidate observations."""
+    """Return verbatim-grounded candidate suggestions for optional caregiver review."""
     bounded_source = (source_text or "").strip()[:12_000]
     if not bounded_source:
         return {"observations": [], "open_questions": []}
