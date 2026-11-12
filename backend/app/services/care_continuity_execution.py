@@ -87,12 +87,6 @@ def execute_care_continuity_reconciliation(
                 "The source evidence is not linked to the supplied source event"
             )
 
-    # Make pending assertions/review decisions visible to reconciliation in
-    # this same unit of work. The caller retains commit/rollback ownership.
-    db.flush()
-    reconcile_person_change_intelligence(db, person_id, reference_time)
-    db.flush()
-
     stages = {
         "source_preservation": "verified",
         "evidence": "verified" if evidence is not None else "not_applicable",
@@ -114,6 +108,12 @@ def execute_care_continuity_reconciliation(
                     f"Unsupported execution stage status: {name}={value}"
                 )
             stages[name] = value
+    # Make pending assertions/review decisions visible to reconciliation in
+    # this same unit of work. The caller retains commit/rollback ownership.
+    db.flush()
+    reconcile_person_change_intelligence(db, person_id, reference_time)
+    db.flush()
+
 
     # Retrieval is a read-only check against the same authorized LCR projection
     # consumed by caregiver-facing screens. A failed read does not erase the
