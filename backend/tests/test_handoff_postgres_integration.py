@@ -231,8 +231,10 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
         db.close()
 
     def grounded_qwen(records, purpose, audience):
-        daily = next(row for row in records if row["source_type"] == "daily_care_observation")
-        document = next(row for row in records if row["source_type"] == "document_extracted_text")
+        daily = next((row for row in records if row["source_type"] == "daily_care_observation"), None)
+        document = next((row for row in records if row["source_type"] == "document_extracted_text"), None)
+        if daily is None or document is None:
+            return {"status": "not_generated_no_fixture_sources", "provider": "ollama", "model": "qwen-postgres-integration-fixture", "sections": []}
         return {
             "status": "generated",
             "provider": "ollama",
