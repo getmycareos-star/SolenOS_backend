@@ -61,7 +61,10 @@ class LearningEngine:
         person_id = correction.person_id
 
         if target_type == "insight":
-            insight = self.db.query(InsightModel).filter(InsightModel.id == target_id).first()
+            insight = self.db.query(InsightModel).filter(
+                InsightModel.id == target_id,
+                InsightModel.person_id == person_id,
+            ).first()
             if insight:
                 old_description = insight.description
                 insight.description = corrected_text
