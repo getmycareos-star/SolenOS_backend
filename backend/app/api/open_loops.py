@@ -529,6 +529,8 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     requested_status = changes.pop("status", None)
     if requested_status:
         if requested_status not in ALL_STATES: raise HTTPException(status_code=422, detail="Invalid lifecycle status")
+        if requested_status == "deferred" and not (changes.get("review_at") or loop.review_at):
+            raise HTTPException(status_code=422, detail="Deferral requires a timezone-aware review time so the system can resume it")
         if loop.status in TERMINAL_STATES:
             raise HTTPException(status_code=409, detail="Terminal loops must use the explicit reopening endpoint")
         if requested_status in {"closed", "cancelled"}:
@@ -541,6 +543,8 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
         if deadline and not (changes.get("deadline_source") or loop.deadline_source):
             raise HTTPException(status_code=422, detail="A deadline requires an explicit source")
         loop.deadline_at = deadline
+    if "review_at" in changes:
+        loop.review_at = _utc(changes.pop("review_at"))
     if changes.get("deadline_source") is not None and changes["deadline_source"] not in {"explicit_user", "recorded_commitment", "system_policy"}:
         raise HTTPException(status_code=422, detail="Invalid deadline source")
     for field, value in changes.items():
