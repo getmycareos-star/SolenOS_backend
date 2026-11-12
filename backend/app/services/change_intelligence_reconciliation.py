@@ -8,6 +8,7 @@ from datetime import datetime
 import logging
 from typing import Optional
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent
@@ -63,6 +64,20 @@ def reconcile_person_change_intelligence(
                 CareAssertion.id.in_(protected_ids),
             ).all()
         }
+        # Some test/session configurations disable autoflush and retain a
+        # source assertion as a persistent identity-map object while a
+        # transaction-aware workflow is still assembling its revision rows.
+        # Count that object as preserved only if SQLAlchemy does not mark it
+        # deleted and the authenticated person scope matches.
+        for obj in list(db.identity_map.values()) + list(db.new):
+            if (
+                isinstance(obj, CareAssertion)
+                and str(obj.id) in protected_ids
+                and str(obj.person_id) == str(person_id)
+                and obj not in db.deleted
+                and not sa_inspect(obj).deleted
+            ):
+                present.add(str(obj.id))
         missing = set(protected_ids) - present
         if missing:
             same_person_rows = db.query(
