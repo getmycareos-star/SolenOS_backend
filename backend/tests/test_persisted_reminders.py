@@ -653,6 +653,16 @@ def test_web_push_failure_is_persisted_as_retry_scheduled_and_retried_once(monke
             notification_id=notification.id,
             subscription_id=subscription.id,
         ).one()
+        from app.models.notifications import DeliveryFailureEvent
+        failure = db.query(DeliveryFailureEvent).filter_by(delivery_id=delivery.id).one()
+        assert failure.delivery_type == "web_push"
+        assert failure.person_id == session["person"]["id"]
+        assert failure.caregiver_id == session["caregiver"]["id"]
+        assert failure.failure_code == "http_503"
+        assert failure.retryable is True
+        assert failure.resolved_at is None
+        assert failure.failure_detail_redacted == "Push provider rejected the request"
+
         assert delivery.status == "retry_scheduled"
         assert delivery.attempt_count == 1
         assert delivery.last_error_code == "http_503"
@@ -673,6 +683,9 @@ def test_web_push_failure_is_persisted_as_retry_scheduled_and_retried_once(monke
         assert delivery.status == "accepted"
         assert delivery.attempt_count == 2
         assert delivery.provider_accepted_at is not None
+        db.refresh(failure)
+        assert failure.resolved_at is not None
+        assert db.query(DeliveryFailureEvent).filter_by(delivery_id=delivery.id).count() == 1
         assert calls == ["failed", "accepted"]
         assert db.query(CarePushDelivery).filter_by(
             notification_id=notification.id,
