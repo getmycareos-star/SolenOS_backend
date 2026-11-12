@@ -1050,7 +1050,6 @@ def review_appointment_outcome_proposal(
         if decision == "accept" and assertion_id:
             # Re-attach the source assertion after the shared reconciliation
             # pass and verify it remains in this caller-owned transaction.
-            db.add(assertion)
             db.flush()
             persisted_assertion = db.query(CareAssertion.id).filter(
                 CareAssertion.id == assertion_id,
