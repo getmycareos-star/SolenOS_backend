@@ -127,12 +127,10 @@ def _unreadable_page_numbers(source_text: str) -> list[int]:
     return [
         int(match.group(1))
         for match in re.finditer(
-            r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[No readable text detected on this page\]",
+            r"(?m)^\\[Page\\s+(\\d+)\\s+OCR\\]\\n\\[No readable text detected on this page\\]",
             source_text or "",
         )
     ]
-
-
 def _unprocessed_page_numbers(source_text: str) -> list[int]:
     return [
         int(match.group(1))
