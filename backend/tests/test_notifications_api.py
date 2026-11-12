@@ -307,6 +307,20 @@ def test_web_push_provider_failure_is_never_recorded_as_accepted(monkeypatch):
             assert all(item.failure_code == "provider_error" for item in failures)
             assert [item.retryable for item in failures] == [True, True, True, True, False]
             assert all(item.resolved_at is None for item in failures)
+
+            from app.models.notifications import NotificationDeliveryAttempt
+            attempts = db.query(NotificationDeliveryAttempt).filter_by(
+                notification_id=notification.id,
+                channel="web_push",
+            ).order_by(NotificationDeliveryAttempt.attempt_number.asc()).all()
+            assert len(attempts) == 5
+            assert [item.attempt_number for item in attempts] == [1, 2, 3, 4, 5]
+            assert [item.result for item in attempts] == [
+                "retry_scheduled", "retry_scheduled", "retry_scheduled",
+                "retry_scheduled", "failed",
+            ]
+            assert all(item.failure_code == "provider_error" for item in attempts)
+            assert all(item.record_metadata["provider_accepted"] is False for item in attempts)
         finally:
             db.close()
     finally:
