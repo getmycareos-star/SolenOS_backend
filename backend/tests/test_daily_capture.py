@@ -1145,7 +1145,7 @@ def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
     try:
         seed_person_and_caregiver()
 
-        def fail_apply(self, correction):
+        def fail_apply(self, correction, *, commit=True):
             raise RuntimeError("injected correction learning failure")
 
         monkeypatch.setattr(api_v1.LearningEngine, "apply_correction", fail_apply)
