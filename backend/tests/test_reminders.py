@@ -350,3 +350,91 @@ def test_inactive_quiet_hours_flag_does_not_drop_due_reminder():
         ).count() == 1
     finally:
         db.close()
+
+
+
+def test_reminder_snooze_moves_due_time_and_records_caregiver_without_completing():
+    client = TestClient(app)
+    session = create_session(client, "Caregiver snooze")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    due_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=headers,
+        json={"person_id": session["person"]["id"], "title": "Follow up tomorrow", "due_at": due_at},
+    )
+    assert created.status_code == 201, created.text
+    reminder_id = created.json()["id"]
+    snooze_until = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    snoozed = client.patch(
+        f"/api/v1/reminders/{reminder_id}/snooze",
+        headers=headers,
+        json={"snooze_until": snooze_until},
+    )
+    assert snoozed.status_code == 200, snoozed.text
+    body = snoozed.json()
+    assert body["status"] == "open"
+    assert body["snoozed_by_caregiver_id"] == session["caregiver"]["id"]
+    assert body["snoozed_at"] is not None
+    assert body["snooze_count"] == 1
+    assert abs((datetime.fromisoformat(body["due_at"]) - datetime.fromisoformat(snooze_until)).total_seconds()) < 1
+    from app.models.reminder import CareReminder
+    db = TestSessionLocal()
+    try:
+        stored = db.query(CareReminder).filter_by(id=reminder_id).one()
+        assert stored.delivery_generation == 1
+        assert stored.status == "open"
+    finally:
+        db.close()
+
+
+def test_snooze_rejects_completed_reminder_and_cross_record_access():
+    client = TestClient(app)
+    first = create_session(client, "First snooze caregiver")
+    second = create_session(client, "Second snooze caregiver")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    created = client.post(
+        "/api/v1/reminders",
+        headers=first_headers,
+        json={
+            "person_id": first["person"]["id"],
+            "title": "Do not snooze after completion",
+            "due_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        },
+    )
+    reminder_id = created.json()["id"]
+    hidden = client.patch(
+        f"/api/v1/reminders/{reminder_id}/snooze",
+        headers=second_headers,
+        json={"snooze_until": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()},
+    )
+    assert hidden.status_code == 404
+    completed = client.patch(
+        f"/api/v1/reminders/{reminder_id}/complete",
+        headers=first_headers,
+        json={},
+    )
+    assert completed.status_code == 200
+    rejected = client.patch(
+        f"/api/v1/reminders/{reminder_id}/snooze",
+        headers=first_headers,
+        json={"snooze_until": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()},
+    )
+    assert rejected.status_code == 409
+
+
+def test_quiet_hours_use_caregiver_timezone_and_overnight_window():
+    from types import SimpleNamespace
+    from app.services.reminder_delivery import is_quiet_hours
+
+    preference = SimpleNamespace(
+        quiet_hours_enabled=True,
+        quiet_hours_start="21:00",
+        quiet_hours_end="08:00",
+        timezone_name="America/New_York",
+    )
+    # 02:00 local in New York during standard time.
+    assert is_quiet_hours(preference, datetime(2026, 1, 15, 7, 0, tzinfo=timezone.utc)) is True
+    # 10:00 local is outside the configured overnight quiet window.
+    assert is_quiet_hours(preference, datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)) is False
