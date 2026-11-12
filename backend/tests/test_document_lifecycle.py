@@ -213,6 +213,13 @@ def test_real_tesseract_ocr_extracts_scanned_pdf_with_page_provenance(client):
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert response.status_code == 201, response.text
     assert response.json()["extraction_method"] == "server_tesseract_ocr_pdf"
+    quality = response.json()["ocr_quality_by_page"]
+    assert len(quality) == 1
+    assert quality[0]["page_number"] == 1
+    assert quality[0]["method"] == "tesseract_word_confidence_heuristic"
+    assert quality[0]["is_probability"] is False
+    assert quality[0]["token_count"] > 0
+    assert "Handwriting may be misread" in quality[0]["handwriting_warning"]
     retrieved = test_client.get(
         f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
     )
