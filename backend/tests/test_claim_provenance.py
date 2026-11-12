@@ -236,12 +236,16 @@ def test_qwen_context_sources_are_tied_to_their_own_record_reference():
     records = context_lines_to_source_records([
         "Recorded care event [event-1]: She felt unsteady near the kitchen.",
         "Recorded appointment [appointment-1]: Routine visit scheduled.",
+        "Persisted extracted document [analysis-1] from evidence [original-file-1]: extracted_text=She felt unsteady.",
         "No matching source was found.",
     ])
     assert [(item["record_type"], item["record_id"]) for item in records] == [
         ("care_event", "event-1"),
         ("appointment", "appointment-1"),
+        ("document_extraction", "analysis-1"),
     ]
+    document = records[2]
+    assert document["related_evidence_ids"] == ["original-file-1"]
     provenance = build_claim_provenance("She felt unsteady near the kitchen.", records)
     assert provenance["claims"][0]["source_references"][0]["record_id"] == "event-1"
 
