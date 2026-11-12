@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -17,6 +17,10 @@ class CareReminder(Base):
     note = Column(Text, nullable=True)
     due_at = Column(DateTime(timezone=True), nullable=False, index=True)
     status = Column(String(16), nullable=False, default="open", server_default="open", index=True)
+    snoozed_at = Column(DateTime(timezone=True), nullable=True)
+    snoozed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    snooze_count = Column(Integer, nullable=False, default=0, server_default="0")
+    delivery_generation = Column(Integer, nullable=False, default=0, server_default="0")
     completed_at = Column(DateTime(timezone=True), nullable=True)
     completed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     completion_note = Column(Text, nullable=True)
