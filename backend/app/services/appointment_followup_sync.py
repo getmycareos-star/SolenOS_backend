@@ -63,8 +63,10 @@ def sync_appointment_followups(
         if source_id in current_source_ids:
             continue
         current_source_ids.add(source_id)
-        owner = item.get("owner")
+        owner = item.get("owner_label", item.get("owner"))
         owner_label = owner.strip()[:200] if isinstance(owner, str) and owner.strip() else None
+        raw_owner_role = item.get("owner_role")
+        owner_role = raw_owner_role.strip()[:100] if isinstance(raw_owner_role, str) and raw_owner_role.strip() else None
         due_text = item.get("due") if isinstance(item.get("due"), str) else None
         due_at = _aware_due(due_text)
         source_status = item.get("status") if isinstance(item.get("status"), str) else "not_recorded"
@@ -72,12 +74,13 @@ def sync_appointment_followups(
         evidence = [{
             "record_type": "appointment_workspace", "record_id": workspace_id,
             "source_type": SOURCE_TYPE, "reported_owner": owner_label,
+            "reported_owner_role": owner_role,
             "reported_due": due_text, "reported_status": source_status,
             "epistemic_status": "caregiver_reported",
             "interpretation_limit": "A reported follow-up is not proof that the action was completed or that the reported owner accepted responsibility.",
         }]
         fingerprint = hashlib.sha256(json.dumps({
-            "title": title, "owner": owner_label, "due": due_text, "status": source_status,
+            "title": title, "owner": owner_label, "owner_role": owner_role, "due": due_text, "status": source_status,
         }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
         loop = db.query(OpenLoopRecord).filter(
@@ -98,7 +101,7 @@ def sync_appointment_followups(
                     "Completion was reported in the appointment workspace; keep it reported until supported by completion evidence."
                     if reported_complete else None
                 ),
-                owner_role=None, owner_label=owner_label, source_type=SOURCE_TYPE, source_id=source_id,
+                owner_role=owner_role, owner_label=owner_label, source_type=SOURCE_TYPE, source_id=source_id,
                 source_fingerprint=fingerprint, evidence=evidence, uncertainty="reported",
                 deadline_at=due_at, deadline_source="explicit_user" if due_at else None,
                 deadline_timezone=str(due_at.tzinfo) if due_at else None,
@@ -133,6 +136,7 @@ def sync_appointment_followups(
             loop.closure_evidence = []
         loop.title = title
         loop.description = title
+        loop.owner_role = owner_role
         loop.owner_label = owner_label
         loop.deadline_at = due_at
         loop.deadline_source = "explicit_user" if due_at else None
