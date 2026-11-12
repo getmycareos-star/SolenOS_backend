@@ -135,7 +135,7 @@ def build_distinct_event_aggregate(
     if topic not in _EVENT_TOPIC_TERMS:
         return {"status": "unsupported_topic", "topic": topic, "count": None, "source_references": []}
     terms = _EVENT_TOPIC_TERMS[topic]
-    excluded_statuses = {"draft", "pending", "cancelled", "canceled", "rejected", "deleted", "superseded", "withdrawn"}
+    eligible_statuses = {"recorded", "completed", "occurred", "resolved", "accepted"}
     candidates = []
     start = start_at if start_at.tzinfo else start_at.replace(tzinfo=timezone.utc)
     end = end_at if end_at.tzinfo else end_at.replace(tzinfo=timezone.utc)
@@ -153,7 +153,7 @@ def build_distinct_event_aggregate(
         if not (start <= occurred < end):
             continue
         status = str(event.get("status") or "recorded").casefold()
-        if status in excluded_statuses:
+        if status not in eligible_statuses:
             continue
         searchable = " ".join(str(event.get(key) or "") for key in ("event_type", "title", "description", "tags")).casefold()
         if not any(term in searchable for term in terms):
@@ -230,7 +230,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
             topic = str(aggregate.get("topic") or "")
             topic_terms = _EVENT_TOPIC_TERMS.get(topic, ())
             mentions_topic = any(term in normalized_claim for term in topic_terms)
-            mentions_incident = bool(re.search(r"\b(?:incident|incidents|event|events|occasion|occasions)\b", normalized_claim))
+            mentions_incident = bool(re.search(r"\b(?:incident|incidents|event|events|occasion|occasions|episode|episodes)\b", normalized_claim))
             if statement_number is not None and mentions_topic and mentions_incident and statement_number == aggregate.get("count"):
                 aggregate_match = aggregate
                 break
