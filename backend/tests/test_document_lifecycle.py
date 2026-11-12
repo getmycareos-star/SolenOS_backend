@@ -807,7 +807,7 @@ def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatc
         assert metadata["scan_processing"]["crop_insets_percent"] == {
             "top": 10.0, "right": 20.0, "bottom": 10.0, "left": 10.0
         }
-        assert metadata["scan_processing"]["client_declared_review_status"] == "not_reviewed"
+        assert metadata["scan_processing"]["client_declared_review_status"] == "not_provided"
     assert observed["size"] != Image.open(io.BytesIO(original)).size
 
 
