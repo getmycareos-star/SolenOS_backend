@@ -268,6 +268,55 @@ def test_scanned_pdf_processes_more_than_25_pages_and_reports_partial_results(cl
     assert "Extracted page 30" in retrieved.json()["extracted_text"]
 
 
+def test_partial_extraction_retries_saved_original_without_duplicate_upload(client, monkeypatch):
+    from fastapi import HTTPException
+    from pypdf import PdfWriter
+    from app.api import document_lifecycle
+
+    test_client, session = client
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+    original = output.getvalue()
+    evidence_id = persist_document(session, original, "recoverable-two-page-scan.pdf", "application/pdf")
+    state = {"attempt": 1, "page": 0}
+
+    def page_ocr(_image):
+        state["page"] += 1
+        if state["attempt"] == 1 and state["page"] == 2:
+            raise HTTPException(status_code=422, detail="Temporary page OCR failure")
+        return f"Recovered page {state['page']}"
+
+    monkeypatch.setattr(document_lifecycle, "_ocr_image", page_ocr)
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    first = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert first.status_code == 201, first.text
+    assert first.json()["extraction_status"] == "partial"
+    assert first.json()["unreadable_page_numbers"] == [2]
+    analysis_id = first.json()["analysis_id"]
+
+    state["attempt"] = 2
+    state["page"] = 0
+    second = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert second.status_code == 201, second.text
+    assert second.json()["analysis_id"] == analysis_id
+    assert second.json()["extraction_status"] == "available"
+    assert second.json()["unreadable_page_numbers"] == []
+    assert second.json()["processed_page_numbers"] == [1, 2]
+
+    retrieved = test_client.get(f"/api/v1/documents/analyses/{analysis_id}", headers=auth)
+    assert retrieved.status_code == 200, retrieved.text
+    assert "Recovered page 2" in retrieved.json()["extracted_text"]
+    with TestSessionLocal() as db:
+        assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
+        assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 1
+        saved = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+        assert saved.sha256 == hashlib.sha256(original).hexdigest()
+        assert saved.content == original
+
+
 def test_real_upload_endpoint_feeds_document_extraction(client):
     test_client, session = client
     auth = {"Authorization": f"Bearer {session['access_token']}"}
