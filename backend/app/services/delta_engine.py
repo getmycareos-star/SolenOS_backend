@@ -20,6 +20,7 @@ from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
+from app.services.claim_provenance import build_claim_provenance
 
 
 DELTA_ENGINE_VERSION = "2026.11.12.3"
@@ -813,10 +814,62 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             "source_references": item["source_record_refs"],
         })
 
+    summary_source_records = []
+    if source_event_id:
+        summary_source_records.append({
+            "record_type": "care_event",
+            "record_id": str(source_event_id),
+            "label": "New care update",
+            "source_text": content,
+        })
+    summary_source_records.extend({
+        "record_type": "care_event",
+        "record_id": str(event.id),
+        "label": getattr(event, "title", None) or "Earlier care update",
+        "source_text": " ".join(part for part in (
+            getattr(event, "title", "") or "",
+            getattr(event, "description", "") or "",
+        ) if part),
+        "occurred_at": getattr(event, "occurred_at", None).isoformat() if getattr(event, "occurred_at", None) else None,
+        "recorded_at": getattr(event, "recorded_at", None).isoformat() if getattr(event, "recorded_at", None) else None,
+    } for event in prior_events)
+    summary_source_records.extend({
+        "record_type": "care_assertion",
+        "record_id": str(item.get("assertion_id")),
+        "label": str(item.get("field") or "Care record detail"),
+        "source_text": str(item.get("value") or ""),
+        "occurred_at": item.get("observed_at"),
+    } for item in active_state if item.get("assertion_id"))
+    summary_source_records.extend({
+        "record_type": "evidence",
+        "record_id": str(item.id),
+        "label": "Original note or document",
+        "source_text": item.source_text or "",
+        "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
+        "recorded_at": item.ingested_at.isoformat() if item.ingested_at else (item.uploaded_at.isoformat() if item.uploaded_at else None),
+    } for item in source_evidence_rows)
+    for summary_name in ("event_summary", "caregiver_summary", "clinician_summary"):
+        summary_text = str(result.get(summary_name) or "").strip()
+        if not summary_text:
+            continue
+        summary_provenance = build_claim_provenance(summary_text, summary_source_records)
+        for summary_index, summary_claim in enumerate(summary_provenance.get("claims", [])):
+            summary_status = summary_claim.get("support_status")
+            summary_refs = enrich_delta_source_references(summary_claim.get("source_references") or [])
+            delta_claims.append({
+                "claim_id": f"{summary_name}-{summary_index + 1}",
+                "claim_type": "summary",
+                "summary_field": summary_name,
+                "text": summary_claim.get("text") or summary_text,
+                "support_status": "matched_exact_source_wording" if summary_status == "matched_saved_wording" and summary_refs else "historical_only" if summary_status == "matched_historical_only" else "not_matched_to_source",
+                "validation_basis": "exact_saved_source_wording" if summary_status == "matched_saved_wording" and summary_refs else "historical_wording_only" if summary_status == "matched_historical_only" else "summary_statement_not_exactly_matched",
+                "source_references": summary_refs,
+            })
+
     result["claim_provenance"] = {
         "version": "delta-claim-provenance-v1",
         "coverage": "all_findings_linked" if delta_claims and all(
-            item["support_status"] in {"matched_source_and_state", "matched_competing_sources"}
+            item["support_status"] in {"matched_source_and_state", "matched_competing_sources", "matched_exact_source_wording"}
             for item in delta_claims
         ) else "some_findings_unmatched" if delta_claims else "no_findings",
         "claims": delta_claims,
