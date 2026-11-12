@@ -45,6 +45,7 @@ def execute_care_continuity_reconciliation(
     source_handoff_draft_revision_number: int | None = None,
     reconcile_lcr: bool = True,
     reference_time: datetime | None = None,
+    stage_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Validate persisted lineage and stage the shared LCR reconciliation.
 
@@ -221,6 +222,35 @@ def execute_care_continuity_reconciliation(
                 "The original caregiver-authored Companion message could not be verified"
             )
 
+    stages = {
+        "source_preservation": "verified",
+        "evidence": "verified" if evidence_rows else "not_applicable",
+        "source_message": "verified" if message is not None else "not_applicable",
+        "appointment_workspace_source": "verified" if appointment_workspace is not None else "not_applicable",
+        "appointment_workspace_revision": "verified" if appointment_revision is not None else "not_applicable",
+        "handoff_draft": "verified" if handoff_draft is not None else "not_applicable",
+        "handoff_draft_revision": "verified" if handoff_revision is not None else "not_applicable",
+        "extraction": "not_applicable",
+        "assessment": "not_applicable",
+        "review": "not_required",
+        "reconciliation": (
+            "staged_in_caller_transaction" if reconcile_lcr else "not_applicable_read_only_output"
+        ),
+        "longitudinal_retrieval": "not_verified",
+    }
+    if stage_statuses:
+        allowed = {
+            "extraction": {"available", "pending", "failed", "not_applicable"},
+            "assessment": {"available", "pending", "failed", "not_applicable"},
+            "review": {"required", "completed", "not_required", "pending"},
+        }
+        for name, value in stage_statuses.items():
+            if name not in allowed or value not in allowed[name]:
+                raise CareContinuityExecutionError(
+                    f"Unsupported execution stage status: {name}={value}"
+                )
+            stages[name] = value
+
     # Make pending assertions/review decisions visible to reconciliation in
     # this same unit of work. The caller retains commit/rollback ownership.
     db.flush()
@@ -245,16 +275,6 @@ def execute_care_continuity_reconciliation(
         "source_appointment_workspace_revision_id": source_appointment_workspace_revision_id,
         "source_handoff_draft_id": source_handoff_draft_id,
         "source_handoff_draft_revision_number": source_handoff_draft_revision_number,
-        "stages": {
-            "source_preservation": "verified",
-            "evidence": "verified" if evidence_rows else "not_applicable",
-            "source_message": "verified" if message is not None else "not_applicable",
-            "appointment_workspace_source": "verified" if appointment_workspace is not None else "not_applicable",
-            "appointment_workspace_revision": "verified" if appointment_revision is not None else "not_applicable",
-            "handoff_draft": "verified" if handoff_draft is not None else "not_applicable",
-            "handoff_draft_revision": "verified" if handoff_revision is not None else "not_applicable",
-            "reconciliation": "staged_in_caller_transaction" if reconcile_lcr else "not_applicable_read_only_output",
-            "longitudinal_retrieval": "not_verified",
-        },
+        "stages": stages,
         "transaction_owner": "caller",
     }
