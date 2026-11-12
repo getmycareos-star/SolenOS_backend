@@ -364,16 +364,26 @@ class UncertaintyEngine:
             if claim.subject_type != payload["subject_type"] or claim.subject_id != payload["subject_id"]:
                 raise ValueError("A clarification question must use the linked claim's subject scope.")
         if payload.get("necessity", "not_assessed") == "necessary":
-            # A human-facing request must be grounded in a persisted source and
-            # explain the concrete care decision that cannot proceed without it.
+            # A human-facing request must be grounded in persisted evidence,
+            # not merely a database row that may itself have no source.
             linked_evidence = list(payload.get("evidence_ids") or [])
             if claim is not None:
-                linked_evidence = list(dict.fromkeys(linked_evidence + list(claim.evidence_ids or [])))
-                payload["evidence_ids"] = linked_evidence or None
-            if not linked_evidence and claim is None:
+                linked_evidence.extend(claim.evidence_ids or [])
+                if claim.source_event_id:
+                    source_event = self.db.query(CareEventModel).filter(
+                        CareEventModel.id == claim.source_event_id,
+                        CareEventModel.person_id == scoped_person_id,
+                    ).first()
+                    if source_event is not None:
+                        linked_evidence.extend(source_event.evidence_ids or [])
+            linked_evidence = self._validate_person_evidence(
+                scoped_person_id, list(dict.fromkeys(linked_evidence))
+            )
+            if not linked_evidence:
                 raise ValueError(
-                    "A necessary caregiver question requires persisted source evidence or a linked care assertion."
+                    "A necessary caregiver question requires persisted source evidence linked to this care record."
                 )
+            payload["evidence_ids"] = linked_evidence
         allowed_answerer_roles = {
             "person_receiving_care", "reporting_caregiver", "other_caregiver",
             "professional", "not_known",
@@ -473,11 +483,29 @@ class UncertaintyEngine:
         if new_necessity == "necessary" and not _has_decision_dependency(context_for_necessity):
             raise ValueError("A necessary caregiver question must identify the current care decision that depends on the answer.")
         if new_necessity == "necessary":
-            linked_evidence = update_data.get("evidence_ids", db_question.evidence_ids) or []
-            if not linked_evidence and not db_question.claim_id:
+            linked_evidence = list(update_data.get("evidence_ids", db_question.evidence_ids) or [])
+            if db_question.claim_id:
+                linked_claim = self.db.query(CareAssertionModel).filter(
+                    CareAssertionModel.id == db_question.claim_id,
+                    CareAssertionModel.person_id == db_question.person_id,
+                ).first()
+                if linked_claim is not None:
+                    linked_evidence.extend(linked_claim.evidence_ids or [])
+                    if linked_claim.source_event_id:
+                        source_event = self.db.query(CareEventModel).filter(
+                            CareEventModel.id == linked_claim.source_event_id,
+                            CareEventModel.person_id == db_question.person_id,
+                        ).first()
+                        if source_event is not None:
+                            linked_evidence.extend(source_event.evidence_ids or [])
+            linked_evidence = self._validate_person_evidence(
+                db_question.person_id, list(dict.fromkeys(linked_evidence))
+            )
+            if not linked_evidence:
                 raise ValueError(
-                    "A necessary caregiver question requires persisted source evidence or a linked care assertion."
+                    "A necessary caregiver question requires persisted source evidence linked to this care record."
                 )
+            update_data["evidence_ids"] = linked_evidence
         new_status = update_data.get("status", db_question.status)
         allowed_statuses = {"open", "answered", "declined", "closed", "unresolved"}
         if new_status not in allowed_statuses:
