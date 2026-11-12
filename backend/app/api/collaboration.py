@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.services.epistemic_contract import assertion_information_status
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
@@ -3357,6 +3358,10 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         assertion_context: list[str] = []
         for assertion in approved_assertions:
             source_assertion_ids.append(str(assertion.id))
+            information_status, interpretation_limit = assertion_information_status(
+                assertion.epistemic_state,
+                assertion.assertion_status,
+            )
             assertion_context.append(
                 "Caregiver-attributed LCR assertion (status preserved): "
                 + json.dumps({
@@ -3369,17 +3374,10 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                     "evidence_ids": [str(value) for value in (assertion.evidence_ids or [])],
                     "source_text": (assertion.source_text or "")[:500],
                     "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                    "epistemic_state": assertion.epistemic_state or "reported",
                     "status": assertion.assertion_status,
-                    "information_status": (
-                        "caregiver_accepted_assertion" if assertion.assertion_status == "accepted"
-                        else "caregiver_reviewed_legacy_assertion" if assertion.assertion_status == "caregiver_reviewed"
-                        else "caregiver_reported_assertion"
-                    ),
-                    "interpretation_limit": (
-                        "Caregiver-attributed report admitted to the LCR as unverified; do not present it as established fact."
-                        if assertion.assertion_status == "reported"
-                        else "Caregiver-reviewed assertion; preserve source attribution and recorded wording."
-                    ),
+                    "information_status": information_status,
+                    "interpretation_limit": interpretation_limit,
                 }, ensure_ascii=False)
             )
         source_context.extend(assertion_context)
