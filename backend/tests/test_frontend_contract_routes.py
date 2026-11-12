@@ -1264,7 +1264,7 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
         reminder = created.json()
         reminder_id = reminder["id"]
         assert reminder["status"] == "open"
-        assert reminder["delivery_mode"] == "in_app_list_only"
+        assert reminder["delivery_mode"] == "in_app_notification_feed"
         assert reminder["notification_delivery_status"] == "not_sent"
         assert reminder["created_by_caregiver_id"] == caregiver_id
         assert reminder["due_at"].endswith(("Z", "+00:00")), reminder["due_at"]
@@ -1696,7 +1696,13 @@ def test_uncertainty_analysis_rejects_cross_person_scope_and_duplicate_evidence(
             },
         )
         assert assessment.status_code == 200, assessment.text
-        assessment_id = assessment.json()["assessment_id"]
+        assessment_body = assessment.json()
+        assessment_id = assessment_body["assessment_id"]
+        assert assessment_body["analysis"]["clarification_questions"] == []
+        assert assessment_body["analysis"]["clarification_candidate_status"] == "not_assessed_not_caregiver_work"
+        assert assessment_body["analysis"]["internal_clarification_candidates"], (
+            "The uncertainty assessment must retain candidate wording internally."
+        )
         questions = client.get(
             f"/api/v1/uncertainty/questions/{person_id}?status=open",
             headers=auth,
@@ -1710,7 +1716,9 @@ def test_uncertainty_analysis_rejects_cross_person_scope_and_duplicate_evidence(
                 for link in (question.get("context") or [])
             )
         ]
-        assert linked_questions, "Uncertainty clarification question was not durably linked to its assessment."
+        assert linked_questions == [], (
+            "An unassessed model-generated question must not become caregiver work."
+        )
     finally:
         teardown()
 
