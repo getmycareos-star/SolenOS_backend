@@ -3577,6 +3577,15 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             if owned_evidence_ids != set(evidence_ids):
                 # Do not disclose whether a missing ID belongs to another care record.
                 raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
+        if not (
+            source_event_id
+            or evidence_ids
+            or (isinstance(data.get("source_text"), str) and data["source_text"].strip())
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Every care statement must retain a source event, linked evidence record, or source text",
+            )
 
     if resource == "relationships" and data.get("source_type") == "situation" and data.get("target_type") == "situation":
         if data.get("relationship_type") not in {"related_to", "unrelated_to"}:
