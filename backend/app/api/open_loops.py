@@ -1062,9 +1062,8 @@ def _reopen_due_deferred_loops(db: Session, now: datetime) -> int:
 
 
 async def open_loop_maintenance_loop():
-    """Periodically reassess deadlines and relevance; never infer completion."""
+    """Recover due work immediately at startup, then reassess on the normal interval."""
     while True:
-        await asyncio.sleep(OPEN_LOOP_MAINTENANCE_INTERVAL_SECONDS)
         db = SessionLocal()
         try:
             now = datetime.now(timezone.utc)
@@ -1129,3 +1128,4 @@ async def open_loop_maintenance_loop():
             logger.exception("Open-loop maintenance failed; it will retry on the next interval")
         finally:
             db.close()
+        await asyncio.sleep(OPEN_LOOP_MAINTENANCE_INTERVAL_SECONDS)
