@@ -1133,12 +1133,10 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
-    db.commit()
-    db.refresh(db_correction)
-
     try:
+        db.flush()
         engine = LearningEngine(db)
-        engine.apply_correction(db_correction)
+        engine.apply_correction(db_correction, commit=False)
         engine.record_learning_event(
             db_correction.person_id,
             "correction_applied",
@@ -1146,21 +1144,28 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
             "correction",
             source_id=db_correction.id,
             caregiver_id=correction.caregiver_id,
+            commit=False,
         )
         engine.after_save(db_correction.person_id)
-        reconcile_person_change_intelligence(db, db_correction.person_id)
-        db.commit()
-    except Exception:
-        # The correction itself was committed above. Learning and projection
-        # updates are secondary; returning an error would invite duplicate
-        # correction submissions after an ambiguous client retry.
-        db.rollback()
-        logger.exception(
-            "Secondary correction processing failed after durable correction %s",
-            db_correction.id,
+        execution = execute_care_continuity_reconciliation(
+            db,
+            db_correction.person_id,
+            workflow="care_record_correction",
+            caregiver_id=correction.caregiver_id,
+            correction_id=db_correction.id,
         )
+        db.commit()
+        execution["stages"]["reconciliation"] = "committed"
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Correction and care-record reassessment could not be committed")
+        raise HTTPException(
+            status_code=503,
+            detail="The correction could not be saved with its care-record reassessment. Retry after refreshing the record.",
+        ) from exc
 
     db.refresh(db_correction)
+    db_correction.care_continuity_execution = execution
     return db_correction
 
 
