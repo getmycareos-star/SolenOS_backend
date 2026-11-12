@@ -23,6 +23,19 @@ Run commands from the repository's `backend` directory and follow the dependency
 
 Before considering a change complete, run the backend test suite and startup checks available in `.github/workflows/backend-validation.yml`. A passing local test suite does not prove that Railway is running the same commit, that production migrations are current, or that the live PostgreSQL schema is correct; those require separate deployment/readiness evidence.
 
+## Optional browser push notifications
+
+The API supports caregiver-scoped Web Push subscriptions. Configure these backend environment variables before enabling the browser control:
+
+- `VAPID_PUBLIC_KEY`: URL-safe base64 VAPID public key.
+- `VAPID_PRIVATE_KEY`: matching VAPID private key in PEM form; preserve newlines or encode them as `\\n`.
+- `VAPID_SUBJECT`: a contact URI such as `mailto:support@solenosai.net`.
+- `SECRET_KEY`: the stable production application secret; it also derives the at-rest encryption key for stored browser subscriptions. Rotating it requires caregivers to register their browser subscriptions again.
+
+The push worker stores provider acceptance, retries transient failures, and revokes expired endpoints. A provider-accepted receipt does **not** prove that a device displayed the notification. Push payloads intentionally contain no care details; the caregiver opens the authenticated app to review the notification feed.
+
+Android native push is a separate Firebase Cloud Messaging integration. It requires a real Firebase Android app configuration and service credentials; Web Push does not deliver to a Capacitor Android WebView.
+
 ## Product and safety principles
 
 1. **Trust over feature count:** prioritize continuity, accuracy, explainability, and reduced caregiver cognitive load.
