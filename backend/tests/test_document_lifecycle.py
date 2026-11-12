@@ -258,14 +258,15 @@ def test_scanned_pdf_processes_more_than_25_pages_and_reports_partial_results(cl
     payload = response.json()
     assert payload["extraction_status"] == "partial"
     assert payload["page_count"] == 30
-    assert payload["unreadable_page_numbers"] == [2]
-    assert payload["unprocessed_page_numbers"] == []
+    assert payload["unreadable_page_numbers"] == []
+    assert payload["unprocessed_page_numbers"] == [2]
     assert payload["processed_page_numbers"] == list(range(1, 31))
     assert calls["count"] == 30
     retrieved = test_client.get(f"/api/v1/documents/analyses/{payload['analysis_id']}", headers=auth)
     assert retrieved.status_code == 200, retrieved.text
     assert "[Page 2 OCR]" in retrieved.json()["extracted_text"]
-    assert "[No readable text detected on this page]" in retrieved.json()["extracted_text"]
+    assert "[Page not processed: OCR engine error]" in retrieved.json()["extracted_text"]
+    assert "[No readable text detected on this page]" not in retrieved.json()["extracted_text"]
     assert "Extracted page 30" in retrieved.json()["extracted_text"]
 
 
@@ -295,7 +296,8 @@ def test_partial_extraction_retries_saved_original_without_duplicate_upload(clie
     first = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert first.status_code == 201, first.text
     assert first.json()["extraction_status"] == "partial"
-    assert first.json()["unreadable_page_numbers"] == [2]
+    assert first.json()["unreadable_page_numbers"] == []
+    assert first.json()["unprocessed_page_numbers"] == [2]
     analysis_id = first.json()["analysis_id"]
 
     state["attempt"] = 2
