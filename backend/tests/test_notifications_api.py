@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models.notifications import CareNotification
+from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
 from app.models.privacy_delivery import NotificationReadReceipt
 
 
@@ -142,5 +142,64 @@ def test_notifications_feed_unread_count_and_read_are_scoped(monkeypatch):
             ).count() == 1
         finally:
             db.close()
+    finally:
+        teardown()
+
+def test_notification_feed_exposes_failed_push_delivery_truthfully(monkeypatch):
+    client, first, second = setup_client(monkeypatch)
+    try:
+        db = TestSession()
+        try:
+            subscription = CarePushSubscription(
+                id="failed-push-subscription",
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                endpoint_hash="f" * 64,
+                encrypted_subscription="encrypted-test-subscription",
+            )
+            notification = CareNotification(
+                id="failed-push-notification",
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                title="Call the clinic",
+                body="Ask about the appointment.",
+                category="reminder_due",
+                priority="normal",
+                source_event_id="appointment-follow-up-1",
+            )
+            db.add_all([subscription, notification])
+            db.flush()
+            db.add(CarePushDelivery(
+                id="failed-push-delivery",
+                notification_id=notification.id,
+                subscription_id=subscription.id,
+                status="failed",
+                attempt_count=5,
+                last_error_code="provider_error",
+                last_error_message="Push delivery could not be completed",
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.get(
+            "/api/v1/notifications?limit=100&offset=0",
+            headers={"Authorization": f"Bearer {first['access_token']}"},
+        )
+        assert response.status_code == 200, response.text
+        item = next(row for row in response.json()["items"] if row["id"] == "failed-push-notification")
+        assert item["push_delivery"]["status"] == "failed"
+        assert item["push_delivery"]["failed_count"] == 1
+        assert "remains available in your SolenOS inbox" in item["push_delivery"]["message"]
+        assert "provider_error" not in item["push_delivery"]["message"]
+        assert "delivered" not in item["push_delivery"]["message"].lower()
+
+        # Delivery outcomes remain scoped to the caregiver who owns the notification.
+        foreign = client.get(
+            "/api/v1/notifications?limit=100&offset=0",
+            headers={"Authorization": f"Bearer {second['access_token']}"},
+        )
+        assert foreign.status_code == 200, foreign.text
+        assert all(row["id"] != "failed-push-notification" for row in foreign.json()["items"])
     finally:
         teardown()
