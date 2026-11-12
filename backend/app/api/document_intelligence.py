@@ -16,6 +16,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -220,14 +221,16 @@ def list_document_intelligence(
         items.append(_response(analysis))
         if len(items) >= limit:
             break
-    jobs = db.query(QwenBackgroundJob).filter(
-        QwenBackgroundJob.person_id == person_id,
-        QwenBackgroundJob.caregiver_id == caregiver_id,
-        QwenBackgroundJob.workflow == "document_intake",
-        QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
-    ).order_by(QwenBackgroundJob.created_at.desc()).limit(500).all()
     processing_jobs = []
     seen_evidence_ids = set()
+    jobs = []
+    if inspect(db.get_bind()).has_table("qwen_background_jobs"):
+        jobs = db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.person_id == person_id,
+            QwenBackgroundJob.caregiver_id == caregiver_id,
+            QwenBackgroundJob.workflow == "document_intake",
+            QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
+        ).order_by(QwenBackgroundJob.created_at.desc()).limit(500).all()
     for job in jobs:
         try:
             evidence_ids = json.loads(job.evidence_ids_json or "[]")
