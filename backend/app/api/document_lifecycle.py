@@ -393,6 +393,12 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             raise HTTPException(status_code=422, detail="The email contains no readable message body")
         return _bounded_extraction(extracted, "server_email_text")
 
+    if mime == "application/vnd.ms-outlook" or filename.endswith(".msg"):
+        raise HTTPException(
+            status_code=415,
+            detail="Outlook .msg files are preserved, but extraction is not available on this server. Export the message as .eml or PDF and upload it again.",
+        )
+
     if mime == "application/msword" or filename.endswith(".doc"):
         raise HTTPException(
             status_code=415,
