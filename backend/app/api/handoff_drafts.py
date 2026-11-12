@@ -872,26 +872,25 @@ def save_handoff_draft_revision(
         raise HTTPException(status_code=413, detail="Draft content exceeds the supported size")
     current_sections = (draft.structured_content or {}).get("sections", [])
     source_sections_unchanged = edited_content.get("sections", []) == current_sections
+    notes = edited_content.get("caregiver_notes", [])
+    notes_valid = (
+        isinstance(notes, list)
+        and len(notes) <= 20
+        and all(
+            isinstance(note, dict)
+            and note.get("attribution") == "caregiver_authored_unverified"
+            and isinstance(note.get("text"), str)
+            and bool(note["text"].strip())
+            and len(note["text"]) <= 2000
+            for note in notes
+        )
+    )
     if draft.generation_status == "generated":
-        valid_content = source_sections_unchanged and _validate_draft_quotes(edited_content, draft.source_snapshot or {})
+        valid_content = source_sections_unchanged and notes_valid and _validate_draft_quotes(edited_content, draft.source_snapshot or {})
     else:
-        notes = edited_content.get("caregiver_notes", [])
         generation = edited_content.get("generation")
         generated_sections = generation.get("sections", []) if isinstance(generation, dict) else []
-        valid_content = (
-            source_sections_unchanged
-            and not generated_sections
-            and isinstance(notes, list)
-            and len(notes) <= 20
-            and all(
-                isinstance(note, dict)
-                and note.get("attribution") == "caregiver_authored_unverified"
-                and isinstance(note.get("text"), str)
-                and bool(note["text"].strip())
-                and len(note["text"]) <= 2000
-                for note in notes
-            )
-        )
+        valid_content = source_sections_unchanged and not generated_sections and notes_valid
     if not valid_content:
         raise HTTPException(status_code=422, detail="Draft edits must preserve sourced records exactly; caregiver notes are labelled as unverified reports")
     content_hash = _draft_content_hash(edited_content)
