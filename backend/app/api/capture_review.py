@@ -13,6 +13,7 @@ from app.schemas.capture_review import CaptureCandidateReview
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.lcr_context import build_lcr_context
 
 router = APIRouter(tags=["capture review"])
 
@@ -266,6 +267,24 @@ def review_capture_candidate(
     db.commit()
     if execution is not None:
         execution["stages"]["reconciliation"] = "committed"
+        try:
+            projection = build_lcr_context(
+                db,
+                person_id,
+                caregiver_id=caregiver_id,
+                limit_per_source=1,
+            )
+            retrieval_status = (
+                "available"
+                if not projection.get("missing_required_sources")
+                else "unavailable"
+            )
+        except Exception:
+            retrieval_status = "unavailable"
+        execution["stages"]["longitudinal_retrieval"] = retrieval_status
+        analysis.execution_status = dict(execution["stages"])
+        db.add(analysis)
+        db.commit()
     db.refresh(analysis)
 
     return {
