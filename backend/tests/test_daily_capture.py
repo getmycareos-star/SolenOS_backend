@@ -1827,7 +1827,7 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         assert receipt["success"] is True
         assert receipt["qwen_extraction_status"] == "available"
         assert receipt["qwen_review_required"] is False
-        assert receipt["execution_status"]["assessment"] == "completed"
+        assert receipt["execution_status"]["assessment"] == "available"
 
         db = TestingSessionLocal()
         try:
