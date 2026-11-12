@@ -3469,6 +3469,25 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             )).first():
                 raise HTTPException(status_code=404, detail="Source event was not found in this care record")
 
+        evidence_ids = data.get("evidence_ids") or []
+        if not isinstance(evidence_ids, list) or any(not isinstance(item, str) or not item.strip() for item in evidence_ids):
+            raise HTTPException(status_code=422, detail="evidence_ids must be a list of non-empty evidence IDs")
+        if len(evidence_ids) != len(set(evidence_ids)):
+            raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
+        if evidence_ids:
+            evidence_table = _table(db, "evidence")
+            owned_evidence_ids = {
+                str(row[0]) for row in db.execute(
+                    select(evidence_table.c.id).where(
+                        evidence_table.c.id.in_(evidence_ids),
+                        evidence_table.c.person_id == person_id,
+                    )
+                ).all()
+            }
+            if owned_evidence_ids != set(evidence_ids):
+                # Do not disclose whether a missing ID belongs to another care record.
+                raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
+
     if resource == "relationships" and data.get("source_type") == "situation" and data.get("target_type") == "situation":
         if data.get("relationship_type") not in {"related_to", "unrelated_to"}:
             raise HTTPException(status_code=422, detail="Situation relationships must be related_to or an explicit unrelated_to correction")
