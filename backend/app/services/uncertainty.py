@@ -66,10 +66,20 @@ def _question_is_answered_by_current_lcr(
         CareAssertionModel.person_id == person_id,
         CareAssertionModel.subject_type == "person",
         CareAssertionModel.subject_id == person_id,
-        CareAssertionModel.assertion_kind.in_(["current_state", "document_reviewed_observation"]),
+        CareAssertionModel.assertion_kind.in_([
+            "current_state", "document_reviewed_observation", "time_bound_observation",
+        ]),
         CareAssertionModel.assertion_status.in_(["accepted", "caregiver_reviewed"]),
     ).all()
+    now = datetime.now(timezone.utc)
     for assertion in assertions:
+        if assertion.assertion_kind in {"document_reviewed_observation", "time_bound_observation"}:
+            if not assertion.observed_at or not assertion.review_after_days or assertion.review_after_days <= 0:
+                continue
+            observed_at = assertion.observed_at
+            observed_at = observed_at.replace(tzinfo=timezone.utc) if observed_at.tzinfo is None else observed_at.astimezone(timezone.utc)
+            if now > observed_at + __import__("datetime").timedelta(days=assertion.review_after_days):
+                continue
         field_tokens = {
             token for token in re.findall(r"[a-z0-9]+", (assertion.field or "").replace("_", " ").casefold())
             if len(token) > 2
