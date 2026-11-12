@@ -136,7 +136,8 @@ async def process_one_qwen_job() -> bool:
         # The API container can start while the deployment migration command is
         # still creating the queue table. Avoid querying it before its DDL commits;
         # the poll loop retries after its normal idle wait.
-        if not inspect(db.get_bind()).has_table("qwen_background_jobs"):
+        schema = inspect(db.get_bind())
+        if not schema.has_table("qwen_background_jobs") or not schema.has_table("qwen_job_events"):
             return False
 
         now = datetime.now(timezone.utc)
