@@ -888,6 +888,52 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         canonical = candidate["canonical_candidate"]
         canonical["warnings"] = list(candidate.get("warnings") or canonical.get("warnings") or [])
 
+    # Compare medication candidates only against the existing current-medication
+    # projection, which already enforces same-person review windows and explicit
+    # active status. A match creates a professional clarification, never a
+    # medication change or an inferred administration instruction.
+    try:
+        from app.api.care_continuity import current_medication_records
+        medication_projection = current_medication_records(request, db)
+        active_medications = medication_projection.get("medications", [])
+    except Exception:
+        logger.exception("Current medication projection unavailable during document reconciliation")
+        active_medications = []
+        for candidate in grounded:
+            if candidate.get("field_type") == "medication":
+                candidate.setdefault("warnings", []).append(
+                    "SolenOS could not compare this medication candidate with the current medication record. Do not treat it as a current instruction without professional confirmation."
+                )
+    for candidate in grounded:
+        if candidate.get("field_type") != "medication":
+            continue
+        candidate_subject = re.sub(r"[^a-z0-9]+", "", str(candidate.get("subject") or "").casefold())
+        matching_medication = next(
+            (
+                item for item in active_medications
+                if candidate_subject
+                and candidate_subject == re.sub(r"[^a-z0-9]+", "", str(item.get("name") or "").casefold())
+            ),
+            None,
+        )
+        if matching_medication is None:
+            continue
+        question_id = _persist_medication_document_conflict_question(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            evidence_id=evidence_id,
+            analysis_id=analysis.id,
+            upload=upload,
+            candidate=candidate,
+            active_medication=matching_medication,
+        )
+        if question_id:
+            candidate["professional_confirmation_question_id"] = question_id
+            candidate.setdefault("warnings", []).append(
+                "This document appears to conflict with the current medication record. The instruction is unconfirmed; a prescribing professional or pharmacist must confirm it before any medication decision."
+            )
+            candidate["canonical_candidate"]["warnings"] = list(candidate["warnings"])
 
     metadata = copy.deepcopy(metadata)
     try:
