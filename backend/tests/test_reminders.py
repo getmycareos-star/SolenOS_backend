@@ -625,3 +625,96 @@ def test_web_push_public_key_requires_valid_vapid_subject(monkeypatch):
     )
     response = client.get("/api/v1/notifications/push/public-key", headers=headers)
     assert response.status_code == 503, response.text
+
+
+def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
+    from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    session = create_session(client, "Timezone change caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    now = datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc)
+    reminder = CareReminder(
+        person_id=session["person"]["id"],
+        created_by_caregiver_id=session["caregiver"]["id"],
+        title="Timezone change follow-up",
+        due_at=datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc),
+        status="open",
+    )
+    db = TestSessionLocal()
+    try:
+        db.add(reminder)
+        db.add(CareNotificationPreference(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            reminders_enabled=True,
+            quiet_hours_enabled=True,
+            quiet_hours_start="09:00",
+            quiet_hours_end="18:00",
+            timezone_name="America/New_York",
+        ))
+        db.commit()
+
+        # Noon in New York is inside the configured quiet window.
+        assert deliver_due_reminders(db=db, now=now) == 0
+        db.refresh(reminder)
+        assert reminder.notification_deferred_until is not None
+    finally:
+        db.close()
+
+    changed = client.put(
+        "/api/v1/notifications/preferences",
+        headers=headers,
+        json={"timezone_name": "Asia/Tokyo"},
+    )
+    assert changed.status_code == 200, changed.text
+    db = TestSessionLocal()
+    try:
+        db.refresh(reminder)
+        assert reminder.notification_deferred_until is None
+        # 02:00 in Tokyo is outside the configured 09:00-18:00 quiet window.
+        assert deliver_due_reminders(db=db, now=now) == 1
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id == reminder.id,
+            CareNotification.category == "reminder_due",
+        ).count() == 1
+    finally:
+        db.close()
+
+
+def test_push_subscription_endpoint_cannot_be_claimed_by_another_care_record(monkeypatch):
+    from types import SimpleNamespace
+    from app.api import push_notifications
+
+    monkeypatch.setattr(
+        push_notifications,
+        "get_settings",
+        lambda: SimpleNamespace(
+            vapid_public_key="public-key",
+            vapid_private_key="private-key",
+            vapid_subject="mailto:support@solenosai.net",
+            secret_key="test-secret-key-for-push-subscription-isolation",
+        ),
+    )
+    client = TestClient(app)
+    first = create_session(client, "Push subscription owner")
+    second = create_session(client, "Push subscription attacker")
+    payload = {
+        "endpoint": "https://fcm.googleapis.com/fcm/send/solenos-test-subscription",
+        "keys": {"p256dh": "test-public-key", "auth": "test-auth-secret"},
+    }
+    first_response = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+        json=payload,
+    )
+    assert first_response.status_code == 201, first_response.text
+
+    cross_record = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+        json=payload,
+    )
+    assert cross_record.status_code == 409, cross_record.text
