@@ -4849,7 +4849,7 @@ def update_care_notification_preferences(
         payload.quiet_hours_enabled, payload.quiet_hours_start,
         payload.quiet_hours_end, payload.timezone_name,
     )):
-        pending_pushes = db.query(CarePushDelivery).join(
+        pending_push_ids = db.query(CarePushDelivery.id).join(
             CareNotification, CareNotification.id == CarePushDelivery.notification_id
         ).filter(
             CareNotification.person_id == person_id,
@@ -4857,15 +4857,14 @@ def update_care_notification_preferences(
             CarePushDelivery.status == "pending",
         )
         if payload.reminders_enabled is False:
-            pending_pushes.filter(CareNotification.category == "reminder_due").update(
-                {CarePushDelivery.status: "cancelled"},
-                synchronize_session=False,
-            )
+            pending_push_ids = pending_push_ids.filter(CareNotification.category == "reminder_due")
+            db.query(CarePushDelivery).filter(
+                CarePushDelivery.id.in_(pending_push_ids.subquery())
+            ).update({CarePushDelivery.status: "cancelled"}, synchronize_session=False)
         else:
-            pending_pushes.update(
-                {CarePushDelivery.next_attempt_at: datetime.now(timezone.utc)},
-                synchronize_session=False,
-            )
+            db.query(CarePushDelivery).filter(
+                CarePushDelivery.id.in_(pending_push_ids.subquery())
+            ).update({CarePushDelivery.next_attempt_at: datetime.now(timezone.utc)}, synchronize_session=False)
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
         person_id=person_id, caregiver_id=caregiver_id,
