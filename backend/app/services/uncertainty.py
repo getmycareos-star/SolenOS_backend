@@ -51,6 +51,8 @@ def persist_source_clarification_questions(
         person_id, caregiver_id, source_kind, source_record_type, source_record_id
     )):
         raise ValueError("A care record, caregiver, and persisted source reference are required.")
+    if source_kind not in {"daily_capture_extraction", "document_extraction"}:
+        raise ValueError("Unsupported clarification source.")
     if source_record_type == "care_event":
         source_row = db.query(CareEventModel).filter(
             CareEventModel.id == source_record_id,
@@ -81,8 +83,8 @@ def persist_source_clarification_questions(
         ).first()
         if source_row is None:
             raise ValueError("The clarification source document is missing or belongs to another care record.")
-        if str(source_row.uploaded_by_caregiver_id) != str(caregiver_id):
-            raise ValueError("The clarification source document was not uploaded by the authenticated caregiver.")
+        # Another caregiver may review a document already saved in this same care record.
+        # The evidence row preserves its uploader; this question records the reviewer.
         linked_ids = list(dict.fromkeys([source_record_id, *[
             str(value) for value in (evidence_ids or []) if value
         ]]))
