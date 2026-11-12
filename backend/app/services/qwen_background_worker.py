@@ -166,6 +166,58 @@ async def process_one_qwen_job() -> bool:
         db.commit()
         db.refresh(job)
 
+        # Document intake reuses this durable PostgreSQL queue so extraction and
+        # review continue even if the caregiver closes the app after upload.
+        # It creates source-bound CaptureAnalysis candidates only; it never
+        # creates LCR assertions or a QwenModelOutput.
+        if job.workflow == "document_intake":
+            evidence_ids = json.loads(job.evidence_ids_json or "[]")
+            if not isinstance(evidence_ids, list) or not evidence_ids or len(evidence_ids) > 10:
+                raise ValueError("document_intake_evidence_scope_invalid")
+            from app.api.document_lifecycle import extract_saved_document
+            from app.api.document_intelligence import analyze_saved_document
+
+            scoped_request = SimpleNamespace(
+                state=SimpleNamespace(
+                    scoped_person_id=job.person_id,
+                    scoped_caregiver_id=job.caregiver_id,
+                )
+            )
+            completed = []
+            for evidence_id in evidence_ids:
+                if not isinstance(evidence_id, str) or not evidence_id.strip():
+                    raise ValueError("document_intake_evidence_id_invalid")
+                extraction = extract_saved_document(evidence_id, scoped_request, db)
+                intelligence = analyze_saved_document(evidence_id, scoped_request, db)
+                completed.append({
+                    "evidence_id": evidence_id,
+                    "analysis_id": extraction.get("analysis_id"),
+                    "intelligence_status": intelligence.get("intelligence_status"),
+                    "candidate_count": intelligence.get("candidate_count", 0),
+                })
+            job.status = "completed"
+            job.workflow = "document_intake"
+            job.result_text = json.dumps(completed)
+            job.completed_at = datetime.now(timezone.utc)
+            job.locked_at = None
+            job.error_code = None
+            db.add(QwenJobEvent(
+                job_id=job.id,
+                person_id=job.person_id,
+                caregiver_id=job.caregiver_id,
+                event_type="document_intake_completed",
+                from_status="processing",
+                to_status="completed",
+                metadata_json={
+                    "source_evidence_ids": evidence_ids,
+                    "analysis_count": len(completed),
+                    "review_required": True,
+                    "written_to_lcr": False,
+                },
+            ))
+            db.commit()
+            return True
+
         workflow = await _classify_task(job.task_text, job.context_text or "")
         job.workflow = workflow
         db.commit()
