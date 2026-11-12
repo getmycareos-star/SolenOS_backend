@@ -157,11 +157,11 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         idempotency_key=payload.idempotency_key,
         idempotency_request_sha256=request_fingerprint if payload.idempotency_key else None,
     ))
-    sync_appointment_followups(
-        db, person_id=person_id, caregiver_id=caregiver_id,
-        workspace_id=row.id, payload=payload.payload,
-    )
     try:
+        sync_appointment_followups(
+            db, person_id=person_id, caregiver_id=caregiver_id,
+            workspace_id=row.id, payload=payload.payload,
+        )
         db.commit()
         db.refresh(row)
     except IntegrityError as exc:
@@ -1101,11 +1101,11 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
         idempotency_key=payload.idempotency_key,
         idempotency_request_sha256=update_fingerprint if payload.idempotency_key else None,
     ))
-    sync_appointment_followups(
-        db, person_id=person_id, caregiver_id=caregiver_id,
-        workspace_id=row.id, payload=payload.payload,
-    )
     try:
+        sync_appointment_followups(
+            db, person_id=person_id, caregiver_id=caregiver_id,
+            workspace_id=row.id, payload=payload.payload,
+        )
         db.commit()
         db.refresh(row)
     except IntegrityError as exc:
