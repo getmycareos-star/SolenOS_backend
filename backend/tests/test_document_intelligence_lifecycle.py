@@ -78,9 +78,12 @@ def test_document_intelligence_defers_when_source_extraction_has_failed_pages(mo
     client = TestClient(app)
     try:
         session_data = create_record(client, "Incomplete document extraction caregiver")
+        newline = chr(10)
         source = (
-            "[Page 1 OCR]\\nPatient walked 20 metres with a frame.\\n\\n"
-            "[Page 2 OCR]\\n[Page not processed: OCR operation failed]"
+            "[Page 1 OCR]" + newline
+            + "Patient walked 20 metres with a frame." + newline + newline
+            + "[Page 2 OCR]" + newline
+            + "[Page not processed: OCR operation failed]"
         )
         evidence_id = save_original(session_data, source)
         auth = {"Authorization": f"Bearer {session_data['access_token']}"}
