@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -59,7 +60,7 @@ from app.services.qwen_gateway import (
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
-from app.services.claim_provenance import build_claim_provenance
+from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRProposal
 
 router = APIRouter(tags=["community and companion"])
@@ -83,6 +84,77 @@ def _medication_day_event_filter():
             CareEvent.description.ilike(pattern),
         ))
     return or_(*predicates)
+
+
+def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, question: str) -> list[dict]:
+    """Build a bounded count only for an explicitly requested supported topic/window."""
+    normalized = (question or "").casefold()
+    topic_terms = ("unsteadiness", "unsteady", "lost balance", "loss of balance", "wobbly", "stumbled", "staggered")
+    asks_for_count = bool(re.search(r"\\b(?:how many|number of|count|total|incidents|occasions)\\b", normalized))
+    if not asks_for_count or not any(term in normalized for term in topic_terms):
+        return []
+    if not re.search(r"\\bthis month\\b", normalized):
+        return [{
+            "status": "unsupported_time_window",
+            "topic": "unsteadiness",
+            "count": None,
+            "source_references": [],
+            "interpretation_limit": "The requested date range is not one of the supported count windows. No total is stated.",
+        }]
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    timezone_name = getattr(caregiver, "timezone", None) or "UTC"
+    try:
+        local_now = datetime.now(ZoneInfo(timezone_name))
+    except (ZoneInfoNotFoundError, ValueError):
+        local_now = datetime.now(timezone.utc)
+        timezone_name = "UTC"
+    local_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start_utc = local_start.astimezone(timezone.utc)
+    end_utc = (local_now + timedelta(microseconds=1)).astimezone(timezone.utc)
+    rows = (
+        db.query(CareEvent)
+        .filter(
+            CareEvent.person_id == person_id,
+            CareEvent.occurred_at >= start_utc,
+            CareEvent.occurred_at < end_utc,
+        )
+        .order_by(CareEvent.occurred_at.asc(), CareEvent.recorded_at.asc())
+        .limit(501)
+        .all()
+    )
+    truncated = len(rows) > 500
+    selected = rows[:500]
+    actor_ids = {str(row.created_by_caregiver_id) for row in selected if row.created_by_caregiver_id}
+    names = {
+        str(row.id): row.name
+        for row in db.query(Caregiver).filter(
+            Caregiver.person_id == person_id,
+            Caregiver.id.in_(actor_ids or {"__no_matching_caregiver__"}),
+        ).all()
+    }
+    aggregate = build_distinct_event_aggregate(
+        [{
+            "id": str(row.id),
+            "event_type": row.event_type,
+            "status": row.status,
+            "occurred_at": row.occurred_at,
+            "recorded_at": row.recorded_at.isoformat() if row.recorded_at else None,
+            "title": row.title,
+            "description": row.description or "",
+            "tags": " ".join(str(tag) for tag in (row.tags or [])),
+            "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
+            "entered_by": names.get(str(row.created_by_caregiver_id)),
+        } for row in selected],
+        topic="unsteadiness",
+        start_at=start_utc,
+        end_at=end_utc,
+        window_label=f"this calendar month ({local_start.strftime('%b %d')}–{local_now.strftime('%b %d, %Y')}, {timezone_name})",
+        truncated=truncated,
+    )
+    return [aggregate]
 
 
 class SharedFileInput(BaseModel):
