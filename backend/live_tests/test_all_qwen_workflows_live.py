@@ -117,7 +117,10 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
             assert medication_evidence_ids and set(medication_evidence_ids).intersection(data["source_evidence_ids"]), (
                 f"{workflow} did not retrieve the authorized medication source evidence: {data}"
             )
-            assert medication_event_id not in data["source_event_ids"], (
+            assert medication_event_id in data["source_event_ids"], (
+                f"{workflow} did not retrieve the medication-related care event: {data}"
+            )
+            assert event_id not in data["source_event_ids"], (
                 f"{workflow} included an unrelated sleep observation: {data}"
             )
         elif workflow in EVENT_WORKFLOWS:
