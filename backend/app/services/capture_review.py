@@ -45,7 +45,7 @@ def persist_capture_analysis(
 
 _TIME_REFERENCE = re.compile(
     r"\b(last night|yesterday evening|yesterday morning|yesterday|this morning|"
-    r"this afternoon|this evening|tonight|today|at breakfast|at lunch|at dinner)\b",
+    r"this afternoon|this evening|tonight|today|now|at breakfast|at lunch|at dinner)\b",
     re.IGNORECASE,
 )
 _HEDGE_REFERENCE = re.compile(
