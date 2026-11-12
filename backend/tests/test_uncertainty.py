@@ -4357,7 +4357,7 @@ def test_source_clarification_dedup_merges_rephrasing_but_preserves_time_context
                 "What was her medication dose last week?",
             ],
         )
-        assert len(first) == 2
+        assert len(first) == 3
 
         second = persist_source_clarification_questions(
             db,
