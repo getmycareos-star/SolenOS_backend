@@ -1300,6 +1300,8 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
             )
             if candidate is None:
                 return None
+            if candidate.epistemic_state not in {"reported", "observed", "verified"}:
+                return None
             if get_freshness(candidate).get("status") != "within_review_window":
                 return None
             return candidate
