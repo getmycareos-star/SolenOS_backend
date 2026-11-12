@@ -2039,3 +2039,65 @@ def test_uncertain_medication_change_report_never_overwrites_reviewed_medication
             db.close()
     finally:
         teardown_db()
+
+
+def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatch):
+    from app.api import v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum seemed more unsettled this morning, and ate lunch."
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [
+                    {
+                        "subject": "Mum",
+                        "observation": "unsettled",
+                        "source_quote": original_report,
+                        "review_status": "pending_review",
+                        "source_event_id": source_event_id,
+                    },
+                    {
+                        "subject": "Mum",
+                        "observation": "ate lunch",
+                        "source_quote": original_report,
+                        "review_status": "pending_review",
+                        "source_event_id": source_event_id,
+                    },
+                ],
+                "open_questions": [],
+            }
+
+        monkeypatch.setattr(api_v1, "extract_review_candidates", exact_source_candidates)
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "separate-clause-hedge-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        db = TestingSessionLocal()
+        try:
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=response.json()["evidence_ids"][0],
+            ).all()
+            by_value = {row.value_text: row for row in observations}
+            assert by_value["unsettled"].epistemic_status == "uncertain"
+            assert by_value["unsettled"].hedge_marker == "seemed"
+            assert by_value["ate lunch"].epistemic_status == "reported"
+            assert by_value["ate lunch"].hedge_marker is None
+        finally:
+            db.close()
+    finally:
+        teardown_db()
