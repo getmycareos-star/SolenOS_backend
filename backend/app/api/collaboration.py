@@ -335,6 +335,29 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             Caregiver.id.in_(caregiver_ids or {"__no_matching_caregiver__"}),
         ).all()
     }
+    evidence_relationship_status = {}
+    if evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
+        relationships = db.query(EvidenceSourceRelationship).filter(
+            EvidenceSourceRelationship.person_id == person_id,
+            or_(
+                EvidenceSourceRelationship.source_evidence_id.in_(evidence_ids),
+                EvidenceSourceRelationship.related_evidence_id.in_(evidence_ids),
+            ),
+        ).all()
+        for relationship in relationships:
+            for evidence_id in (str(relationship.source_evidence_id), str(relationship.related_evidence_id)):
+                evidence_relationship_status.setdefault(evidence_id, []).append(relationship.source_independence_status)
+    source_hashes = list(dict.fromkeys(
+        item.source_text_sha256 for item in evidence.values() if item.source_text_sha256
+    ))
+    duplicate_counts = {}
+    if source_hashes:
+        for duplicate in db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.source_text_sha256.in_(source_hashes),
+        ).all():
+            if duplicate.source_text_sha256:
+                duplicate_counts[duplicate.source_text_sha256] = duplicate_counts.get(duplicate.source_text_sha256, 0) + 1
 
     def evidence_summary(evidence_id: str) -> dict | None:
         item = evidence.get(str(evidence_id))
@@ -347,6 +370,12 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             except (TypeError, ValueError):
                 metadata = {}
         filename = metadata.get("filename") if isinstance(metadata, dict) else None
+        statuses = evidence_relationship_status.get(str(item.id), [])
+        independence = (
+            "shared_origin" if any(value in {"shared_origin", "copied_or_same_origin"} for value in statuses)
+            else "independent" if any(value in {"independent", "independent_source"} for value in statuses)
+            else "not_assessed"
+        )
         return {
             "label": filename or "Original note or document",
             "record_id": str(item.id),
@@ -356,6 +385,8 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             "reported_by": item.reported_by_label or item.original_author or caregiver_names.get(str(item.reported_by_caregiver_id or "")),
             "entered_by": caregiver_names.get(str(item.uploaded_by_caregiver_id or "")),
             "record_status": item.epistemic_status or item.evidence_status,
+            "source_independence_status": independence,
+            "exact_wording_duplicate_count": max(0, duplicate_counts.get(item.source_text_sha256, 1) - 1) if item.source_text_sha256 else 0,
         }
 
     for record in records:
@@ -386,6 +417,8 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "reported_by": summary.get("reported_by"),
                 "entered_by": summary.get("entered_by"),
                 "record_status": item.epistemic_status or item.evidence_status,
+                "source_independence_status": evidence_summary(record_id).get("source_independence_status") if evidence_summary(record_id) else "not_assessed",
+                "exact_wording_duplicate_count": evidence_summary(record_id).get("exact_wording_duplicate_count", 0) if evidence_summary(record_id) else 0,
             })
         elif record.get("record_type") == "document_extraction" and record_id in documents:
             item = documents[record_id]
