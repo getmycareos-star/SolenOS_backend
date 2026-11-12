@@ -209,6 +209,15 @@ def deliver_pending_web_pushes(db=None, now=None):
         )
         retry_delays = (60, 300, 1800, 7200, 21600)
         for delivery, notification, subscription in due:
+            preference = session.query(CareNotificationPreference).filter(
+                CareNotificationPreference.person_id == notification.person_id,
+                CareNotificationPreference.caregiver_id == notification.caregiver_id,
+            ).first()
+            release_at = quiet_hours_release_at(preference, current)
+            if release_at is not None and notification.priority not in {"emergency", "critical"}:
+                delivery.next_attempt_at = release_at
+                session.commit()
+                continue
             delivery.attempt_count += 1
             delivery.last_attempt_at = current
             try:
