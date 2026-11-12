@@ -334,7 +334,7 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             caregiver_id=session["caregiver"]["id"],
             title="Private care event title",
             body="Private care details that must not appear on the lock screen.",
-            category="care_update",
+            category="reminder_due",
             priority="normal",
             created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
         )
@@ -444,3 +444,73 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
         assert len(sent) == 1
     finally:
         db.close()
+
+
+def test_care_change_and_necessary_question_notifications_stay_in_app_only(monkeypatch):
+    from types import SimpleNamespace
+    import sys
+    import app.api.push_notifications as push_api
+    import app.services.reminder_delivery as delivery_service
+    from app.models.notifications import CareNotification, CarePushDelivery
+
+    settings = SimpleNamespace(
+        vapid_public_key="public-vapid-key",
+        vapid_private_key="-----BEGIN PRIVATE KEY-----\\nprivate\\n-----END PRIVATE KEY-----",
+        vapid_subject="mailto:support@solenosai.net",
+        secret_key="in-app-only-test-secret",
+    )
+    monkeypatch.setattr(push_api, "get_settings", lambda: settings)
+    monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
+    sent = []
+
+    class FakeWebPushException(Exception):
+        response = None
+
+    def fake_webpush(**kwargs):
+        sent.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pywebpush",
+        SimpleNamespace(WebPushException=FakeWebPushException, webpush=fake_webpush),
+    )
+
+    client = TestClient(app)
+    session = create_session(client, "In-app only caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    registered = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers=headers,
+        json={
+            "endpoint": "https://fcm.googleapis.com/fcm/send/in-app-only",
+            "keys": {"p256dh": "public-key", "auth": "auth-secret"},
+        },
+    )
+    assert registered.status_code == 201, registered.text
+
+    db = TestSessionLocal()
+    try:
+        created_at = datetime.now(timezone.utc) + timedelta(seconds=2)
+        for category, identifier in (("care_change", "care-change-inbox"), ("care_attention", "care-question-inbox")):
+            db.add(CareNotification(
+                id=identifier,
+                person_id=session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+                title="In-app care item",
+                body="This item should not interrupt the caregiver.",
+                category=category,
+                priority="normal",
+                created_at=created_at,
+            ))
+        db.commit()
+
+        accepted = delivery_service.deliver_pending_web_pushes(
+            db=db,
+            now=created_at + timedelta(seconds=1),
+        )
+        assert accepted == 0
+        assert db.query(CarePushDelivery).count() == 0
+        assert sent == []
+    finally:
+        db.close()
+        client.close()
