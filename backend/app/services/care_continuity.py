@@ -163,9 +163,13 @@ def get_freshness(
     now: Optional[datetime] = None,
     *,
     unresolved_conflict: bool = False,
+    reviewed_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     now = _utc(now or datetime.now(timezone.utc))
-    reference = _utc(assertion.observed_at) or _utc(assertion.recorded_at)
+    # A caregiver's explicit review starts a new review window. Keep the
+    # original recorded_at/observed_at untouched as source provenance.
+    review_reference = reviewed_at if assertion.assertion_status == "accepted" else None
+    reference = _utc(review_reference) or _utc(assertion.observed_at) or _utc(assertion.recorded_at)
     age_days = max(0, (now - reference).days) if reference else None
     if assertion.assertion_kind == "time_bound_observation":
         status = "time_bound_observation"
