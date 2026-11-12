@@ -1122,8 +1122,6 @@ def _validate_quick_check_in(payload: dict) -> None:
 
     if not overall_impression_only and quick.get("scope") != "selected_areas_only":
         raise HTTPException(status_code=422, detail="quick_check_in scope must be selected_areas_only")
-    if overall_impression_only and kind != "same_as_usual":
-        raise HTTPException(status_code=422, detail="overall_impression_only is only valid for same_as_usual")
     if quick.get("epistemic_status") != "caregiver_reported":
         raise HTTPException(status_code=422, detail="quick_check_in must be marked caregiver_reported")
 
