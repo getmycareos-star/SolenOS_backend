@@ -25,7 +25,9 @@ class CareAssertionCreate(BaseModel):
     event_time_text: Optional[str] = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
-    def observed_assertions_require_observation_context(self):
+    def validate_assertion_epistemic_state(self):
+        if self.epistemic_state in {"conflicting", "missing"}:
+            raise ValueError("conflicting and missing are derived record states, not directly creatable assertions")
         if self.epistemic_state == "observed":
             if self.observed_at is None:
                 raise ValueError("observed_at is required for an observed assertion")
@@ -41,7 +43,7 @@ class CareAssertionResponse(BaseModel):
     subject_id: str
     field: str
     assertion_kind: str = Field(default="current_state", min_length=1, max_length=80)
-    epistemic_state: Literal["reported", "observed", "verified", "inferred", "uncertain", "conflicting", "missing", "withdrawn", "corrected"] = "reported"
+    epistemic_state: Literal["reported", "observed", "verified", "inferred", "uncertain", "conflicting", "missing"] = "reported"
     asserted_value: str
     source_event_id: Optional[str] = None
     source_label: str
