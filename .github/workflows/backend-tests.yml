@@ -340,9 +340,9 @@ jobs:
         run: python -m pytest backend/tests/test_pattern_postgres_integration.py -q -vv
 
   qwen-image-build:
-    # Require actual Qwen model inference for every main push and backend PR.
-    # Manual dispatch remains available for targeted reruns.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # Keep the heavyweight live-Qwen image/inference check manual; core release gates
+    # run the PostgreSQL integration, backend tests, migration and recovery workflows.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
