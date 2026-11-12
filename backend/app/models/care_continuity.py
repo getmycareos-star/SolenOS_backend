@@ -14,7 +14,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index
 )
 from sqlalchemy.sql import func
-from sqlalchemy import event, inspect
+from sqlalchemy import event, inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.database import Base
@@ -178,6 +178,12 @@ def _version_care_state(session, flush_context, instances):
         table = getattr(getattr(obj, "__table__", None), "name", None)
         if table not in TRACKED_TABLES or isinstance(obj, CareStateRevision):
             continue
+        # The uncertainty service records OpenQuestion transitions with explicit
+        # actor provenance. Skip the generic listener for those same objects so
+        # one logical transition cannot create two revisions with the same number.
+        manual_revision_objects = session.info.get("manual_care_state_revision_objects", set())
+        if table == "open_questions" and id(obj) in manual_revision_objects:
+            continue
         state = inspect(obj)
         if obj in session.dirty and not session.is_modified(obj, include_collections=True):
             continue
@@ -202,6 +208,12 @@ def _version_care_state(session, flush_context, instances):
             or getattr(obj, "created_by_caregiver_id", None)
             or getattr(obj, "caregiver_id", None)
         )
+        if table == "open_questions" and session.get_bind().dialect.name == "postgresql":
+            lock_key = f"care-state-revision:open_questions:{person_id}:{target_id}"
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+                {"lock_key": lock_key},
+            )
         with session.no_autoflush:
             latest = (
                 session.query(CareStateRevision.revision_number)
