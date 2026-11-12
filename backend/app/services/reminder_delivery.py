@@ -19,7 +19,7 @@ import hashlib
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
+from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription, DeliveryFailureEvent
 
 # Care changes and clarification requests stay in the authenticated inbox.
 # Browser push is reserved for explicitly due reminders.
@@ -186,6 +186,32 @@ def deliver_due_reminders(db=None, now=None):
         if owns_session:
             session.close()
 
+
+
+
+def _record_delivery_failure(session, delivery, notification, subscription, current, code, detail, retryable):
+    """Persist a redacted failure event separately from the mutable delivery cursor."""
+    session.add(DeliveryFailureEvent(
+        id=str(uuid.uuid4()),
+        person_id=notification.person_id,
+        caregiver_id=notification.caregiver_id,
+        delivery_type="web_push",
+        delivery_id=delivery.id,
+        recipient_id=subscription.caregiver_id,
+        failure_code=str(code)[:120],
+        failure_detail_redacted=str(detail)[:1000] if detail else None,
+        occurred_at=current,
+        retryable=bool(retryable),
+        record_metadata={"notification_id": notification.id, "attempt_number": delivery.attempt_count},
+    ))
+
+
+def _resolve_delivery_failures(session, delivery, current):
+    session.query(DeliveryFailureEvent).filter(
+        DeliveryFailureEvent.delivery_id == delivery.id,
+        DeliveryFailureEvent.delivery_type == "web_push",
+        DeliveryFailureEvent.resolved_at.is_(None),
+    ).update({"resolved_at": current, "updated_at": current}, synchronize_session=False)
 
 def deliver_pending_web_pushes(db=None, now=None):
     """Send privacy-preserving Web Push payloads and persist provider receipts/retries."""
@@ -399,6 +425,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 delivery.provider_accepted_at = current
                 delivery.last_error_code = None
                 delivery.last_error_message = None
+                _resolve_delivery_failures(session, delivery, current)
                 accepted += 1
                 session.commit()
             except InvalidToken:
@@ -408,6 +435,10 @@ def deliver_pending_web_pushes(db=None, now=None):
                 delivery.status = "expired"
                 delivery.last_error_code = "subscription_decryption_failed"
                 delivery.last_error_message = "Browser subscription could not be decrypted; re-registration is required"
+                _record_delivery_failure(
+                    session, delivery, notification, subscription, current,
+                    delivery.last_error_code, "Browser subscription could not be decrypted; re-registration is required", False,
+                )
                 session.commit()
             except WebPushException as exc:
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
@@ -421,6 +452,11 @@ def deliver_pending_web_pushes(db=None, now=None):
                 else:
                     delivery.status = "retry_scheduled"
                     delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
+                _record_delivery_failure(
+                    session, delivery, notification, subscription, current,
+                    delivery.last_error_code, delivery.last_error_message,
+                    delivery.status == "retry_scheduled",
+                )
                 session.commit()
             except Exception as exc:
                 delivery.last_error_code = type(exc).__name__[:64]
@@ -430,6 +466,11 @@ def deliver_pending_web_pushes(db=None, now=None):
                 else:
                     delivery.status = "retry_scheduled"
                     delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
+                _record_delivery_failure(
+                    session, delivery, notification, subscription, current,
+                    delivery.last_error_code, delivery.last_error_message,
+                    delivery.status == "retry_scheduled",
+                )
                 session.commit()
         return accepted
     finally:
