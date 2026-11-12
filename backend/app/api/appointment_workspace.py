@@ -29,6 +29,7 @@ from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, Appoin
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.appointment_followup_sync import sync_appointment_followups
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,10 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         idempotency_key=payload.idempotency_key,
         idempotency_request_sha256=request_fingerprint if payload.idempotency_key else None,
     ))
+    sync_appointment_followups(
+        db, person_id=person_id, caregiver_id=caregiver_id,
+        workspace_id=row.id, payload=payload.payload,
+    )
     try:
         db.commit()
         db.refresh(row)
@@ -1096,6 +1101,10 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
         idempotency_key=payload.idempotency_key,
         idempotency_request_sha256=update_fingerprint if payload.idempotency_key else None,
     ))
+    sync_appointment_followups(
+        db, person_id=person_id, caregiver_id=caregiver_id,
+        workspace_id=row.id, payload=payload.payload,
+    )
     try:
         db.commit()
         db.refresh(row)
