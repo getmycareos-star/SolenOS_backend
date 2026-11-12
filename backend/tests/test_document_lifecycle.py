@@ -1078,3 +1078,28 @@ def test_upload_and_extract_bmp_and_tiff_document_scans(client):
         assert extracted.json()["extraction_method"] == "server_tesseract_ocr_image"
 
     source.close()
+
+
+def test_scanned_pdf_does_not_mislabel_missing_ocr_runtime_as_partial(client, monkeypatch):
+    from fastapi import HTTPException
+    from pypdf import PdfWriter
+    import app.api.document_lifecycle as lifecycle
+
+    test_client, session = client
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    evidence_id = persist_document(session, buffer.getvalue(), "ocr-unavailable.pdf", "application/pdf")
+    monkeypatch.setattr(
+        lifecycle,
+        "_ocr_image",
+        lambda _image: (_ for _ in ()).throw(HTTPException(status_code=503, detail="OCR unavailable")),
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 503
+    with TestSessionLocal() as db:
+        assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
