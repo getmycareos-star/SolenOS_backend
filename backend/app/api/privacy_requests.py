@@ -1139,6 +1139,17 @@ def fulfil_approved_deletion(
             db.query(EvidenceUpload).filter(
                 EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
             ).delete(synchronize_session=False)
+        # Also mark any remaining ORM evidence objects for deletion. This
+        # prevents a loaded identity-map row from surviving a bulk/Core delete path.
+        evidence_rows = db.query(Evidence).filter(Evidence.person_id == person_id).all()
+        evidence_rows_by_id = {str(item.id): item for item in evidence_rows}
+        for evidence_id in evidence_ids_to_erase:
+            row_by_id = evidence_rows_by_id.get(str(evidence_id))
+            if row_by_id is None:
+                row_by_id = db.query(Evidence).filter(Evidence.id == evidence_id).first()
+            if row_by_id is not None:
+                db.delete(row_by_id)
+        db.flush()
         # Use direct SQL as a final deterministic erasure pass. Evidence can have
         # nullable ownership changes from dependent cleanup, so delete both by the
         # original scoped owner and by the immutable IDs captured before cleanup.
