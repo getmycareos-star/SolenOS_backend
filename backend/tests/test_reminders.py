@@ -1,4 +1,9 @@
+import base64
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -35,6 +40,26 @@ def teardown_function():
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
     Base.metadata.drop_all(bind=engine)
+
+
+def _valid_vapid_settings(secret_key: str):
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_bytes = private_key.public_key().public_bytes(
+        Encoding.X962,
+        PublicFormat.UncompressedPoint,
+    )
+    private_pem = private_key.private_bytes(
+        Encoding.PEM,
+        PrivateFormat.PKCS8,
+        NoEncryption(),
+    ).decode("ascii")
+    public_key = base64.urlsafe_b64encode(public_bytes).rstrip(b"=").decode("ascii")
+    return SimpleNamespace(
+        vapid_public_key=public_key,
+        vapid_private_key=private_pem,
+        vapid_subject="mailto:support@solenosai.net",
+        secret_key=secret_key,
+    )
 
 
 def create_session(client: TestClient, caregiver_name: str):
@@ -689,16 +714,8 @@ def test_push_subscription_endpoint_cannot_be_claimed_by_another_care_record(mon
     from types import SimpleNamespace
     from app.api import push_notifications
 
-    monkeypatch.setattr(
-        push_notifications,
-        "get_settings",
-        lambda: SimpleNamespace(
-            vapid_public_key="public-key",
-            vapid_private_key="private-key",
-            vapid_subject="mailto:support@solenosai.net",
-            secret_key="test-secret-key-for-push-subscription-isolation",
-        ),
-    )
+    settings = _valid_vapid_settings("test-secret-key-for-push-subscription-isolation")
+    monkeypatch.setattr(push_notifications, "get_settings", lambda: settings)
     client = TestClient(app)
     first = create_session(client, "Push subscription owner")
     second = create_session(client, "Push subscription attacker")
