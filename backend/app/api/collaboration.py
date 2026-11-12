@@ -869,7 +869,7 @@ async def upload_evidence(
                 "persisted": True,
                 "idempotent_replay": True,
                 "document_processing_job_id": document_job.id if document_job else None,
-                "processing_status": "queued" if document_job else "not_applicable",
+                "processing_status": document_job.status if document_job else "not_applicable",
                 "duplicate_detected": bool(prior_meta.get("duplicate_detected")),
                 "duplicate_of_evidence_id": prior_meta.get("duplicate_of_evidence_id"),
                 "source_integrity": {
