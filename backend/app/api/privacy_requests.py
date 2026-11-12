@@ -1158,7 +1158,48 @@ def fulfil_approved_deletion(
                 "redacted": True,
             },
         ))
+        # Repeat root erasure after every dependent cleanup and audit write. This
+        # is deliberately the final database mutation in the transaction so no
+        # later lifecycle write can reintroduce a root row through a trigger or
+        # relationship side effect.
+        db.execute(
+            text("DELETE FROM caregivers WHERE id = :caregiver_id"),
+            {"caregiver_id": caregiver_id},
+        )
+        db.execute(
+            text("DELETE FROM persons WHERE id = :person_id"),
+            {"person_id": person_id},
+        )
+        remaining_roots = db.execute(
+            text("""
+                SELECT
+                    (SELECT COUNT(*) FROM persons WHERE id = :person_id) AS persons_remaining,
+                    (SELECT COUNT(*) FROM caregivers WHERE id = :caregiver_id) AS caregivers_remaining
+            """),
+            {"person_id": person_id, "caregiver_id": caregiver_id},
+        ).mappings().one()
+        if int(remaining_roots["persons_remaining"]) or int(remaining_roots["caregivers_remaining"]):
+            raise HTTPException(
+                status_code=409,
+                detail="Care record identity rows remain after the final deletion pass; request was not fulfilled",
+            )
+
         db.commit()
+        db.expire_all()
+        # Verify from the committed database state before returning a success receipt.
+        committed_roots = db.execute(
+            text("""
+                SELECT
+                    (SELECT COUNT(*) FROM persons WHERE id = :person_id) AS persons_remaining,
+                    (SELECT COUNT(*) FROM caregivers WHERE id = :caregiver_id) AS caregivers_remaining
+            """),
+            {"person_id": person_id, "caregiver_id": caregiver_id},
+        ).mappings().one()
+        if int(committed_roots["persons_remaining"]) or int(committed_roots["caregivers_remaining"]):
+            raise HTTPException(
+                status_code=409,
+                detail="Care record identity rows remain after committed deletion verification",
+            )
         db.refresh(row)
     except Exception:
         db.rollback()
