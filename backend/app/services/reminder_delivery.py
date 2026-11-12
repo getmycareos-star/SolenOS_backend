@@ -419,6 +419,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 elif delivery.attempt_count >= 5:
                     delivery.status = "failed"
                 else:
+                    delivery.status = "retry_scheduled"
                     delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
                 session.commit()
             except Exception as exc:
