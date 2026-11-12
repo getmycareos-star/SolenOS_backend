@@ -13,6 +13,7 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Evidence
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob
 
