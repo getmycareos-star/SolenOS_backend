@@ -1842,6 +1842,7 @@ def prepare_handoff_draft(
     db.refresh(persisted_draft)
     return {
         "draft_id": draft_id,
+        "draft_persisted": True,
         "generation_status": generation_status,
         "validation_status": validation_status,
         "review_status": "pending_review",

@@ -223,6 +223,9 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     )
     assert prepared.status_code == 200, prepared.text
     draft_id = prepared.json()["draft_id"]
+    assert prepared.json()["draft_persisted"] is True
+    assert prepared.json()["read_only"] is True
+    assert prepared.json()["updates_lcr"] is False
     outsider = _create_session(client, "Unrelated caregiver")
     outsider_headers = {"Authorization": f"Bearer {outsider['access_token']}"}
     assert client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=outsider_headers).status_code == 404
