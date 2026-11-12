@@ -3006,6 +3006,7 @@ def test_qwen_cross_workflow_claim_sources_keep_events_documents_and_appointment
     try:
         from app.core.database import get_db
         from app.api.collaboration import _enrich_qwen_claim_source_records
+        from app.models.care import CareEvent
         from app.models.capture_analysis import CaptureAnalysis
         from app.models.time_location import Appointment
         from app.services.claim_provenance import context_lines_to_source_records
