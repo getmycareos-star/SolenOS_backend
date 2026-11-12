@@ -260,9 +260,13 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
 
 def _latest_assertion_review_at(db: Session, assertion: CareAssertion) -> Optional[datetime]:
     """Read the append-only review timestamp without mutating source event time."""
-    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+    # Reflect through the Session's active connection, not the Engine. With
+    # SQLite StaticPool an Engine-level reflection checkout can reuse the same
+    # DBAPI connection and roll back the caller's uncommitted assertion writes.
+    connection = db.connection()
+    if not inspect(connection).has_table("care_assertion_revisions"):
         return None
-    revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+    revisions = Table("care_assertion_revisions", MetaData(), autoload_with=connection)
     return db.execute(
         select(revisions.c.changed_at).where(
             revisions.c.person_id == assertion.person_id,
@@ -279,9 +283,10 @@ def _append_assertion_revision(
     changed_by_caregiver_id: Optional[str],
 ) -> Optional[datetime]:
     """Persist an immutable assertion review/version in the existing revision table."""
-    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+    connection = db.connection()
+    if not inspect(connection).has_table("care_assertion_revisions"):
         return None
-    revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+    revisions = Table("care_assertion_revisions", MetaData(), autoload_with=connection)
     latest = db.execute(select(func.max(revisions.c.revision_number)).where(
         revisions.c.person_id == assertion.person_id,
         revisions.c.assertion_id == assertion.id,
