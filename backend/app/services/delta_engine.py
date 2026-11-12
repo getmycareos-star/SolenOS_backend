@@ -411,6 +411,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     ).order_by(InformationGap.created_at.desc()).limit(50).all()
     open_questions = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == person_id, OpenQuestion.status == "open",
+        OpenQuestion.necessity == "necessary",
     ).order_by(OpenQuestion.asked_at.desc()).limit(50).all()
     unresolved_contradictions = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
