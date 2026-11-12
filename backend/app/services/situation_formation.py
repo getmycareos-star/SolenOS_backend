@@ -11,6 +11,7 @@ from app.models.uncertainty import (
 from app.models.significance import SignificanceAssessment
 from app.services.change_detection import detect_event_changes
 from app.services.pattern_detection import detect_patterns
+from app.services.care_continuity import has_valid_caregiver_necessity
 from app.core.change_enums import (
     SituationType,
     SituationState,
@@ -366,6 +367,7 @@ def _epistemic_context(db: Session, person_id: str, subject_type: str, subject_i
         OpenQuestionModel.status == "open",
         OpenQuestionModel.necessity == "necessary",
     ).all()
+    questions = [question for question in questions if has_valid_caregiver_necessity(question)]
 
     if contradictions:
         epistemic_state = "conflicting"
