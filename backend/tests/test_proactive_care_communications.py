@@ -9,7 +9,7 @@ from app.core.database import Base
 from app.core.uncertainty_enums import Priority
 from app.models.care import Caregiver, Evidence, Person
 from app.models.change import Change
-from app.models.notifications import CareNotification
+from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
 from app.models.uncertainty import OpenQuestion
 from app.services.proactive_care_communications import create_proactive_care_notifications
 
@@ -99,6 +99,20 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
                 status="open",
                 priority=Priority.HIGH,
                 evidence_ids=[evidence.id],
+                context=[{"decision_dependency": "The next care handoff cannot identify the active schedule without this answer."}],
+            ),
+            OpenQuestion(
+                id="notify-invalid-necessity-question",
+                person_id=person.id,
+                question="Which activity preference should be used?",
+                subject_type="person",
+                subject_id=person.id,
+                necessity="necessary",
+                necessity_rationale="This would be useful context.",
+                status="open",
+                priority=Priority.HIGH,
+                evidence_ids=[evidence.id],
+                context=[],
             ),
             OpenQuestion(
                 id="notify-not-assessed-question",
@@ -142,7 +156,57 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
             "notify-necessary-question",
         }
         assert all(item.priority == "normal" for item in notifications)
+        assert all(item.status == "active" for item in notifications)
         assert db.query(CareNotification).filter(CareNotification.person_id == other_person.id).count() == 0
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id == "notify-invalid-necessity-question"
+        ).count() == 0
+
+        care_change_notification = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_change",
+        ).first()
+        subscription = CarePushSubscription(
+            id="notify-subscription",
+            person_id=person.id,
+            caregiver_id=care_change_notification.caregiver_id,
+            endpoint_hash="notify-endpoint-hash",
+            encrypted_subscription="encrypted-test-subscription",
+            created_at=now,
+        )
+        db.add(subscription)
+        db.flush()
+        delivery = CarePushDelivery(
+            id="notify-pending-delivery",
+            notification_id=care_change_notification.id,
+            subscription_id=subscription.id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=now,
+        )
+        db.add(delivery)
+        db.flush()
+
+        meaningful_change = db.query(Change).filter_by(id="notify-meaningful-change").one()
+        meaningful_change.is_active = False
+        meaningful_change.superseded_by_change_id = "notify-replacement-change"
+        necessary_question = db.query(OpenQuestion).filter_by(id="notify-necessary-question").one()
+        necessary_question.status = "closed"
+        assert create_proactive_care_notifications(db, person.id, now=now) == 0
+        db.commit()
+
+        care_change_notifications = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_change",
+        ).all()
+        care_attention_notifications = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_attention",
+        ).all()
+        assert all(item.status == "superseded" for item in care_change_notifications)
+        assert all(item.status == "resolved" for item in care_attention_notifications)
+        db.refresh(delivery)
+        assert delivery.status == "cancelled"
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
