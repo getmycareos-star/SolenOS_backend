@@ -52,6 +52,7 @@ from app.models.collaboration import (
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
+from app.models.uncertainty import OpenQuestion
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -1143,12 +1144,24 @@ def list_document_processing_status(
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in observations
         )
-        medication_conflict = any(
+        medication_conflict_from_document = any(
             isinstance(item, dict)
             and item.get("field_type") == "medication"
             and any("conflicting medication instructions" in str(warning).casefold() for warning in (item.get("warnings") or []))
             for item in observations
         )
+        medication_questions = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person_id,
+            OpenQuestion.subject_type == "medication",
+            OpenQuestion.intended_answerer_role == "professional",
+            OpenQuestion.status == "open",
+        ).all()
+        linked_medication_questions = [
+            question for question in medication_questions
+            if evidence.id in (question.evidence_ids or [])
+        ]
+        medication_conflict = medication_conflict_from_document or bool(linked_medication_questions)
+        medication_confirmation_question_ids = [str(question.id) for question in linked_medication_questions]
         accepted_follow_up_ids = list(dict.fromkeys(
             str(item.get("accepted_follow_up_id"))
             for item in observations
@@ -1177,6 +1190,7 @@ def list_document_processing_status(
                 for item in observations
             ),
             "medication_conflict": medication_conflict,
+            "medication_confirmation_question_ids": medication_confirmation_question_ids,
             "accepted_follow_up_ids": accepted_follow_up_ids,
             "duplicate_detected": bool(evidence_metadata.get("duplicate_detected")) if isinstance(evidence_metadata, dict) else False,
             "duplicate_of_evidence_id": evidence_metadata.get("duplicate_of_evidence_id") if isinstance(evidence_metadata, dict) else None,
