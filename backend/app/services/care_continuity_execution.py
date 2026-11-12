@@ -119,9 +119,11 @@ def execute_care_continuity_reconciliation(
 
     appointment_workspace = None
     appointment_revision = None
-    if source_appointment_workspace_revision_id:
-        if not source_appointment_workspace_id:
-            raise CareContinuityExecutionError("An appointment workspace revision must include its workspace reference")
+    if bool(source_appointment_workspace_id) != bool(source_appointment_workspace_revision_id):
+        raise CareContinuityExecutionError(
+            "An appointment workspace and its persisted revision must be supplied together"
+        )
+    if source_appointment_workspace_id and source_appointment_workspace_revision_id:
         appointment_workspace = db.query(AppointmentWorkspaceRecord).filter(
             AppointmentWorkspaceRecord.id == source_appointment_workspace_id,
             AppointmentWorkspaceRecord.person_id == person_id,
