@@ -174,7 +174,7 @@ The coordinator is now used by these backend paths:
 - Care assertion acceptance and clarification-answer acceptance.
 - Caregiver correction and reassessment.
 
-The accepted-review paths that use the coordinator commit the review decision and reconciliation in the same transaction. The API surfaces a receipt to the frontend for the Daily Capture, Add Record, Companion, evidence-review, clarification-review, and correction responses where the response contract supports it.
+The accepted-review paths that use the coordinator commit the review decision and reconciliation in the same transaction. The API surfaces a receipt to the frontend for Daily Capture, Add Record, Companion, and evidence-review responses. The clarification-review API returns a receipt, but its new frontend review controls were reverted after repeated Netlify build failures; the existing UI still saves answers separately and does not yet expose the review action. Correction receipts are returned by the backend response contract, but the caregiver-facing correction UI has not yet been verified to display them.
 
 ### Not yet implemented or proven
 
