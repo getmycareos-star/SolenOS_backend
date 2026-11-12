@@ -4,7 +4,7 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from app.services.delta_engine import _match_source_references, _parse_model_json
+from app.services.delta_engine import DELTA_JSON_CONTRACT, _match_source_references, _parse_model_json
 
 
 def test_new_event_excerpt_is_linked_only_to_the_persisted_event_id():
@@ -108,3 +108,27 @@ def test_delta_json_parser_rejects_truncated_output_without_persisting():
         _parse_model_json('{"event_summary":"unfinished"')
     assert exc.value.status_code == 502
     assert exc.value.detail["code"] == "delta_invalid_json"
+
+
+
+def test_delta_json_contract_bounds_each_finding_list_for_compact_inference():
+    payload = {
+        "event_summary": "Caregiver observation recorded.",
+        "medications": [
+            {"change_type": "uncertain", "name": "Medicine A", "previous": None, "current": None, "evidence_excerpt": "Mention A", "certainty": "uncertain"},
+            {"change_type": "uncertain", "name": "Medicine B", "previous": None, "current": None, "evidence_excerpt": "Mention B", "certainty": "uncertain"},
+        ],
+        "conditions": [],
+        "symptoms": [],
+        "tests": [],
+        "follow_ups": [],
+        "contradictions": [],
+        "clinical_gaps": [],
+        "caregiver_summary": "Review the recorded observation.",
+        "clinician_summary": "Caregiver-reported observation.",
+    }
+    with pytest.raises(HTTPException) as exc:
+        _parse_model_json(json.dumps(payload))
+    assert exc.value.status_code == 502
+    assert "item limit" in str(exc.value.detail)
+    assert DELTA_JSON_CONTRACT["medications"]["maxItems"] == 1
