@@ -802,18 +802,22 @@ def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(clie
         assert db.query(Evidence).filter_by(person_id=session["person"]["id"]).count() == 1
 
 
-def test_outlook_msg_is_preserved_but_reports_explicit_unsupported_extraction(client):
+def test_invalid_outlook_msg_is_preserved_and_reported_as_unreadable(client):
     test_client, session = client
+    original = b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-outlook-binary"
     evidence_id = persist_document(
         session,
-        b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-outlook-binary",
+        original,
         "clinic-message.msg",
         "application/vnd.ms-outlook",
     )
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
-    assert response.status_code == 415, response.text
-    assert ".msg files are preserved" in response.json()["detail"]
+    assert response.status_code == 422, response.text
+    assert "Outlook message could not be read" in response.json()["detail"]
+    retrieved = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert retrieved.status_code == 200
+    assert retrieved.content == original
 
 
 def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatch):
