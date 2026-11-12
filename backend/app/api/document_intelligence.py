@@ -942,6 +942,14 @@ def review_document_candidate(
     change_intelligence_status = "not_required"
     execution = None
     if payload.decision == "accept":
+        persisted_before_reconciliation = db.execute(
+            text("SELECT id, person_id, assertion_status FROM care_assertions WHERE id = :assertion_id"),
+            {"assertion_id": assertion_id},
+        ).mappings().first()
+        logger.warning(
+            "Document assertion persistence before reconciliation: assertion_id=%s person_id=%s sql_row=%s",
+            assertion_id, person_id, dict(persisted_before_reconciliation) if persisted_before_reconciliation else None,
+        )
         try:
             execution = execute_care_continuity_reconciliation(
                 db,
@@ -971,7 +979,7 @@ def review_document_candidate(
             text("SELECT id, person_id, assertion_status FROM care_assertions WHERE id = :assertion_id"),
             {"assertion_id": assertion_id},
         ).mappings().first()
-        logger.info(
+        logger.warning(
             "Document assertion persistence after reconciliation: assertion_id=%s person_id=%s sql_row=%s",
             assertion_id, person_id, dict(persisted_after_reconciliation) if persisted_after_reconciliation else None,
         )
