@@ -266,7 +266,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     all_open_questions = []
     page_inputs = split_document_pages(source_text)
     unreadable_pages = unreadable_page_numbers(source_text)
-    all_page_numbers = sorted({int(match.group(1)) for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)", source_text)})
+    all_page_numbers = sorted({int(match.group(1)) for match in re.finditer(r"(?m)^\[Page\s+(\d+)", source_text)})
     if not page_inputs:
         raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
 
