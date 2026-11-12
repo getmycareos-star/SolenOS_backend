@@ -311,6 +311,7 @@ class UncertaintyEngine:
             scoped_person_id, payload.get("evidence_ids")
         ) or None
         claim_id = payload.get("claim_id")
+        claim = None
         if claim_id:
             claim = self.db.query(CareAssertionModel).filter(
                 CareAssertionModel.id == claim_id,
@@ -320,6 +321,17 @@ class UncertaintyEngine:
                 raise ValueError("A linked claim must belong to the same care record.")
             if claim.subject_type != payload["subject_type"] or claim.subject_id != payload["subject_id"]:
                 raise ValueError("A clarification question must use the linked claim's subject scope.")
+        if payload.get("necessity", "not_assessed") == "necessary":
+            # A human-facing request must be grounded in a persisted source and
+            # explain the concrete care decision that cannot proceed without it.
+            linked_evidence = list(payload.get("evidence_ids") or [])
+            if claim is not None:
+                linked_evidence = list(dict.fromkeys(linked_evidence + list(claim.evidence_ids or [])))
+                payload["evidence_ids"] = linked_evidence or None
+            if not linked_evidence:
+                raise ValueError(
+                    "A necessary caregiver question requires source evidence or a source-linked care assertion."
+                )
         allowed_answerer_roles = {
             "person_receiving_care", "reporting_caregiver", "other_caregiver",
             "professional", "not_known",
