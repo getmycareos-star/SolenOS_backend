@@ -81,6 +81,8 @@ class OpenQuestionCreate(OpenQuestionBase):
 class OpenQuestionUpdate(BaseModel):
     status: Optional[str] = None
     priority: Optional[Priority] = None
+    necessity: Optional[Literal["necessary", "optional", "not_assessed"]] = None
+    necessity_rationale: Optional[str] = Field(default=None, max_length=4000)
     answer: Optional[str] = None
     answer_provenance: Optional[str] = None
     closed_reason: Optional[str] = None
