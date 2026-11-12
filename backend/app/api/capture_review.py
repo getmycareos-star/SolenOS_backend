@@ -210,9 +210,10 @@ def review_capture_candidate(
     db.add(analysis)
 
     change_intelligence_status = "not_required"
+    execution = None
     if payload.decision == "accept":
         try:
-            execute_care_continuity_reconciliation(
+            execution = execute_care_continuity_reconciliation(
                 db,
                 person_id,
                 workflow="daily_capture_review",
@@ -242,6 +243,7 @@ def review_capture_candidate(
         "assertion_id": assertion_id,
         "review_required": payload.decision != "accept" and payload.decision != "reject",
         "change_intelligence_status": change_intelligence_status,
+        "care_continuity_execution": execution,
         "written_to_lcr": payload.decision == "accept",
         "message": (
             "Caregiver-approved Daily Care observation saved as a source-linked LCR assertion."
