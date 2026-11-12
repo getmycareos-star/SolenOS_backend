@@ -300,11 +300,14 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
         assert replacement.acceptance_status.value == "explicit"
         assert persisted_transfer.status == "accepted"
         assert persisted_transfer.related_record_id == "existing-clinic-follow-up"
-        assert db.query(CaregiverResponsibility).filter_by(
-            person_id=primary["person"]["id"],
-            responsibility_type="clinic_follow_up",
-            status="active",
-        ).count() == 1
+        active_followups = [
+            item for item in db.query(CaregiverResponsibility).filter_by(
+                person_id=primary["person"]["id"],
+                responsibility_type="clinic_follow_up",
+            ).all()
+            if item.status.value == "active"
+        ]
+        assert len(active_followups) == 1
     finally:
         db.close()
 
