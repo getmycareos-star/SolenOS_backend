@@ -338,6 +338,16 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
             uploaded = _upload_document_for_lifecycle(db, person_id, caregiver_id, "unrelated-private.txt", original)
             evidence_id = uploaded["evidence_id"]
             assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
+            db.add(QwenBackgroundJob(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                task_text="Read the uploaded document for a caregiver question.",
+                context_text="",
+                evidence_ids_json=json.dumps([evidence_id]),
+                workflow="living_care_record",
+                status="queued",
+            ))
+            db.commit()
 
         with Session() as db:
             result = delete_uploaded_document(evidence_id, _request(person_id, caregiver_id), db)
@@ -351,11 +361,12 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
             assert "filename" not in json.loads(evidence.extra_metadata or "{}")
             assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 0
             assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
-            assert db.query(QwenBackgroundJob).filter(
+            cancelled_jobs = db.query(QwenBackgroundJob).filter(
                 QwenBackgroundJob.person_id == person_id,
-                QwenBackgroundJob.workflow == "document_intake",
                 QwenBackgroundJob.evidence_ids_json == json.dumps([evidence_id]),
-            ).one().status == "cancelled"
+            ).all()
+            assert {job.workflow for job in cancelled_jobs} == {"document_intake", "living_care_record"}
+            assert all(job.status == "cancelled" for job in cancelled_jobs)
             with pytest.raises(HTTPException) as denied:
                 extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
             assert denied.value.status_code == 404
