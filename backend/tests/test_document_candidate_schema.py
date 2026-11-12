@@ -251,4 +251,4 @@ def test_repeated_source_quote_has_no_false_unique_span():
     )
     assert candidate["source_span_start"] is None
     assert candidate["source_span_end"] is None
-    assert any("unambiguous page" in warning for warning in candidate["warnings"])
+    assert any("unique source span is unavailable" in warning for warning in candidate["warnings"])
