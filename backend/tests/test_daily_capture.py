@@ -11,6 +11,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
+from app.models.care_continuity import CareRecordRelationship
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -933,6 +934,104 @@ def test_legacy_event_write_requires_matching_server_session():
             db.close()
     finally:
         teardown_db()
+
+def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkeypatch):
+    import app.api.v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        now = datetime.now(timezone.utc)
+        db = TestingSessionLocal()
+        original = CareEvent(
+            id="event-original-daily-test",
+            person_id="person-daily-test",
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=now,
+            title="Morning observation",
+            description="Mum seemed unusually confused.",
+            created_by_caregiver_id="caregiver-daily-test",
+        )
+        foreign = CareEvent(
+            id="event-foreign-daily-test",
+            person_id="person-other-test",
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=now,
+            title="Foreign observation",
+            description="This belongs to another care record.",
+            created_by_caregiver_id="caregiver-other-test",
+        )
+        db.add_all([original, foreign])
+        db.commit()
+        db.close()
+
+        monkeypatch.setattr(
+            api_v1,
+            "execute_care_continuity_reconciliation",
+            lambda *args, **kwargs: {
+                "workflow": "care_record_correction",
+                "status": "committed",
+                "stages": {"reconciliation": "committed"},
+            },
+        )
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        response = client.post(
+            "/api/v1/corrections",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "target_type": "care_event",
+                "target_id": original.id,
+                "original_text": original.description,
+                "corrected_text": "Mum was tired; confusion was not confirmed.",
+                "reason": "Caregiver correction",
+            },
+        )
+        assert response.status_code == 200, response.text
+        correction_id = response.json()["id"]
+
+        db = TestingSessionLocal()
+        try:
+            unchanged = db.query(CareEvent).filter_by(id=original.id).one()
+            assert unchanged.description == "Mum seemed unusually confused."
+            link = db.query(CareRecordRelationship).filter_by(
+                person_id="person-daily-test",
+                source_type="correction",
+                source_id=correction_id,
+                relationship_type="corrects",
+                target_type="care_event",
+                target_id=original.id,
+            ).one()
+            assert "original care event retained unchanged" in link.provenance
+        finally:
+            db.close()
+
+        foreign_response = client.post(
+            "/api/v1/corrections",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "target_type": "care_event",
+                "target_id": foreign.id,
+                "original_text": "Foreign original",
+                "corrected_text": "Attempted foreign correction",
+            },
+        )
+        assert foreign_response.status_code == 404, foreign_response.text
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Correction).count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
 
 def test_legacy_insight_and_correction_routes_require_scoped_sessions():
     setup_db()
