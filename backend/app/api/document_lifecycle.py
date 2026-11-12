@@ -148,11 +148,11 @@ def _extract_rtf(content: bytes) -> str:
             skip = stack.pop() if stack else False
             index += 1
             continue
-        if char == "\\\\":
+        if char == "\\":
             if index + 1 >= len(source):
                 break
             nxt = source[index + 1]
-            if nxt in "{}\\\\":
+            if nxt in "{}\\":
                 if not skip:
                     output.append(nxt)
                 index += 2
@@ -166,15 +166,15 @@ def _extract_rtf(content: bytes) -> str:
                     pass
                 index += 4
                 continue
-            match = re.match(r"\\\\([a-zA-Z]+)(-?\\d+)? ?", source[index:])
+            match = re.match(r"\\([a-zA-Z]+)(-?\d+)? ?", source[index:])
             if match:
                 word, number = match.group(1), match.group(2)
                 if word in {"fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "header", "footer"}:
                     skip = True
                 elif not skip and word in {"par", "line"}:
-                    output.append("\\n")
+                    output.append("\n")
                 elif not skip and word == "tab":
-                    output.append("\\t")
+                    output.append("\t")
                 elif not skip and word == "u" and number:
                     try:
                         output.append(chr(int(number) % 65536))
@@ -184,7 +184,7 @@ def _extract_rtf(content: bytes) -> str:
                 continue
             index += 2
             continue
-        if not skip and char not in "\\r\\n":
+        if not skip and char not in "\r\n":
             output.append(char)
         index += 1
     return re.sub(r"[ \\t]+", " ", "".join(output)).strip()
@@ -383,10 +383,10 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 if html_body is not None:
                     parser.feed(html_body.get_content())
                 extracted = parser.text()
-            headers = "\\n".join(
+            headers = "\n".join(
                 f"{name}: {message.get(name)}" for name in ("From", "To", "Date", "Subject") if message.get(name)
             )
-            extracted = (headers + "\\n\\n" + str(extracted or "")).strip()
+            extracted = (headers + "\n\n" + str(extracted or "")).strip()
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved email could not be read") from exc
         if not extracted:
@@ -481,7 +481,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
         "intelligence_status": intelligence.get("status") or "not_run",
-        "review_required": any(
+        "review_required": False,
+        "review_available": any(
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in observations
         ),
