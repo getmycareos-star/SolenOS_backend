@@ -214,3 +214,64 @@ def test_notification_preferences_validate_and_persist_quiet_hours_schedule():
     assert other.status_code == 200
     assert other.json()["timezone_name"] == "UTC"
     assert other.json()["quiet_hours_start"] == "21:00"
+
+
+
+def test_web_push_registration_is_encrypted_scoped_and_revocable(monkeypatch):
+    from types import SimpleNamespace
+    import app.api.push_notifications as push_api
+    from app.models.notifications import CarePushSubscription
+
+    monkeypatch.setattr(
+        push_api,
+        "get_settings",
+        lambda: SimpleNamespace(vapid_public_key="BPublicVapidKey", secret_key="test-secret-key"),
+    )
+    client = TestClient(app)
+    first = create_session(client, "Push owner")
+    second = create_session(client, "Different push owner")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    endpoint = "https://push.example.test/subscription/unique-endpoint"
+    payload = {
+        "endpoint": endpoint,
+        "keys": {"p256dh": "test-public-key-material", "auth": "test-auth-secret"},
+    }
+
+    public_key = client.get("/api/v1/notifications/push/public-key", headers=first_headers)
+    assert public_key.status_code == 200
+    assert public_key.json()["public_key"] == "BPublicVapidKey"
+
+    registered = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers=first_headers,
+        json=payload,
+    )
+    assert registered.status_code == 201, registered.text
+    assert registered.json()["registered"] is True
+
+    db = TestSessionLocal()
+    try:
+        stored = db.query(CarePushSubscription).one()
+        assert stored.person_id == first["person"]["id"]
+        assert stored.caregiver_id == first["caregiver"]["id"]
+        assert endpoint not in stored.encrypted_subscription
+        assert "test-auth-secret" not in stored.encrypted_subscription
+    finally:
+        db.close()
+
+    cross_record = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers=second_headers,
+        json=payload,
+    )
+    assert cross_record.status_code == 409
+
+    revoked = client.request(
+        "DELETE",
+        "/api/v1/notifications/push/subscriptions",
+        headers=first_headers,
+        json={"endpoint": endpoint},
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revoked"] is True
