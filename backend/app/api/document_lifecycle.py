@@ -342,10 +342,14 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             native_pages = []
             for page in reader.pages:
                 try:
-                    page_text = page.extract_text(extraction_mode="layout") or ""
-                except TypeError:
-                    # Older pypdf versions do not expose layout extraction.
-                    page_text = page.extract_text() or ""
+                    try:
+                        page_text = page.extract_text(extraction_mode="layout") or ""
+                    except TypeError:
+                        # Older pypdf versions do not expose layout extraction.
+                        page_text = page.extract_text() or ""
+                except Exception:
+                    # Preserve page order and let OCR attempt this page.
+                    page_text = ""
                 native_pages.append(page_text.strip())
         except HTTPException:
             raise
