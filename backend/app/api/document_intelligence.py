@@ -710,6 +710,7 @@ def review_document_candidate(
                 db,
                 person_id,
                 workflow="document_candidate_review",
+                caregiver_id=caregiver_id,
                 source_evidence_id=evidence_id,
             )
             change_intelligence_status = "available"
