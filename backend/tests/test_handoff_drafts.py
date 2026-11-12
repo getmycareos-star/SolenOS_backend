@@ -1443,6 +1443,17 @@ def test_caregiver_approved_professional_export_returns_pdf_and_requires_approva
     saved = test_client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=headers)
     assert saved.status_code == 200, saved.text
     assert saved.json()["caregiver_notes"][0]["attribution"] == "caregiver_authored_unverified"
+    tampered = test_client.put(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers=headers,
+        json={"content": {
+            "template_sections": saved.json()["template_sections"],
+            "sections": saved.json()["sections"] + [{"title": "Fabricated source", "items": []}],
+            "generation": saved.json()["generation"],
+            "caregiver_notes": saved.json()["caregiver_notes"],
+        }},
+    )
+    assert tampered.status_code == 422
 
     approved = test_client.post(
         f"/api/v1/handoff-drafts/{draft_id}/approve-export",
