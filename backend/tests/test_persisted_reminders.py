@@ -334,6 +334,7 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
     import app.api.push_notifications as push_api
     import app.services.reminder_delivery as delivery_service
     from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
+    from app.models.open_loop import OpenLoopRecord
 
     settings = _valid_vapid_settings("stable-test-secret")
     monkeypatch.setattr(push_api, "get_settings", lambda: settings)
@@ -388,6 +389,74 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
         )
         subscription = db.query(CarePushSubscription).one()
+        due_soon = datetime.now(timezone.utc) + timedelta(hours=4)
+        due_later = datetime.now(timezone.utc) + timedelta(hours=18)
+        high_loop = OpenLoopRecord(
+            id="push-high-priority-loop",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            loop_type="follow_up",
+            title="Call the clinic",
+            description="A recorded follow-up with a near deadline.",
+            status="open",
+            outcome_status="outcome_unknown",
+            owner_role="unassigned",
+            source_type="appointment_workspace_follow_up",
+            source_id="workspace:call-clinic",
+            source_fingerprint="b" * 64,
+            evidence=[{"record_type": "appointment_workspace", "record_id": "workspace-push"}],
+            uncertainty="reported",
+            deadline_at=due_soon,
+            deadline_source="explicit_user",
+            priority="normal",
+            priority_reasons=[],
+            version=1,
+        )
+        normal_loop = OpenLoopRecord(
+            id="push-normal-priority-loop",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            loop_type="awaiting_response",
+            title="Check the follow-up response",
+            description="A recorded follow-up with a later deadline.",
+            status="open",
+            outcome_status="outcome_unknown",
+            owner_role="unassigned",
+            source_type="handoff_follow_up",
+            source_id="handoff:response",
+            source_fingerprint="c" * 64,
+            evidence=[{"record_type": "handoff", "record_id": "handoff-push"}],
+            uncertainty="reported",
+            deadline_at=due_later,
+            deadline_source="recorded_commitment",
+            priority="normal",
+            priority_reasons=[],
+            version=1,
+        )
+        db.add_all([high_loop, normal_loop])
+        db.flush()
+        high_loop_notification = CareNotification(
+            id="push-test-open-loop-high",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="A care follow-up is due soon",
+            body="Private follow-up details stay in the authenticated inbox.",
+            category="open_loop_due",
+            priority="high",
+            source_event_id=f"{high_loop.id}|{due_soon.isoformat()}",
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+        )
+        normal_loop_notification = CareNotification(
+            id="push-test-open-loop-normal",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="A care follow-up is due soon",
+            body="This should remain in the in-app inbox.",
+            category="open_loop_due",
+            priority="normal",
+            source_event_id=f"{normal_loop.id}|{due_later.isoformat()}",
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+        )
         stale_delivery = CarePushDelivery(
             id="push-test-stale-in-app-delivery",
             notification_id=in_app_change.id,
@@ -396,14 +465,25 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             attempt_count=0,
             next_attempt_at=datetime.now(timezone.utc),
         )
-        db.add_all([notification, in_app_change, stale_delivery])
+        normal_priority_delivery = CarePushDelivery(
+            id="push-test-open-loop-normal-delivery",
+            notification_id=normal_loop_notification.id,
+            subscription_id=subscription.id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=datetime.now(timezone.utc),
+        )
+        db.add_all([
+            notification, in_app_change, high_loop_notification,
+            normal_loop_notification, stale_delivery, normal_priority_delivery,
+        ])
         db.commit()
 
         accepted = delivery_service.deliver_pending_web_pushes(
             db=db,
             now=datetime.now(timezone.utc),
         )
-        assert accepted == 1
+        assert accepted == 2
         delivery = db.query(CarePushDelivery).filter_by(
             notification_id=notification.id
         ).one()
@@ -412,10 +492,21 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
         assert stale_delivery.status == "cancelled"
         assert stale_delivery.last_error_code == "in_app_only_category"
         assert delivery.provider_accepted_at is not None
-        assert len(sent_payloads) == 1
-        assert "Private reminder title" not in sent_payloads[0]["data"]
-        assert "Private reminder details" not in sent_payloads[0]["data"]
-        assert "You have a care update" in sent_payloads[0]["data"]
+        open_loop_delivery = db.query(CarePushDelivery).filter_by(
+            notification_id=high_loop_notification.id
+        ).one()
+        assert open_loop_delivery.status == "accepted"
+        normal_delivery = db.query(CarePushDelivery).filter_by(
+            notification_id=normal_loop_notification.id
+        ).one()
+        assert normal_delivery.status == "cancelled"
+        assert normal_delivery.last_error_code == "notification_not_push_eligible"
+        assert len(sent_payloads) == 2
+        for sent in sent_payloads:
+            assert "Private reminder title" not in sent["data"]
+            assert "Private reminder details" not in sent["data"]
+            assert "Private follow-up details" not in sent["data"]
+            assert "You have a care update" in sent["data"]
     finally:
         db.close()
 

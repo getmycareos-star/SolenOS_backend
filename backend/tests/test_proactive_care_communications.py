@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -10,6 +10,7 @@ from app.core.uncertainty_enums import Priority
 from app.models.care import Caregiver, Evidence, Person
 from app.models.change import Change
 from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
+from app.models.open_loop import OpenLoopRecord
 from app.models.uncertainty import OpenQuestion
 from app.services.proactive_care_communications import create_proactive_care_notifications
 
@@ -141,22 +142,91 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         db.flush()
 
         now = datetime.now(timezone.utc)
-        assert create_proactive_care_notifications(db, person.id, now=now) == 4
+        due_soon = now + timedelta(hours=4)
+        due_later = now + timedelta(hours=18)
+
+        def open_loop(loop_id, caregiver_id, deadline, deadline_source="explicit_user", status="open", loop_type="follow_up"):
+            return OpenLoopRecord(
+                id=loop_id,
+                person_id=person.id,
+                caregiver_id=caregiver_id,
+                loop_type=loop_type,
+                title=f"Follow-up {loop_id}",
+                description=f"Recorded follow-up {loop_id}",
+                status=status,
+                outcome_status="outcome_unknown",
+                owner_role="unassigned",
+                source_type="appointment_workspace_follow_up",
+                source_id=f"workspace:{loop_id}",
+                source_fingerprint=("a" * 64),
+                evidence=[{"record_type": "appointment_workspace", "record_id": "workspace-1"}],
+                uncertainty="reported",
+                deadline_at=deadline,
+                deadline_source=deadline_source,
+                priority="normal",
+                priority_reasons=[],
+                version=1,
+            )
+
+        due_loop = open_loop("notify-due-loop", caregiver_one.id, due_soon)
+        later_loop = open_loop(
+            "notify-later-loop", caregiver_two.id, due_later,
+            loop_type="awaiting_response",
+        )
+        outside_window_loop = open_loop(
+            "notify-outside-window-loop", caregiver_one.id, now + timedelta(hours=48),
+        )
+        policy_deadline_loop = open_loop(
+            "notify-policy-deadline-loop", caregiver_one.id, now + timedelta(hours=2),
+            deadline_source="system_policy",
+        )
+        deferred_loop = open_loop(
+            "notify-deferred-loop", caregiver_one.id, now + timedelta(hours=2),
+            status="deferred",
+        )
+        db.add_all([
+            due_loop, later_loop, outside_window_loop,
+            policy_deadline_loop, deferred_loop,
+        ])
+        db.flush()
+
+        due_loop_source = f"{due_loop.id}|{due_soon.isoformat()}"
+        later_loop_source = f"{later_loop.id}|{due_later.isoformat()}"
+        assert create_proactive_care_notifications(db, person.id, now=now) == 6
         db.commit()
 
         assert create_proactive_care_notifications(db, person.id, now=now) == 0
         db.commit()
 
         notifications = db.query(CareNotification).filter(CareNotification.person_id == person.id).all()
-        assert len(notifications) == 4
+        assert len(notifications) == 6
         assert {item.caregiver_id for item in notifications} == {caregiver_one.id, caregiver_two.id}
-        assert {item.category for item in notifications} == {"care_change", "care_attention"}
+        assert {item.category for item in notifications} == {"care_change", "care_attention", "open_loop_due"}
         assert {item.source_event_id for item in notifications} == {
             "notify-meaningful-change",
             "notify-necessary-question",
+            due_loop_source,
+            later_loop_source,
         }
-        assert all(item.priority == "normal" for item in notifications)
+        assert all(
+            item.priority == "normal"
+            for item in notifications
+            if item.category in {"care_change", "care_attention"}
+        )
+        open_loop_notifications = [item for item in notifications if item.category == "open_loop_due"]
+        assert len(open_loop_notifications) == 2
+        assert {item.caregiver_id for item in open_loop_notifications} == {caregiver_one.id, caregiver_two.id}
+        assert {item.priority for item in open_loop_notifications} == {"high", "normal"}
         assert all(item.status == "active" for item in notifications)
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id.like("notify-outside-window-loop|%")
+        ).count() == 0
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id.like("notify-policy-deadline-loop|%")
+        ).count() == 0
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id.like("notify-deferred-loop|%")
+        ).count() == 0
         assert db.query(CareNotification).filter(CareNotification.person_id == other_person.id).count() == 0
         assert db.query(CareNotification).filter(
             CareNotification.source_event_id == "notify-invalid-necessity-question"
@@ -187,6 +257,33 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         db.add(delivery)
         db.flush()
 
+        due_loop_notification = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "open_loop_due",
+            CareNotification.source_event_id == due_loop_source,
+        ).one()
+        due_subscription = CarePushSubscription(
+            id="notify-due-subscription",
+            person_id=person.id,
+            caregiver_id=caregiver_one.id,
+            endpoint_hash="notify-due-endpoint-hash",
+            encrypted_subscription="encrypted-due-test-subscription",
+            created_at=now,
+        )
+        db.add(due_subscription)
+        db.flush()
+        due_delivery = CarePushDelivery(
+            id="notify-due-pending-delivery",
+            notification_id=due_loop_notification.id,
+            subscription_id=due_subscription.id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=now,
+        )
+        db.add(due_delivery)
+        db.flush()
+
+        due_loop.status = "closed"
         meaningful_change = db.query(Change).filter_by(id="notify-meaningful-change").one()
         meaningful_change.is_active = False
         meaningful_change.superseded_by_change_id = "notify-replacement-change"
@@ -205,8 +302,12 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         ).all()
         assert all(item.status == "superseded" for item in care_change_notifications)
         assert all(item.status == "resolved" for item in care_attention_notifications)
+        db.refresh(due_loop_notification)
+        assert due_loop_notification.status == "resolved"
         db.refresh(delivery)
+        db.refresh(due_delivery)
         assert delivery.status == "cancelled"
+        assert due_delivery.status == "cancelled"
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)

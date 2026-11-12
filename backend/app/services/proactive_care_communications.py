@@ -7,7 +7,7 @@ The existing reminder delivery worker handles push delivery after commit.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,11 +16,181 @@ from app.core.change_enums import SignificanceVerdict
 from app.models.care import Caregiver, Evidence
 from app.models.change import Change
 from app.models.notifications import CareNotification, CarePushDelivery
+from app.models.open_loop import OpenLoopRecord
 from app.models.uncertainty import OpenQuestion
 from app.services.care_continuity import has_valid_caregiver_necessity
 
 
 OPEN_QUESTION_STATUSES = {"open", "unanswered", "pending", "unresolved"}
+OPEN_LOOP_DUE_WINDOW = timedelta(hours=24)
+OPEN_LOOP_PUSH_WINDOW = timedelta(hours=6)
+OPEN_LOOP_DUE_STATUSES = {"open", "waiting", "pending_closure_verification"}
+OPEN_LOOP_DUE_TYPES = {"follow_up", "awaiting_response", "professional_input", "pending_action", "pending_decision"}
+OPEN_LOOP_DUE_SOURCES = {"explicit_user", "recorded_commitment"}
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _open_loop_due_source_key(loop: OpenLoopRecord) -> str | None:
+    deadline = _as_utc(loop.deadline_at)
+    return f"{loop.id}|{deadline.isoformat()}" if deadline is not None else None
+
+
+def open_loop_due_notification_state(
+    db: Session,
+    notification: CareNotification,
+    now: datetime | None = None,
+) -> tuple[bool, str, str | None]:
+    """Validate a time-sensitive message against its current persisted open loop."""
+    source_id = str(notification.source_event_id or "")
+    loop_id, separator, _ = source_id.partition("|")
+    if not separator or not loop_id:
+        return False, "resolved", "source_unavailable"
+    loop = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.id == loop_id,
+        OpenLoopRecord.person_id == notification.person_id,
+        OpenLoopRecord.caregiver_id == notification.caregiver_id,
+    ).first()
+    if loop is None:
+        return False, "resolved", "source_unavailable"
+    deadline = _as_utc(loop.deadline_at)
+    if (
+        loop.status not in OPEN_LOOP_DUE_STATUSES
+        or loop.loop_type not in OPEN_LOOP_DUE_TYPES
+        or loop.deadline_source not in OPEN_LOOP_DUE_SOURCES
+        or deadline is None
+    ):
+        return False, "resolved", "source_no_longer_time_sensitive"
+    if _open_loop_due_source_key(loop) != source_id:
+        return False, "superseded", "deadline_changed"
+    timestamp = _as_utc(now or datetime.now(timezone.utc))
+    if deadline > timestamp + OPEN_LOOP_DUE_WINDOW:
+        return False, "superseded", "deadline_moved_out_of_window"
+    return True, "active", None
+
+
+def _create_open_loop_due_notifications(
+    db: Session,
+    person_id: str,
+    timestamp: datetime,
+) -> tuple[int, int]:
+    loops = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == person_id,
+        OpenLoopRecord.status.in_(sorted(OPEN_LOOP_DUE_STATUSES)),
+        OpenLoopRecord.loop_type.in_(sorted(OPEN_LOOP_DUE_TYPES)),
+        OpenLoopRecord.deadline_source.in_(sorted(OPEN_LOOP_DUE_SOURCES)),
+        OpenLoopRecord.deadline_at.is_not(None),
+        OpenLoopRecord.deadline_at <= timestamp + OPEN_LOOP_DUE_WINDOW,
+    ).order_by(OpenLoopRecord.deadline_at.asc(), OpenLoopRecord.id.asc()).all()
+    created = updated = 0
+    for loop in loops:
+        caregiver_exists = db.query(Caregiver.id).filter(
+            Caregiver.id == loop.caregiver_id,
+            Caregiver.person_id == person_id,
+        ).first()
+        if caregiver_exists is None:
+            continue
+        source_key = _open_loop_due_source_key(loop)
+        deadline = _as_utc(loop.deadline_at)
+        if source_key is None or deadline is None:
+            continue
+        overdue = deadline <= timestamp
+        high_priority = overdue or deadline <= timestamp + OPEN_LOOP_PUSH_WINDOW
+        title = "A care follow-up is overdue" if overdue else "A care follow-up is due soon"
+        body = (
+            f'The recorded follow-up "{loop.title}" is past its deadline. Review it in Open Loops.'
+            if overdue else
+            f'The recorded follow-up "{loop.title}" is due within 24 hours. Review it in Open Loops.'
+        )
+        priority = "high" if high_priority else "normal"
+        existing = db.query(CareNotification).filter(
+            CareNotification.person_id == person_id,
+            CareNotification.caregiver_id == loop.caregiver_id,
+            CareNotification.category == "open_loop_due",
+            CareNotification.source_event_id == source_key,
+            CareNotification.status == "active",
+        ).first()
+        if existing is not None:
+            if (existing.title, existing.body, existing.priority) != (title, body, priority):
+                existing.title = title
+                existing.body = body
+                existing.priority = priority
+                existing.updated_at = timestamp
+                updated += 1
+            continue
+        notification_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"solenos:open-loop-due:{source_key}:{loop.version or 1}",
+        ))
+        created += int(_create_active_notification(db, CareNotification(
+            id=notification_id,
+            person_id=person_id,
+            caregiver_id=loop.caregiver_id,
+            title=title,
+            body=body,
+            category="open_loop_due",
+            priority=priority,
+            source_event_id=source_key,
+            status="active",
+            created_at=timestamp,
+            updated_at=timestamp,
+        )))
+    return created, updated
+
+
+def sync_open_loop_due_notifications(
+    db: Session,
+    *,
+    person_id: str | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Create, update, or close deadline messages using the existing notification store."""
+    timestamp = _as_utc(now or datetime.now(timezone.utc))
+    if person_id is None:
+        person_ids = {
+            str(row[0]) for row in db.query(OpenLoopRecord.person_id).filter(
+                OpenLoopRecord.deadline_at.is_not(None)
+            ).distinct().all()
+        }
+        person_ids.update(
+            str(row[0]) for row in db.query(CareNotification.person_id).filter(
+                CareNotification.category == "open_loop_due",
+                CareNotification.status == "active",
+            ).distinct().all()
+        )
+    else:
+        person_ids = {person_id}
+    changed = 0
+    for scoped_person_id in sorted(person_ids):
+        active = db.query(CareNotification).filter(
+            CareNotification.person_id == scoped_person_id,
+            CareNotification.category == "open_loop_due",
+            CareNotification.status == "active",
+        ).order_by(CareNotification.created_at.asc(), CareNotification.id.asc()).all()
+        for notification in active:
+            still_active, next_status, reason = open_loop_due_notification_state(
+                db, notification, timestamp
+            )
+            if still_active:
+                continue
+            notification.status = next_status
+            notification.resolution_reason = reason
+            notification.resolved_at = timestamp
+            notification.updated_at = timestamp
+            _cancel_pending_pushes(db, notification.id, reason or "source_resolved")
+            changed += 1
+        created, updated = _create_open_loop_due_notifications(
+            db, scoped_person_id, timestamp
+        )
+        changed += created + updated
+    db.flush()
+    return changed
 
 
 def _valid_evidence_ids(db: Session, person_id: str, values: list[str] | None) -> list[str]:
@@ -92,7 +262,7 @@ def _close_obsolete_notifications(db: Session, person_id: str, timestamp: dateti
     active = db.query(CareNotification).filter(
         CareNotification.person_id == person_id,
         CareNotification.status == "active",
-        CareNotification.category.in_(["care_change", "care_attention"]),
+        CareNotification.category.in_(["care_change", "care_attention", "open_loop_due"]),
     ).order_by(CareNotification.created_at.asc(), CareNotification.id.asc()).all()
     closed = 0
     for notification in active:
@@ -104,13 +274,21 @@ def _close_obsolete_notifications(db: Session, person_id: str, timestamp: dateti
                 continue
             notification.status = next_status
             notification.resolution_reason = reason
-        else:
+        elif notification.category == "care_attention":
             still_active, reason = _active_question(
                 db, person_id, notification.source_event_id
             )
             if still_active:
                 continue
             notification.status = "resolved"
+            notification.resolution_reason = reason
+        else:
+            still_active, next_status, reason = open_loop_due_notification_state(
+                db, notification, timestamp
+            )
+            if still_active:
+                continue
+            notification.status = next_status
             notification.resolution_reason = reason
         notification.resolved_at = timestamp
         notification.updated_at = timestamp
@@ -234,5 +412,7 @@ def create_proactive_care_notifications(
                 updated_at=timestamp,
             )))
 
+    open_loop_created, _ = _create_open_loop_due_notifications(db, person_id, timestamp)
+    created += open_loop_created
     db.flush()
     return created

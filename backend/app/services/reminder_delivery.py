@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import case, cast, exists, literal, or_, String
+from sqlalchemy import and_, case, cast, exists, literal, or_, String
 from sqlalchemy.exc import IntegrityError
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -23,7 +23,7 @@ from app.models.notifications import CareNotification, CareNotificationPreferenc
 
 # Care changes and clarification requests stay in the authenticated inbox.
 # Browser push is reserved for explicitly due reminders.
-PUSH_NOTIFICATION_CATEGORIES = frozenset({"reminder_due"})
+PUSH_NOTIFICATION_CATEGORIES = frozenset({"reminder_due", "open_loop_due"})
 from app.models.reminder import CareReminder
 from app.services.web_push_config import vapid_configuration_error
 
@@ -123,6 +123,10 @@ def deliver_due_reminders(db=None, now=None):
             delivery.last_error_code = "in_app_only_category"
             delivery.last_error_message = "This care message stays in the in-app inbox."
         if in_app_only_pending:
+            session.commit()
+
+        from app.services.proactive_care_communications import sync_open_loop_due_notifications
+        if sync_open_loop_due_notifications(session, now=current):
             session.commit()
 
         due = (
@@ -231,6 +235,13 @@ def deliver_pending_web_pushes(db=None, now=None):
                 or_(
                     CareNotification.status != "active",
                     CarePushSubscription.revoked_at.is_not(None),
+                    and_(
+                        CareNotification.category == "open_loop_due",
+                        or_(
+                            CareNotification.priority.notin_(("high", "critical", "urgent", "emergency")),
+                            CareNotification.read_at.is_not(None),
+                        ),
+                    ),
                 ),
             )
             .all()
@@ -253,6 +264,13 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CareNotification.created_at >= subscription.created_at,
                 CareNotification.status == "active",
                 CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
+                or_(
+                    CareNotification.category != "open_loop_due",
+                    and_(
+                        CareNotification.priority.in_(("high", "critical", "urgent", "emergency")),
+                        CareNotification.read_at.is_(None),
+                    ),
+                ),
             ).all()
             for notification in notifications:
                 existing = session.query(CarePushDelivery.id).filter(
@@ -301,6 +319,30 @@ def deliver_pending_web_pushes(db=None, now=None):
                 delivery.last_error_message = "The care source no longer requires this notification."
                 session.commit()
                 continue
+            if notification.category == "open_loop_due":
+                from app.services.proactive_care_communications import open_loop_due_notification_state
+                still_active, next_status, reason = open_loop_due_notification_state(
+                    session, notification, current
+                )
+                if not still_active:
+                    notification.status = next_status
+                    notification.resolution_reason = reason
+                    notification.resolved_at = current
+                    notification.updated_at = current
+                    delivery.status = "cancelled"
+                    delivery.last_error_code = (reason or "source_resolved")[:64]
+                    delivery.last_error_message = "The recorded follow-up is no longer due."
+                    session.commit()
+                    continue
+                if (
+                    notification.read_at is not None
+                    or notification.priority not in {"high", "critical", "urgent", "emergency"}
+                ):
+                    delivery.status = "cancelled"
+                    delivery.last_error_code = "notification_not_push_eligible"
+                    delivery.last_error_message = "The follow-up is available in the in-app inbox without a push interruption."
+                    session.commit()
+                    continue
             preference = session.query(CareNotificationPreference).filter(
                 CareNotificationPreference.person_id == notification.person_id,
                 CareNotificationPreference.caregiver_id == notification.caregiver_id,
