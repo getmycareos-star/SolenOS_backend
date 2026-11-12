@@ -1153,6 +1153,31 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             assert receipt["provenance"]["evidence_ids"] == run.evidence_ids
             assert "computed_changes" in receipt
 
+        # Compare exact source-grounded final assertions against the independently
+        # authored expected state; a successful HTTP/service call is not a pass.
+        for expected_assertion in scenario["expected_final_state"]["assertions"]:
+            actual = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person.id,
+                CareAssertion.subject_type == "symptom",
+                CareAssertion.subject_id == expected_assertion["topic"],
+                CareAssertion.asserted_value == expected_assertion["value"],
+                CareAssertion.source_event_id == expected_assertion["source_event_id"],
+                CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
+            ).first()
+            assert actual is not None, (
+                f"{scenario['scenario_id']}: missing expected assertion {expected_assertion}"
+            )
+
+        duplicate_ids = {
+            event["id"] for event in ordered_events
+            if event.get("classification") == "duplicate_same_occurrence"
+        }
+        for duplicate_id in duplicate_ids:
+            assert db.query(CareAssertion).filter(
+                CareAssertion.person_id == person.id,
+                CareAssertion.source_event_id == duplicate_id,
+            ).count() == 0
+
         # Medication references, historical lists and missed-dose reports are not
         # sufficient to establish a current prescription.
         medication_assertions = db.query(CareAssertion).filter(
