@@ -83,7 +83,7 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
     if family == "temporal_ordering":
         events[6]["arrival"] = 10 + (variant % 3)
         events[7]["arrival"] = 2 + (variant % 4)
-        events[0]["arrival"] = 9
+        # Keep the original observation available before its later correction.
     elif family == "duplicate_observations":
         duplicate = dict(events[0])
         duplicate.update({
