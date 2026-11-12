@@ -554,6 +554,11 @@ class UncertaintyEngine:
             query = query.filter(OpenQuestionModel.subject_id == subject_id)
         if status:
             query = query.filter(OpenQuestionModel.status == status)
+        else:
+            # The default caregiver projection is an active-work list, not an
+            # archive. Closed/superseded questions remain available through
+            # the explicit status filter and answer-history route.
+            query = query.filter(OpenQuestionModel.status.in_(["open", "unresolved"]))
         return query.order_by(OpenQuestionModel.asked_at.desc()).all()
 
     def create_contradiction(self, contradiction: ContradictionCreate) -> ContradictionModel:
