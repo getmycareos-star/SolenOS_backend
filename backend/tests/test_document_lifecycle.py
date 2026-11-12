@@ -245,6 +245,13 @@ def test_real_upload_endpoint_feeds_document_extraction(client):
         assert job.status == "queued"
         assert __import__("json").loads(job.evidence_ids_json) == [evidence_id]
 
+    queue_state = test_client.get("/api/v1/documents/intelligence", headers=auth)
+    assert queue_state.status_code == 200, queue_state.text
+    assert any(
+        item["evidence_id"] == evidence_id and item["status"] == "queued"
+        for item in queue_state.json()["processing_jobs"]
+    )
+
     # Client-provided OCR/text must not enter the authoritative Evidence source.
     with TestSessionLocal() as db:
         evidence = db.query(Evidence).filter_by(id=evidence_id).one()
