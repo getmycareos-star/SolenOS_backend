@@ -537,7 +537,7 @@ def test_system_reassessment_audits_deadlines_without_infering_completion():
     due_soon_current = client.get(f"/api/v1/open-loops/{due_soon['id']}", headers=headers)
     assert due_soon_current.status_code == 200, due_soon_current.text
     assert due_soon_current.json()["loop"]["priority"] == "high"
-    assert "within 24 hours" in " ".join(due_soon_current.json()["priority_reasons"])
+    assert "within 24 hours" in " ".join(due_soon_current.json()["loop"]["priority_reasons"])
     due_soon_history = client.get(
         f"/api/v1/open-loops/{due_soon['id']}/history", headers=headers
     )
