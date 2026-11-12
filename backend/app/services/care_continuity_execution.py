@@ -305,7 +305,7 @@ def execute_care_continuity_reconciliation(
         allowed = {
             "extraction": {"available", "pending", "failed", "not_applicable"},
             "assessment": {"available", "pending", "failed", "not_applicable"},
-            "review": {"required", "completed", "not_required", "pending"},
+            "review": {"required", "available", "completed", "not_required", "pending"},
         }
         for name, value in stage_statuses.items():
             if name not in allowed or value not in allowed[name]:
