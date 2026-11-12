@@ -316,3 +316,37 @@ def test_due_reminder_batch_does_not_starve_older_delivered_rows():
         ).count() == 101
     finally:
         db.close()
+
+
+def test_inactive_quiet_hours_flag_does_not_drop_due_reminder():
+    from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    session = create_session(client, "Caregiver quiet hours")
+    db = TestSessionLocal()
+    try:
+        reminder = CareReminder(
+            person_id=session["person"]["id"],
+            created_by_caregiver_id=session["caregiver"]["id"],
+            title="Check care plan",
+            due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            status="open",
+        )
+        db.add(reminder)
+        db.add(CareNotificationPreference(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            reminders_enabled=True,
+            quiet_hours_enabled=True,
+        ))
+        db.commit()
+
+        assert deliver_due_reminders(db=db) == 1
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id == reminder.id,
+            CareNotification.category == "reminder_due",
+        ).count() == 1
+    finally:
+        db.close()
