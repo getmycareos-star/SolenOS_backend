@@ -450,6 +450,10 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
                 if owner_column:
                     predicate = table.c[owner_column] == caregiver_id
                 else:
+                    manifest["unexported_tables"].append({
+                        "table": name,
+                        "reason": "No recognized person or caregiver ownership column; excluded to prevent cross-user disclosure.",
+                    })
                     continue
             rows = db.execute(table.select().where(predicate)).mappings().all()
             if not rows:
