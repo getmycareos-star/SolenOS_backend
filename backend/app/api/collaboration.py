@@ -90,10 +90,10 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
     """Build a bounded count only for an explicitly requested supported topic/window."""
     normalized = (question or "").casefold()
     topic_terms = ("unsteadiness", "unsteady", "lost balance", "loss of balance", "wobbly", "stumbled", "staggered")
-    asks_for_count = bool(re.search(r"\\b(?:how many|number of|count|total|incidents|occasions)\\b", normalized))
+    asks_for_count = bool(re.search(r"\b(?:how many|number of|count|total|incidents|occasions)\b", normalized))
     if not asks_for_count or not any(term in normalized for term in topic_terms):
         return []
-    if not re.search(r"\\bthis month\\b", normalized):
+    if not re.search(r"\bthis month\b", normalized):
         return [{
             "status": "unsupported_time_window",
             "topic": "unsteadiness",
