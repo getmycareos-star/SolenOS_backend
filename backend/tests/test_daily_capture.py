@@ -1258,6 +1258,22 @@ def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
     setup_db()
     try:
         seed_person_and_caregiver()
+        from app.models.care import CareEvent
+        target_db = TestingSessionLocal()
+        try:
+            target_db.add(CareEvent(
+                id="event-source-1",
+                person_id="person-daily-test",
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime.now(timezone.utc),
+                title="Caregiver observation",
+                description="Mum was unusually confused.",
+                created_by_caregiver_id="caregiver-daily-test",
+            ))
+            target_db.commit()
+        finally:
+            target_db.close()
 
         def no_op_apply(self, correction, *, commit=True):
             return None
