@@ -12,7 +12,8 @@ from app.models.care import Person, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationSession, ConversationMessage
-from app.models.uncertainty import OpenQuestion
+from app.models.uncertainty import OpenQuestion, InformationGap
+from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -2877,5 +2878,125 @@ def test_source_correction_requires_review_for_direct_and_dependent_claims():
         assert dependent_body["review_required"] is True
         assert "impact-correction-source-claim" in dependent_body["changed_prerequisite_claim_ids"]
         assert "prerequisite_claim_source_or_assessment_changed" in dependent_body["reasons"]
+    finally:
+        teardown_db()
+
+
+def test_normal_reconciliation_persists_only_actionable_source_linked_questions():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        now = datetime.now(timezone.utc)
+        person = Person(id="person-question-reconcile", name="Question Reconciliation Person")
+        caregiver = Caregiver(
+            id="caregiver-question-reconcile",
+            name="Question Reconciliation Caregiver",
+            email="question-reconcile@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="evidence-question-reconcile",
+            person_id=person.id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="The caregiver reported that her appetite has changed recently.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_caregiver_id=caregiver.id,
+        )
+        reported = CareAssertion(
+            id="assertion-question-reconcile-reported",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="appetite",
+            assertion_kind="current_state",
+            asserted_value="Appetite has changed recently",
+            source_label="Caregiver report",
+            source_text=evidence.source_text,
+            evidence_ids=[evidence.id],
+            assertion_status="reported",
+            observed_at=now,
+            review_after_days=30,
+            created_by_caregiver_id=caregiver.id,
+        )
+        accepted = CareAssertion(
+            id="assertion-question-reconcile-accepted",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="usual_bedtime",
+            assertion_kind="current_state",
+            asserted_value="Usually goes to bed at 9 PM",
+            source_label="Caregiver-reviewed report",
+            source_text="Caregiver confirmed usual bedtime.",
+            evidence_ids=[],
+            assertion_status="accepted",
+            observed_at=now,
+            review_after_days=30,
+            created_by_caregiver_id=caregiver.id,
+        )
+        time_bound = CareAssertion(
+            id="assertion-question-reconcile-time-bound",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="sleep_observation",
+            assertion_kind="time_bound_observation",
+            asserted_value="Slept poorly last night",
+            source_label="Caregiver report",
+            source_text="Slept poorly last night.",
+            evidence_ids=[evidence.id],
+            assertion_status="caregiver_reviewed",
+            observed_at=now,
+            created_by_caregiver_id=caregiver.id,
+        )
+        gap = InformationGap(
+            id="gap-question-reconcile",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="recent_weight",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.ABSENT,
+            priority=Priority.MEDIUM,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="No recent weight measurement is recorded.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, reported, accepted, time_bound, gap])
+        db.commit()
+
+        # The ordinary shared reconciliation path is responsible for refreshing
+        # source-linked questions; no separate caregiver action is required.
+        reconcile_person_change_intelligence(db, person.id)
+        db.commit()
+        first = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).all()
+        assert len(first) == 2
+        assert any("appetite" in row.question for row in first)
+        assert any("recent_weight" in row.question for row in first)
+        assert all(row.evidence_ids == [evidence.id] for row in first)
+        assert all(row.context and row.context[0].get("source_id") for row in first)
+
+        # Reconciliation is idempotent: it enriches existing open questions but
+        # does not multiply them on every subsequent save/reload.
+        reconcile_person_change_intelligence(db, person.id)
+        db.commit()
+        second_count = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).count()
+        assert second_count == 2
+        assert not any("usual_bedtime" in row.question for row in db.query(OpenQuestion).filter_by(person_id=person.id).all())
+        assert not any("sleep_observation" in row.question for row in db.query(OpenQuestion).filter_by(person_id=person.id).all())
     finally:
         teardown_db()
