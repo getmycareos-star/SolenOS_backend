@@ -67,9 +67,9 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
         if not text:
             continue
         record_id = None
-        match = re.search(r"\[([^\]\r\n]{1,160})\]", text)
-        if match:
-            record_id = match.group(1).strip()
+        bracket_ids = [value.strip() for value in re.findall(r"\[([^\]\r\n]{1,160})\]", text)]
+        if bracket_ids:
+            record_id = bracket_ids[0]
         record_type = "care_record"
         prefix = text.casefold()
         for marker, kind in (
@@ -118,6 +118,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             "source_text": text,
             "source_excerpt": text[:700],
             "record_status": None,
+            "related_evidence_ids": bracket_ids[1:2] if record_type == "document_extraction" and len(bracket_ids) > 1 else [],
         })
     return records
 
