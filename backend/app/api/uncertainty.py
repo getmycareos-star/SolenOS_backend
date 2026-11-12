@@ -24,7 +24,7 @@ from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse, OpenQuestionReviewCreate, OpenQuestionReviewResponse
 from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
-from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
+from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState
 from app.api.care_delta import _scoped_identity
 from app.models.care_continuity import EvidenceClaimDependency, EvidenceClaimAssessment, CareAssertion
 from app.schemas.care_continuity import CareAssertionCreate
