@@ -345,105 +345,79 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
         Base.metadata.drop_all(bind=engine)
 
 
-def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(monkeypatch):
+def test_incomplete_document_blocks_interpretation_and_candidate_acceptance(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
-    first_quote = "Previous instruction: take metformin 500 mg once daily."
-    second_quote = "New instruction: take metformin 1000 mg twice daily."
     source = (
-        "[Page 1]\nDischarge summary\n" + first_quote + "\n\n"
+        "[Page 1]\nDischarge summary\nPatient walked with assistance.\n\n"
         "[Page 2 OCR]\n[No readable text detected on this page]\n\n"
-        "[Page 3]\nMedication reconciliation\n" + second_quote
+        "[Page 3]\nMedication reconciliation\nMedication instruction recorded."
     )
     calls = []
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
         calls.append(page_text)
-        quote = first_quote if first_quote in page_text else second_quote
-        return {"observations": [{
-            "subject": "metformin",
-            "observation": quote,
-            "source_quote": quote,
-            "extraction_method": "test_verbatim",
-        }], "open_questions": []}
+        return {"observations": [], "open_questions": []}
 
     monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
     try:
-        caregiver = create_record(client, "Multi-page caregiver")
+        caregiver = create_record(client, "Incomplete document caregiver")
         auth = {"Authorization": "Bearer " + caregiver["access_token"]}
         evidence_id = save_original(caregiver, source)
-        with Session() as db:
-            evidence_row = db.query(Evidence).filter_by(id=evidence_id).one()
-            evidence_row.extra_metadata = json.dumps({
-                "filename": "duplicate-discharge-summary.txt",
-                "duplicate_detected": True,
-                "duplicate_of_evidence_id": "original-evidence-123",
-            })
-            db.commit()
         extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
         assert extracted.status_code == 201, extracted.text
+        extraction_body = extracted.json()
+        assert extraction_body["extraction_status"] == "partial"
+        assert extraction_body["unreadable_page_numbers"] == [2]
+
         understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
-        assert understood.status_code == 201, understood.text
-        body = understood.json()
-        assert len(calls) == 2
-        assert body["intelligence_status"] == "partial"
-        assert body["processed_page_count"] == 2
-        assert body["total_page_count"] == 3
-        assert body["processed_page_numbers"] == [1, 3]
-        assert body["unreadable_page_numbers"] == [2]
-        assert any("Pages 2 have no readable extracted text" in note for note in body["open_questions"])
-        assert [item["page_number"] for item in body["observations"]] == [1, 3]
-        assert all(item["review_status"] == "pending_review" for item in body["observations"])
-        assert all(
-            any("Conflicting medication instructions" in warning for warning in item["warnings"])
-            for item in body["observations"]
-        )
-        assert all(
-            any("exact binary duplicate" in warning for warning in item["warnings"])
-            for item in body["observations"]
-        )
-        assert any("outdated or superseded" in warning for warning in body["observations"][0]["warnings"])
-        assert body["written_to_lcr"] is False
-        accepted = client.post(
-            f"/api/v1/documents/intelligence/{body['analysis_id']}/review",
+        assert understood.status_code == 409, understood.text
+        assert "blocked until every page has a complete extraction" in understood.json()["detail"]
+        assert "unreadable pages: 2" in understood.json()["detail"]
+        assert calls == []
+
+        # Also reject stale candidates created by an older implementation:
+        # they must not be accepted into the LCR while source pages are missing.
+        with Session() as db:
+            analysis = db.query(CaptureAnalysis).filter_by(
+                source_evidence_id=evidence_id,
+                person_id=caregiver["person"]["id"],
+                caregiver_id=caregiver["caregiver"]["id"],
+            ).one()
+            metadata = dict(analysis.candidates)
+            metadata["document_intelligence"] = {
+                "source_text_sha256": hashlib.sha256(analysis.source_text.strip().encode()).hexdigest(),
+                "observations": [{
+                    "subject": "Patient",
+                    "observation": "Patient walked with assistance.",
+                    "source_quote": "Patient walked with assistance.",
+                    "review_status": "pending_review",
+                    "field_type": "observation",
+                    "warnings": [],
+                    "canonical_candidate": {},
+                }],
+            }
+            analysis.candidates = metadata
+            db.add(analysis)
+            db.commit()
+            analysis_id = analysis.id
+
+        review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
             json={"candidate_index": 0, "decision": "accept"},
         )
-        assert accepted.status_code == 200, accepted.text
-        assert accepted.json()["written_to_lcr"] is True
+        assert review.status_code == 409, review.text
+        assert "blocked until every page has a complete extraction" in review.json()["detail"]
         with Session() as db:
-            assertion = db.query(CareAssertion).filter_by(
-                person_id=caregiver["person"]["id"]
-            ).one()
-            assert f"page {body['observations'][0]['page_number']}" in assertion.source_label
-            assert "duplicate copy; not independent corroboration" in assertion.source_label
-            assert assertion.field == "medication"
-            assert "Strength: 500 mg" in assertion.asserted_value
-            assert "Dosage instructions:" in assertion.asserted_value
-        current_care = client.get(
-            "/api/v1/care-continuity/current-care?limit_per_source=12",
-            headers=auth,
-        )
-        assert current_care.status_code == 200, current_care.text
-        lcr_item = next(
-            item for item in current_care.json()["items"]
-            if item["title"] == "medication"
-        )
-        assert "Strength: 500 mg" in lcr_item["description"]
-        assert "Dosage instructions:" in lcr_item["description"]
-        assert "Conflicting medication instructions" in lcr_item["description"]
-        assert "outdated or superseded" in lcr_item["description"]
-        assert lcr_item["source_label"].find("page 1") >= 0
-        assert lcr_item["epistemic_status"] == "caregiver_reported"
+            assert db.query(CareAssertion).filter_by(person_id=caregiver["person"]["id"]).count() == 0
+            assert db.query(DocumentReviewEvent).filter_by(analysis_id=analysis_id).count() == 0
     finally:
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
-
-
-
 def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
