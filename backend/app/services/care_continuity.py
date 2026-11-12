@@ -228,8 +228,10 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
         # care journey. Preserve the conflict as qualified rather than treating
         # the values as simultaneous; undated competing current-state reports
         # remain unresolved. Neither path chooses a winner.
-        has_distinct_time_context = bool(assertion.event_time_text) or any(
-            bool(peer.event_time_text) for peer in conflicts
+        has_distinct_time_context = (
+            bool(assertion.event_time_text)
+            or assertion.observed_at is not None
+            or any(bool(peer.event_time_text) or peer.observed_at is not None for peer in conflicts)
         )
         proposed_conflict_status = "qualified" if has_distinct_time_context else "unresolved"
         if contradiction:
