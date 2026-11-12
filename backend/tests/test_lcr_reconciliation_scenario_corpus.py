@@ -146,7 +146,11 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
                 if family == "duplicate_observations" else []
             ),
             "evidence_references": evidence_refs,
-            "unresolved_questions": [
+            # These remain internal information gaps. The scenario does
+            # not establish a current care decision that requires caregiver
+            # input, so they must not be emitted as caregiver questions.
+            "unresolved_questions": [],
+            "internal_information_gaps": [
                 "What is the currently prescribed medication and dose?",
                 "Was the reported missed dose later administered?",
                 "What is the corrected date of the original sleep observation?",
@@ -197,7 +201,8 @@ def test_curated_longitudinal_scenario_has_independent_expected_state(scenario):
     assert {ref["event_id"] for ref in expected["evidence_references"]} == {
         event["id"] for event in events
     }
-    assert expected["unresolved_questions"]
+    assert expected["unresolved_questions"] == []
+    assert expected["internal_information_gaps"]
     assert scenario["initial_lcr"]["assertions"]
 
 
