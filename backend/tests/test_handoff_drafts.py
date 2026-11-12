@@ -623,7 +623,6 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
 
 def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
-    from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
 
     test_client, session = client
     person_id = session["person"]["id"]
