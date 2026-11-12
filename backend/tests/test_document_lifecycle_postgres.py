@@ -804,3 +804,63 @@ def test_postgres_corrected_filename_suggests_predecessor_without_auto_linking()
             assert metadata["possible_version_suggestion_reason"] == "normalized_filename_match"
     finally:
         engine.dispose()
+
+
+def test_postgres_transient_page_failure_is_counted_and_eventually_stops_retrying():
+    """Repeated identical OCR timeouts remain partial and exhaust a bounded page retry budget."""
+    from app.api import document_lifecycle
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-page-retry-person-{suffix}"
+    caregiver_id = f"doc-page-retry-caregiver-{suffix}"
+    calls = {"count": 0}
+    timeout_marker = "[Page 1 OCR]\n[Page not processed: OCR engine error]"
+
+    def fail_ocr(_upload, _content, _evidence, **_kwargs):
+        calls["count"] += 1
+        return timeout_marker, "fault-injected-ocr-timeout"
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Page retry fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Page retry caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            uploaded = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "page-failure.txt",
+                b"Original document bytes remain unchanged during OCR timeout retries.",
+            )
+
+        document_lifecycle._extract = fail_ocr
+        with Session() as db:
+            first = extract_saved_document(uploaded["evidence_id"], _request(person_id, caregiver_id), db)
+            assert first["extraction_status"] == "partial"
+            assert first["retryable_page_numbers"] == [1]
+            assert first["page_retry_attempts"] == {"1": 1}
+
+        for expected_attempt in range(2, 8):
+            with Session() as db:
+                result = extract_saved_document(uploaded["evidence_id"], _request(person_id, caregiver_id), db)
+                assert result["extraction_status"] == "partial"
+                assert result["page_retry_attempts"] == {"1": expected_attempt}
+                if expected_attempt < 7:
+                    assert result["retryable_page_numbers"] == [1]
+                    assert result["retry_exhausted_page_numbers"] == []
+                else:
+                    assert result["retryable_page_numbers"] == []
+                    assert result["retry_exhausted_page_numbers"] == [1]
+
+        with Session() as db:
+            exhausted = extract_saved_document(uploaded["evidence_id"], _request(person_id, caregiver_id), db)
+            assert exhausted["page_retry_attempts"] == {"1": 7}
+            assert exhausted["retry_exhausted_page_numbers"] == [1]
+            assert calls["count"] == 7
+            stored_upload = db.query(EvidenceUpload).filter_by(evidence_id=uploaded["evidence_id"]).one()
+            assert bytes(stored_upload.content) == b"Original document bytes remain unchanged during OCR timeout retries."
+    finally:
+        document_lifecycle._extract = document_lifecycle._extract
+        engine.dispose()
