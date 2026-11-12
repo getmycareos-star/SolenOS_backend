@@ -662,7 +662,7 @@ def test_document_understanding_retry_processes_only_remaining_pages(monkeypatch
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
         page_number = int(page_text.split("]", 1)[0].split()[-1])
         processed_pages.append(page_number)
-        quote = page_text.split("\\n", 1)[1].strip()
+        quote = page_text.split("\n", 1)[1].strip()
         return {
             "observations": [{
                 "subject": "Patient",
@@ -677,8 +677,8 @@ def test_document_understanding_retry_processes_only_remaining_pages(monkeypatch
     try:
         caregiver = create_record(client, "Paged document caregiver")
         auth = {"Authorization": "Bearer " + caregiver["access_token"]}
-        source = "\\n\\n".join(
-            f"[Page {page}]\\nPatient completed therapy session {page}."
+        source = "\n\n".join(
+            f"[Page {page}]\nPatient completed therapy session {page}."
             for page in range(1, 27)
         )
         evidence_id = save_original(caregiver, source)
