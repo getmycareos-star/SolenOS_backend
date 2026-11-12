@@ -161,6 +161,21 @@ def build_distinct_event_aggregate(
             continue
         candidates.append({**event, "_occurred": occurred, "_searchable": re.sub(r"\s+", " ", searchable).strip()})
 
+    correction_review_events = [
+        item for item in candidates if item.get("source_correction_requires_review")
+    ]
+    if correction_review_events:
+        return {
+            "status": "source_correction_requires_review",
+            "topic": topic,
+            "window_label": window_label,
+            "count": None,
+            "candidate_count": len(candidates),
+            "affected_event_count": len(correction_review_events),
+            "interpretation_limit": "A source detail linked to one or more matching care updates was later corrected. Those updates need review before a current total can be stated.",
+            "source_references": [],
+        }
+
     if truncated:
         return {
             "status": "incomplete_source_window",
