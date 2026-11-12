@@ -24,6 +24,7 @@ class OpenLoopRecord(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    assigned_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True, index=True)
     loop_type = Column(String(40), nullable=False)
     title = Column(String(240), nullable=False)
     description = Column(Text, nullable=False)
