@@ -28,6 +28,16 @@ class CareAssertionCreate(BaseModel):
     def validate_assertion_epistemic_state(self):
         if self.epistemic_state in {"conflicting", "missing"}:
             raise ValueError("conflicting and missing are derived record states, not directly creatable assertions")
+        if not (
+            self.source_event_id
+            or self.source_proposal_id
+            or self.source_message_id
+            or self.evidence_ids
+            or (self.source_text or "").strip()
+        ):
+            raise ValueError(
+                "Every care assertion must retain a source event, proposal, message, evidence record, or source text"
+            )
         if self.epistemic_state == "observed":
             if self.observed_at is None:
                 raise ValueError("observed_at is required for an observed assertion")
