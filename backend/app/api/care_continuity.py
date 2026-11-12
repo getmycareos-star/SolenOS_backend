@@ -3596,60 +3596,35 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
     scoped_person_id, _ = _scoped_identity(request, db)
     if str(person_id) != str(scoped_person_id):
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+
+    # Use the ORM model so JSONList fields are decoded consistently on SQLite
+    # and PostgreSQL. Keep the same strict necessity gate used by every other
+    # caregiver-facing clarification projection.
+    from app.models.uncertainty import OpenQuestion
+    from app.services.care_continuity import has_valid_caregiver_necessity
+
+    rows = db.query(OpenQuestion).filter(
+        OpenQuestion.person_id == scoped_person_id,
+        OpenQuestion.necessity == "necessary",
+        OpenQuestion.status.in_(["open", "unanswered", "pending"]),
+    ).order_by(OpenQuestion.asked_at.desc(), OpenQuestion.id.asc()).all()
+
     output = []
-    if inspect(db.get_bind()).has_table("open_questions"):
-        questions = _table(db, "open_questions")
-        rows = db.execute(select(questions).where(
-            questions.c.person_id == scoped_person_id,
-            questions.c.necessity == "necessary",
-        )).mappings().all()
-        for raw in rows:
-            row = _jsonable(dict(raw))
-            if str(row.get("status") or "open").casefold() not in {"open", "unanswered", "pending"}:
-                continue
-            evidence_ids = row.get("evidence_ids")
-            rationale = row.get("necessity_rationale")
-            if not isinstance(evidence_ids, list) or not evidence_ids:
-                continue
-            found_evidence_ids = {
-                str(value) for value in db.query(Evidence.id).filter(
-                    Evidence.person_id == scoped_person_id,
-                    Evidence.id.in_([str(value) for value in evidence_ids if value]),
-                ).all()
-            }
-            if found_evidence_ids != {str(value) for value in evidence_ids if value}:
-                continue
-            if not isinstance(evidence_ids, list) or not evidence_ids:
-                continue
-            if not isinstance(rationale, str) or not rationale.strip():
-                continue
-            valid_dependency = False
-            for context_item in (row.get("context") or []):
-                if not isinstance(context_item, dict):
-                    continue
-                nested = context_item.get("necessity_assessment")
-                nested_dependency = nested.get("decision_dependency") if isinstance(nested, dict) else None
-                direct_dependency = context_item.get("decision_dependency")
-                if any(
-                    isinstance(value, str) and value.strip()
-                    for value in (direct_dependency, nested_dependency)
-                ):
-                    valid_dependency = True
-                    break
-            if not valid_dependency:
-                continue
-            output.append({
-                "question": row.get("question") or "Persisted open question",
-                "subject_type": row.get("subject_type") or "care_record",
-                "subject_id": row.get("subject_id") or scoped_person_id,
-                "priority": str(row.get("priority") or "informational"),
-                "reason": "This question is persisted as open; no answer is recorded.",
-                "evidence_ids": row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else [],
-                "source_kind": "open_question",
-                "source_id": row.get("id"),
-                "source_ids": [row.get("id")],
-                "persisted_question_id": row.get("id"),
-            })
+    for question in rows:
+        if not has_valid_caregiver_necessity(question, db, scoped_person_id):
+            continue
+        output.append({
+            "question": question.question or "Persisted open question",
+            "subject_type": question.subject_type or "care_record",
+            "subject_id": question.subject_id or scoped_person_id,
+            "priority": str(getattr(question.priority, "value", question.priority) or "informational"),
+            "reason": "This question is persisted as open; no answer is recorded.",
+            "evidence_ids": list(question.evidence_ids or []),
+            "source_kind": "open_question",
+            "source_id": question.id,
+            "source_ids": [question.id],
+            "persisted_question_id": question.id,
+        })
     # Open information gaps remain internal care memory. They are not
     # caregiver questions unless the necessity assessment promotes them into
     # a source-linked OpenQuestion above.
