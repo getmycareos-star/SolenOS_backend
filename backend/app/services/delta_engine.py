@@ -1003,6 +1003,28 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 topic = str(item.get("topic") or "unspecified conflict").strip()
                 description = str(item.get("why_conflicting") or "Competing source reports require human review.")
                 description += " Reports: " + " | ".join(str(value) for value in (item.get("reports") or []))
+                # Retain the provenance for every competing source, not just the
+                # latest event's evidence IDs.
+                conflict_refs: list[dict[str, str]] = []
+                for excerpt in item.get("evidence_excerpts") or []:
+                    conflict_refs.extend(_match_source_references(
+                        str(excerpt),
+                        new_content=content,
+                        source_event_id=source_event_id,
+                        active_state=active_state,
+                        prior_events=prior_events,
+                        evidence_rows=source_evidence_rows,
+                    ))
+                unique_conflict_refs = {
+                    (ref["record_type"], ref["record_id"]): ref
+                    for ref in conflict_refs
+                }
+                conflict_evidence_ids = list(dict.fromkeys(
+                    record_id for record_type, record_id in unique_conflict_refs
+                    if record_type == "evidence"
+                ))
+                if not unique_conflict_refs:
+                    continue
                 existing = db.query(Contradiction).filter(
                     Contradiction.person_id == person_id,
                     Contradiction.subject_type == "delta_engine_report",
@@ -1012,7 +1034,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 if existing is None:
                     db.add(Contradiction(
                         person_id=person_id, subject_type="delta_engine_report", subject_id=topic,
-                        field=topic, description=description, evidence_ids=evidence_ids,
+                        field=topic, description=description, evidence_ids=conflict_evidence_ids,
                         source_assertion_ids=[], resolution_status="unresolved",
                     ))
             run = CareDeltaRun(
