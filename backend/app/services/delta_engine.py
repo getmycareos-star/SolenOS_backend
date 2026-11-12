@@ -23,7 +23,7 @@ from app.services.care_continuity import create_assertion
 from app.services.claim_provenance import build_claim_provenance
 
 
-DELTA_ENGINE_VERSION = "2026.11.12.3"
+DELTA_ENGINE_VERSION = "2026.11.12.4"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
