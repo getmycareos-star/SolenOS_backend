@@ -348,7 +348,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             OpenQuestion.person_id == person_id,
             OpenQuestion.status.notin_(["answered", "closed", "resolved", "rejected"]),
             OpenQuestion.necessity == "necessary",
-        ).order_by(OpenQuestion.asked_at.desc()).limit(30).all()
+        ).order_by(OpenQuestion.asked_at.desc())..all()
         question_source_status = "available" if question_rows else "empty"
     except Exception:
         db.rollback()
@@ -357,7 +357,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     if question_rows is not None:
         question_rows = [
             item for item in question_rows if has_valid_caregiver_necessity(item)
-        ]
+        ][:30]
         question_source_status = "available" if question_rows else "empty"
     question_items = [{
         "source_id": str(item.id),
