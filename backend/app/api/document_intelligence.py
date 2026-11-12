@@ -727,6 +727,8 @@ def review_document_candidate(
     # Persist the assertion, append-only review event, candidate state and
     # reconciliation in one transaction for accepted document candidates.
     db.commit()
+    if execution is not None:
+        execution["stages"]["reconciliation"] = "committed"
     db.refresh(analysis)
     return {
         "analysis_id": analysis_id,
