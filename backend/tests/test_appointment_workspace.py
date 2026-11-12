@@ -1322,6 +1322,7 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
         assert assertion.source_message_id is None
         assert assertion.observed_at is not None
         assert assertion.review_after_days == 30
+        assert assertion.epistemic_state == "reported"
         assert len(assertion.evidence_ids or []) == 1
         appointment_source = db.query(Evidence).filter(
             Evidence.id == assertion.evidence_ids[0],
