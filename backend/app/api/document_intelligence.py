@@ -235,6 +235,21 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     metadata = _metadata(analysis)
     existing = _intelligence(analysis)
     if existing:
+        try:
+            persist_source_clarification_questions(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_kind="document_extraction",
+                source_record_type="evidence",
+                source_record_id=str(evidence.id),
+                evidence_ids=[str(evidence.id)],
+                questions=existing.get("open_questions") or [],
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Could not backfill saved document clarification questions for evidence %s", evidence.id)
         return _response(analysis)
 
     source_text = (analysis.source_text or "").strip()

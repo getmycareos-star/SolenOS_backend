@@ -661,6 +661,22 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     "pending_review", "corrected_pending_approval", "corrected_by_caregiver",
                 }
             ]
+            if existing_analysis and existing_analysis.extraction_status == "available" and isinstance(existing_analysis.candidates, dict):
+                try:
+                    persist_source_clarification_questions(
+                        db,
+                        person_id=person_id,
+                        caregiver_id=caregiver_id,
+                        source_kind="daily_capture_extraction",
+                        source_record_type="care_event",
+                        source_record_id=existing_event.id,
+                        evidence_ids=linked_evidence_ids,
+                        questions=existing_analysis.candidates.get("open_questions") or [],
+                    )
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logger.exception("Could not backfill saved Daily Care clarification questions for event %s", existing_event.id)
             return {
                 "success": True,
                 "id": existing_event.id,
