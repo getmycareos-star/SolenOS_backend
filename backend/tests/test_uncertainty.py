@@ -3644,6 +3644,16 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         assert necessary.closed_reason.startswith("automatically_suppressed")
         assert necessary.answered_at is None
 
+        new_discharge_evidence = Evidence(
+            id="finding6-discharge-evidence-update",
+            person_id=person.id,
+            type="document",
+            source_text="A newer discharge instruction document was added for the upcoming handoff.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        db.add(new_discharge_evidence)
+        necessary_gap.evidence_ids = list(necessary_gap.evidence_ids or []) + [new_discharge_evidence.id]
         necessary_gap.context = [{
             "caregiver_attention_required": True,
             "necessity_rationale": "The upcoming handoff again depends on the active discharge instruction.",
