@@ -300,14 +300,22 @@ def review_companion_care_update(
     if decision == "accept":
         # The original user message is the persisted Companion source. Verify
         # its conversation/person scope before reconciling the accepted claim.
-        execution = execute_care_continuity_reconciliation(
-            db,
-            person_id,
-            workflow="companion_care_update_review",
-            source_message_id=source_message.id,
-            source_conversation_id=session.id,
-        )
-        change_intelligence_status = "available"
+        try:
+            execution = execute_care_continuity_reconciliation(
+                db,
+                person_id,
+                workflow="companion_care_update_review",
+                caregiver_id=caregiver_id,
+                source_message_id=source_message.id,
+                source_conversation_id=session.id,
+            )
+            change_intelligence_status = "available"
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=503,
+                detail="Care-continuity reconciliation failed; the Companion review was not committed. Retry the review.",
+            ) from exc
     db.commit()
     if execution is not None:
         execution["stages"]["reconciliation"] = "committed"
