@@ -4410,3 +4410,66 @@ def test_source_clarification_dedup_merges_rephrasing_but_preserves_time_context
     finally:
         db.close()
         teardown_db()
+
+
+def test_daily_capture_questions_require_an_explicit_source_prerequisite():
+    from app.services.uncertainty import persist_source_clarification_questions
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="daily-necessity-person", name="Care recipient")
+        caregiver = Caregiver(
+            id="daily-necessity-caregiver",
+            name="Family caregiver",
+            email="daily-necessity@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="daily-necessity-evidence",
+            person_id=person.id,
+            type="daily_care",
+            source_text="Confirm the appointment time before leaving for the clinic.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="daily_care",
+        )
+        event = CareEvent(
+            id="daily-necessity-event",
+            person_id=person.id,
+            event_type="daily_care",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Appointment preparation",
+            description="Confirm the appointment time before leaving for the clinic.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, event])
+        db.flush()
+
+        questions = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction",
+            source_record_type="care_event",
+            source_record_id=event.id,
+            evidence_ids=[evidence.id],
+            questions=[
+                "What time is the appointment?",
+                "How has her sleep been this week?",
+            ],
+        )
+        by_text = {item.question: item for item in questions}
+        appointment_question = by_text["What time is the appointment?"]
+        sleep_question = by_text["How has her sleep been this week?"]
+
+        assert appointment_question.necessity == "necessary"
+        assert appointment_question.priority == Priority.HIGH
+        assert appointment_question.evidence_ids == [evidence.id]
+        assert sleep_question.necessity == "not_assessed"
+        assert sleep_question.necessity_rationale is None
+    finally:
+        db.close()
+        teardown_db()
