@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 import os
 import re
@@ -23,6 +24,8 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.claim_provenance import build_claim_provenance
 
+
+logger = logging.getLogger(__name__)
 
 DELTA_ENGINE_VERSION = "2026.11.12.6"
 
@@ -1379,6 +1382,10 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 })
             db.flush()
         except Exception as exc:
+            # Keep the API response generic, but retain the original database or
+            # validation exception in server logs so persistence regressions are
+            # diagnosable without exposing care content to the caller.
+            logger.exception("Delta reconciliation persistence failed")
             db.rollback()
             raise HTTPException(
                 status_code=500,
