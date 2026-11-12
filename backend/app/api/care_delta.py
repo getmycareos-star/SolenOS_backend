@@ -67,6 +67,7 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, db: Sessi
         changed_observation_count = 0
         changed_source_count = 0
         freshness_reasons = []
+        observation_history_checked = inspect(db.get_bind()).has_table("evidence_observations")
         if row.source_event_id:
             source_event = db.query(CareEvent).filter(
                 CareEvent.person_id == scoped_person_id,
@@ -87,7 +88,8 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, db: Sessi
                             changed_source_count += 1
                             freshness_reasons.append("source_event_changed_after_review")
                             break
-            source_ids = list(dict.fromkeys(source_ids + [str(value) for value in (source_event.evidence_ids or []) if source_event] if source_event else source_ids))
+            if source_event:
+                source_ids = list(dict.fromkeys(source_ids + [str(value) for value in (source_event.evidence_ids or []) if value]))
         if source_ids:
             evidence_rows = db.query(Evidence).filter(
                 Evidence.person_id == scoped_person_id,
@@ -96,7 +98,19 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, db: Sessi
             if len(evidence_rows) != len(set(source_ids)):
                 changed_source_count += len(set(source_ids) - {str(item.id) for item in evidence_rows})
                 freshness_reasons.append("linked_source_unavailable")
-            if row.created_at and inspect(db.get_bind()).has_table("evidence_observations"):
+            if row.created_at:
+                run_time = row.created_at
+                if run_time.tzinfo is None:
+                    run_time = run_time.replace(tzinfo=timezone.utc)
+                for evidence_row in evidence_rows:
+                    updated_at = getattr(evidence_row, "updated_at", None)
+                    if updated_at:
+                        if updated_at.tzinfo is None:
+                            updated_at = updated_at.replace(tzinfo=timezone.utc)
+                        if updated_at > run_time:
+                            changed_source_count += 1
+                            freshness_reasons.append("source_document_changed_after_review")
+            if row.created_at and observation_history_checked:
                 observation_rows = db.query(EvidenceObservation).filter(
                     EvidenceObservation.person_id == scoped_person_id,
                     EvidenceObservation.evidence_id.in_(source_ids),
@@ -107,7 +121,7 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, db: Sessi
                     changed_source_count += changed_observation_count
                     freshness_reasons.append("source_observation_added_or_corrected_after_review")
         source_freshness = {
-            "status": "stale" if changed_source_count else "current" if (source_ids or row.source_event_id) else "not_checked",
+            "status": "stale" if changed_source_count else "current" if (source_ids or row.source_event_id) and observation_history_checked else "not_checked",
             "changed_source_count": changed_source_count,
             "changed_observation_count": changed_observation_count,
             "reasons": sorted(set(freshness_reasons)),
