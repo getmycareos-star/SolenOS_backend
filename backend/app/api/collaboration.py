@@ -2473,6 +2473,21 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     ):
         context_lines.append("No authoritative reminder delivery receipt or notification state is available to this request.")
 
+    validated_aggregates = _requested_event_aggregates(db, person_id, caregiver_id, payload.text)
+    for aggregate in validated_aggregates:
+        if aggregate.get("status") == "validated":
+            context_lines.append(
+                f"Validated event count for {aggregate['topic']} during {aggregate['window_label']}: "
+                f"{aggregate['count']} distinct dated care-event records. "
+                "The count excludes repeated records sharing the same source evidence or identical event details at the same time. "
+                "It is a count of saved reports, not independent clinical corroboration."
+            )
+        else:
+            context_lines.append(
+                f"No complete count is available for {aggregate.get('topic')}: "
+                f"{aggregate.get('interpretation_limit', 'The requested count could not be validated.')}"
+            )
+
     guidance = {
         "daily_capture": "Organize only what the caregiver reports today. Separate reported facts, uncertainty and questions. Do not infer diagnosis, cause or unreported measurements.",
         "add_record": "Help structure a proposed care-record entry or correction from supplied words. Identify missing date, source or detail as unknown; never claim anything was saved.",
@@ -2689,9 +2704,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             status_code=503,
             detail="Qwen could not produce a sufficiently grounded response. No suggestion was returned and nothing was written to the care record; please clarify the source or retry.",
         )
+    claim_source_records = context_lines_to_source_records(context_lines)
+    claim_provenance = build_claim_provenance(reply, claim_source_records, validated_aggregates)
     return {
         "workflow": payload.workflow,
         "reply": reply,
+        "claim_provenance": claim_provenance,
+        "validated_aggregates": validated_aggregates,
         "ai_generated": True,
         "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
         "authority": "solenos_care_record_and_caregiver",
@@ -3849,7 +3868,8 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 "record_status": assertion.assertion_status,
                 "related_evidence_ids": list(assertion.evidence_ids or []),
             })
-    claim_provenance = build_claim_provenance(reply, claim_source_records)
+    validated_aggregates = _requested_event_aggregates(db, person_id, caregiver_id, user_text)
+    claim_provenance = build_claim_provenance(reply, claim_source_records, validated_aggregates)
 
     response_metadata = {
         "request_sha256": request_sha256,
