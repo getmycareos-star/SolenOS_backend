@@ -193,6 +193,8 @@ def _existing_assertion_for_exact_document_duplicate(
     assertion_kind: str = "document_reviewed_observation",
 ):
     """Reuse a prior assertion only when the uploaded binaries are exact duplicates."""
+    if subject_id is None and subject_type == "person":
+        subject_id = person_id
     existing_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         CareAssertion.field == field,
