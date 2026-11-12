@@ -117,9 +117,9 @@ def _extract_docx(content: bytes) -> str:
             parts = {}
             for name in wanted:
                 info = archive.getinfo(name)
-                if info.file_size > 8 * 1024 * 1024 or info.compress_size == 0:
+                if info.file_size > 8 * 1024 * 1024 or (info.file_size > 0 and info.compress_size == 0):
                     raise HTTPException(status_code=413, detail="Word document content exceeds extraction limits")
-                if info.file_size / max(info.compress_size, 1) > 100:
+                if info.file_size and info.file_size / max(info.compress_size, 1) > 100:
                     raise HTTPException(status_code=413, detail="Word document compression ratio exceeds safety limits")
                 parts[name] = ET.fromstring(archive.read(info))
     except HTTPException:
