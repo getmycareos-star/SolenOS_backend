@@ -1034,6 +1034,35 @@ def fulfil_approved_deletion(
             elif table.name in direct_predicates:
                 db.execute(table.delete().where(direct_predicates[table.name]))
 
+        # Explicitly erase evidence payloads before the person identity. The
+        # generic metadata closure is a defence-in-depth sweep, but evidence is
+        # a primary care-record table and must never survive as an orphan when a
+        # schema has nullable or differently configured foreign-key behaviour.
+        if inspector.has_table("evidence_uploads") and inspector.has_table("evidence"):
+            db.execute(
+                text("""
+                    DELETE FROM evidence_uploads
+                    WHERE evidence_id IN (
+                        SELECT id FROM evidence WHERE person_id = :person_id
+                    )
+                """),
+                {"person_id": person_id},
+            )
+        if inspector.has_table("evidence"):
+            db.execute(
+                text("DELETE FROM evidence WHERE person_id = :person_id"),
+                {"person_id": person_id},
+            )
+            remaining_evidence = db.execute(
+                text("SELECT COUNT(*) FROM evidence WHERE person_id = :person_id"),
+                {"person_id": person_id},
+            ).scalar_one()
+            if int(remaining_evidence):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Evidence rows remain after the care-record deletion pass; request was not fulfilled",
+                )
+
         # Explicitly remove the two root identity rows after the dependent-row
         # closure. Foreign-key violations fail closed rather than reporting a
         # successful erasure while either root identity remains.
