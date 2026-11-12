@@ -82,7 +82,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "fields": ["id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value",
                    "source_event_id", "source_label", "source_text", "source_conversation_id",
                    "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids",
-                   "assertion_status", "observed_at", "review_after_days", "created_by_caregiver_id",
+                   "epistemic_state", "assertion_status", "observed_at", "review_after_days", "created_by_caregiver_id",
                    "recorded_at"],
         "order": ["recorded_at", "created_at"],
     },
@@ -343,11 +343,20 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
     if source_name == "assertions":
-        status = str(item.get("assertion_status") or "unknown").casefold()
-        if status == "accepted":
-            return "caregiver_accepted_assertion", "Caregiver-reviewed assertion; preserve its source attribution and recorded wording."
-        if status == "caregiver_reviewed":
-            return "caregiver_reviewed_legacy_assertion", "Caregiver-reviewed assertion; preserve its source attribution and recorded wording."
+        epistemic = str(item.get("epistemic_state") or "reported").casefold()
+        lifecycle = str(item.get("assertion_status") or "reported").casefold()
+        if epistemic == "inferred":
+            return "inferred_interpretation", "AI- or rule-derived interpretation; caregiver review does not make it independently verified."
+        if epistemic == "verified":
+            return "verified_after_review", "A persisted verification state is recorded; retain its source and verification history."
+        if epistemic == "observed":
+            return "source_attributed_observation", "A direct observation is recorded with its source and observation time."
+        if epistemic == "conflicting":
+            return "conflicting_information", "Conflicting information is present; do not select a winner automatically."
+        if epistemic in {"uncertain", "missing"}:
+            return epistemic, "The information is uncertain or missing; do not present it as established."
+        if lifecycle in {"accepted", "caregiver_reviewed"}:
+            return "caregiver_reviewed_report", "A caregiver reviewed this report; review does not establish independent or clinical verification."
         return "caregiver_reported_assertion", "Caregiver-attributed report admitted to the LCR as unverified; do not present it as established fact."
     if source_name == "document_extractions":
         return (
