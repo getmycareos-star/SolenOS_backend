@@ -49,7 +49,8 @@ _TIME_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 _HEDGE_REFERENCE = re.compile(
-    r"\b(seemed|appeared|possibly|maybe|might|may have|could have|i think|"
+    r"\b(seem(?:s|ed)?|appear(?:s|ed)?|possibly|maybe|might|may have|could have|"
+    r"nothing unusual|nothing out of the ordinary|no unusual changes?|i think|"
     r"i believe|not sure|can't remember|cannot remember|don't remember)\b",
     re.IGNORECASE,
 )
