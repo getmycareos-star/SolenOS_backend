@@ -940,6 +940,7 @@ def review_document_candidate(
                 workflow="document_candidate_review",
                 source_caregiver_id=caregiver_id,
                 source_evidence_id=evidence_id,
+                source_assertion_id=assertion_id,
             )
             change_intelligence_status = "available"
         except Exception as exc:
