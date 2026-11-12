@@ -10,6 +10,8 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.capture_analysis import CaptureAnalysis
+from app.models.care_continuity import EvidenceObservation
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
@@ -1775,5 +1777,108 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
         assert cross_person_write.status_code == 403
         cross_person_read = client.get("/api/v1/events/person-daily-test", headers=foreign_headers)
         assert cross_person_read.status_code == 403
+    finally:
+        teardown_db()
+
+
+def test_natural_language_daily_entry_projects_only_source_grounded_observations_into_lcr(monkeypatch):
+    from app.api import v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night and seemed more unsettled this morning."
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [
+                    {
+                        "subject": "Mum",
+                        "observation": "slept poorly last night",
+                        "source_quote": original_report,
+                        "review_status": "pending_review",
+                        "source_event_id": source_event_id,
+                    },
+                    {
+                        "subject": "Mum",
+                        "observation": "seemed more unsettled this morning",
+                        "source_quote": original_report,
+                        "review_status": "pending_review",
+                        "source_event_id": source_event_id,
+                    },
+                ],
+                "open_questions": ["A generic question must not become a caregiver task."],
+            }
+
+        monkeypatch.setattr(api_v1, "extract_review_candidates", exact_source_candidates)
+        payload = {
+            "person_id": "person-daily-test",
+            "caregiver_id": "caregiver-daily-test",
+            "capture_kind": "natural_language_update",
+            "capture_idempotency_key": "natural-language-grounded-001",
+            "notes": original_report,
+        }
+        response = client.post("/api/v1/daily-care/entries", headers=headers, json=payload)
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert receipt["success"] is True
+        assert receipt["qwen_extraction_status"] == "available"
+        assert receipt["qwen_review_required"] is False
+        assert receipt["execution_status"]["assessment"] == "available"
+
+        db = TestingSessionLocal()
+        try:
+            event = db.query(CareEvent).filter_by(id=receipt["id"]).one()
+            evidence = db.query(Evidence).filter_by(id=receipt["evidence_ids"][0]).one()
+            analysis = db.query(CaptureAnalysis).filter_by(source_event_id=event.id).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=evidence.id,
+            ).order_by(EvidenceObservation.source_span_start, EvidenceObservation.value_text).all()
+
+            assert json.loads(event.description)["notes"] == original_report
+            assert json.loads(evidence.source_text)["original_capture"]["notes"] == original_report
+            assert analysis.source_text == original_report
+            assert len(observations) == 2
+            by_value = {row.value_text: row for row in observations}
+            sleep = by_value["slept poorly last night"]
+            unsettled = by_value["seemed more unsettled this morning"]
+            assert sleep.source_passage == original_report
+            assert sleep.source_span_start == 0
+            assert sleep.source_span_end == len(original_report)
+            assert sleep.epistemic_status == "reported"
+            assert "last night" in sleep.context
+            assert unsettled.epistemic_status == "uncertain"
+            assert unsettled.hedge_marker == "seemed"
+            assert "this morning" in unsettled.context
+            assert "not a diagnosis" in unsettled.ambiguity_note
+            assert all(row.extraction_method == "qwen_source_grounded" for row in observations)
+            assert all(row.evidence_id == evidence.id for row in observations)
+            assert all(row.created_by_caregiver_id == "caregiver-daily-test" for row in observations)
+            assert all(item["review_status"] == "recorded_as_reported_observation" for item in analysis.candidates["observations"])
+        finally:
+            db.close()
+
+        current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert current.status_code == 200, current.text
+        lcr_event = next(row for row in current.json()["items"] if row["id"] == receipt["id"])
+        assert len(lcr_event["derived_observations"]) == 2
+        assert {row["value_text"] for row in lcr_event["derived_observations"]} == {
+            "slept poorly last night",
+            "seemed more unsettled this morning",
+        }
+
+        replay = client.post("/api/v1/daily-care/entries", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["id"] == receipt["id"]
+        assert replay.json()["idempotent_replay"] is True
+        db = TestingSessionLocal()
+        try:
+            assert db.query(EvidenceObservation).filter_by(evidence_id=receipt["evidence_ids"][0]).count() == 2
+        finally:
+            db.close()
     finally:
         teardown_db()
