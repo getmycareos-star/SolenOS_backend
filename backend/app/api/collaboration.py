@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, inspect, or_, text
@@ -61,7 +61,7 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
+from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.schemas.care_continuity import CareAssertionCreate
@@ -3385,7 +3385,7 @@ def _stored_claim_provenance(row: ConversationMessage) -> dict | None:
 
 
 @router.post("/conversation/message")
-async def companion_message(payload: CompanionCreate, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
     companion_request_started = _time.perf_counter()
     companion_request_id = getattr(request.state, "request_id", None)
@@ -4587,22 +4587,9 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
+    # Companion turns are conversation only. Care-record updates must enter
+    # through the explicit Daily Care or document evidence workflows.
     care_update_candidates = []
-    if not emergency and not _is_casual_greeting(user_text):
-        # FastAPI sends the validated conversation response before this background
-        # task performs the separate care-update inference. Casual greetings and
-        # emergency responses never create care-review jobs. The original user and
-        # assistant messages are already committed and cannot be rolled back by it.
-        background_tasks.add_task(
-            process_companion_care_update_message,
-            db.get_bind(),
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            conversation_id=session.id,
-            message_id=str(user_row.id),
-            source_text=user_text,
-            anonymous_session_id=_resolve_anonymous_session_id(request, db, person_id, caregiver_id),
-        )
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
