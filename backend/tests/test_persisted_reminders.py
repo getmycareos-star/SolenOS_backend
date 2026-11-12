@@ -243,6 +243,33 @@ def test_notification_preferences_validate_and_persist_quiet_hours_schedule():
 
 
 
+def test_web_push_capability_reports_unavailable_without_vapid_configuration(monkeypatch):
+    from types import SimpleNamespace
+    import app.api.push_notifications as push_api
+
+    settings = SimpleNamespace(
+        vapid_public_key="",
+        vapid_private_key="",
+        vapid_subject="",
+        secret_key="test-secret-key",
+    )
+    monkeypatch.setattr(push_api, "get_settings", lambda: settings)
+    client = TestClient(app)
+    session = create_session(client, "Push unavailable caregiver")
+
+    response = client.get(
+        "/api/v1/notifications/push/public-key",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "available": False,
+        "public_key": None,
+        "reason": "not_configured",
+    }
+
+
 def test_web_push_registration_is_encrypted_scoped_and_revocable(monkeypatch):
     from types import SimpleNamespace
     import app.api.push_notifications as push_api
