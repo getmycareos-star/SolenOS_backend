@@ -367,7 +367,7 @@ def _epistemic_context(db: Session, person_id: str, subject_type: str, subject_i
         OpenQuestionModel.status == "open",
         OpenQuestionModel.necessity == "necessary",
     ).all()
-    questions = [question for question in questions if has_valid_caregiver_necessity(question)]
+    questions = [question for question in questions if has_valid_caregiver_necessity(question, db, person_id)]
 
     if contradictions:
         epistemic_state = "conflicting"
