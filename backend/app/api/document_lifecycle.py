@@ -37,6 +37,7 @@ MAX_EXTRACTED_CHARS = 100_000
 MAX_PDF_PAGES = 100
 MIN_NATIVE_PDF_TEXT_CHARS = 40
 MAX_IMAGE_PIXELS = 20_000_000
+MAX_DOCUMENT_PAGE_EXTRACTION_ATTEMPTS = 5
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 
@@ -766,7 +767,13 @@ def _response(analysis: CaptureAnalysis) -> dict:
         # retry cannot retain stale failure markers from an earlier attempt.
         "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
         "unprocessed_page_numbers": _unprocessed_page_numbers(analysis.source_text or ""),
-        "retryable_page_numbers": _retryable_page_numbers(analysis.source_text or ""),
+        "retryable_page_numbers": [
+            page for page in _retryable_page_numbers(analysis.source_text or "")
+            if page not in set(details.get("retry_exhausted_page_numbers") or [])
+        ],
+        "retry_exhausted_page_numbers": details.get("retry_exhausted_page_numbers") or [],
+        "page_retry_attempts": details.get("page_retry_attempts") or {},
+        "extraction_attempt_count": int(details.get("extraction_attempt_count") or 1),
         "blocked_page_numbers": _blocked_page_numbers(analysis.source_text or ""),
         "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "model_provenance": intelligence.get("model_provenance"),
@@ -817,6 +824,9 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
         "processed_page_numbers": processed_pages,
         "unreadable_page_numbers": unreadable_pages,
         "unprocessed_page_numbers": unprocessed_pages,
+        "extraction_attempt_count": 1,
+        "page_retry_attempts": {str(page): 1 for page in _retryable_page_numbers(source_text)},
+        "retry_exhausted_page_numbers": [],
         "observations": [],
         "open_questions": [],
     }
@@ -854,7 +864,8 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if metadata.get("kind") != "document_extraction_v1":
             continue
         _verify_persisted_extraction(row, upload, db, content)
-        failed_pages = set(_retryable_page_numbers(row.source_text or ""))
+        exhausted_before_retry = {int(page) for page in (metadata.get("retry_exhausted_page_numbers") or [])}
+        failed_pages = set(_retryable_page_numbers(row.source_text or "")) - exhausted_before_retry
         if row.extraction_status == "partial" and failed_pages:
             # Retry only pages whose processing did not complete. Preserve
             # successful and successfully-processed-but-unreadable page results.
@@ -867,11 +878,27 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 previous_source_text=row.source_text or "",
             )
             retry_text = _apply_capture_page_number(retry_text, evidence)
+            attempt_count = int(metadata.get("extraction_attempt_count") or 1) + 1
+            page_retry_attempts = dict(metadata.get("page_retry_attempts") or {})
+            retry_timestamp = datetime.now(timezone.utc).isoformat()
+            for page in failed_pages:
+                page_retry_attempts[str(page)] = int(page_retry_attempts.get(str(page)) or 1) + 1
+            current_retryable_pages = set(_retryable_page_numbers(retry_text))
+            retry_exhausted_pages = sorted(
+                page for page in current_retryable_pages
+                if int(page_retry_attempts.get(str(page)) or 1) >= MAX_DOCUMENT_PAGE_EXTRACTION_ATTEMPTS
+            )
             if retry_text.strip() != (row.source_text or "").strip() or retry_method != metadata.get("extraction_method"):
                 retry_status, retry_metadata = _extraction_metadata(upload, retry_text, retry_method)
-                attempt_count = int(metadata.get("extraction_attempt_count") or 1) + 1
                 retry_metadata["extraction_attempt_count"] = attempt_count
-                retry_metadata["last_extraction_attempt_at"] = datetime.now(timezone.utc).isoformat()
+                retry_metadata["page_retry_attempts"] = page_retry_attempts
+                retry_metadata["retry_exhausted_page_numbers"] = retry_exhausted_pages
+                retry_metadata["last_extraction_attempt_at"] = retry_timestamp
+                retry_metadata["page_retry_history"] = list(metadata.get("page_retry_history") or []) + [
+                    {"page_number": page, "attempt": page_retry_attempts[str(page)], "attempted_at": retry_timestamp,
+                     "result": "retryable_failure" if page in current_retryable_pages else "processed"}
+                    for page in sorted(failed_pages)
+                ]
                 has_intelligence = isinstance(metadata.get("document_intelligence"), dict)
                 has_review_history = bool(row.review_history)
                 if has_intelligence or has_review_history:
@@ -900,6 +927,19 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 db.commit()
                 db.refresh(row)
                 return _response(row)
+            # A failed retry can produce the exact same page marker. Persist the
+            # attempt anyway so the durable worker can apply bounded backoff
+            # instead of looping every few seconds forever.
+            metadata["extraction_attempt_count"] = attempt_count
+            metadata["page_retry_attempts"] = page_retry_attempts
+            metadata["retry_exhausted_page_numbers"] = retry_exhausted_pages
+            metadata["last_extraction_attempt_at"] = retry_timestamp
+            metadata["page_retry_history"] = list(metadata.get("page_retry_history") or []) + [
+                {"page_number": page, "attempt": page_retry_attempts[str(page)], "attempted_at": retry_timestamp,
+                 "result": "retryable_failure" if page in current_retryable_pages else "processed"}
+                for page in sorted(failed_pages)
+            ]
+            row.candidates = metadata
             db.commit()
             db.refresh(row)
             return _response(row)
