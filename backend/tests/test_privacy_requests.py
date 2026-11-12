@@ -750,6 +750,15 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
             {"id": "legacy-owned", "person_id": person_id, "caregiver_id": caregiver_id, "payload": "owned legacy row"},
             {"id": "legacy-other", "person_id": person_id, "caregiver_id": other_caregiver.id, "payload": "other legacy row"},
         ])
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS privacy_export_actor_scope_probe "
+            "(id VARCHAR PRIMARY KEY, actor_id VARCHAR, payload TEXT)"
+        ))
+        db.execute(text("DELETE FROM privacy_export_actor_scope_probe"))
+        db.execute(text(
+            "INSERT INTO privacy_export_actor_scope_probe (id, actor_id, payload) "
+            "VALUES ('actor-only-row', :actor_id, 'must not infer caregiver ownership')"
+        ), {"actor_id": caregiver_id})
         db.add_all([
             EvidenceUpload(
                 evidence_id=owned.id,
@@ -816,6 +825,9 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
     with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
         names = archive.namelist()
         manifest = json.loads(archive.read("manifest.json"))
+        unexported = {item["table"]: item["reason"] for item in manifest["unexported_tables"]}
+        assert "privacy_export_actor_scope_probe" in unexported
+        assert "records/privacy_export_actor_scope_probe.json" not in names
         assert any(name.startswith(f"documents/{owned_id}_") for name in names)
         assert not any(other_id in name for name in names)
         assert not any("other-caregiver-private" in name for name in names)
