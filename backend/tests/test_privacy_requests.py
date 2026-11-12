@@ -737,6 +737,19 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
         )
         db.add_all([owned, other])
         db.flush()
+        from sqlalchemy import text
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS privacy_export_legacy_probe "
+            "(id VARCHAR PRIMARY KEY, person_id VARCHAR, caregiver_id VARCHAR, payload TEXT)"
+        ))
+        db.execute(text("DELETE FROM privacy_export_legacy_probe"))
+        db.execute(text(
+            "INSERT INTO privacy_export_legacy_probe (id, person_id, caregiver_id, payload) "
+            "VALUES (:id, :person_id, :caregiver_id, :payload)"
+        ), [
+            {"id": "legacy-owned", "person_id": person_id, "caregiver_id": caregiver_id, "payload": "owned legacy row"},
+            {"id": "legacy-other", "person_id": person_id, "caregiver_id": other_caregiver.id, "payload": "other legacy row"},
+        ])
         db.add_all([
             EvidenceUpload(
                 evidence_id=owned.id,
@@ -816,6 +829,17 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
         assert own_posts[0]["content"] == "My own caregiver experience"
         own_reactions = json.loads(archive.read("records/community_reactions.json"))
         assert [item["id"] for item in own_reactions] == ["requester-community-reaction"]
+        legacy_rows = json.loads(archive.read("records/privacy_export_legacy_probe.json"))
+        assert [item["id"] for item in legacy_rows] == ["legacy-owned"]
+        assert legacy_rows[0]["payload"] == "owned legacy row"
+
+    cleanup_db = TestSessionLocal()
+    try:
+        from sqlalchemy import text
+        cleanup_db.execute(text("DROP TABLE IF EXISTS privacy_export_legacy_probe"))
+        cleanup_db.commit()
+    finally:
+        cleanup_db.close()
 
     replay = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-export",
