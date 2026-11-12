@@ -51,6 +51,7 @@ from app.models.collaboration import (
 )
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -1386,10 +1387,22 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         EvidenceFreshnessAssessment.person_id == person_id,
         EvidenceFreshnessAssessment.evidence_id == evidence_id,
     ).first()
-    if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness:
+    linked_open_loop = any(
+        evidence_id in (row.evidence or [])
+        for row in db.query(OpenLoopRecord).filter(OpenLoopRecord.person_id == person_id).all()
+    )
+    linked_open_loop_occurrence = any(
+        evidence_id in (row.evidence or [])
+        for row in db.query(OpenLoopOccurrence).filter(OpenLoopOccurrence.person_id == person_id).all()
+    )
+    linked_open_loop_event = any(
+        evidence_id in (row.evidence or [])
+        for row in db.query(OpenLoopEvent).filter(OpenLoopEvent.person_id == person_id).all()
+    )
+    if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness or linked_open_loop or linked_open_loop_occurrence or linked_open_loop_event:
         raise HTTPException(
             status_code=409,
-            detail="This document supports other care-history or assessment records. Resolve those source dependencies before deletion. The original file has not been removed.",
+            detail="This document supports other care-history, follow-up or assessment records. Resolve those source dependencies before deletion. The original file has not been removed.",
         )
     child_version = db.query(EvidenceModel.id).filter(EvidenceModel.parent_evidence_id == evidence_id).first()
     if child_version:
