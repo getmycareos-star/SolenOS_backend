@@ -222,21 +222,18 @@ def test_postgres_document_upload_extraction_retry_persistence_and_person_isolat
         with Session() as db:
             upload_request = _request(person_a, caregiver_a)
             uploaded = asyncio.run(upload_evidence(
-                upload_request,
-                UploadFile(
+                request=upload_request,
+                file=UploadFile(
                     filename="care-note.txt",
                     file=io.BytesIO(original),
                     headers=Headers({"content-type": "text/plain"}),
                 ),
-                person_a,
-                caregiver_a,
-                "document",
-                "",
-                "not_provided",
-                "0",
-                "{}",
-                "false",
-                db,
+                person_id=person_a,
+                caregiver_id=caregiver_a,
+                evidence_type="document",
+                extracted_text="",
+                scan_review_status="not_provided",
+                db=db,
             ))
             assert uploaded["persisted"] is True
             assert uploaded["size_bytes"] == len(original)
