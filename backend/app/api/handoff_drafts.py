@@ -422,7 +422,7 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "source_references": [
             {key: item.get(key) for key in (
                 "source_type", "source_table", "source_id", "source_fingerprint", "source_revision", "source_revision_status", "event_at", "recorded_at",
-                "due_at", "details", "epistemic_status", "record_status", "stale_warning",
+                "due_at", "details", "epistemic_state", "epistemic_status", "assertion_status", "record_status", "stale_warning",
                 "evidence_ids", "evidence_sources", "evidence_reference_status",
             )}
             for item in records if isinstance(item, dict)
@@ -474,7 +474,9 @@ def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
                 "label": str(source.get("source_type") or "Saved care information").replace("_", " ").title(),
                 "occurred_at": source.get("event_at"),
                 "recorded_at": source.get("recorded_at"),
+                "epistemic_state": source.get("epistemic_state"),
                 "epistemic_status": source.get("epistemic_status"),
+                "assertion_status": source.get("assertion_status"),
                 "record_status": source.get("record_status"),
                 "source_state_label": "This source may have changed since it was saved." if stale else None,
                 "related_evidence": list(source.get("evidence_sources") or []),
