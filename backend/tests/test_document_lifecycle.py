@@ -446,6 +446,39 @@ def test_duplicate_upload_is_preserved_and_linked_to_original(client):
 
 
 
+def test_image_ocr_failure_is_recorded_as_unprocessed_not_unreadable(client, monkeypatch):
+    from fastapi import HTTPException
+    from app.api import document_lifecycle
+
+    test_client, session = client
+    original = _scanned_text_image()
+    monkeypatch.setattr(
+        document_lifecycle,
+        "_ocr_image",
+        lambda _image: (_ for _ in ()).throw(HTTPException(status_code=422, detail="OCR engine failed")),
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+        },
+        files={"file": ("ocr-failed.jpg", original, "image/jpeg")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_status"] == "partial"
+    assert response.json()["unreadable_page_numbers"] == []
+    assert response.json()["unprocessed_page_numbers"] == [1]
+    assert "[Page not processed: OCR operation failed]" in response.json()["extracted_text"]
+
+
 def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_text(client, monkeypatch):
     from app.api import document_lifecycle
     from app.models.capture_analysis import CaptureAnalysis
