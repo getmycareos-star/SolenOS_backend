@@ -943,9 +943,11 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
         seed_person_and_caregiver()
         seed_second_person_and_caregiver()
         now = datetime.now(timezone.utc)
+        original_id = "event-original-daily-test"
+        foreign_id = "event-foreign-daily-test"
         db = TestingSessionLocal()
         original = CareEvent(
-            id="event-original-daily-test",
+            id=original_id,
             person_id="person-daily-test",
             event_type="structured_daily_capture",
             status="recorded",
@@ -955,7 +957,7 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
             created_by_caregiver_id="caregiver-daily-test",
         )
         foreign = CareEvent(
-            id="event-foreign-daily-test",
+            id=foreign_id,
             person_id="person-other-test",
             event_type="structured_daily_capture",
             status="recorded",
@@ -986,8 +988,8 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
                 "person_id": "person-daily-test",
                 "caregiver_id": "caregiver-daily-test",
                 "target_type": "care_event",
-                "target_id": original.id,
-                "original_text": original.description,
+                "target_id": original_id,
+                "original_text": "Mum seemed unusually confused.",
                 "corrected_text": "Mum was tired; confusion was not confirmed.",
                 "reason": "Caregiver correction",
             },
@@ -997,7 +999,7 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
 
         db = TestingSessionLocal()
         try:
-            unchanged = db.query(CareEvent).filter_by(id=original.id).one()
+            unchanged = db.query(CareEvent).filter_by(id=original_id).one()
             assert unchanged.description == "Mum seemed unusually confused."
             link = db.query(CareRecordRelationship).filter_by(
                 person_id="person-daily-test",
@@ -1005,7 +1007,7 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
                 source_id=correction_id,
                 relationship_type="corrects",
                 target_type="care_event",
-                target_id=original.id,
+                target_id=original_id,
             ).one()
             assert "original care event retained unchanged" in link.provenance
         finally:
@@ -1018,7 +1020,7 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
                 "person_id": "person-daily-test",
                 "caregiver_id": "caregiver-daily-test",
                 "target_type": "care_event",
-                "target_id": foreign.id,
+                "target_id": foreign_id,
                 "original_text": "Foreign original",
                 "corrected_text": "Attempted foreign correction",
             },
