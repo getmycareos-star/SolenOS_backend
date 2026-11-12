@@ -350,3 +350,90 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
         assert "You have a care update" in sent_payloads[0]["data"]
     finally:
         db.close()
+
+
+
+def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
+    from types import SimpleNamespace
+    import sys
+    import app.api.push_notifications as push_api
+    import app.services.reminder_delivery as delivery_service
+    from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
+
+    settings = SimpleNamespace(
+        vapid_public_key="public-vapid-key",
+        vapid_private_key="-----BEGIN PRIVATE KEY-----\\nprivate\\n-----END PRIVATE KEY-----",
+        vapid_subject="mailto:support@solenosai.net",
+        secret_key="quiet-hours-test-secret",
+    )
+    monkeypatch.setattr(push_api, "get_settings", lambda: settings)
+    monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
+    sent = []
+
+    class FakeWebPushException(Exception):
+        response = None
+
+    def fake_webpush(**kwargs):
+        sent.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pywebpush",
+        SimpleNamespace(WebPushException=FakeWebPushException, webpush=fake_webpush),
+    )
+
+    client = TestClient(app)
+    session = create_session(client, "Quiet push caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    endpoint = "https://fcm.googleapis.com/fcm/send/quiet-window"
+    response = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers=headers,
+        json={"endpoint": endpoint, "keys": {"p256dh": "public-key", "auth": "auth-secret"}},
+    )
+    assert response.status_code == 201, response.text
+
+    db = TestSessionLocal()
+    try:
+        subscription = db.query(CarePushSubscription).one()
+        subscription.created_at = datetime(2026, 1, 15, 6, 0, tzinfo=timezone.utc)
+        db.add(CareNotificationPreference(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            reminders_enabled=True,
+            quiet_hours_enabled=True,
+            quiet_hours_start="21:00",
+            quiet_hours_end="08:00",
+            timezone_name="America/New_York",
+        ))
+        notification = CareNotification(
+            id="quiet-push-notification",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="Sensitive title",
+            body="Sensitive care detail",
+            category="handoff",
+            priority="normal",
+            created_at=datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc),
+        )
+        db.add(notification)
+        db.commit()
+
+        assert delivery_service.deliver_pending_web_pushes(
+            db=db, now=datetime(2026, 1, 15, 7, 0, tzinfo=timezone.utc)
+        ) == 0
+        delivery = db.query(CarePushDelivery).filter_by(notification_id=notification.id).one()
+        release = delivery.next_attempt_at
+        release = release.replace(tzinfo=timezone.utc) if release.tzinfo is None else release
+        assert delivery.status == "pending"
+        assert release == datetime(2026, 1, 15, 13, 0, tzinfo=timezone.utc)
+        assert sent == []
+
+        assert delivery_service.deliver_pending_web_pushes(
+            db=db, now=datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)
+        ) == 1
+        db.refresh(delivery)
+        assert delivery.status == "accepted"
+        assert len(sent) == 1
+    finally:
+        db.close()
