@@ -839,6 +839,11 @@ def review_document_candidate(
                     source_label=source_label,
                     source_text=quote,
                     evidence_ids=[evidence_id],
+                    # Document observations are source-attributed and accepted
+                    # by the caregiver, but remain time-bounded reports. A
+                    # review window lets the shared reconciler cover exact LCR
+                    # gaps without treating the document as permanently current.
+                    review_after_days=30,
                     event_time_text=candidate.get("event_date") or None,
                     created_by_caregiver_id=caregiver_id,
                     updated_by_caregiver_id=caregiver_id,
