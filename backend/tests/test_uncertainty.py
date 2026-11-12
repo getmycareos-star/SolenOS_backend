@@ -4269,7 +4269,7 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
             subject_type="person",
             subject_id=person.id,
             field="sleep_schedule",
-            assertion_kind="current_state",
+            assertion_kind="document_reviewed_observation",
             asserted_value="Usually sleeps from 9 PM to 6 AM",
             source_label="caregiver report",
             source_text="The usual sleep schedule is documented.",
