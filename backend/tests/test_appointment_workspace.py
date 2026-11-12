@@ -1815,3 +1815,131 @@ def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_re
     assert reported_loop.outcome_evidence[0]["epistemic_status"] == "caregiver_reported"
     assert reported_loop.closure_result is None
     db.close()
+
+
+def test_blocked_appointment_follow_up_creates_and_reassesses_one_evidence_backed_question(client):
+    from app.models.open_loop import OpenLoopRecord
+    from app.models.uncertainty import OpenQuestion
+
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    db = TestSessionLocal()
+    evidence = Evidence(
+        person_id=owner["person"]["id"],
+        type="appointment_record",
+        source_text="Clinic record: the result is not available; the follow-up decision is blocked until the clinic confirms it.",
+        uploaded_by_caregiver_id=owner["caregiver"]["id"],
+        source_type="caregiver_report",
+    )
+    db.add(evidence)
+    db.commit()
+    evidence_id = evidence.id
+    db.close()
+
+    payload = {
+        "follow_ups": [{
+            "action": "Confirm the pending test result with the clinic",
+            "owner": "Clinic",
+            "owner_role": "professional",
+            "status": "blocked",
+            "clarification_question": "Has the clinic released the pending test result?",
+            "necessity_rationale": "The follow-up is explicitly blocked until the clinic confirms whether the result is available.",
+            "decision_dependency": "The caregiver cannot complete the documented appointment follow-up or pass the result to the next care professional until the clinic confirms its availability.",
+            "evidence_ids": [evidence_id],
+            "intended_answerer_role": "professional",
+        }],
+    }
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={"status": "outcome_pending", "payload": payload, "change_reason": "Record blocked clinic follow-up"},
+    )
+    assert created.status_code == 201, created.text
+
+    db = TestSessionLocal()
+    try:
+        loop = db.query(OpenLoopRecord).filter(
+            OpenLoopRecord.person_id == owner["person"]["id"],
+            OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+        ).one()
+        question = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == owner["person"]["id"],
+            OpenQuestion.subject_type == "appointment_follow_up",
+            OpenQuestion.subject_id == loop.id,
+            OpenQuestion.question == payload["follow_ups"][0]["clarification_question"],
+        ).one()
+        assert loop.status == "blocked"
+        assert question.necessity == "necessary"
+        assert question.status == "open"
+        assert question.evidence_ids == [evidence_id]
+        assert question.necessity_rationale == payload["follow_ups"][0]["necessity_rationale"]
+        assert any(
+            item.get("source_kind") == "appointment_workspace_follow_up"
+            and item.get("source_id") == loop.id
+            for item in question.context
+        )
+    finally:
+        db.close()
+
+    # Removing the explicit blocked state removes the decision dependency.
+    # The shared lifecycle must suppress the old request, not leave it active.
+    updated = test_client.patch(
+        f"/api/v1/appointment-workspaces/{created.json()['id']}",
+        headers=headers,
+        json={
+            "expected_version": 1,
+            "status": "outcome_pending",
+            "payload": {"follow_ups": [{
+                **payload["follow_ups"][0],
+                "status": "open",
+            }]},
+            "change_reason": "Clinic follow-up is no longer blocked",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+
+    db = TestSessionLocal()
+    try:
+        question = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == owner["person"]["id"],
+            OpenQuestion.question == payload["follow_ups"][0]["clarification_question"],
+        ).one()
+        assert question.status == "closed"
+        assert str(question.closed_reason).startswith("automatically_superseded:")
+    finally:
+        db.close()
+
+
+def test_blocked_appointment_follow_up_rejects_another_persons_evidence(client):
+    test_client, owner, other = client
+    db = TestSessionLocal()
+    foreign_evidence = Evidence(
+        person_id=other["person"]["id"],
+        type="appointment_record",
+        source_text="Evidence belonging to a different care record.",
+        uploaded_by_caregiver_id=other["caregiver"]["id"],
+        source_type="caregiver_report",
+    )
+    db.add(foreign_evidence)
+    db.commit()
+    foreign_evidence_id = foreign_evidence.id
+    db.close()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={
+            "status": "outcome_pending",
+            "change_reason": "Attempt cross-record follow-up",
+            "payload": {"follow_ups": [{
+                "action": "Confirm the pending result",
+                "status": "blocked",
+                "clarification_question": "Has the result been released?",
+                "necessity_rationale": "The action is blocked pending confirmation.",
+                "decision_dependency": "The follow-up cannot proceed until the result is confirmed.",
+                "evidence_ids": [foreign_evidence_id],
+            }]},
+        },
+    )
+    assert response.status_code == 422, response.text
