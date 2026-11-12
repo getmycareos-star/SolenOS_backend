@@ -189,6 +189,18 @@ def _extract_rtf(content: bytes) -> str:
     return re.sub(r"[ \\t]+", " ", "".join(output)).strip()
 
 
+def _bounded_extraction(text: str, method: str) -> tuple[str, str]:
+    if len(text) > MAX_EXTRACTED_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Extraction exceeds the {MAX_EXTRACTED_CHARS}-character processing limit. "
+                "The original remains saved; this document needs a supported smaller section or page range."
+            ),
+        )
+    return text, method
+
+
 def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str, str]:
     content = _verified_content(upload) if content is None else content
     mime = (upload.mime_type or "").split(";", 1)[0].lower()
@@ -219,7 +231,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
         ]
         if native_pages and not ocr_page_indexes:
             page_texts = [f"[Page {index + 1}]\n{text}" for index, text in enumerate(native_pages)]
-            return "\n\n".join(page_texts)[:MAX_EXTRACTED_CHARS], "server_pdf_text"
+            return _bounded_extraction("\n\n".join(page_texts), "server_pdf_text")
 
         if len(ocr_page_indexes) > MAX_OCR_PAGES:
             raise HTTPException(
@@ -273,7 +285,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
                 detail="No readable text was found after OCR. The original document remains preserved.",
             )
         method = "server_pdf_text_plus_tesseract_ocr" if any(native_pages) else "server_tesseract_ocr_pdf"
-        return extracted[:MAX_EXTRACTED_CHARS], method
+        return _bounded_extraction(extracted, method)
 
     if mime.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp")):
         try:
@@ -290,19 +302,19 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
                 status_code=422,
                 detail="No readable text was found in the image. The original document remains preserved.",
             )
-        return f"[Image OCR]\n[Page 1 OCR]\n{extracted}"[:MAX_EXTRACTED_CHARS], "server_tesseract_ocr_image"
+        return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{extracted}", "server_tesseract_ocr_image")
 
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or filename.endswith(".docx"):
         extracted = _extract_docx(content)
         if not extracted:
             raise HTTPException(status_code=422, detail="No readable text was found in the Word document")
-        return extracted[:MAX_EXTRACTED_CHARS], "server_docx_xml"
+        return _bounded_extraction(extracted, "server_docx_xml")
 
     if mime in {"application/rtf", "text/rtf"} or filename.endswith(".rtf"):
         extracted = _extract_rtf(content)
         if not extracted:
             raise HTTPException(status_code=422, detail="No readable text was found in the RTF document")
-        return extracted[:MAX_EXTRACTED_CHARS], "server_rtf_text"
+        return _bounded_extraction(extracted, "server_rtf_text")
 
     if mime == "message/rfc822" or filename.endswith(".eml"):
         try:
@@ -324,7 +336,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
             raise HTTPException(status_code=422, detail="The saved email could not be read") from exc
         if not extracted:
             raise HTTPException(status_code=422, detail="The email contains no readable message body")
-        return extracted[:MAX_EXTRACTED_CHARS], "server_email_text"
+        return _bounded_extraction(extracted, "server_email_text")
 
     if mime == "application/msword" or filename.endswith(".doc"):
         raise HTTPException(
@@ -341,7 +353,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
             raise HTTPException(status_code=415, detail="Saved text document is not UTF-8") from exc
         if not extracted:
             raise HTTPException(status_code=422, detail="The saved document contains no readable text")
-        return extracted[:MAX_EXTRACTED_CHARS], "server_utf8_text"
+        return _bounded_extraction(extracted, "server_utf8_text")
 
     raise HTTPException(
         status_code=415,
