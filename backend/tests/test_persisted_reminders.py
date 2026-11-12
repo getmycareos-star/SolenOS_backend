@@ -72,8 +72,8 @@ def test_reminder_create_list_complete_and_cancel_persist_in_database():
 
     assert created["status"] == "open"
     assert created["created_by_caregiver_id"] == session["caregiver"]["id"]
-    assert created["delivery_mode"] == "in_app_list_only"
-    assert created["notification_delivery_status"] == "not_sent"
+    assert created["delivery_mode"] == "in_app_notification_feed"
+    assert created["notification_delivery_status"] == "in_app_feed_only"
 
     listed = client.get(
         f"/api/v1/reminders/{session['person']['id']}",
@@ -169,3 +169,48 @@ def test_reminder_rejects_missing_timezone_and_blank_title():
         },
     )
     assert blank_title.status_code == 422, blank_title.text
+
+
+
+def test_notification_preferences_validate_and_persist_quiet_hours_schedule():
+    client = TestClient(app)
+    session = create_session(client, "Quiet hours caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    saved = client.put(
+        "/api/v1/notifications/preferences",
+        headers=headers,
+        json={
+            "quiet_hours_enabled": True,
+            "quiet_hours_start": "22:30",
+            "quiet_hours_end": "07:15",
+            "timezone_name": "America/Los_Angeles",
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["quiet_hours_enabled"] is True
+    assert saved.json()["quiet_hours_start"] == "22:30"
+    assert saved.json()["quiet_hours_end"] == "07:15"
+    assert saved.json()["timezone_name"] == "America/Los_Angeles"
+
+    invalid_timezone = client.put(
+        "/api/v1/notifications/preferences",
+        headers=headers,
+        json={"timezone_name": "Not/A_Real_Zone"},
+    )
+    assert invalid_timezone.status_code == 422, invalid_timezone.text
+
+    equal_window = client.put(
+        "/api/v1/notifications/preferences",
+        headers=headers,
+        json={"quiet_hours_start": "08:00", "quiet_hours_end": "08:00"},
+    )
+    assert equal_window.status_code == 422, equal_window.text
+
+    second_session = create_session(client, "Different caregiver")
+    other = client.get(
+        "/api/v1/notifications/preferences",
+        headers={"Authorization": f"Bearer {second_session['access_token']}"},
+    )
+    assert other.status_code == 200
+    assert other.json()["timezone_name"] == "UTC"
+    assert other.json()["quiet_hours_start"] == "21:00"
