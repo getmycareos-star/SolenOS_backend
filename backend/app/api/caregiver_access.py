@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver
 from app.models.caregiver_account import CaregiverAccount
-from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
+from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer, CaregiverPrimaryTransfer
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
 from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus
@@ -204,7 +204,7 @@ def revoke_invitation(invitation_id: str, request: Request, db: Session = Depend
         CaregiverInvitation.id == invitation_id,
         CaregiverInvitation.person_id == person_id,
         CaregiverInvitation.status == "pending",
-    ).first()
+    ).with_for_update().first()
     if invitation is None:
         raise HTTPException(status_code=404, detail="Pending invitation not found.")
     invitation.status = "revoked"
@@ -482,6 +482,129 @@ def reject_responsibility_transfer(transfer_id: str, request: Request, db: Sessi
     ).with_for_update().first()
     if transfer is None:
         raise HTTPException(status_code=404, detail="Pending responsibility transfer not found.")
+    transfer.status = "rejected"
+    db.commit()
+    return {"rejected": True, "transfer_id": transfer.id}
+
+
+class PrimaryTransferCreate(BaseModel):
+    to_caregiver_id: str = Field(min_length=1, max_length=160)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+@router.post("/primary-transfers", status_code=201)
+def create_primary_transfer(payload: PrimaryTransferCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, actor_id = _actor_scope(request)
+    current_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == actor_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.role == "primary",
+        CaregiverAccessGrant.can_manage_members.is_(True),
+    ).with_for_update().first()
+    if current_grant is None:
+        raise HTTPException(status_code=403, detail="Only the current primary caregiver can transfer primary authority.")
+    target_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == payload.to_caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).first()
+    if target_grant is None or str(target_grant.caregiver_id) == actor_id:
+        raise HTTPException(status_code=404, detail="The receiving caregiver does not have active access.")
+    pending = db.query(CaregiverPrimaryTransfer).filter(
+        CaregiverPrimaryTransfer.person_id == person_id,
+        CaregiverPrimaryTransfer.status == "pending",
+    ).first()
+    if pending:
+        raise HTTPException(status_code=409, detail="A primary caregiver transfer is already awaiting acceptance.")
+    transfer = CaregiverPrimaryTransfer(
+        person_id=person_id,
+        from_caregiver_id=actor_id,
+        to_caregiver_id=target_grant.caregiver_id,
+        reason=payload.reason,
+        status="pending",
+    )
+    db.add(transfer)
+    db.commit()
+    db.refresh(transfer)
+    return {"id": transfer.id, "status": transfer.status, "from_caregiver_id": transfer.from_caregiver_id,
+            "to_caregiver_id": transfer.to_caregiver_id, "reason": transfer.reason,
+            "created_at": transfer.created_at.isoformat() if transfer.created_at else None}
+
+
+@router.get("/primary-transfers")
+def list_primary_transfers(request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, _profile = _current_profile(request, db)
+    query = db.query(CaregiverPrimaryTransfer).filter(CaregiverPrimaryTransfer.person_id == person_id)
+    if not bool(getattr(request.state, "caregiver_can_manage_members", False)):
+        query = query.filter(CaregiverPrimaryTransfer.to_caregiver_id == session_caregiver_id)
+    return [{
+        "id": item.id,
+        "from_caregiver_id": item.from_caregiver_id,
+        "to_caregiver_id": item.to_caregiver_id,
+        "reason": item.reason,
+        "status": item.status,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "accepted_at": item.accepted_at.isoformat() if item.accepted_at else None,
+    } for item in query.order_by(CaregiverPrimaryTransfer.created_at.desc()).all()]
+
+
+@router.post("/primary-transfers/{transfer_id}/accept")
+def accept_primary_transfer(transfer_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, _profile = _current_profile(request, db)
+    transfer = db.query(CaregiverPrimaryTransfer).filter(
+        CaregiverPrimaryTransfer.id == transfer_id,
+        CaregiverPrimaryTransfer.person_id == person_id,
+        CaregiverPrimaryTransfer.to_caregiver_id == session_caregiver_id,
+        CaregiverPrimaryTransfer.status == "pending",
+    ).with_for_update().first()
+    if transfer is None:
+        raise HTTPException(status_code=404, detail="Pending primary caregiver transfer not found.")
+    old_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == transfer.from_caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.role == "primary",
+        CaregiverAccessGrant.can_manage_members.is_(True),
+    ).with_for_update().first()
+    new_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == session_caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    if old_grant is None or new_grant is None:
+        transfer.status = "stale"
+        db.commit()
+        raise HTTPException(status_code=409, detail="The primary caregiver authority changed before this transfer was accepted.")
+    now = datetime.now(timezone.utc)
+    old_grant.role = "family"
+    old_grant.can_manage_members = False
+    old_grant.updated_at = now
+    new_grant.role = "primary"
+    new_grant.can_manage_members = True
+    new_grant.updated_at = now
+    transfer.status = "accepted"
+    transfer.accepted_at = now
+    transfer.accepted_by_caregiver_id = session_caregiver_id
+    db.commit()
+    return {"accepted": True, "transfer_id": transfer.id, "new_primary_caregiver_id": session_caregiver_id,
+            "previous_primary_caregiver_id": transfer.from_caregiver_id,
+            "previous_caregiver_access_retained": old_grant.status == "active"}
+
+
+@router.post("/primary-transfers/{transfer_id}/reject")
+def reject_primary_transfer(transfer_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, _profile = _current_profile(request, db)
+    transfer = db.query(CaregiverPrimaryTransfer).filter(
+        CaregiverPrimaryTransfer.id == transfer_id,
+        CaregiverPrimaryTransfer.person_id == person_id,
+        CaregiverPrimaryTransfer.to_caregiver_id == session_caregiver_id,
+        CaregiverPrimaryTransfer.status == "pending",
+    ).with_for_update().first()
+    if transfer is None:
+        raise HTTPException(status_code=404, detail="Pending primary caregiver transfer not found.")
     transfer.status = "rejected"
     db.commit()
     return {"rejected": True, "transfer_id": transfer.id}
