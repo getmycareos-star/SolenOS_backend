@@ -1010,7 +1010,7 @@ OPEN_LOOP_MAINTENANCE_INTERVAL_SECONDS = 900
 
 
 async def open_loop_maintenance_loop():
-    """Periodic DB-backed review flagging; never closes an item automatically."""
+    """Periodically reassess deadlines and relevance; never infer completion."""
     while True:
         await asyncio.sleep(OPEN_LOOP_MAINTENANCE_INTERVAL_SECONDS)
         db = SessionLocal()
@@ -1018,20 +1018,53 @@ async def open_loop_maintenance_loop():
             now = datetime.now(timezone.utc)
             cutoff = now - timedelta(days=ABANDONMENT_INACTIVITY_DAYS)
             rows = db.query(OpenLoopRecord).filter(
-                OpenLoopRecord.status.in_({"open", "waiting"}),
-                OpenLoopRecord.updated_at <= cutoff,
+                OpenLoopRecord.status.in_(OPEN_STATES),
+            ).order_by(
+                OpenLoopRecord.deadline_at.asc().nullslast(),
+                OpenLoopRecord.updated_at.asc(),
             ).limit(500).all()
             changed = 0
             for loop in rows:
                 before = _snapshot(loop)
                 prior_update = loop.updated_at
-                loop.status = "review_abandoned"
-                loop.inactive_since = prior_update.replace(tzinfo=timezone.utc) if prior_update and prior_update.tzinfo is None else prior_update
-                loop.updated_at = now
-                loop.version += 1
-                loop.priority_reasons = list(dict.fromkeys([*(loop.priority_reasons or []), "No recorded loop activity for 30 days; human review required"]))
-                _audit(db, loop, "abandoned_review_flagged", before, [{"policy_days": ABANDONMENT_INACTIVITY_DAYS}])
-                changed += 1
+                prior_version = loop.version
+                prior_priority = loop.priority
+                prior_reasons = list(loop.priority_reasons or [])
+
+                if (
+                    loop.status in {"open", "waiting"}
+                    and prior_update is not None
+                    and (prior_update.replace(tzinfo=timezone.utc) if prior_update.tzinfo is None else prior_update) <= cutoff
+                ):
+                    loop.status = "review_abandoned"
+                    loop.inactive_since = prior_update.replace(tzinfo=timezone.utc) if prior_update.tzinfo is None else prior_update
+
+                _reassess(db, loop)
+                state_changed = (
+                    before["status"] != loop.status
+                    or prior_priority != loop.priority
+                    or prior_reasons != list(loop.priority_reasons or [])
+                )
+                if state_changed:
+                    _audit(
+                        db, loop, "automatically_reassessed", before,
+                        [{
+                            "as_of": now.isoformat(),
+                            "deadline_passed": bool(
+                                loop.deadline_at
+                                and (loop.deadline_at.replace(tzinfo=timezone.utc) if loop.deadline_at.tzinfo is None else loop.deadline_at) <= now
+                            ),
+                            "completion_inferred": False,
+                        }],
+                        actor="solenos_reconciliation",
+                    )
+                    changed += 1
+                else:
+                    # Avoid rewriting rows or incrementing versions when the
+                    # scheduled assessment finds no meaningful state change.
+                    loop.updated_at = prior_update
+                    loop.version = prior_version
+
             if changed:
                 db.commit()
             else:
