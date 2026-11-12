@@ -1147,7 +1147,11 @@ def list_document_processing_status(
         medication_conflict_from_document = any(
             isinstance(item, dict)
             and item.get("field_type") == "medication"
-            and any("conflicting medication instructions" in str(warning).casefold() for warning in (item.get("warnings") or []))
+            and any(
+                "conflicting medication instructions" in str(warning).casefold()
+                or "conflict with the current medication record" in str(warning).casefold()
+                for warning in (item.get("warnings") or [])
+            )
             for item in observations
         )
         medication_questions = db.query(OpenQuestion).filter(
