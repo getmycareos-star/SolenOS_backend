@@ -1258,6 +1258,31 @@ def fulfil_approved_deletion(
                 detail="Caregiver record remains after committed deletion verification",
             )
 
+        # Verify evidence by the immutable IDs captured before erasure, after
+        # commit. This catches database-side ownership nulling or transaction
+        # behavior that a pre-commit person_id query cannot detect.
+        remaining_evidence_ids = []
+        if evidence_ids_to_erase:
+            remaining_evidence_ids = db.query(Evidence.id).filter(
+                Evidence.id.in_(evidence_ids_to_erase)
+            ).scalars().all()
+        if remaining_evidence_ids:
+            for evidence_id in remaining_evidence_ids:
+                db.execute(
+                    text("DELETE FROM evidence WHERE id = :evidence_id"),
+                    {"evidence_id": str(evidence_id)},
+                )
+            db.commit()
+            db.expire_all()
+            remaining_evidence_ids = db.query(Evidence.id).filter(
+                Evidence.id.in_(evidence_ids_to_erase)
+            ).scalars().all()
+        if remaining_evidence_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="Evidence rows remain after committed deletion verification; request was not marked fulfilled",
+            )
+
         # Both root identities are now absent. Only now persist the redacted
         # request receipt and terminal audit event.
         pseudonym = "erased:" + hashlib.sha256(
