@@ -188,6 +188,7 @@ This ledger is not a claim that the full 13-stage contract is complete.
 4. Correction dependency propagation and stale-artifact invalidation still need end-to-end verification across summaries, appointments, handoffs, and other derived views.
 5. The new coordinator tests have been authored but have not been executed in a confirmed PostgreSQL test run. Unit tests, live cross-person denial, process restart, idempotent retry, and transaction-failure tests remain required.
 6. The Railway production service is configured with `watchPatterns: ["MANUAL_DEPLOY_ONLY"]`. Commits to backend `main` do not automatically deploy this service. The live deployment observed during this implementation predates these commits. No production deployment or migration was initiated as part of this work.
+7. The Netlify production site still reports its previously published deploy (`6ae2425ae2226aff78043206`) as current. The main-branch deploy for frontend commit `83ab2bf11e8aea8903a5629767c01c2bc97c032e` remains in `building` state, with no successful publish confirmed. The clarification-answer review UI is present on frontend `main`, but its production build is not verified.
 
 ### Required next actions
 
