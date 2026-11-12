@@ -510,6 +510,8 @@ def test_snap_care_photo_upload_is_persisted_without_document_ocr(client):
             "person_id": session["person"]["id"],
             "caregiver_id": session["caregiver"]["id"],
             "evidence_type": "care_photo",
+            "capture_method": "snap",
+            "capture_timestamp": "2026-11-12T06:00:00Z",
         },
         files={"file": ("current-care-photo.png", image_bytes, "image/png")},
     )
@@ -521,6 +523,9 @@ def test_snap_care_photo_upload_is_persisted_without_document_ocr(client):
         assert evidence.type == "care_photo"
         assert upload.content == image_bytes
         assert upload.sha256
+        metadata = __import__("json").loads(evidence.extra_metadata or "{}")
+        assert metadata["capture"]["method"] == "snap"
+        assert metadata["capture"]["captured_at"] == "2026-11-12T06:00:00+00:00"
     # Document OCR is intentionally not run against Snap care-photo evidence.
     extraction = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert extraction.status_code == 404, extraction.text
