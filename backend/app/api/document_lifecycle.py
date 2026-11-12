@@ -736,7 +736,10 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         CaptureAnalysis.source_evidence_id == evidence_id,
     ).order_by(CaptureAnalysis.created_at.desc()).all()
     for row in existing:
-        metadata = row.candidates if isinstance(row.candidates, dict) else {}
+        # Copy the JSON document before mutating it. SQLAlchemy does not track
+        # in-place edits to JSON columns; reassigning the same mutated dict can
+        # leave source_text_sha256 stale after a successful partial-extraction retry.
+        metadata = dict(row.candidates) if isinstance(row.candidates, dict) else {}
         if metadata.get("kind") != "document_extraction_v1":
             continue
         _verify_persisted_extraction(row, upload, db, content)
