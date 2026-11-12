@@ -2055,6 +2055,60 @@ def main():
                 f"continuity clarification creation failed: {continuity_question_status}: {continuity_question}")
         continuity_question_id = continuity_question["id"]
 
+        answer_question_status, answer_question = request(
+            "POST", "/api/v1/uncertainty/questions", token=continuity_token,
+            body={
+                "person_id": continuity_person_id,
+                "question": "Who observed the change in the evening routine?",
+                "subject_type": "routine",
+                "subject_id": "postgres-account-continuity-routine",
+                "priority": "medium",
+            },
+        )
+        require(answer_question_status == 200 and answer_question.get("id"),
+                f"continuity answer-history question creation failed: {answer_question_status}: {answer_question}")
+        answer_question_id = answer_question["id"]
+        exact_answer = "I observed it on three evenings this week."
+        exact_provenance = "I was present on each of those evenings."
+        answer_status, answer_body = request(
+            "PATCH", f"/api/v1/uncertainty/questions/{answer_question_id}",
+            token=continuity_token,
+            body={
+                "status": "answered",
+                "answer": exact_answer,
+                "answer_provenance": exact_provenance,
+            },
+        )
+        require(answer_status == 200 and answer_body.get("status") == "answered",
+                f"continuity answer was not saved: {answer_status}: {answer_body}")
+        answer_history_status, answer_history = request(
+            "GET", f"/api/v1/uncertainty/questions/{answer_question_id}/answer-history",
+            token=continuity_token,
+        )
+        require(
+            answer_history_status == 200
+            and len(answer_history) == 1
+            and answer_history[0].get("answer") == exact_answer
+            and answer_history[0].get("answer_provenance") == exact_provenance
+            and len(answer_history[0].get("evidence_ids") or []) == 1,
+            f"continuity answer history or source evidence was not persisted: {answer_history_status}: {answer_history}",
+        )
+        answer_evidence_id = answer_history[0]["evidence_ids"][0]
+        with SessionLocal() as db:
+            from app.models.care import Evidence
+            saved_answer_evidence = db.query(Evidence).filter_by(
+                id=answer_evidence_id,
+                person_id=continuity_person_id,
+            ).one()
+            require(
+                saved_answer_evidence.evidence_kind == "caregiver_report"
+                and saved_answer_evidence.epistemic_status == "caregiver_reported"
+                and saved_answer_evidence.uploaded_by_caregiver_id == continuity_caregiver_id
+                and exact_answer in saved_answer_evidence.source_text
+                and exact_provenance in saved_answer_evidence.source_text,
+                "answer source evidence did not preserve exact caregiver wording and attribution",
+            )
+
         continuity_loop_status, continuity_loop = request(
             "POST", "/api/v1/open-loops", token=continuity_token,
             body={
@@ -2191,6 +2245,18 @@ def main():
         require(restored_question_status == 200 and any(
             item.get("id") == continuity_question_id for item in restored_questions
         ), "open clarification question did not restore after account login")
+        restored_answer_history_status, restored_answer_history = request(
+            "GET", f"/api/v1/uncertainty/questions/{answer_question_id}/answer-history",
+            token=continuity_login_token,
+        )
+        require(
+            restored_answer_history_status == 200
+            and len(restored_answer_history) == 1
+            and restored_answer_history[0].get("answer") == exact_answer
+            and restored_answer_history[0].get("answer_provenance") == exact_provenance
+            and restored_answer_history[0].get("evidence_ids") == [answer_evidence_id],
+            "clarification answer and source history did not restore after account login",
+        )
 
         restored_loop_status, restored_loop = request(
             "GET", f"/api/v1/open-loops/{continuity_loop_id}", token=continuity_login_token,
