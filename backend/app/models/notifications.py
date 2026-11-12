@@ -9,7 +9,7 @@ from app.core.database import Base
 class CareNotification(Base):
     __tablename__ = "care_notifications"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(String, primary_key=True)
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(180), nullable=False)
@@ -31,5 +31,8 @@ class CareNotificationPreference(Base):
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
     quiet_hours_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    quiet_hours_start = Column(String(5), nullable=False, default="21:00", server_default="21:00")
+    quiet_hours_end = Column(String(5), nullable=False, default="08:00", server_default="08:00")
+    timezone_name = Column(String(64), nullable=False, default="UTC", server_default="UTC")
     reminders_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
