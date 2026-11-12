@@ -210,9 +210,13 @@ def list_document_intelligence(
         CaptureAnalysis.caregiver_id == caregiver_id,
     ).order_by(CaptureAnalysis.created_at.desc()).limit(500).all()
     items = []
+    seen_evidence_ids = set()
     for analysis in rows:
         metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
         if metadata.get("kind") != "document_extraction_v1":
+            continue
+        evidence_id = str(analysis.source_evidence_id or "")
+        if not evidence_id or evidence_id in seen_evidence_ids:
             continue
         evidence = db.query(Evidence.id).filter(
             Evidence.id == analysis.source_evidence_id,
@@ -222,6 +226,7 @@ def list_document_intelligence(
         ).first()
         if evidence is None:
             continue
+        seen_evidence_ids.add(evidence_id)
         items.append(_response(analysis))
         if len(items) >= limit:
             break
