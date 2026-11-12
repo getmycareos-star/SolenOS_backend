@@ -1264,7 +1264,7 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
         reminder = created.json()
         reminder_id = reminder["id"]
         assert reminder["status"] == "open"
-        assert reminder["delivery_mode"] == "in_app_list_only"
+        assert reminder["delivery_mode"] == "in_app_notification_feed"
         assert reminder["notification_delivery_status"] == "not_sent"
         assert reminder["created_by_caregiver_id"] == caregiver_id
         assert reminder["due_at"].endswith(("Z", "+00:00")), reminder["due_at"]
@@ -1702,15 +1702,14 @@ def test_uncertainty_analysis_rejects_cross_person_scope_and_duplicate_evidence(
             headers=auth,
         )
         assert questions.status_code == 200, questions.text
-        linked_questions = [
-            question for question in questions.json()
-            if question["subject_id"] == "current"
-            and any(
-                isinstance(link, dict) and link.get("assessment_id") == assessment_id
-                for link in (question.get("context") or [])
-            )
-        ]
-        assert linked_questions, "Uncertainty clarification question was not durably linked to its assessment."
+        assert questions.json() == [], (
+            "Model-generated clarification wording must remain internal until "
+            "an evidence-backed necessity assessment promotes it to caregiver work."
+        )
+        analysis = assessment.json()["analysis"]
+        assert analysis["clarification_questions"] == []
+        assert analysis["clarification_candidate_status"] == "not_assessed_not_caregiver_work"
+        assert isinstance(analysis["internal_clarification_candidates"], list)
     finally:
         teardown()
 

@@ -419,11 +419,21 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
             caregiver_id=session["caregiver"]["id"],
             title="Sensitive title",
             body="Sensitive care detail",
-            category="handoff",
+            category="reminder_due",
             priority="normal",
             created_at=datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc),
         )
-        db.add(notification)
+        in_app_handoff = CareNotification(
+            id="in-app-handoff-notification",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="New care handoff",
+            body="A caregiver has shared a care summary with you.",
+            category="handoff",
+            priority="normal",
+            created_at=datetime(2026, 1, 15, 6, 31, tzinfo=timezone.utc),
+        )
+        db.add_all([notification, in_app_handoff])
         db.commit()
 
         assert delivery_service.deliver_pending_web_pushes(
@@ -434,6 +444,7 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
         release = release.replace(tzinfo=timezone.utc) if release.tzinfo is None else release
         assert delivery.status == "pending"
         assert release == datetime(2026, 1, 15, 13, 0, tzinfo=timezone.utc)
+        assert db.query(CarePushDelivery).filter_by(notification_id=in_app_handoff.id).count() == 0
         assert sent == []
 
         assert delivery_service.deliver_pending_web_pushes(
@@ -441,6 +452,33 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
         ) == 1
         db.refresh(delivery)
         assert delivery.status == "accepted"
+        assert db.query(CarePushDelivery).filter_by(notification_id=in_app_handoff.id).count() == 0
+        assert len(sent) == 1
+
+        preference = db.query(CareNotificationPreference).filter_by(
+            person_id=session["person"]["id"], caregiver_id=session["caregiver"]["id"]
+        ).one()
+        preference.reminders_enabled = False
+        disabled_notification = CareNotification(
+            id="disabled-reminder-notification",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="Disabled reminder",
+            body="This must not be pushed.",
+            category="reminder_due",
+            priority="normal",
+            created_at=datetime(2026, 1, 15, 15, 1, tzinfo=timezone.utc),
+        )
+        db.add(disabled_notification)
+        db.commit()
+        assert delivery_service.deliver_pending_web_pushes(
+            db=db, now=datetime(2026, 1, 15, 15, 2, tzinfo=timezone.utc)
+        ) == 0
+        disabled_delivery = db.query(CarePushDelivery).filter_by(
+            notification_id=disabled_notification.id
+        ).one()
+        assert disabled_delivery.status == "cancelled"
+        assert disabled_delivery.last_error_code == "reminders_disabled"
         assert len(sent) == 1
     finally:
         db.close()

@@ -131,8 +131,6 @@ def _unreadable_page_numbers(source_text: str) -> list[int]:
             source_text or "",
         )
     ]
-
-
 def _unprocessed_page_numbers(source_text: str) -> list[int]:
     return [
         int(match.group(1))

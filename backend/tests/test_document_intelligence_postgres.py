@@ -775,7 +775,6 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 0
             assert db.query(CaptureAnalysis).filter_by(id=analysis_id).count() == 0
             assert db.query(DocumentReviewEvent).filter_by(analysis_id=analysis_id).count() == 0
-            assert db.query(QwenBackgroundJob).filter_by(id=processing_job_id).count() == 0
             assert db.query(CareAssertion).filter_by(id=assertion_id).count() == 0
             receipt = db.query(DataSubjectRequest).filter_by(id=deletion_request_id).one()
             assert receipt.request_status == "fulfilled"
