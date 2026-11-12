@@ -257,7 +257,7 @@ def test_web_push_registration_is_encrypted_scoped_and_revocable(monkeypatch):
 
     public_key = client.get("/api/v1/notifications/push/public-key", headers=first_headers)
     assert public_key.status_code == 200
-    assert public_key.json()["public_key"] == "BPublicVapidKey"
+    assert public_key.json()["public_key"] == settings.vapid_public_key
 
     registered = client.post(
         "/api/v1/notifications/push/subscriptions",
