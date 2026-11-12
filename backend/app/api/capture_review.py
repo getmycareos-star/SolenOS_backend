@@ -232,6 +232,8 @@ def review_capture_candidate(
     # together. A failure cannot leave a caregiver-visible accepted review with
     # a silently stale longitudinal projection.
     db.commit()
+    if execution is not None:
+        execution["stages"]["reconciliation"] = "committed"
     db.refresh(analysis)
 
     return {
