@@ -24,6 +24,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
 logger = logging.getLogger(__name__)
@@ -426,6 +427,7 @@ def _draft_response(draft: HandoffDraft) -> dict:
             for item in records if isinstance(item, dict)
         ],
         "evidence_lineage": snapshot.get("evidence_lineage", {}),
+        "care_continuity_execution": getattr(draft, "care_continuity_execution", None),
         "limitations": snapshot.get("limitations", []),
         "warning": "This is a caregiver-reviewed handoff draft, not an independent clinical assessment. Missing information is not a negative finding. Verify source status and timestamps before sharing.",
     }
@@ -881,6 +883,16 @@ def approve_handoff_draft(
     draft.approval_content_sha256 = content_hash
     draft.approval_parameters = approval_parameters
     draft.review_status = "approved_for_sharing"
+    execution = execute_care_continuity_reconciliation(
+        db,
+        person_id,
+        workflow="handoff_draft_approval",
+        source_caregiver_id=caregiver_id,
+        source_handoff_draft_id=draft.id,
+        source_handoff_draft_revision_number=draft.revision_number,
+        reconcile_lcr=False,
+    )
+    draft.care_continuity_execution = execution
     db.add(draft)
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
@@ -896,8 +908,12 @@ def approve_handoff_draft(
             "expires_at": expires_at.isoformat() if expires_at else None,
         },
     ))
-    db.commit()
-    db.refresh(draft)
+    try:
+        db.commit()
+        db.refresh(draft)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="The handoff approval could not be saved with its source validation") from exc
     return _draft_response(draft)
 
 
