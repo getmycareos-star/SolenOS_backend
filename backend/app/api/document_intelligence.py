@@ -16,7 +16,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -875,6 +875,15 @@ def review_document_candidate(
                 raise HTTPException(status_code=404, detail="Source-linked assertion not found in this care record")
 
         assertion_id = str(assertion_row.id)
+        db.flush()
+        persisted_before_reconciliation = db.execute(
+            text("SELECT id, person_id, assertion_status FROM care_assertions WHERE id = :assertion_id"),
+            {"assertion_id": assertion_id},
+        ).mappings().first()
+        logger.info(
+            "Document assertion persistence before reconciliation: assertion_id=%s person_id=%s sql_row=%s",
+            assertion_id, person_id, dict(persisted_before_reconciliation) if persisted_before_reconciliation else None,
+        )
         # Flush the assertion and its state revision in the same transaction as
         # the append-only review event below. No intermediate commit is allowed.
         db.flush()
@@ -958,6 +967,14 @@ def review_document_candidate(
     # reconciliation in one transaction for accepted document candidates.
     if payload.decision == "accept" and assertion_id:
         db.flush()
+        persisted_after_reconciliation = db.execute(
+            text("SELECT id, person_id, assertion_status FROM care_assertions WHERE id = :assertion_id"),
+            {"assertion_id": assertion_id},
+        ).mappings().first()
+        logger.info(
+            "Document assertion persistence after reconciliation: assertion_id=%s person_id=%s sql_row=%s",
+            assertion_id, person_id, dict(persisted_after_reconciliation) if persisted_after_reconciliation else None,
+        )
         persisted_assertion = db.query(CareAssertion.id).filter(
             CareAssertion.id == assertion_id,
             CareAssertion.person_id == person_id,
