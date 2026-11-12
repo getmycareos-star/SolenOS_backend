@@ -738,9 +738,9 @@ def get_claim_assessment_impact(
             )
             if prerequisite_observation_changes or assessment_changed or prerequisite is None:
                 changed_prerequisite_claim_ids.append(prerequisite_id)
-                pending_claim_ids.append(prerequisite_id)
+            pending_claim_ids.append(prerequisite_id)
     if changed_prerequisite_claim_ids:
-        reasons.append("prerequisite_claim_assessment_changed")
+        reasons.append("prerequisite_claim_source_or_assessment_changed")
 
     # Conflicts are surfaced rather than resolved by recency, frequency, or
     # a majority of reports. A human must assess their scope and relevance.
@@ -4121,6 +4121,13 @@ def create_evidence_observation(
     )
     try:
         db.add(row)
+        db.flush()
+        execution = execute_care_continuity_reconciliation(
+            db,
+            person_id,
+            workflow="evidence_observation_corrected" if superseded_observation is not None else "evidence_observation_added",
+            source_evidence_id=evidence.id,
+        )
         db.commit()
         db.refresh(row)
     except IntegrityError as exc:
@@ -4128,9 +4135,16 @@ def create_evidence_observation(
         raise HTTPException(status_code=409, detail="This source-span observation already exists") from exc
     except Exception as exc:
         db.rollback()
-        logger.exception("Evidence observation could not be persisted")
-        raise HTTPException(status_code=503, detail="Evidence observation could not be persisted") from exc
-    return _evidence_observation_response(row)
+        logger.exception("Evidence observation and affected care projections could not be reassessed")
+        raise HTTPException(status_code=503, detail="The detail could not be saved with its care-record reassessment") from exc
+    response = _evidence_observation_response(row)
+    response["care_continuity_execution"] = execution
+    response["reassessment_notice"] = (
+        "Earlier information was kept. Related care summaries were refreshed, and claims using this source may need caregiver review."
+        if superseded_observation is not None else
+        "The original source was kept. Related care summaries were refreshed."
+    )
+    return response
 
 
 def _evidence_observation_response(row):
