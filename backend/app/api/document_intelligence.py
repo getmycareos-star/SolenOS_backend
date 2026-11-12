@@ -675,12 +675,25 @@ def review_document_candidate(
         prior = candidate.get("review_decision")
         if prior == payload.decision:
             accepted_assertion = None
-            if prior == "accept" and candidate.get("accepted_assertion_id"):
-                accepted_assertion = db.query(CareAssertion).filter(
-                    CareAssertion.id == candidate.get("accepted_assertion_id"),
-                    CareAssertion.person_id == person_id,
-                    CareAssertion.created_by_caregiver_id == caregiver_id,
-                ).first()
+            if prior == "accept":
+                # The append-only review event is the durable idempotency
+                # source of truth. Candidate JSON is a compatibility projection
+                # and may lag after a partial write/retry.
+                prior_event = db.query(DocumentReviewEvent).filter(
+                    DocumentReviewEvent.analysis_id == analysis_id,
+                    DocumentReviewEvent.candidate_index == payload.candidate_index,
+                    DocumentReviewEvent.decision == "accept",
+                ).order_by(DocumentReviewEvent.decision_version.desc()).first()
+                accepted_assertion_id = (
+                    prior_event.resulting_assertion_id if prior_event
+                    else candidate.get("accepted_assertion_id")
+                )
+                if accepted_assertion_id:
+                    accepted_assertion = db.query(CareAssertion).filter(
+                        CareAssertion.id == accepted_assertion_id,
+                        CareAssertion.person_id == person_id,
+                        CareAssertion.created_by_caregiver_id == caregiver_id,
+                    ).first()
             active_assertion = (
                 accepted_assertion is not None
                 and accepted_assertion.assertion_status not in {"rejected", "superseded"}
