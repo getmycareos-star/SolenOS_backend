@@ -416,7 +416,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     ).order_by(OpenQuestion.asked_at.desc()).all()
     open_questions = [
         question for question in open_questions
-        if has_valid_caregiver_necessity(question)
+        if has_valid_caregiver_necessity(question, db, person_id)
     ][:50]
     unresolved_contradictions = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
