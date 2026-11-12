@@ -3219,6 +3219,13 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             relationship="Family",
             person_id=person.id,
         )
+        reviewing_caregiver = Caregiver(
+            id="caregiver-document-question-reviewer",
+            name="Document Question Reviewer",
+            email="document-question-reviewer@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
         evidence = Evidence(
             id="evidence-extracted-question",
             person_id=person.id,
@@ -3240,7 +3247,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
-        db.add_all([person, caregiver, evidence, event])
+        db.add_all([person, caregiver, reviewing_caregiver, evidence, event])
         db.commit()
 
         questions = [
@@ -3282,6 +3289,25 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         )
         db.commit()
         assert {row.id for row in second} == {row.id for row in first}
-        assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 2
+
+        # A second authorized caregiver can review a document uploaded by the
+        # first caregiver without rewriting the original uploader attribution.
+        document_questions = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=reviewing_caregiver.id,
+            source_kind="document_extraction",
+            source_record_type="evidence",
+            source_record_id=evidence.id,
+            evidence_ids=[evidence.id],
+            questions=["Was her medication changed before discharge?"],
+        )
+        db.commit()
+        assert len(document_questions) == 1
+        assert document_questions[0].created_by_caregiver_id == reviewing_caregiver.id
+        assert document_questions[0].context[0]["source_record_refs"] == [
+            {"record_type": "evidence", "record_id": evidence.id}
+        ]
+        assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 3
     finally:
         teardown_db()
