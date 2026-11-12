@@ -212,6 +212,7 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
         assert assertion.source_event_id == event_id
         assert assertion.asserted_value == "Caregiver reported that sleep was poor last night."
         assert assertion.assertion_status == "caregiver_reviewed"
+        assert assertion.epistemic_state == "inferred"
         assert assertion.created_by_caregiver_id == session["caregiver"]["id"]
         from app.models.capture_analysis import CaptureAnalysis
         analysis = db.query(CaptureAnalysis).filter_by(id=result["proposal_analysis_id"]).one()
