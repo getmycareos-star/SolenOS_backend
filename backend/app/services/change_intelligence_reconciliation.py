@@ -73,6 +73,10 @@ def reconcile_person_change_intelligence(
                 f"Source assertion preservation failed during {stage}"
             )
 
+    # Flush source writes before the preservation guard. Some callers create
+    # an assertion and immediately trigger reconciliation in the same unit of
+    # work; the guard must validate the pending row, not a pre-flush snapshot.
+    db.flush()
     assert_source_assertions_preserved("start")
     event_types = [
         row[0]
