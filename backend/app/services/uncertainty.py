@@ -36,7 +36,7 @@ _QUESTION_FILLER_TOKENS = {
     "did", "do", "does", "for", "from", "had", "has", "have", "he", "her",
     "hers", "him", "his", "how", "if", "in", "into", "is", "it", "its",
     "me", "of", "on", "or", "our", "please", "she", "should", "tell", "that",
-    "the", "their", "them", "they", "this", "to", "us", "was", "we", "were",
+    "the", "their", "them", "they", "this", "to", "take", "us", "was", "we", "were",
     "what", "when", "where", "which", "who", "why", "will", "would", "you",
     "your", "know", "confirm", "currently",
 }
