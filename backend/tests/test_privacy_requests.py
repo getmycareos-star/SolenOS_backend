@@ -1226,3 +1226,79 @@ def test_approved_care_event_correction_creates_lcr_revision(monkeypatch):
         assert correction.original_text == before["description"]
     finally:
         db.close()
+
+def test_approved_evidence_source_correction_preserves_immutable_original(monkeypatch):
+    from app.models.care import Evidence, Correction
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "k" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Evidence correction recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {
+        **caregiver_headers,
+        "X-SolenOS-Privacy-Reviewer-Token": "k" * 40,
+    }
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            person_id=session["person"]["id"],
+            type="observation",
+            source_text="The caregiver said the appointment was Monday.",
+            uploaded_by_caregiver_id=session["caregiver"]["id"],
+        )
+        db.add(evidence)
+        db.commit()
+        db.refresh(evidence)
+        evidence_id = evidence.id
+        original_text = evidence.source_text
+        original_hash = evidence.source_text_sha256
+    finally:
+        db.close()
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": "correction",
+            "authority_basis": "self",
+            "authority_attested": True,
+            "correction_target_type": "evidence_source",
+            "correction_target_id": evidence_id,
+            "correction_text": "The caregiver said the appointment was Tuesday.",
+            "correction_reason": "The original weekday was transcribed incorrectly.",
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed identity and correction authority.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    fulfilled = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
+        headers=reviewer_headers,
+    )
+    assert fulfilled.status_code == 200, fulfilled.text
+    assert fulfilled.json()["correction"]["target_type"] == "evidence_source"
+
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(Evidence).filter(Evidence.id == evidence_id).one()
+        assert persisted.source_text == original_text
+        assert persisted.source_text_sha256 == original_hash
+        correction = db.query(Correction).filter(
+            Correction.id == fulfilled.json()["fulfilment"]["correction_id"]
+        ).one()
+        assert correction.target_type == "evidence_source"
+        assert correction.target_id == evidence_id
+        assert correction.original_text == original_text
+        assert correction.corrected_text == "The caregiver said the appointment was Tuesday."
+    finally:
+        db.close()
