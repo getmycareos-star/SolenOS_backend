@@ -34,7 +34,6 @@ from app.services.document_candidate_schema import classify_document
 router = APIRouter(prefix="/documents", tags=["document lifecycle"])
 MAX_EXTRACTED_CHARS = 100_000
 MAX_PDF_PAGES = 100
-MAX_OCR_PAGES = 25
 MIN_NATIVE_PDF_TEXT_CHARS = 40
 MAX_IMAGE_PIXELS = 20_000_000
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
@@ -68,10 +67,38 @@ def _verified_content(upload: EvidenceUpload) -> bytes:
 
 
 def _ocr_image(image: Image.Image) -> str:
-    """Run the installed local Tesseract engine; never silently fall back to a fake result."""
+    """Run local OCR and retain token confidence as a non-probabilistic quality heuristic."""
+    normalized = None
     try:
         normalized = ImageOps.exif_transpose(image).convert("RGB")
-        return pytesseract.image_to_string(normalized, lang="eng", config="--psm 6 -c preserve_interword_spaces=1").strip()
+        data = pytesseract.image_to_data(
+            normalized,
+            lang="eng",
+            config="--psm 6 -c preserve_interword_spaces=1",
+            output_type=pytesseract.Output.DICT,
+        )
+        lines: dict[tuple[int, int, int], list[str]] = {}
+        confidences = []
+        for index, token in enumerate(data.get("text", [])):
+            token = str(token or "").strip()
+            if not token:
+                continue
+            key = (int(data["block_num"][index]), int(data["par_num"][index]), int(data["line_num"][index]))
+            lines.setdefault(key, []).append(token)
+            try:
+                confidence = float(data["conf"][index])
+                if confidence >= 0:
+                    confidences.append(confidence)
+            except (TypeError, ValueError, IndexError):
+                continue
+        image.info["solenos_ocr_quality"] = {
+            "mean_token_confidence": round(sum(confidences) / len(confidences)) if confidences else None,
+            "low_confidence_token_count": sum(1 for value in confidences if value < 50),
+            "token_count": len(confidences),
+            "method": "tesseract_word_confidence_heuristic",
+            "is_probability": False,
+        }
+        return "\n".join(" ".join(tokens) for tokens in lines.values()).strip()
     except pytesseract.TesseractNotFoundError as exc:
         raise HTTPException(
             status_code=503,
@@ -79,6 +106,58 @@ def _ocr_image(image: Image.Image) -> str:
         ) from exc
     except pytesseract.TesseractError as exc:
         raise HTTPException(status_code=422, detail="OCR could not read this document image") from exc
+    finally:
+        if normalized is not None:
+            normalized.close()
+
+
+def _ocr_quality_marker(image: Image.Image) -> str | None:
+    quality = image.info.get("solenos_ocr_quality")
+    if not isinstance(quality, dict) or not quality.get("token_count"):
+        return None
+    mean = quality.get("mean_token_confidence")
+    return (
+        f"[OCR quality: mean_token_confidence={mean}; "
+        f"low_confidence_tokens={quality.get('low_confidence_token_count')}; "
+        f"token_count={quality.get('token_count')}; "
+        "metric=tesseract_engine_heuristic_not_probability]"
+    )
+
+
+def _page_numbers(source_text: str, marker: str) -> list[int]:
+    return [
+        int(value) for value in re.findall(
+            rf"(?m)^\[Page\s+(\d+)\s+{re.escape(marker)}\]",
+            source_text or "",
+        )
+    ]
+
+
+def _unreadable_page_numbers(source_text: str) -> list[int]:
+    return _page_numbers(source_text, "OCR") if "[No readable text detected on this page]" in (source_text or "") else []
+
+
+def _ocr_quality_by_page(source_text: str) -> list[dict]:
+    results = []
+    markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or ""))
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
+        section = source_text[marker.end():end]
+        match = re.search(
+            r"\[OCR quality: mean_token_confidence=(\d+|None); low_confidence_tokens=(\d+); token_count=(\d+); metric=tesseract_engine_heuristic_not_probability\]",
+            section,
+        )
+        if match:
+            results.append({
+                "page_number": int(marker.group(1)),
+                "mean_token_confidence": int(match.group(1)) if match.group(1) != "None" else None,
+                "low_confidence_token_count": int(match.group(2)),
+                "token_count": int(match.group(3)),
+                "method": "tesseract_word_confidence_heuristic",
+                "is_probability": False,
+                "handwriting_warning": "Handwriting may be misread even when OCR engine confidence is high.",
+            })
+    return results
 
 
 class _HTMLText(HTMLParser):
@@ -353,8 +432,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved PDF could not be read") from exc
 
-        # Sparse hidden text layers (e.g. a scanned page with only a footer)
-        # do not prove that the clinical content is digitally readable.
+        # Sparse hidden text layers do not establish that a scanned page is readable.
         ocr_page_indexes = [
             index for index, value in enumerate(native_pages)
             if len(value.strip()) < MIN_NATIVE_PDF_TEXT_CHARS
@@ -363,44 +441,54 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             page_texts = [f"[Page {index + 1}]\n{text}" for index, text in enumerate(native_pages)]
             return _bounded_extraction("\n\n".join(page_texts), "server_pdf_text")
 
-        if len(ocr_page_indexes) > MAX_OCR_PAGES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Scanned PDF pages are limited to {MAX_OCR_PAGES} per extraction.",
-            )
         rendered = None
+        page_texts = []
+        unprocessed_pages = []
         try:
             rendered = pdfium.PdfDocument(content)
-            page_texts = []
             for index, native_text in enumerate(native_pages):
+                page_number = index + 1
                 if len(native_text.strip()) >= MIN_NATIVE_PDF_TEXT_CHARS:
-                    page_texts.append(f"[Page {index + 1}]\n{native_text}")
+                    page_texts.append(f"[Page {page_number}]\n{native_text}")
                     continue
-                page = rendered[index]
+                page = None
+                bitmap = None
+                image = None
                 try:
+                    page = rendered[index]
                     width, height = page.get_size()
                     if width * height * 4 > MAX_IMAGE_PIXELS:
-                        raise HTTPException(
-                            status_code=413,
-                            detail=f"PDF page {index + 1} exceeds the 20-megapixel OCR limit.",
-                        )
+                        unprocessed_pages.append(page_number)
+                        page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: exceeds the 20-megapixel OCR limit]")
+                        continue
                     bitmap = page.render(scale=2)
                     image = bitmap.to_pil()
-                    try:
-                        ocr_text = _ocr_image(image)
-                    finally:
-                        image.close()
-                        bitmap.close()
+                    ocr_text = _ocr_image(image)
                     if ocr_text:
-                        combined_text = "\n".join(value for value in (native_text.strip(), ocr_text) if value)
-                        page_texts.append(f"[Page {index + 1} OCR]\n{combined_text}")
+                        quality_marker = _ocr_quality_marker(image)
+                        page_content = "\n".join(value for value in (quality_marker, native_text.strip(), ocr_text) if value)
+                        page_texts.append(f"[Page {page_number} OCR]\n{page_content}")
                     elif native_text.strip():
-                        page_texts.append(f"[Page {index + 1}]\n{native_text.strip()}")
+                        page_texts.append(f"[Page {page_number}]\n{native_text.strip()}")
                     else:
-                        # Keep unreadable page identity explicit; never invent content.
-                        page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
+                        page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
+                except HTTPException as exc:
+                    if exc.status_code == 503:
+                        raise
+                    if exc.status_code == 413:
+                        unprocessed_pages.append(page_number)
+                        page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR page limit exceeded]")
+                    else:
+                        page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
+                except Exception:
+                    page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
                 finally:
-                    page.close()
+                    if image is not None:
+                        image.close()
+                    if bitmap is not None:
+                        bitmap.close()
+                    if page is not None:
+                        page.close()
         except HTTPException:
             raise
         except Exception as exc:
@@ -416,7 +504,6 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             )
         method = "server_pdf_text_plus_tesseract_ocr" if any(native_pages) else "server_tesseract_ocr_pdf"
         return _bounded_extraction(extracted, method)
-
     if mime.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp")):
         try:
             with Image.open(io.BytesIO(content)) as image:
@@ -425,6 +512,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
                 try:
                     extracted = _ocr_image(adjusted)
+                    quality_marker = _ocr_quality_marker(adjusted)
                 finally:
                     if used_scan_adjustments:
                         adjusted.close()
@@ -437,7 +525,8 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 status_code=422,
                 detail="No readable text was found in the image. The original document remains preserved.",
             )
-        return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{extracted}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
+        page_content = "\n".join(value for value in (quality_marker, extracted) if value)
+        return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{page_content}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
 
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or filename.endswith(".docx"):
         extracted = _extract_docx(content)
@@ -555,6 +644,11 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "source_evidence_id": analysis.source_evidence_id,
         "extraction_status": analysis.extraction_status,
         "extraction_method": details.get("extraction_method"),
+        "page_count": details.get("page_count", 1),
+        "processed_page_numbers": details.get("processed_page_numbers", []),
+        "unreadable_page_numbers": details.get("unreadable_page_numbers", []),
+        "unprocessed_page_numbers": details.get("unprocessed_page_numbers", []),
+        "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "source_text_sha256": hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest(),
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
@@ -612,13 +706,20 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     capture_page_number = capture.get("page_number")
     if capture.get("method") == "scan" and isinstance(capture_page_number, int) and not isinstance(capture_page_number, bool):
         source_text = source_text.replace("[Page 1 OCR]", f"[Page {capture_page_number} OCR]", 1)
+    total_pages = len(re.findall(r"(?m)^\\[Page\\s+\\d+", source_text)) or 1
+    unreadable_pages = _unreadable_page_numbers(source_text)
+    unprocessed_pages = [
+        int(value) for value in re.findall(r"(?m)^\\[Page\\s+(\\d+)\\s+OCR\\]\\n\\[Page not processed:", source_text)
+    ]
+    processed_pages = sorted(set(range(1, total_pages + 1)) - set(unprocessed_pages))
+    extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
         source_event_id=None,
         source_evidence_id=evidence_id,
         source_text=source_text,
-        extraction_status="available",
+        extraction_status=extraction_status,
         candidates={
             "kind": "document_extraction_v1",
             "filename": upload.filename,
