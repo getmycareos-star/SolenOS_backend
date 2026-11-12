@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Correction, Evidence, Person
+from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.services.lcr_context import build_lcr_context
 from app.services.change_intelligence_reconciliation import (
@@ -35,6 +36,7 @@ def execute_care_continuity_reconciliation(
     source_message_id: str | None = None,
     source_conversation_id: str | None = None,
     correction_id: str | None = None,
+    source_assertion_id: str | None = None,
     reference_time: datetime | None = None,
     stage_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -51,7 +53,7 @@ def execute_care_continuity_reconciliation(
         [value for value in (source_evidence_ids or []) if isinstance(value, str) and value.strip()]
         + ([source_evidence_id] if source_evidence_id else [])
     ))
-    if not source_event_id and not evidence_ids and not source_message_id and not correction_id:
+    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
     if source_message_id and (not source_conversation_id or not caregiver_id):
         raise CareContinuityExecutionError(
@@ -101,6 +103,17 @@ def execute_care_continuity_reconciliation(
         if not set(evidence_ids).issubset(linked_ids):
             raise CareContinuityExecutionError(
                 "The source evidence is not linked to the supplied source event"
+            )
+
+    assertion = None
+    if source_assertion_id:
+        assertion = db.query(CareAssertion).filter(
+            CareAssertion.id == source_assertion_id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if assertion is None:
+            raise CareContinuityExecutionError(
+                "The source assertion is missing or belongs to another care record"
             )
 
     correction = None
@@ -195,6 +208,7 @@ def execute_care_continuity_reconciliation(
         "source_message_id": source_message_id,
         "source_conversation_id": source_conversation_id,
         "correction_id": correction_id,
+        "source_assertion_id": source_assertion_id,
         "stages": stages,
         "transaction_owner": "caller",
     }
