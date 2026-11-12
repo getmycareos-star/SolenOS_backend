@@ -363,7 +363,7 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
             source_label="Caregiver-reviewed current prescriber instruction",
             source_text="Current prescriber instruction states the medication dose.",
             evidence_ids=[current_source.id],
-            assertion_status="accepted",
+            assertion_status="reported",
             epistemic_state="reported",
             review_after_days=30,
             created_by_caregiver_id=caregiver.id,
@@ -397,12 +397,16 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
         ))
         db.flush()
 
-        reconciliation = reconcile_information_gaps_from_accepted_assertions(db, person.id)
-        lifecycle = reassess_open_question_lifecycle(db, person.id)
-        db.flush()
+        # Exercise the real caregiver review transition: it must trigger
+        # reconciliation itself rather than requiring a later manual refresh.
+        from app.services.care_continuity import set_assertion_status
+        set_assertion_status(
+            db, accepted_assertion.id, person.id, "accepted",
+            updated_by_caregiver_id=caregiver.id, review_after_days=30,
+        )
         db.refresh(gap)
         db.refresh(question)
-        assert reconciliation == {"scanned": 2, "resolved": 1, "skipped_conflict": 1}
+        db.refresh(question)
         assert gap.lifecycle_status == GapLifecycleStatus.RESOLVED
         assert conflict_gap.lifecycle_status == GapLifecycleStatus.OPEN
         assert gap.resolution_mechanism.value == "new_evidence"
@@ -410,8 +414,6 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
         assert question.status == "closed"
         assert question.closed_reason.startswith("automatically_superseded")
         assert question.answered_at is None
-        assert lifecycle["superseded"] == 1
-        db.commit()
         db.close()
     finally:
         teardown_db()
