@@ -11,7 +11,7 @@ from app.api.collaboration import _scope
 from app.core.database import get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care import CareEvent, Evidence
-from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
 from app.schemas.care_continuity import CareAssertionCreate
@@ -105,8 +105,25 @@ def review_qwen_assistance_proposal(
         QwenBackgroundJob.caregiver_id == caregiver_id,
         QwenBackgroundJob.status == "completed",
     ).first()
-    if output is None or job is None or output.written_to_lcr:
+    if (
+        output is None or job is None or output.written_to_lcr
+        or output.review_required is not True
+        or output.review_status != "pending_review"
+    ):
         raise HTTPException(status_code=409, detail="The original care suggestion is no longer available")
+    safety = db.query(QwenSafetyEvaluation).filter(
+        QwenSafetyEvaluation.output_id == output.id,
+        QwenSafetyEvaluation.job_id == job.id,
+        QwenSafetyEvaluation.person_id == person_id,
+        QwenSafetyEvaluation.caregiver_id == caregiver_id,
+    ).order_by(QwenSafetyEvaluation.created_at.desc()).first()
+    if (
+        safety is None
+        or safety.human_review_required is not True
+        or safety.decision != "review_required"
+        or safety.risk_class not in {"unassessed", "low"}
+    ):
+        raise HTTPException(status_code=409, detail="This suggestion is not eligible for caregiver approval")
     change = dict(proposal.proposed_change_json or {})
     if change.get("asserted_value") != output.output_text or change.get("information_status") != "ai_generated_interpretation_pending_caregiver_review":
         raise HTTPException(status_code=409, detail="The saved suggestion no longer matches its review proposal")
