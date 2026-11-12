@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import case, cast, exists, literal, or_, String
 from sqlalchemy.exc import IntegrityError
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 import base64
 import hashlib
 
@@ -236,6 +236,14 @@ def deliver_pending_web_pushes(db=None, now=None):
                 delivery.last_error_code = None
                 delivery.last_error_message = None
                 accepted += 1
+                session.commit()
+            except InvalidToken:
+                # SECRET_KEY rotation invalidates the encrypted subscription.
+                # Revoke it so the caregiver can register this browser again.
+                subscription.revoked_at = current
+                delivery.status = "expired"
+                delivery.last_error_code = "subscription_decryption_failed"
+                delivery.last_error_message = "Browser subscription could not be decrypted; re-registration is required"
                 session.commit()
             except WebPushException as exc:
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
