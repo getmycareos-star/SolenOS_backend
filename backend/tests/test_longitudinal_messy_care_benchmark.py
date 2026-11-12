@@ -1182,6 +1182,13 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             assert receipt["provenance"]["source_event_id"] == run.source_event_id
             assert receipt["provenance"]["evidence_ids"] == run.evidence_ids
             assert "computed_changes" in receipt
+            assert "claim_provenance" in receipt
+            for claim in receipt["claim_provenance"]["claims"]:
+                if claim["support_status"] in {"matched_source_and_state", "matched_competing_sources"}:
+                    assert claim["source_references"], "a supported Delta finding must name its actual source records"
+            for domain in ("medications", "conditions", "symptoms", "tests", "follow_ups", "clinical_gaps", "contradictions"):
+                for finding in receipt.get(domain, []):
+                    assert "source_record_refs" in finding, "every Delta finding must expose its claim-specific source references"
 
         # Compare exact source-grounded final assertions against the independently
         # authored expected state; a successful HTTP/service call is not a pass.
