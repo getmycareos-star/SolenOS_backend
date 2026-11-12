@@ -741,7 +741,7 @@ def _apply_capture_page_number(source_text: str, evidence: Evidence) -> str:
 
 def _merge_pdf_page_extraction(existing_text: str, retry_text: str, retry_pages: set[int]) -> str:
     """Replace only retried PDF page blocks, preserving every successful page verbatim."""
-    page_pattern = re.compile(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]\\n")
+    page_pattern = re.compile(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]\n")
     def split_pages(value: str) -> tuple[str, dict[int, str]]:
         matches = list(page_pattern.finditer(value or ""))
         if not matches:
@@ -759,7 +759,7 @@ def _merge_pdf_page_extraction(existing_text: str, retry_text: str, retry_pages:
         if page_number in retry_pages_text:
             existing_pages[page_number] = retry_pages_text[page_number]
     ordered = [existing_pages[number] for number in sorted(existing_pages)]
-    return "\\n\\n".join(([preamble] if preamble else []) + ordered).strip()
+    return "\n\n".join(([preamble] if preamble else []) + ordered).strip()
 
 
 def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) -> tuple[str, dict]:
