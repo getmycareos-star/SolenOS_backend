@@ -111,7 +111,7 @@ def test_saved_snap_care_photo_is_linked_to_situation_without_document_ocr():
         created, headers = create_authenticated_session(client, "Snap Photo Person")
         person_id = created["person"]["id"]
         caregiver_id = created["caregiver"]["id"]
-        photo_bytes = b"\\x89PNG\\r\\n\\x1a\\n" + b"care-photo-original-bytes"
+        photo_bytes = b"\x89PNG\r\n\x1a\n" + b"care-photo-original-bytes"
         uploaded = client.post(
             "/api/v1/upload",
             headers=headers,
