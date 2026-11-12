@@ -262,6 +262,102 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
         teardown_db()
 
 
+def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-gap-reconcile", name="Gap Reconcile Person")
+        caregiver = Caregiver(
+            id="caregiver-gap-reconcile",
+            name="Gap Reconcile Caregiver",
+            email="gap-reconcile@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        gap_source = Evidence(
+            id="evidence-gap-reconcile-original",
+            person_id=person.id,
+            type="document",
+            source_text="Earlier record notes that the prescribed dose is not documented.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        current_source = Evidence(
+            id="evidence-gap-reconcile-current",
+            person_id=person.id,
+            type="document",
+            source_text="Current prescriber instruction states the medication dose.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        gap = InformationGap(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="medication-1",
+            field="current_dose",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="The current dose is not established for the care handoff.",
+            evidence_ids=[gap_source.id],
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The current handoff depends on the prescribed dose.",
+                "decision_dependency": "The handoff cannot state the current dose without this source.",
+            }],
+        )
+        db.add_all([person, caregiver, gap_source, current_source, gap])
+        db.flush()
+
+        from app.services.care_continuity import (
+            next_best_questions,
+            reconcile_information_gaps_from_accepted_assertions,
+            reassess_open_question_lifecycle,
+        )
+        next_best_questions(db, person.id, persist=True, commit=False)
+        question = db.query(OpenQuestion).filter_by(
+            person_id=person.id, subject_id="medication-1", necessity="necessary"
+        ).one()
+        assert question.status == "open"
+
+        accepted_assertion = CareAssertion(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="medication-1",
+            field="current_dose",
+            assertion_kind="current_state",
+            asserted_value="Dose stated in current prescriber instruction",
+            source_label="Caregiver-reviewed current prescriber instruction",
+            source_text="Current prescriber instruction states the medication dose.",
+            evidence_ids=[current_source.id],
+            assertion_status="accepted",
+            epistemic_state="reported",
+            created_by_caregiver_id=caregiver.id,
+            updated_by_caregiver_id=caregiver.id,
+        )
+        db.add(accepted_assertion)
+        db.flush()
+
+        reconciliation = reconcile_information_gaps_from_accepted_assertions(db, person.id)
+        lifecycle = reassess_open_question_lifecycle(db, person.id)
+        db.flush()
+        db.refresh(gap)
+        db.refresh(question)
+        assert reconciliation == {"scanned": 1, "resolved": 1, "skipped_conflict": 0}
+        assert gap.lifecycle_status == GapLifecycleStatus.RESOLVED
+        assert gap.resolution_mechanism.value == "new_evidence"
+        assert current_source.id in gap.evidence_ids
+        assert question.status == "closed"
+        assert question.closed_reason.startswith("automatically_superseded")
+        assert question.answered_at is None
+        assert lifecycle["superseded"] == 1
+        db.commit()
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_unknown_vs_false():
     setup_db()
     try:
