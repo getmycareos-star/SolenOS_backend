@@ -44,21 +44,38 @@ Each action should have an owner, due time or condition, status, source, and out
 
 ## Current endpoint boundary
 
-POST /api/v1/handoff-drafts/prepare is a read-only first vertical slice. It reads a fixed allowlist of care facts, care decisions, open questions, information gaps, timeline entries, care events, care transitions, and appointments. Action records are included only when their linked evidence belongs to the requesting caregiver; evidence from another caregiver is excluded unless a separately verified sharing adapter is implemented. Daily Care, document contents, medication/allergy data, routines/preferences, contacts, measurements, and professional identity are not to be represented as retrieved until their scoped adapters are implemented and tested. Community is not authorised. It does not create a handoff, deliver a share, or mutate the LCR.
+\`POST /api/v1/handoff-drafts/prepare\` remains a read-only preparation endpoint. It does not create a recipient-bound handoff, deliver information, authenticate a professional, establish professional access, or mutate the LCR.
 
-The current endpoint emits source references, separate event/record/due times, allowlisted source metadata, and source-availability states. Active LCR facts may be included even when older than the requested event window; superseded historical facts are included only when their record timestamp falls inside that window and are labelled superseded. Audience-specific template coverage is a checklist, not a clinical completeness score. The draft should not be treated as a transactionally consistent immutable snapshot until snapshot/version semantics are implemented and tested.
+The preparation endpoint reads the existing allowlisted LCR facts, decisions/outcomes, open questions, information gaps, timeline entries, care events/transitions, appointments, Daily Care observations, and uploaded-document/extraction records when available. Action records remain limited to the requesting caregiver's eligible linked evidence. Community is not an authorized source.
+
+For professional-audience drafts, medication output is limited to unambiguous caregiver-reviewed current medication assertions within their configured review window. It is a caregiver report, not independent clinical verification and not proof of administration. No medication list is inferred from incidental document or narrative text. No verified person-scoped allergy adapter exists; allergy coverage is explicitly unavailable and must never be interpreted as "no allergies".
+
+\`POST /api/v1/handoff-drafts/{draft_id}\` saves a caregiver revision. Source sections must remain byte-for-byte equivalent to the retrieved source sections. Generated statements must retain exact source-reference validation. Caregiver-authored notes are separately attributed as unverified reports and cannot be promoted to source facts.
+
+\`POST /api/v1/handoff-drafts/{draft_id}/approve-export\` approves only the requesting caregiver's professional-audience draft, after source freshness is rechecked and the saved revision hash is verified. \`GET /api/v1/handoff-drafts/{draft_id}/export.pdf\` returns a PDF only for that exact approved revision, repeats the freshness and revision-hash checks, and records an export audit event. The PDF includes caregiver-facing evidence labels, source IDs and available source/reporter references, separate event/record times, source availability, medication-report limitations, and the explicit allergy-data limitation. Responses are marked \`Cache-Control: no-store\`.
+
+External sharing is caregiver-controlled through the device share sheet or manual PDF attachment. SolenOS does not email the PDF, issue an external share link, register a professional recipient, create a recipient portal, or provide the recipient access to the SolenOS record. The local file may be retained or forwarded by the recipient; SolenOS cannot revoke a file after it leaves the device.
+
+The draft stores a versioned source snapshot and revisions. Approval is bound to the exact saved revision and source fingerprints; export fails closed when the source cannot be revalidated or has changed. This is not a transactionally consistent database snapshot across all source tables, and the export must not be represented as clinical validation or professional receipt/acceptance.
+
+## Release limitations
+
+- Allergy/reaction data is unavailable until a dedicated person-scoped, provenance-preserving adapter is implemented and tested. The PDF must state that unavailable does not mean absent.
+- Routines/preferences, contacts, measurements, professional identity/credentials, professional receipt/acceptance and recipient access are not part of this MVP.
+- No schema migration is required for caregiver approval/PDF export; existing draft/revision/audit persistence is reused.
+- Production behavior remains unverified until the backend PR is merged and the existing deployment is updated through the separately approved release process.
 
 ## Required tests before release
 
-1. Missing/invalid session rejected.
-2. Cross-person data cannot be read or inferred through empty/partial response.
-3. Source adapter absent versus empty versus unavailable are distinguished.
-4. Provenance IDs and timestamps survive response and handoff persistence.
-5. Corrections retain history and invalidate stale reviewed drafts.
-6. Medication discrepancies never auto-resolve and no medication-change advice is produced.
-7. Owner/deadline/status/outcome for actions persist and are not auto-completed.
-8. Review changes invalidate approval; share requires explicit review and authorized recipient scope.
-9. Receipt, questions, acceptance/decline and unaccepted responsibility persist.
-10. Expiry/revocation blocks access and original document bytes are access-controlled.
-11. Audit failure fails closed.
-12. Live Railway E2E proves authenticated save/read/restart/isolation; unit or mocked tests alone are insufficient.
+1. Missing/invalid session is rejected; cross-person and cross-caregiver draft access is denied.
+2. Source adapter absent versus empty versus unavailable are distinguished.
+3. Provenance IDs, source/reporter labels, evidence states and event/record timestamps survive draft persistence and PDF export.
+4. Caregiver-reviewed medication reports include only unambiguous current assertions within the review window; unreviewed or conflicting assertions are excluded.
+5. Allergy coverage remains explicitly unavailable and never implies absence.
+6. A caregiver revision cannot alter or fabricate source sections; caregiver notes remain attributed as unverified reports.
+7. Approval is bound to the exact persisted revision; edits invalidate approval.
+8. Approval and export fail closed when source freshness is stale or unknown, or when the revision hash does not match.
+9. PDF export requires approval, preserves evidence labels and source references, and uses no-store response headers.
+10. Device sharing is user initiated; no recipient account, external link, email delivery, or professional receipt is claimed.
+11. Privacy deletion removes scoped records and indirectly linked legacy rows while retaining only the redacted receipt/audit record.
+12. Live backend E2E must verify authenticated prepare/edit/approve/export, cross-person isolation, and restart persistence before production release.
