@@ -227,6 +227,13 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             assert accepted.status_code == 200, accepted.text
             accepted_assertion_id = accepted.json()["assertion_id"]
             assert accepted.json()["written_to_lcr"] is True
+            reconciliation = accepted.json()["reconciliation"]
+            assert reconciliation["workflow"] == "appointment_outcome_review"
+            assert reconciliation["source_appointment_workspace_id"] == record_id
+            assert reconciliation["source_appointment_workspace_revision_id"]
+            assert reconciliation["source_assertion_id"] == accepted_assertion_id
+            assert reconciliation["stages"]["source_preservation"] == "verified"
+            assert reconciliation["stages"]["reconciliation"] == "committed"
 
             rejected = client.post(
                 f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposals[2]['id']}/review",
