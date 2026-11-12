@@ -1022,7 +1022,7 @@ async def open_loop_maintenance_loop():
             ).order_by(
                 OpenLoopRecord.deadline_at.asc().nullslast(),
                 OpenLoopRecord.updated_at.asc(),
-            ).limit(500).all()
+            ).all()
             changed = 0
             for loop in rows:
                 before = _snapshot(loop)
