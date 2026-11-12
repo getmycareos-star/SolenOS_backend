@@ -570,6 +570,9 @@ def reconcile_information_gaps_from_accepted_assertions(
         CareAssertion.person_id == person_id,
         CareAssertion.assertion_kind == "current_state",
         CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
+        CareAssertion.epistemic_state.in_(("reported", "observed", "verified")),
+        CareAssertion.review_after_days.is_not(None),
+        CareAssertion.review_after_days > 0,
     ).order_by(CareAssertion.recorded_at.desc()).all()
 
     evidence_by_assertion = {}
