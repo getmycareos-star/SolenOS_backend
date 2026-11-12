@@ -1308,6 +1308,41 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
         assert initial_medication_gap.lifecycle_status == GapLifecycleStatus.OPEN
         assert initial_medication_gap.gap_reason == GapReason.ABSENT
 
+        # Exact final assertion agreement for the scenario's observed domains.
+        # Include the seeded baseline and the first observation as historical
+        # assertions; require the later observation and confusion report exactly,
+        # and reject unexpected extra active assertions in these domains.
+        observation_topic = scenario["initial_lcr"]["assertions"][0]["topic"]
+        initial_value = scenario["initial_lcr"]["assertions"][0]["value"]
+        expected_assertion_rows = {
+            (observation_topic, initial_value, None, "reported"),
+            (observation_topic, initial_value, f"{scenario['scenario_id']}-01", "reported"),
+            (
+                observation_topic,
+                next(
+                    event["assertion_value"] for event in ordered_events
+                    if event["id"] == f"{scenario['scenario_id']}-07"
+                ),
+                f"{scenario['scenario_id']}-07",
+                "reported",
+            ),
+            ("confusion", "increased confusion", f"{scenario['scenario_id']}-08", "reported"),
+        }
+        actual_assertion_rows = {
+            (row.subject_id, row.asserted_value, row.source_event_id, row.assertion_status)
+            for row in db.query(CareAssertion).filter(
+                CareAssertion.person_id == person.id,
+                CareAssertion.subject_type == "symptom",
+                CareAssertion.subject_id.in_([observation_topic, "confusion"]),
+                CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
+            ).all()
+        }
+        assert actual_assertion_rows == expected_assertion_rows, (
+            f"{scenario['scenario_id']}: exact assertion-state mismatch; "
+            f"missing={expected_assertion_rows - actual_assertion_rows}; "
+            f"unexpected={actual_assertion_rows - expected_assertion_rows}"
+        )
+
         # Every persisted assertion must cite only evidence belonging to its own
         # source event, never unrelated evidence from another event in the run.
         evidence_owner = {
