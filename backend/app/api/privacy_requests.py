@@ -1139,17 +1139,32 @@ def fulfil_approved_deletion(
             db.query(EvidenceUpload).filter(
                 EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
             ).delete(synchronize_session=False)
-            db.query(Evidence).filter(
+        # Use direct SQL as a final deterministic erasure pass. Evidence can have
+        # nullable ownership changes from dependent cleanup, so delete both by the
+        # original scoped owner and by the immutable IDs captured before cleanup.
+        db.execute(
+            text("DELETE FROM evidence WHERE person_id = :person_id"),
+            {"person_id": person_id},
+        )
+        for evidence_id in evidence_ids_to_erase:
+            db.execute(
+                text("DELETE FROM evidence WHERE id = :evidence_id"),
+                {"evidence_id": str(evidence_id)},
+            )
+        remaining_evidence_query = db.query(Evidence.id)
+        if evidence_ids_to_erase:
+            remaining_evidence_query = remaining_evidence_query.filter(
                 Evidence.id.in_(evidence_ids_to_erase)
-            ).delete(synchronize_session=False)
-            remaining_evidence = db.query(Evidence.id).filter(
-                Evidence.id.in_(evidence_ids_to_erase)
-            ).count()
-            if int(remaining_evidence):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Evidence rows remain after the care-record deletion pass; request was not fulfilled",
-                )
+            )
+        else:
+            remaining_evidence_query = remaining_evidence_query.filter(
+                Evidence.person_id == person_id
+            )
+        if remaining_evidence_query.count():
+            raise HTTPException(
+                status_code=409,
+                detail="Evidence rows remain after the care-record deletion pass; request was not fulfilled",
+            )
 
         # Explicitly remove the two root identity rows after the dependent-row
         # closure. Foreign-key violations fail closed rather than reporting a
