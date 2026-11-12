@@ -33,6 +33,7 @@ from app.api.handoff_drafts import router as handoff_drafts_router
 from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
@@ -1387,6 +1388,40 @@ async def post_situation(
         response_payload["qwen_analysis_id"] = None
         response_payload["qwen_review_required"] = False
         response_payload["qwen_written_to_lcr"] = False
+
+    # The legacy Add Record composer and structured Daily Care now share the
+    # same source-lineage validation and reconciliation transaction boundary.
+    execution = None
+    try:
+        execution = execute_care_continuity_reconciliation(
+            db,
+            scoped_person_id,
+            workflow="situation_capture",
+            source_event_id=result.care_event_id,
+            source_evidence_id=result.evidence_id,
+        )
+        db.commit()
+        execution["stages"]["reconciliation"] = "committed"
+    except Exception:
+        db.rollback()
+        execution = {
+            "contract_version": "1.0",
+            "workflow": "situation_capture",
+            "person_id": scoped_person_id,
+            "source_event_id": result.care_event_id,
+            "source_evidence_id": result.evidence_id,
+            "stages": {
+                "source_preservation": "verified",
+                "evidence": "unavailable",
+                "reconciliation": "unavailable",
+            },
+            "transaction_owner": "caller",
+        }
+        logger.exception(
+            "Shared care-continuity execution failed after durable Add Record capture %s",
+            result.care_event_id,
+        )
+    response_payload["care_continuity_execution"] = execution
     return response_payload
 
 
