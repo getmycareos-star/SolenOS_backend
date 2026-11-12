@@ -463,7 +463,7 @@ def _docx_bytes(text):
         (
             "clinic-email.eml",
             "message/rfc822",
-            b"From: clinic@example.org\\r\\nTo: family@example.org\\r\\nSubject: Follow-up\\r\\nMIME-Version: 1.0\\r\\nContent-Type: text/plain; charset=utf-8\\r\\n\\r\\nPlease arrange a review next Tuesday.",
+            b"From: clinic@example.org\r\nTo: family@example.org\r\nSubject: Follow-up\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease arrange a review next Tuesday.",
             "server_email_text",
             "Please arrange a review next Tuesday.",
         ),
