@@ -804,7 +804,7 @@ def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(clie
 
 def test_invalid_outlook_msg_is_preserved_and_reported_as_unreadable(client):
     test_client, session = client
-    original = b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-outlook-binary"
+    original = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-outlook-binary"
     evidence_id = persist_document(
         session,
         original,
