@@ -68,7 +68,7 @@ def test_reminder_create_list_complete_persists_attribution():
     assert reminder["created_by_caregiver_id"] == session["caregiver"]["id"]
     assert reminder["status"] == "open"
     assert reminder["delivery_mode"] == "in_app_notification_feed"
-    assert reminder["notification_delivery_status"] == "in_app_feed_only"
+    assert reminder["notification_delivery_status"] == "in_app_notification_created"
 
     listed = client.get(
         f"/api/v1/reminders/{session['person']['id']}",
