@@ -3619,3 +3619,106 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         db.close()
     finally:
         teardown_db()
+
+
+def test_source_reconciliation_suppresses_reopens_and_supersedes_questions_with_revision_history():
+    setup_db()
+    try:
+        from app.models.care_continuity import CareStateRevision
+        from app.services.care_continuity import reassess_open_question_lifecycle
+
+        db = TestingSessionLocal()
+        person = Person(id="question-lifecycle-person", name="Question Lifecycle Person")
+        caregiver = Caregiver(
+            id="question-lifecycle-caregiver",
+            name="Question Lifecycle Caregiver",
+            email="question-lifecycle@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        gap = InformationGap(
+            id="question-lifecycle-gap",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="active discharge instruction",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="The current discharge instruction is not established.",
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The current care handoff depends on which discharge instruction is active.",
+            }],
+        )
+        question = OpenQuestion(
+            id="question-lifecycle-open",
+            person_id=person.id,
+            question="Which discharge instruction is currently active?",
+            subject_type="person",
+            subject_id=person.id,
+            necessity="necessary",
+            necessity_rationale="The current care handoff depends on which discharge instruction is active.",
+            status="open",
+            priority=Priority.HIGH,
+            evidence_ids=[],
+            context=[{"source_kind": "information_gap", "source_id": gap.id}],
+        )
+        db.add_all([person, caregiver, gap, question])
+        db.commit()
+
+        kept = reassess_open_question_lifecycle(db, person.id)
+        db.commit()
+        assert kept["kept"] == 1
+        assert db.query(OpenQuestion).filter_by(id=question.id).one().status == "open"
+
+        # The source remains in the record, but no longer says caregiver input is necessary.
+        gap.context = [{
+            "caregiver_attention_required": False,
+            "necessity_rationale": "The detail can remain recorded without interrupting the caregiver.",
+        }]
+        db.commit()
+        suppressed = reassess_open_question_lifecycle(db, person.id)
+        db.commit()
+        db.refresh(question)
+        assert suppressed["suppressed"] == 1
+        assert question.status == "closed"
+        assert question.closed_reason.startswith("automatically_suppressed:")
+
+        # If the same source later becomes materially necessary, the system reopens
+        # the original question rather than creating a duplicate.
+        gap.context = [{
+            "caregiver_attention_required": True,
+            "necessity_rationale": "A new handoff now depends on the active discharge instruction.",
+        }]
+        db.commit()
+        reopened = reassess_open_question_lifecycle(db, person.id)
+        db.commit()
+        db.refresh(question)
+        assert reopened["reopened"] == 1
+        assert question.status == "open"
+        assert question.closed_at is None
+        assert question.necessity_rationale == "A new handoff now depends on the active discharge instruction."
+
+        # Once the linked gap is resolved, the system closes the old request as
+        # superseded; silence is never recorded as an answer.
+        gap.lifecycle_status = GapLifecycleStatus.RESOLVED
+        db.commit()
+        superseded = reassess_open_question_lifecycle(db, person.id)
+        db.commit()
+        db.refresh(question)
+        assert superseded["superseded"] == 1
+        assert question.status == "closed"
+        assert question.answer is None
+        assert question.closed_reason.startswith("automatically_superseded:")
+
+        revisions = db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person.id,
+            CareStateRevision.target_id == question.id,
+        ).all()
+        assert len(revisions) >= 4
+        assert all(revision.after_state for revision in revisions)
+        db.close()
+    finally:
+        teardown_db()
