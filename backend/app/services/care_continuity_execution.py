@@ -318,7 +318,10 @@ def execute_care_continuity_reconciliation(
     # this same unit of work. The caller retains commit/rollback ownership.
     db.flush()
     if reconcile_lcr:
-        reconcile_person_change_intelligence(db, person_id, reference_time)
+        reconcile_person_change_intelligence(
+            db, person_id, reference_time,
+            protected_assertion_ids=[source_assertion_id] if source_assertion_id else None,
+        )
         db.flush()
 
     return {
