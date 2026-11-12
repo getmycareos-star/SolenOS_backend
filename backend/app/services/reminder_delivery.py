@@ -34,55 +34,9 @@ def _notification_id(reminder):
     return f"reminder-due:{reminder.id}:{generation}"
 
 
-def is_quiet_hours(preference, now):
-    if preference is None or not preference.quiet_hours_enabled:
-        return False
-    try:
-        local_now = now.astimezone(ZoneInfo(preference.timezone_name or "UTC"))
-        start = time.fromisoformat(preference.quiet_hours_start or "21:00")
-        end = time.fromisoformat(preference.quiet_hours_end or "08:00")
-    except (ValueError, TypeError, ZoneInfoNotFoundError):
-        return True
-    current = local_now.timetz().replace(tzinfo=None)
-    if start == end:
-        return True
-    if start < end:
-        return start <= current < end
-    return current >= start or current < end
-
-
-def quiet_hours_release_at(preference, now):
-    """Return the next local quiet-hours end as UTC, or None when not quiet."""
-    if preference is None or not preference.quiet_hours_enabled:
-        return None
-    try:
-        zone = ZoneInfo(preference.timezone_name or "UTC")
-        local_now = now.astimezone(zone)
-        start = time.fromisoformat(preference.quiet_hours_start or "21:00")
-        end = time.fromisoformat(preference.quiet_hours_end or "08:00")
-    except (ValueError, TypeError, ZoneInfoNotFoundError):
-        # Fail closed for malformed stored settings, but retry in one hour so
-        # an invalid preference cannot permanently starve the worker.
-        return now + timedelta(hours=1)
-    current = local_now.timetz().replace(tzinfo=None)
-    if start == end:
-        release_date = local_now.date() + timedelta(days=1)
-        release_local = datetime.combine(release_date, end, tzinfo=zone)
-        return release_local.astimezone(timezone.utc)
-    if start < end:
-        quiet = start <= current < end
-        release_date = local_now.date()
-    else:
-        quiet = current >= start or current < end
-        release_date = local_now.date() + (timedelta(days=1) if current >= start else timedelta())
-    if not quiet:
-        return None
-    # Resolve DST transitions conservatively. For an ambiguous local end time
-    # (fall-back), choose the later instant so notifications are never released
-    # during the repeated quiet-hours interval. For a nonexistent local end time
-    # (spring-forward), choose the later UTC candidate, which maps to the first
-    # valid local instant after the clock jump.
-    local_end = datetime.combine(release_date, end)
+def _quiet_hours_end_utc(local_date, end_time, zone):
+    """Resolve a local quiet-hours end conservatively across DST transitions."""
+    local_end = datetime.combine(local_date, end_time)
     candidates = [
         local_end.replace(tzinfo=zone, fold=0).astimezone(timezone.utc),
         local_end.replace(tzinfo=zone, fold=1).astimezone(timezone.utc),
@@ -91,8 +45,51 @@ def quiet_hours_release_at(preference, now):
         candidate for candidate in candidates
         if candidate.astimezone(zone).replace(tzinfo=None) == local_end
     ]
+    # Ambiguous times have two valid instants: use the later one. Nonexistent
+    # times have none: use the later UTC candidate, after the forward clock jump.
     return max(valid_candidates or candidates)
 
+
+def _quiet_hours_state(preference, now):
+    """Return (is_quiet, release_at) in UTC; fail closed on invalid settings."""
+    if preference is None or not preference.quiet_hours_enabled:
+        return False, None
+    try:
+        zone = ZoneInfo(preference.timezone_name or "UTC")
+        local_now = now.astimezone(zone)
+        start = time.fromisoformat(preference.quiet_hours_start or "21:00")
+        end = time.fromisoformat(preference.quiet_hours_end or "08:00")
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        return True, now + timedelta(hours=1)
+
+    current = local_now.timetz().replace(tzinfo=None)
+    if start == end:
+        release_date = local_now.date() + timedelta(days=1)
+        return True, _quiet_hours_end_utc(release_date, end, zone)
+
+    if start < end:
+        release_date = local_now.date()
+        release_at = _quiet_hours_end_utc(release_date, end, zone)
+        quiet = start <= current < end or (current >= end and now.astimezone(timezone.utc) < release_at)
+        return quiet, release_at if quiet else None
+
+    # Overnight interval. During a fall-back repeated end hour, local wall time
+    # alone would incorrectly release notifications at the first occurrence.
+    release_date = local_now.date() + (timedelta(days=1) if current >= start else timedelta())
+    release_at = _quiet_hours_end_utc(release_date, end, zone)
+    quiet = current >= start or current < end or (
+        current >= end and now.astimezone(timezone.utc) < release_at
+    )
+    return quiet, release_at if quiet else None
+
+
+def is_quiet_hours(preference, now):
+    return _quiet_hours_state(preference, now)[0]
+
+
+def quiet_hours_release_at(preference, now):
+    """Return the next local quiet-hours end as UTC, or None when not quiet."""
+    return _quiet_hours_state(preference, now)[1]
 
 def deliver_due_reminders(db=None, now=None):
     """Create each due reminder notification once per due-time generation."""
