@@ -24,6 +24,7 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
+from app.services.care_continuity import get_freshness
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
@@ -1253,6 +1254,88 @@ def read_lcr_context(
     """Read one bounded, permission-scoped context projection shared by LCR-facing modules."""
     person_id, _ = _scoped_identity(request, db)
     return build_lcr_context(db, person_id, limit_per_source=limit_per_source, query=query)
+
+
+@router.get("/medications")
+def current_medication_records(request: Request, db: Session = Depends(get_db)):
+    """Return only caregiver-reviewed, in-window medication assertions from the LCR.
+
+    Historical medication events are deliberately not promoted into this list.
+    Each medication is grouped from existing CareAssertion rows sharing a stable
+    subject_id; both a name and an explicit active status are required.
+    """
+    person_id, _ = _scoped_identity(request, db)
+    rows = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        func.lower(CareAssertion.subject_type).in_(("medication", "medications")),
+        CareAssertion.assertion_kind == "current_state",
+        CareAssertion.assertion_status.in_(("reported", "review_required", "accepted", "caregiver_reviewed")),
+    ).order_by(CareAssertion.recorded_at.desc(), CareAssertion.id.desc()).all()
+
+    grouped: dict[str, list[CareAssertion]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.subject_id), []).append(row)
+
+    active_records: list[dict[str, Any]] = []
+    for subject_id, claims in grouped.items():
+        by_field: dict[str, list[CareAssertion]] = {}
+        for claim in claims:
+            by_field.setdefault(str(claim.field).strip().lower(), []).append(claim)
+
+        def accepted_current(field_names: tuple[str, ...]) -> CareAssertion | None:
+            candidates = [claim for field_name in field_names for claim in by_field.get(field_name, [])]
+            if not candidates:
+                return None
+            live_values = {
+                " ".join(str(item.asserted_value or "").casefold().split())
+                for item in candidates
+                if item.assertion_status in {"reported", "review_required", "accepted", "caregiver_reviewed"}
+            }
+            # Competing reports remain unresolved. Never select a winner by recency.
+            if len(live_values) != 1:
+                return None
+            candidate = candidates[0]
+            if candidate.assertion_status not in {"accepted", "caregiver_reviewed"}:
+                return None
+            if get_freshness(candidate).get("status") != "within_review_window":
+                return None
+            return candidate
+
+        name_claim = accepted_current(("name", "medication_name"))
+        status_claim = accepted_current(("status", "medication_status"))
+        if not name_claim or not status_claim or str(status_claim.asserted_value).strip().casefold() != "active":
+            continue
+        dose_claim = accepted_current(("dose", "strength"))
+        active_records.append({
+            "medication_id": subject_id,
+            "name": str(name_claim.asserted_value).strip(),
+            "dose": str(dose_claim.asserted_value).strip() if dose_claim else None,
+            "status": "active",
+            "record_status": "caregiver_reviewed_current_report",
+            "epistemic_state": name_claim.epistemic_state,
+            "source_label": name_claim.source_label,
+            "source_text": name_claim.source_text,
+            "evidence_ids": name_claim.evidence_ids or [],
+            "recorded_at": name_claim.recorded_at,
+            "review_after_days": name_claim.review_after_days,
+            "interpretation_limit": (
+                "Caregiver-reviewed report within its review window; this is not independent "
+                "clinical verification or proof that the medicine was administered."
+            ),
+        })
+
+    active_records.sort(key=lambda item: (item["name"].casefold(), item["medication_id"]))
+    return {
+        "medications": active_records,
+        "count": len(active_records),
+        "source": "care_assertions",
+        "history_events_promoted": False,
+        "interpretation_limit": (
+            "Only same-person medication assertions with an accepted review, an in-window "
+            "review date, an unambiguous name, and an explicit active status are returned. "
+            "Historical medication events are not active medication records."
+        ),
+    }
 
 
 @router.get("/current-care")
