@@ -574,6 +574,7 @@ def review_daily_care_lcr_proposal(
                 subject_id=person_id,
                 field=str(proposal.get("field") or "daily_care_observation")[:120],
                 assertion_kind="caregiver_reviewed_daily_care",
+                epistemic_state="inferred",
                 asserted_value=str(proposal.get("proposed_value") or "")[:4000],
                 source_event_id=event_ids[0] if event_ids else None,
                 source_label="Caregiver-reviewed Daily Care Qwen proposal",
