@@ -1240,12 +1240,22 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 CareAssertion.person_id == person.id,
                 CareAssertion.source_event_id == duplicate_id,
             ).all()
+            duplicate_assertion_details = [
+                {
+                    "id": row.id,
+                    "subject_id": row.subject_id,
+                    "field": row.field,
+                    "asserted_value": row.asserted_value,
+                    "observed_at": row.observed_at.isoformat() if row.observed_at else None,
+                    "source_event_id": row.source_event_id,
+                    "created_by_caregiver_id": row.created_by_caregiver_id,
+                    "assertion_status": row.assertion_status,
+                }
+                for row in duplicate_assertions
+            ]
             assert not duplicate_assertions, (
                 f"{scenario['scenario_id']}: duplicate event {duplicate_id} created assertions: "
-                f"{[{ 'id': row.id, 'subject_id': row.subject_id, 'field': row.field, "
-                f"'asserted_value': row.asserted_value, 'observed_at': row.observed_at.isoformat() if row.observed_at else None, "
-                f"'source_event_id': row.source_event_id, 'created_by_caregiver_id': row.created_by_caregiver_id, "
-                f"'assertion_status': row.assertion_status } for row in duplicate_assertions]}"
+                f"{duplicate_assertion_details}"
             )
             duplicate_link = db.query(CareRecordRelationship).filter(
                 CareRecordRelationship.person_id == person.id,
