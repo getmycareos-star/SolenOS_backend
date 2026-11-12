@@ -23,6 +23,7 @@ from app.models.care import Caregiver, Evidence
 from app.models.reminder import CareReminder
 from app.schemas.action import ActionCandidate
 from app.services.action_normalization import ActionNormalizationService
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 router = APIRouter(tags=["registered care actions"])
 
@@ -406,6 +407,11 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
     if payload.status == "deferred" and linked_reminder and payload.deferred_until is None:
         raise HTTPException(status_code=422, detail="Choose a new due date when deferring an action that has a linked reminder")
     action.status = payload.status
+    # A caregiver's explicit "needs clarification" transition is a deterministic
+    # blocker. It authorizes one source-grounded question through the shared LCR
+    # reconciler; priority/confidence alone never does. Leaving the state removes
+    # the blocker so the same question can be superseded by that lifecycle.
+    action.requires_confirmation = payload.status == "needs_clarification"
     action.deferred_until = payload.deferred_until.astimezone(timezone.utc) if payload.deferred_until else None
     if payload.status == "completed":
         action.completed_at = datetime.now(timezone.utc)
@@ -428,6 +434,10 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
                "Caregiver explicitly confirmed completion" if payload.status == "completed" else None
            ))
     try:
+        # Keep action state, its source-grounded question lifecycle transition,
+        # and audit history in one transaction. This also recovers/reassesses
+        # after restart because the action status is persisted as the source.
+        reconcile_person_change_intelligence(db, person_id)
         db.commit()
     except StaleDataError:
         db.rollback()
