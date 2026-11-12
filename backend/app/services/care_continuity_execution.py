@@ -11,7 +11,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.care import CareEvent, Evidence, Person
+from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.services.lcr_context import build_lcr_context
 from app.services.change_intelligence_reconciliation import (
     reconcile_person_change_intelligence,
 )
@@ -29,6 +30,8 @@ def execute_care_continuity_reconciliation(
     source_event_id: str | None = None,
     source_evidence_id: str | None = None,
     reference_time: datetime | None = None,
+    caregiver_id: str | None = None,
+    stage_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Validate persisted lineage and stage the shared LCR reconciliation.
 
@@ -45,6 +48,15 @@ def execute_care_continuity_reconciliation(
     person = db.query(Person).filter(Person.id == person_id).first()
     if person is None:
         raise CareContinuityExecutionError("The care record could not be verified")
+    if caregiver_id:
+        caregiver = db.query(Caregiver).filter(
+            Caregiver.id == caregiver_id,
+            Caregiver.person_id == person_id,
+        ).first()
+        if caregiver is None:
+            raise CareContinuityExecutionError(
+                "The caregiver is not authorized for this care record"
+            )
 
     event = None
     if source_event_id:
@@ -81,17 +93,52 @@ def execute_care_continuity_reconciliation(
     reconcile_person_change_intelligence(db, person_id, reference_time)
     db.flush()
 
+    stages = {
+        "source_preservation": "verified",
+        "evidence": "verified" if evidence is not None else "not_applicable",
+        "extraction": "not_applicable",
+        "assessment": "not_applicable",
+        "review": "not_required",
+        "reconciliation": "staged_in_caller_transaction",
+        "longitudinal_retrieval": "unavailable",
+    }
+    if stage_statuses:
+        allowed = {
+            "extraction": {"available", "pending", "failed", "not_applicable"},
+            "assessment": {"available", "pending", "failed", "not_applicable"},
+            "review": {"required", "completed", "not_required", "pending"},
+        }
+        for name, value in stage_statuses.items():
+            if name not in allowed or value not in allowed[name]:
+                raise CareContinuityExecutionError(
+                    f"Unsupported execution stage status: {name}={value}"
+                )
+            stages[name] = value
+
+    # Retrieval is a read-only check against the same authorized LCR projection
+    # consumed by caregiver-facing screens. A failed read does not erase the
+    # committed source or roll back a successful reconciliation.
+    try:
+        projection = build_lcr_context(
+            db,
+            person_id,
+            caregiver_id=caregiver_id,
+            limit_per_source=1,
+        )
+        stages["longitudinal_retrieval"] = (
+            "available"
+            if not projection.get("missing_required_sources")
+            else "unavailable"
+        )
+    except Exception:
+        stages["longitudinal_retrieval"] = "unavailable"
+
     return {
         "contract_version": "1.0",
         "workflow": workflow,
         "person_id": person_id,
         "source_event_id": source_event_id,
         "source_evidence_id": source_evidence_id,
-        "stages": {
-            "source_preservation": "verified",
-            "evidence": "verified" if evidence is not None else "not_applicable",
-            "reconciliation": "staged_in_caller_transaction",
-            "longitudinal_retrieval": "not_verified",
-        },
+        "stages": stages,
         "transaction_owner": "caller",
     }
