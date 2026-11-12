@@ -576,6 +576,7 @@ def test_postgres_accepted_document_follow_up_is_persisted_once_and_not_booked()
             duplicate = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge-copy.pdf.txt", raw)
             first_upload = db.query(EvidenceUpload).filter_by(evidence_id=first["evidence_id"]).one()
             duplicate_upload = db.query(EvidenceUpload).filter_by(evidence_id=duplicate["evidence_id"]).one()
+            assert first_upload.sha256 == duplicate_upload.sha256
             candidate = {
                 "field_type": "appointment",
                 "page_number": 6,
