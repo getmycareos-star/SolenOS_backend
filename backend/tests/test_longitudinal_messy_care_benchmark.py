@@ -1091,6 +1091,12 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             db.add_all([evidence, care_event])
             db.flush()
 
+            if event_spec.get("corrects_event_id"):
+                original_event = db.query(CareEvent).filter(
+                    CareEvent.id == event_spec["corrects_event_id"],
+                    CareEvent.person_id == person.id,
+                ).one()
+
             if event_spec["kind"] == "correction" and original_event is not None:
                 db.add(Correction(
                     id=f"correction-{scenario['scenario_id']}",
@@ -1103,12 +1109,6 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                     caregiver_id=caregiver.id,
                 ))
                 db.flush()
-
-            if event_spec.get("corrects_event_id"):
-                original_event = db.query(CareEvent).filter(
-                    CareEvent.id == event_spec["corrects_event_id"],
-                    CareEvent.person_id == person.id,
-                ).one()
 
             model_result_by_call["value"] = fixture_result(event_spec)
             delta_engine.reconcile_event(
