@@ -183,7 +183,7 @@ def test_shared_coordinator_rejects_correction_from_another_caregiver(monkeypatc
     correction = SimpleNamespace(
         id="correction-1",
         person_id="person-1",
-        source_caregiver_id="different-caregiver",
+        caregiver_id="different-caregiver",
     )
     db = _session({Person: person, Correction: correction})
     reconciled = Mock()
