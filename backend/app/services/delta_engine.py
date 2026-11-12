@@ -24,7 +24,7 @@ from app.services.care_continuity import create_assertion
 from app.services.claim_provenance import build_claim_provenance
 
 
-DELTA_ENGINE_VERSION = "2026.11.12.6"
+logger = logging.getLogger(__name__)\n\nDELTA_ENGINE_VERSION = "2026.11.12.6"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
@@ -1379,6 +1379,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 })
             db.flush()
         except Exception as exc:
+            logger.exception(
+                "Delta reconciliation persistence failed",
+                extra={
+                    "person_id": person_id,
+                    "source_event_id": source_event_id,
+                    "evidence_count": len(evidence_ids),
+                },
+            )
             db.rollback()
             raise HTTPException(
                 status_code=500,
