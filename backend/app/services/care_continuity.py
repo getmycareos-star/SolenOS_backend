@@ -205,6 +205,26 @@ def _priority_weight(value: Any) -> int:
     return {"critical": 50, "high": 40, "medium": 30, "low": 20, "informational": 10}.get(str(value), 10)
 
 
+def _question_has_new_grounding(question: OpenQuestion, candidate: Dict[str, Any]) -> bool:
+    """A closed system question reopens only for a new persisted source or evidence."""
+    prior_source_ids = set()
+    for context in (question.context or []):
+        if not isinstance(context, dict):
+            continue
+        source_ids = context.get("source_ids") or [context.get("source_id")]
+        prior_source_ids.update(str(value) for value in source_ids if value)
+    candidate_source_ids = {
+        str(value) for value in (candidate.get("source_ids") or [candidate.get("source_id")])
+        if value
+    }
+    prior_evidence_ids = {str(value) for value in (question.evidence_ids or []) if value}
+    candidate_evidence_ids = {str(value) for value in (candidate.get("evidence_ids") or []) if value}
+    return bool(
+        candidate_source_ids - prior_source_ids
+        or candidate_evidence_ids - prior_evidence_ids
+    )
+
+
 def next_best_questions(
     db: Session,
     person_id: str,
@@ -339,7 +359,7 @@ def next_best_questions(
                 None,
             )
             if existing is None:
-                existing = next(
+                automatically_closed = next(
                     (
                         row for row in matching_rows
                         if row.status == "closed"
@@ -347,13 +367,20 @@ def next_best_questions(
                     ),
                     None,
                 )
-                if existing is not None:
-                    # Reopen only a system-suppressed/superseded question after
-                    # a fresh explicit necessity assessment; never reopen a
-                    # caregiver-declined or manually closed request.
+                if automatically_closed is not None and _question_has_new_grounding(automatically_closed, clean):
+                    existing = automatically_closed
+                    # Reopen only after a new persisted source/evidence arrives;
+                    # a repeated assessment of unchanged information is not new.
                     existing.status = "open"
                     existing.closed_at = None
                     existing.closed_reason = None
+                elif automatically_closed is not None:
+                    # Retain the closed historical row; do not manufacture a
+                    # second copy or reopen it from unchanged evidence.
+                    persisted_id = automatically_closed.id
+                    clean["persisted_question_id"] = persisted_id
+                    output.append(clean)
+                    continue
             source_context = {
                 "source_kind": clean["source_kind"],
                 "source_id": clean["source_id"],
@@ -469,6 +496,9 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
                 list(question.evidence_ids or []) + list(necessary.get("evidence_ids") or [])
             )) or None
             if question.status == "closed" and str(question.closed_reason or "").startswith("automatically_"):
+                if not _question_has_new_grounding(question, necessary):
+                    counts["untouched"] += 1
+                    continue
                 question.status = "open"
                 question.closed_at = None
                 question.closed_reason = None
