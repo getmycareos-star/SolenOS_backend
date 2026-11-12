@@ -3048,11 +3048,12 @@ def test_care_event_correction_reopens_direct_and_dependent_claim_assessments():
         teardown_db()
 
 
-def test_normal_reconciliation_persists_only_actionable_source_linked_questions():
+def test_normal_reconciliation_keeps_unassessed_candidates_internal():
     setup_db()
     try:
         from app.core.database import get_db
         from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+        from app.services.care_continuity import next_best_questions
         app.dependency_overrides[get_db] = override_get_db
 
         db = TestingSessionLocal()
@@ -3147,21 +3148,21 @@ def test_normal_reconciliation_persists_only_actionable_source_linked_questions(
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).all()
-        assert len(first) == 2
-        assert any("appetite" in row.question for row in first)
-        assert any("recent_weight" in row.question for row in first)
-        assert all(row.evidence_ids == [evidence.id] for row in first)
-        assert all(row.context and row.context[0].get("source_id") for row in first)
+        # A contradiction and a missing measurement remain in internal care
+        # intelligence; neither automatically becomes caregiver work.
+        assert first == []
+        candidates = next_best_questions(db, person.id, persist=False)
+        assert any(item["source_kind"] == "information_gap" and item["necessity"] == "not_assessed" for item in candidates)
+        assert db.query(InformationGap).filter_by(id=gap.id).one().lifecycle_status == GapLifecycleStatus.OPEN
 
-        # Reconciliation is idempotent: it enriches existing open questions but
-        # does not multiply them on every subsequent save/reload.
+        # Reconciliation remains idempotent and does not create caregiver questions.
         reconcile_person_change_intelligence(db, person.id)
         db.commit()
         second_count = db.query(OpenQuestion).filter(
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).count()
-        assert second_count == 2
+        assert second_count == 0
         assert not any("usual_bedtime" in row.question for row in db.query(OpenQuestion).filter_by(person_id=person.id).all())
         assert not any("sleep_observation" in row.question for row in db.query(OpenQuestion).filter_by(person_id=person.id).all())
     finally:
@@ -3527,5 +3528,94 @@ def test_source_extraction_questions_reject_cross_person_evidence():
                 questions=["Who confirmed this information?"],
             )
         assert db.query(OpenQuestion).filter_by(person_id=person_a.id).count() == 0
+    finally:
+        teardown_db()
+
+
+
+def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
+    """Missing information remains recorded without automatically creating caregiver work."""
+    setup_db()
+    try:
+        from app.services.care_continuity import next_best_questions
+
+        db = TestingSessionLocal()
+        person = Person(id="finding6-gap-person", name="Finding 6 Person")
+        caregiver = Caregiver(
+            id="finding6-gap-caregiver",
+            name="Finding 6 Caregiver",
+            email="finding6@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        gap = InformationGap(
+            id="finding6-nonessential-gap",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="preferred_music",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_PROVIDED,
+            priority=Priority.INFORMATIONAL,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="No preference has been recorded.",
+        )
+        necessary_gap = InformationGap(
+            id="finding6-necessary-gap",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="discharge_instruction",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="The active discharge instruction is not established.",
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The current care handoff depends on which discharge instruction is active.",
+            }],
+        )
+        db.add_all([person, caregiver, gap, necessary_gap])
+        db.commit()
+
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        db.flush()
+        assert any(item["source_kind"] == "information_gap" and item["necessity"] == "not_assessed" for item in candidates)
+        assert any(item["source_kind"] == "information_gap" and item["necessity"] == "necessary" for item in candidates)
+        assert db.query(InformationGap).filter_by(id=gap.id).one().lifecycle_status == GapLifecycleStatus.OPEN
+        assert db.query(InformationGap).filter_by(id=necessary_gap.id).one().lifecycle_status == GapLifecycleStatus.OPEN
+        necessary = db.query(OpenQuestion).filter_by(person_id=person.id, necessity="necessary").one()
+        assert necessary.necessity_rationale == "The current care handoff depends on which discharge instruction is active."
+        assert necessary.context[0]["source_id"] == necessary_gap.id
+
+        # The caregiver-facing question projection fails closed: only questions
+        # with an explicit necessity assessment and rationale are returned.
+        unassessed = OpenQuestion(
+            person_id=person.id,
+            question="What music does she prefer?",
+            subject_type="person",
+            subject_id=person.id,
+            necessity="not_assessed",
+            status="open",
+            priority=Priority.INFORMATIONAL,
+        )
+        optional = OpenQuestion(
+            person_id=person.id,
+            question="Would she like a different blanket?",
+            subject_type="person",
+            subject_id=person.id,
+            necessity="optional",
+            necessity_rationale="Preference information may be useful but is not needed for a current care decision.",
+            status="open",
+            priority=Priority.INFORMATIONAL,
+        )
+        db.add_all([necessary, unassessed, optional])
+        db.commit()
+
+        from app.services.uncertainty import UncertaintyEngine
+        visible = UncertaintyEngine(db, person_id=person.id).list_open_questions(person.id)
+        assert [item.id for item in visible] == [necessary.id]
+        db.close()
     finally:
         teardown_db()
