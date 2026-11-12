@@ -723,3 +723,41 @@ def test_situation_assessment_preserves_saved_deferral_and_review_context_per_pe
     assert saved["priority"] == deferred["priority"]
     assert saved["priority_reasons"] == deferred["priority_reasons"]
     assert all(item["id"] != deferred["id"] for item in second_assessment["open_loops"]["items"])
+
+
+def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
+    client = TestClient(app)
+    _, headers = session(client, "Deferred recovery recipient")
+    loop = create_loop(client, headers, loop_type="follow_up")
+    review_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    deferred = client.patch(
+        f"/api/v1/open-loops/{loop['id']}",
+        headers=headers,
+        json={
+            "status": "deferred",
+            "deferred_reason": "Waiting for the clinic to return the call.",
+            "review_at": review_at.isoformat(),
+            "reason": "Recheck after the expected callback window.",
+        },
+    )
+    assert deferred.status_code == 200, deferred.text
+    assert deferred.json()["status"] == "deferred"
+
+    db = TestSessionLocal()
+    try:
+        recovered = open_loop_api._reopen_due_deferred_loops(db, datetime.now(timezone.utc))
+        db.commit()
+        row = db.query(open_loop_api.OpenLoopRecord).filter_by(id=loop["id"]).one()
+        assert recovered == 1
+        assert row.status == "open"
+        assert row.review_at is None
+        assert row.deferred_reason == "Waiting for the clinic to return the call."
+        event = db.query(open_loop_api.OpenLoopEvent).filter_by(
+            loop_id=loop["id"], event_type="deferred_review_due"
+        ).one()
+        assert event.actor == "solenos_reconciliation"
+        assert event.before_state["status"] == "deferred"
+        assert event.after_state["status"] == "open"
+        assert event.evidence[0]["completion_inferred"] is False
+    finally:
+        db.close()
