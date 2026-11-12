@@ -215,6 +215,19 @@ class UncertaintyEngine:
         payload["evidence_ids"] = self._validate_person_evidence(
             scoped_person_id, payload.get("evidence_ids")
         ) or None
+        attention_assessments = [
+            item for item in (payload.get("context") or [])
+            if isinstance(item, dict) and item.get("caregiver_attention_required") is True
+        ]
+        for assessment in attention_assessments:
+            rationale = assessment.get("necessity_rationale")
+            dependency = assessment.get("decision_dependency")
+            if not isinstance(rationale, str) or not rationale.strip():
+                raise ValueError("A necessary information-gap request requires a recorded rationale.")
+            if not isinstance(dependency, str) or not dependency.strip():
+                raise ValueError("A necessary information-gap request must identify the current care decision that depends on the missing information.")
+            if not payload["evidence_ids"]:
+                raise ValueError("A necessary information-gap request requires persisted source evidence.")
         if payload.get("resolution_date") or payload.get("resolution_notes") or payload.get("resolution_mechanism"):
             raise ValueError("A new information gap cannot carry a fabricated prior resolution.")
         db_gap = InformationGapModel(**payload)
@@ -242,6 +255,22 @@ class UncertaintyEngine:
             update_data["evidence_ids"] = self._validate_person_evidence(
                 scoped_person_id, update_data["evidence_ids"]
             ) or None
+
+        context_for_assessment = update_data.get("context", db_gap.context) or []
+        attention_assessments = [
+            item for item in context_for_assessment
+            if isinstance(item, dict) and item.get("caregiver_attention_required") is True
+        ]
+        evidence_for_assessment = update_data.get("evidence_ids", db_gap.evidence_ids) or []
+        for assessment in attention_assessments:
+            rationale = assessment.get("necessity_rationale")
+            dependency = assessment.get("decision_dependency")
+            if not isinstance(rationale, str) or not rationale.strip():
+                raise ValueError("A necessary information-gap request requires a recorded rationale.")
+            if not isinstance(dependency, str) or not dependency.strip():
+                raise ValueError("A necessary information-gap request must identify the current care decision that depends on the missing information.")
+            if not evidence_for_assessment:
+                raise ValueError("A necessary information-gap request requires persisted source evidence.")
 
         new_status = update_data.get("lifecycle_status", db_gap.lifecycle_status)
         if new_status == GapLifecycleStatus.RESOLVED:
