@@ -155,8 +155,7 @@ def execute_care_continuity_reconciliation(
                 "The appointment workspace revision is missing or belongs to another care record"
             )
         if source_caregiver_id and (
-            str(appointment_workspace.created_by_caregiver_id) != str(source_caregiver_id)
-            or str(appointment_revision.changed_by_caregiver_id) != str(source_caregiver_id)
+            str(appointment_revision.changed_by_caregiver_id) != str(source_caregiver_id)
         ):
             raise CareContinuityExecutionError(
                 "The appointment workspace revision was not created by the authenticated caregiver"
