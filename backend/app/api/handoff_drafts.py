@@ -2212,6 +2212,7 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
     content = revision.content if isinstance(revision.content, dict) else {}
     snapshot = revision.source_snapshot if isinstance(revision.source_snapshot, dict) else {}
     records = snapshot.get("source_records") if isinstance(snapshot.get("source_records"), list) else []
+    statuses = snapshot.get("source_statuses") if isinstance(snapshot.get("source_statuses"), dict) else {}
     lines = [
         "SOLENOS CARE SUMMARY",
         "Prepared by caregiver for sharing outside SolenOS",
