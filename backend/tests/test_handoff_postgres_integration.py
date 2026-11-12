@@ -287,6 +287,31 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert any(row["source_id"] == shared_analysis_id for row in prepared.json()["source_references"])
     assert any(row["source_id"] == shared_document_id for row in prepared.json()["source_references"])
 
+    # The reporting window changes period events, not older same-person context.
+    for window_days in (7, 14, 30):
+        period_result = client.post(
+            "/api/v1/handoff-drafts/prepare",
+            headers=owner_headers,
+            json={"purpose": "family_transition", "audience": "family", "window_days": window_days},
+        )
+        assert period_result.status_code == 200, period_result.text
+        period_refs = period_result.json()["source_references"]
+        assert any(row["source_id"] == shared_document_id for row in period_refs)
+        assert any(row["source_id"] == event_id for row in period_refs)
+
+    # An unrelated care recipient cannot retrieve the original person's documents.
+    unrelated_handoff = client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=outsider_headers,
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert unrelated_handoff.status_code == 200, unrelated_handoff.text
+    assert unrelated_handoff.json()["source_statuses"]["documents"]["status"] == "empty"
+    assert all(
+        row["source_id"] != shared_document_id
+        for row in unrelated_handoff.json()["source_references"]
+    )
+
     # The persisted identity and revision survive a new database session.
     db = SessionLocal()
     try:
