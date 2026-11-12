@@ -192,6 +192,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert len(execution_calls) == 1
         assert execution_calls[0]["source_caregiver_id"] == first["caregiver"]["id"]
         assert execution_calls[0]["source_evidence_id"] == evidence_id
+        assert execution_calls[0]["source_assertion_id"] == accepted.json()["source_record_ref"]["record_id"]
 
         # Repeating the same acceptance returns the existing assertion; it never duplicates it.
         accepted_again = client.post(
