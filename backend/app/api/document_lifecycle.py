@@ -527,8 +527,19 @@ def _extract(
                 if image.width * image.height > MAX_IMAGE_PIXELS:
                     raise HTTPException(status_code=413, detail="Images are limited to 20 megapixels for OCR")
                 adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
+                ocr_failed = False
+                quality_marker = None
                 try:
-                    extracted = _ocr_image(adjusted)
+                    try:
+                        extracted = _ocr_image(adjusted)
+                    except HTTPException as exc:
+                        if exc.status_code == 503:
+                            raise
+                        extracted = ""
+                        ocr_failed = True
+                    except Exception:
+                        extracted = ""
+                        ocr_failed = True
                     quality_marker = _ocr_quality_marker(adjusted)
                 finally:
                     if used_scan_adjustments:
@@ -537,13 +548,15 @@ def _extract(
             raise
         except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The saved image could not be decoded for OCR") from exc
-        # OCR completed successfully but found no readable words. Persist
-        # this as an unreadable page, not as a failed extraction or empty success.
+        # Distinguish a completed OCR pass with no readable words from an
+        # OCR operation that failed before the page could be assessed.
+        page_result = (
+            "[Page not processed: OCR operation failed]"
+            if ocr_failed
+            else extracted or "[No readable text detected on this page]"
+        )
         page_content = "\n".join(
-            value for value in (
-                quality_marker,
-                extracted or "[No readable text detected on this page]",
-            ) if value
+            value for value in (quality_marker, page_result) if value
         )
         return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{page_content}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
 
