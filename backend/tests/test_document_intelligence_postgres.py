@@ -567,6 +567,13 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+        execution = accepted.json()["care_continuity_execution"]
+        assert execution["workflow"] == "document_candidate_review"
+        assert execution["source_evidence_id"] == evidence_id
+        assert execution["source_assertion_id"] is None
+        assert execution["stages"]["reconciliation"] == "committed"
+        assert execution["transaction_owner"] == "caller"
+        assert accepted.json()["change_intelligence_status"] == "available"
         assertion_id = accepted.json()["source_record_ref"]["record_id"]
 
         accepted_retry = client.post(
