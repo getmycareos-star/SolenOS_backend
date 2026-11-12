@@ -472,15 +472,21 @@ def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_te
         assert stored.type == "document"
 
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
-    assert response.status_code == 422, response.text
-    assert "No readable text" in response.json()["detail"]
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_status"] == "partial"
+    assert response.json()["processed_page_numbers"] == [1]
+    assert response.json()["unreadable_page_numbers"] == [1]
+    assert response.json()["unprocessed_page_numbers"] == []
 
     original_download = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
     assert original_download.status_code == 200, original_download.text
     assert original_download.content == original_bytes
     with TestSessionLocal() as db:
         assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
-        assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
+        analysis = db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).one()
+        assert "[No readable text detected on this page]" in analysis.source_text
+        assert "Medication 500 mg" not in analysis.source_text
+        assert analysis.extraction_status == "partial"
 
 
 
