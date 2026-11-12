@@ -23,7 +23,7 @@ from app.services.care_continuity import create_assertion
 from app.services.claim_provenance import build_claim_provenance
 
 
-DELTA_ENGINE_VERSION = "2026.11.12.4"
+DELTA_ENGINE_VERSION = "2026.11.12.5"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
@@ -990,6 +990,29 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             CareAssertion.assertion_status != "rejected",
                             CareAssertion.source_event_id != source_event_id,
                         ).order_by(CareAssertion.recorded_at.asc()).first()
+                        if duplicate_assertion is None:
+                            # Legacy assertions may have an exact occurrence time
+                            # and source attribution but no source_event_id. SQL
+                            # NULL != event_id is UNKNOWN, so include NULL lineage
+                            # explicitly rather than silently admitting a duplicate.
+                            duplicate_assertion = db.query(CareAssertion).filter(
+                                CareAssertion.person_id == person_id,
+                                CareAssertion.subject_type == domain.rstrip("s"),
+                                CareAssertion.subject_id == subject_id,
+                                CareAssertion.field == field,
+                                CareAssertion.assertion_kind.in_(["time_bound_observation", "current_state"]),
+                                CareAssertion.asserted_value == str(current),
+                                CareAssertion.observed_at == event_date,
+                                or_(
+                                    CareAssertion.source_event_id.is_(None),
+                                    CareAssertion.source_event_id != source_event_id,
+                                ),
+                                CareAssertion.assertion_status != "rejected",
+                                or_(
+                                    CareAssertion.source_label == source,
+                                    CareAssertion.created_by_caregiver_id == created_by_caregiver_id,
+                                ) if created_by_caregiver_id else (CareAssertion.source_label == source),
+                            ).order_by(CareAssertion.recorded_at.asc()).first()
                         if duplicate_assertion is not None:
                             existing_duplicate_link = db.query(CareRecordRelationship.id).filter(
                                 CareRecordRelationship.person_id == person_id,
