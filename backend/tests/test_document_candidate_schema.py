@@ -243,7 +243,7 @@ def test_natural_recorded_date_is_normalized_without_becoming_event_date():
 
 def test_repeated_source_quote_has_no_false_unique_span():
     excerpt = "Take metformin 500 mg twice daily."
-    source = f"[Page 1]\\n{excerpt}\\n\\n[Page 2]\\n{excerpt}"
+    source = f"[Page 1]\n{excerpt}\n\n[Page 2]\n{excerpt}"
     candidate = canonical_candidate(
         {"subject": "metformin", "observation": excerpt, "source_quote": excerpt},
         document_id="doc-repeated-quote",
