@@ -102,6 +102,13 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
             assert result.get("symptoms") == [], result
             assert result.get("follow_ups") == [], result
             assert result.get("clinical_gaps") == [], result
+            caregiver_facing_text = " ".join(
+                result[key] for key in ("event_summary", "caregiver_summary", "clinician_summary")
+            ).casefold()
+            assert not any(
+                unsupported in caregiver_facing_text
+                for unsupported in ("dehydration", "reduced appetite", "illness", "diagnosis")
+            ), result
             assert "breakfast" in (
                 result["event_summary"] + " " + result["caregiver_summary"]
             ).casefold(), result
