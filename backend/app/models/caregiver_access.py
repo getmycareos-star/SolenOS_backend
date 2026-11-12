@@ -67,3 +67,18 @@ class CaregiverResponsibilityTransfer(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     accepted_at = Column(DateTime(timezone=True), nullable=True)
     accepted_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
+
+
+class CaregiverPrimaryTransfer(Base):
+    """Primary caregiver authority transfer; does not move other responsibilities."""
+    __tablename__ = "caregiver_primary_transfers"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="RESTRICT"), nullable=False)
+    to_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="RESTRICT"), nullable=False)
+    reason = Column(String(1000), nullable=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
