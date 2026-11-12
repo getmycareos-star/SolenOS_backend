@@ -103,6 +103,56 @@ def test_create_information_gap():
         assert data["epistemic_state"] == "unknown"
         assert data["gap_reason"] == "not_documented"
         assert data["lifecycle_status"] == "open"
+
+        necessary_payload = {
+            "person_id": "person-1",
+            "subject_type": "medication",
+            "subject_id": "med-1",
+            "field": "current_dose",
+            "epistemic_state": "unknown",
+            "gap_reason": "not_documented",
+            "priority": "high",
+            "description": "The current dose is not established for the upcoming handoff.",
+            "context": [{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The upcoming handoff requires the current prescribed dose.",
+                "decision_dependency": "The medication handoff cannot accurately state the current dose without this source.",
+            }],
+        }
+        missing_source = client.post("/api/v1/uncertainty/gaps", json=necessary_payload)
+        assert missing_source.status_code == 422, missing_source.text
+
+        db = TestingSessionLocal()
+        db.add(Evidence(
+            id="finding6-producer-evidence",
+            person_id="person-1",
+            type="document",
+            source_text="Prescriber medication instruction document.",
+            uploaded_by_caregiver_id="caregiver-1",
+            source_type="document",
+        ))
+        db.commit()
+        db.close()
+        grounded = client.post(
+            "/api/v1/uncertainty/gaps",
+            json={**necessary_payload, "evidence_ids": ["finding6-producer-evidence"]},
+        )
+        assert grounded.status_code == 200, grounded.text
+
+        db = TestingSessionLocal()
+        from app.services.care_continuity import next_best_questions
+        candidates = next_best_questions(db, "person-1", persist=True, commit=False)
+        assert any(
+            item["source_kind"] == "information_gap"
+            and item["necessity"] == "necessary"
+            and item["decision_dependency"].startswith("The medication handoff")
+            for item in candidates
+        )
+        necessary_question = db.query(OpenQuestion).filter_by(
+            person_id="person-1", necessity="necessary"
+        ).one()
+        assert "finding6-producer-evidence" in necessary_question.evidence_ids
+        db.close()
     finally:
         teardown_db()
 
