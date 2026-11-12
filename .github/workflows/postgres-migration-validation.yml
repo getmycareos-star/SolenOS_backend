@@ -711,6 +711,16 @@ jobs:
           createdb -h localhost -U postgres solenos_evidence_columns
           createdb -h localhost -U postgres solenos_messy_care_benchmark
 
+      - name: Run privacy request reviewer workflow tests against PostgreSQL
+        env:
+          PGPASSWORD: postgres
+          TEST_POSTGRES_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_privacy_requests
+        working-directory: backend
+        run: |
+          createdb -h localhost -U postgres solenos_privacy_requests
+          python -m pytest tests/test_privacy_requests.py -q
+          dropdb -h localhost -U postgres solenos_privacy_requests
+
       - name: Run persisted messy-care benchmark against PostgreSQL
         env:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_messy_care_benchmark
@@ -898,13 +908,4 @@ jobs:
             echo "Alembic version table rolled back with failed upgrade transaction; legacy data and schema checks passed."
           fi
 
-      - name: Run privacy request reviewer workflow tests against PostgreSQL
-        env:
-          PGPASSWORD: postgres
-          TEST_POSTGRES_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_privacy_requests
-        working-directory: backend
-        run: |
-          createdb -h localhost -U postgres solenos_privacy_requests
-          python -m pytest tests/test_privacy_requests.py -q
-          dropdb -h localhost -U postgres solenos_privacy_requests
 
