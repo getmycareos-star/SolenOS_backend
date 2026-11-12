@@ -27,7 +27,7 @@ from app.models.uncertainty import Contradiction, OpenQuestion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 from app.schemas.care_continuity import CareAssertionCreate
-from app.services.care_continuity import create_assertion
+from app.services.care_continuity import create_assertion, has_valid_caregiver_necessity
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.appointment_followup_sync import sync_appointment_followups
 
@@ -354,6 +354,11 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         db.rollback()
         question_rows = None
         question_source_status = "failed"
+    if question_rows is not None:
+        question_rows = [
+            item for item in question_rows if has_valid_caregiver_necessity(item)
+        ]
+        question_source_status = "available" if question_rows else "empty"
     question_items = [{
         "source_id": str(item.id),
         "question": item.question,
