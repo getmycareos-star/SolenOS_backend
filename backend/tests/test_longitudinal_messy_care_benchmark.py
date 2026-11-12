@@ -1471,3 +1471,145 @@ def test_correction_supersedes_assertion_and_preserves_append_only_history():
             CareAssertion.id == original.id,
             CareAssertion.assertion_status == "superseded",
         ).count() == 1
+
+
+
+def test_scenario_03_multi_person_medication_conflict_preserves_source_history():
+    """Scenario 03: separate family reports and administration evidence never pick a medication winner."""
+    from app.models.care import Evidence
+    from app.models.uncertainty import Contradiction
+    from app.models.care_continuity import CareAssertion
+    from app.schemas.care_continuity import CareAssertionCreate
+    from app.services.care_continuity import create_assertion
+    from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+
+    with TestingSessionLocal() as db:
+        person, sarah = make_person(db, "scenario-03-margaret")
+        james = Caregiver(
+            id="c-s03-james", name="James", relationship="Family", person_id=person.id
+        )
+        helen = Caregiver(
+            id="c-s03-helen", name="Helen", relationship="Paid care worker", person_id=person.id
+        )
+        db.add_all([james, helen])
+        db.flush()
+        token = issue_session(db, person, sarah)
+        db.commit()
+
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {token}"}
+    reports = [
+        {
+            "reporter": sarah,
+            "text": "Sarah reports that the evening tablet may have been stopped, but she has no written confirmation.",
+            "occurred_at": "2026-11-09T13:20:00+00:00",
+            "reported_at": "2026-11-09T13:20:00+00:00",
+        },
+        {
+            "reporter": james,
+            "text": "James reports that a doctor told him to stop the evening tablet last week.",
+            "occurred_at": "2026-11-02T00:00:00+00:00",
+            "reported_at": "2026-11-09T13:45:00+00:00",
+        },
+        {
+            "reporter": helen,
+            "text": "Helen reports administering the medication from the existing weekly pill organiser.",
+            "occurred_at": "2026-11-09T14:10:00+00:00",
+            "reported_at": "2026-11-09T14:10:00+00:00",
+        },
+    ]
+    saved_ids = []
+    for item in reports:
+        response = client.post(
+            "/api/v1/evidence",
+            headers=headers,
+            json={
+                "person_id": person.id,
+                "type": "note",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "unverified",
+                "source_text": item["text"],
+                "uploaded_by_caregiver_id": sarah.id,
+                "reported_by_caregiver_id": item["reporter"].id,
+                "reported_by_label": item["reporter"].name,
+                "original_author": item["reporter"].name,
+                "occurred_at": item["occurred_at"],
+                "reported_at": item["reported_at"],
+                "origin_channel": "family_care_update",
+            },
+        )
+        assert response.status_code in {200, 201}, response.text
+        saved_ids.append(response.json()["id"])
+
+    # Conflicting medication statements remain reports, not prescribing authority.
+    with TestingSessionLocal() as db:
+        sarah_claim = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="medication",
+                subject_id="evening-tablet",
+                field="medication_status",
+                assertion_kind="current_state",
+                asserted_value="active",
+                source_label="Existing caregiver-reviewed medication record",
+                source_text="Existing medication list records the evening tablet as active.",
+                evidence_ids=[saved_ids[0]],
+                assertion_status="reported",
+                epistemic_state="reported",
+                created_by_caregiver_id=sarah.id,
+            ),
+        )
+        james_claim = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="medication",
+                subject_id="evening-tablet",
+                field="medication_status",
+                assertion_kind="current_state",
+                asserted_value="discontinued",
+                source_label="James verbal report",
+                source_text=reports[1]["text"],
+                evidence_ids=[saved_ids[1]],
+                assertion_status="reported",
+                epistemic_state="reported",
+                created_by_caregiver_id=sarah.id,
+            ),
+        )
+        # Helen's administration statement is a separate event report. It does
+        # not establish the prescription or prove a medication error.
+        reconcile_person_change_intelligence(db, person.id)
+        db.commit()
+
+    # A new session proves source preservation after reconciliation/commit.
+    with TestingSessionLocal() as verify_db:
+        stored = verify_db.query(Evidence).filter(
+            Evidence.person_id == person.id,
+            Evidence.id.in_(saved_ids),
+        ).all()
+        assert {row.id for row in stored} == set(saved_ids)
+        assert {row.reported_by_caregiver_id for row in stored} == {
+            sarah.id, james.id, helen.id
+        }
+        assert {row.source_text for row in stored} == {item["text"] for item in reports}
+        assert all(row.ingested_at is not None for row in stored)
+        assert len({row.occurred_at for row in stored}) == 3
+
+        claims = verify_db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id,
+            CareAssertion.subject_id == "evening-tablet",
+            CareAssertion.field == "medication_status",
+        ).all()
+        assert {row.id for row in claims} == {sarah_claim.id, james_claim.id}
+        assert {row.asserted_value for row in claims} == {"active", "discontinued"}
+        assert all(row.assertion_status == "reported" for row in claims)
+        assert all(row.epistemic_state == "reported" for row in claims)
+
+        conflict = verify_db.query(Contradiction).filter(
+            Contradiction.person_id == person.id,
+            Contradiction.subject_id == "evening-tablet",
+            Contradiction.field == "medication_status",
+        ).one()
+        assert conflict.resolution_status == "unresolved"
+        assert set(conflict.source_assertion_ids or []) == {sarah_claim.id, james_claim.id}
