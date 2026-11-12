@@ -20,6 +20,27 @@ from app.services.qwen_gateway import qwen_chat
 from app.services.qwen_workflows import ENABLED_WORKFLOWS
 
 logger = logging.getLogger(__name__)
+
+
+def _process_document_evidence(evidence_id: str, person_id: str, caregiver_id: str) -> tuple[dict, dict]:
+    """Run OCR and document understanding in a worker thread with its own DB session."""
+    from types import SimpleNamespace
+    from app.api.document_lifecycle import extract_saved_document
+    from app.api.document_intelligence import analyze_saved_document
+
+    scoped_request = SimpleNamespace(
+        state=SimpleNamespace(
+            scoped_person_id=person_id,
+            scoped_caregiver_id=caregiver_id,
+        )
+    )
+    session = SessionLocal()
+    try:
+        extraction = extract_saved_document(evidence_id, scoped_request, session)
+        intelligence = analyze_saved_document(evidence_id, scoped_request, session)
+        return extraction, intelligence
+    finally:
+        session.close()
 # High-confidence local routing rules take precedence over the small model's
 # classification. This avoids sending an obvious medication/appointment/security
 # request to the wrong contract. Ambiguous requests still use constrained Qwen
@@ -175,21 +196,16 @@ async def process_one_qwen_job() -> bool:
             evidence_ids = json.loads(job.evidence_ids_json or "[]")
             if not isinstance(evidence_ids, list) or not evidence_ids or len(evidence_ids) > 10:
                 raise ValueError("document_intake_evidence_scope_invalid")
-            from app.api.document_lifecycle import extract_saved_document
-            from app.api.document_intelligence import analyze_saved_document
-
-            scoped_request = SimpleNamespace(
-                state=SimpleNamespace(
-                    scoped_person_id=job.person_id,
-                    scoped_caregiver_id=job.caregiver_id,
-                )
-            )
             completed = []
             for evidence_id in evidence_ids:
                 if not isinstance(evidence_id, str) or not evidence_id.strip():
                     raise ValueError("document_intake_evidence_id_invalid")
-                extraction = extract_saved_document(evidence_id, scoped_request, db)
-                intelligence = analyze_saved_document(evidence_id, scoped_request, db)
+                extraction, intelligence = await asyncio.to_thread(
+                    _process_document_evidence,
+                    evidence_id,
+                    job.person_id,
+                    job.caregiver_id,
+                )
                 completed.append({
                     "evidence_id": evidence_id,
                     "analysis_id": extraction.get("analysis_id"),
