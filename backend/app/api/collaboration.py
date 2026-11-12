@@ -4846,8 +4846,8 @@ def update_care_notification_preferences(
         ).update({CareReminder.notification_deferred_until: None}, synchronize_session=False)
     preference.updated_at = datetime.now(timezone.utc)
     if any(value is not None for value in (
-        payload.quiet_hours_enabled, payload.quiet_hours_start,
-        payload.quiet_hours_end, payload.timezone_name,
+        payload.quiet_hours_enabled, payload.reminders_enabled,
+        payload.quiet_hours_start, payload.quiet_hours_end, payload.timezone_name,
     )):
         pending_push_ids = db.query(CarePushDelivery.id).join(
             CareNotification, CareNotification.id == CarePushDelivery.notification_id
