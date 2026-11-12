@@ -1167,6 +1167,7 @@ def list_document_processing_status(
             "extraction_status": extraction_status,
             "intelligence_status": intelligence.get("status") or "not_run",
             "page_count": extraction.get("page_count") or intelligence.get("total_page_count"),
+            "processed_page_count": max(0, len(processed_pages) - len(unreadable_pages)),
             "processed_page_numbers": processed_pages,
             "unprocessed_page_numbers": unprocessed_pages,
             "unreadable_page_numbers": unreadable_pages,
