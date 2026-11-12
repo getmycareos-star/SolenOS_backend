@@ -70,51 +70,47 @@ def pending(client, session):
     return response.json()["items"]
 
 
-def test_companion_message_persists_source_and_only_acceptance_creates_assertion(monkeypatch):
+def test_companion_message_is_conversation_only_and_never_creates_lcr_proposal(monkeypatch):
     source = "The caregiver reports a new change during the morning routine."
-    client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}] if text == source else []})
+    client = setup_client(monkeypatch, lambda text: (_ for _ in ()).throw(AssertionError("Companion must not run care-update extraction")))
     try:
-        session = create_session(client, "Caregiver one")
+        session = create_session(client, "Conversation only")
         response = send(client, session, source)
         assert response.status_code == 200, response.text
-        proposal_data = pending(client, session)[0]
-        assert proposal_data["status"] == "pending_authorization"
-        assert proposal_data["proposed_change"]["asserted_value"] == source
+        body = response.json()
+        assert body["care_update_candidates"] == []
+        assert body["written_to_lcr"] is False
+        assert body["persistence"] == "conversation_only"
         db = TestingSessionLocal()
         try:
-            original = db.query(ConversationMessage).filter_by(id=proposal_data["source_message_id"], role="user").one()
-            proposal = db.query(AIOutputLCRProposal).filter_by(id=proposal_data["id"]).one()
-            assert original.content == source
-            assert proposal.source_message_id == original.id
-            assert proposal.source_conversation_id == response.json()["session_id"]
+            assert db.query(ConversationMessage).filter_by(role="user", content=source).count() == 1
+            assert db.query(AIOutputLCRProposal).filter_by(person_id=session["person"]["id"]).count() == 0
             assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
-        finally:
-            db.close()
-        accepted = review(client, session, proposal_data["id"], {"decision": "accept"})
-        assert accepted.status_code == 200, accepted.text
-        assertion_id = accepted.json()["assertion_id"]
-        assert assertion_id
-        replay = review(client, session, proposal_data["id"], {"decision": "accept"})
-        assert replay.status_code == 200 and replay.json()["idempotent_replay"] is True
-        current_care = client.get("/api/v1/care-continuity/current-care", headers={"Authorization": f"Bearer {session['access_token']}"})
-        assert current_care.status_code == 200, current_care.text
-        assert any(item.get("id") == assertion_id for item in current_care.json().get("items", []))
-        db = TestingSessionLocal()
-        try:
-            assertion = db.query(CareAssertion).filter_by(id=assertion_id).one()
-            assert assertion.source_message_id == proposal_data["source_message_id"]
-            assert assertion.source_conversation_id == response.json()["session_id"]
-            assert assertion.source_proposal_id == proposal_data["id"]
-            assert assertion.asserted_value == source
-            assert assertion.created_by_caregiver_id == session["caregiver"]["id"]
-            assert assertion.assertion_status == "caregiver_reviewed"
-            decision = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal_data["id"]).one()
-            assert decision.decision == "accepted"
-            assert decision.reviewer_caregiver_id == session["caregiver"]["id"]
         finally:
             db.close()
     finally:
         teardown()
+
+
+def create_legacy_proposal_for_review(session, response, source):
+    db = TestingSessionLocal()
+    try:
+        original = db.query(ConversationMessage).filter_by(
+            session_id=response.json()["session_id"], role="user", content=source,
+        ).one()
+        proposals = care_updates.persist_companion_candidates(
+            db,
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            conversation_id=response.json()["session_id"],
+            message_id=original.id,
+            source_text=source,
+            extraction={"observations": [{"source_quote": source}]},
+        )
+        assert proposals
+        return proposals[0]
+    finally:
+        db.close()
 
 
 def test_correction_preserves_original_and_requires_separate_acceptance(monkeypatch):
@@ -124,7 +120,7 @@ def test_correction_preserves_original_and_requires_separate_acceptance(monkeypa
         session = create_session(client, "Caregiver correction")
         send_response = send(client, session, source)
         assert send_response.status_code == 200, send_response.text
-        proposal = pending(client, session)[0]
+        proposal = create_legacy_proposal_for_review(session, send_response, source)
         corrected_text = "A caregiver recorded a revised observation during today's visit."
         correction_context = "The caregiver clarifies the revised observation: " + corrected_text
         corrected = review(client, session, proposal["id"], {
@@ -189,7 +185,7 @@ def test_rejection_never_creates_assertion_or_allows_later_acceptance(monkeypatc
         teardown()
 
 
-def test_proposals_are_person_scoped_and_candidate_inference_failure_keeps_message(monkeypatch):
+def test_legacy_proposals_remain_person_scoped_and_companion_never_runs_candidate_extraction(monkeypatch):
     source = "A caregiver records an observation for their own care recipient."
     client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}] if text == source else []})
     try:
@@ -197,7 +193,7 @@ def test_proposals_are_person_scoped_and_candidate_inference_failure_keeps_messa
         second = create_session(client, "Second caregiver")
         send_response = send(client, first, source)
         assert send_response.status_code == 200, send_response.text
-        proposal = pending(client, first)[0]
+        proposal = create_legacy_proposal_for_review(first, send_response, source)
         foreign = review(client, second, proposal["id"], {"decision": "accept"})
         assert foreign.status_code == 404
         db = TestingSessionLocal()
@@ -214,6 +210,7 @@ def test_proposals_are_person_scoped_and_candidate_inference_failure_keeps_messa
         response = send(failing, session, "A caregiver shares a detail about an actual care experience.")
         assert response.status_code == 200, response.text
         assert response.json()["care_update_candidates"] == []
+        assert response.json()["persistence"] == "conversation_only"
         db = TestingSessionLocal()
         try:
             assert db.query(ConversationMessage).filter_by(role="user").count() == 1
@@ -258,7 +255,7 @@ def test_idempotent_accept_replay_does_not_report_rejected_assertion_as_active_l
         session = create_session(client, "Caregiver replay status")
         response = send(client, session, source)
         assert response.status_code == 200, response.text
-        proposal = pending(client, session)[0]
+        proposal = create_legacy_proposal_for_review(session, response, source)
         accepted = review(client, session, proposal["id"], {"decision": "accept"})
         assert accepted.status_code == 200, accepted.text
         assertion_id = accepted.json()["assertion_id"]
