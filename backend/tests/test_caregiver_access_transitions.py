@@ -10,6 +10,7 @@ from app.main import app
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
 from app.models.caregiver_intelligence import CaregiverResponsibility
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_account import CaregiverAccount
 
 pytestmark = pytest.mark.session_security
 
@@ -70,6 +71,12 @@ def test_invitation_is_recipient_bound_and_acceptance_creates_separate_identity(
     client = TestClient(app)
     primary = create_primary(client)
     owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    primary_account = client.post(
+        "/api/v1/accounts",
+        headers=owner_headers,
+        json={"email": "sarah@example.com", "password": "another-long-password-456"},
+    )
+    assert primary_account.status_code == 201, primary_account.text
 
     created = client.post(
         "/api/v1/caregiver-access/invitations",
@@ -136,6 +143,7 @@ def test_invitation_is_recipient_bound_and_acceptance_creates_separate_identity(
         ).one()
         assert grant.status == "active"
         assert grant.can_manage_members is False
+        assert db.query(CaregiverAccount).filter_by(person_id=primary["person"]["id"]).count() == 2
     finally:
         db.close()
 
