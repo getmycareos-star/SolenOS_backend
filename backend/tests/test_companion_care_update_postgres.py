@@ -92,4 +92,5 @@ def test_postgres_companion_persists_conversation_without_creating_care_updates(
         assert captured
     finally:
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
+        # The workflow migrates a disposable PostgreSQL database before this test.
+        # Keep its migration-owned schema intact; CI discards the database afterward.
