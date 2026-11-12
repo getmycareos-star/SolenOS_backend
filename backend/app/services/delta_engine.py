@@ -22,6 +22,8 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 
 
+DELTA_ENGINE_VERSION = "2026.11.12.1"
+
 DELTA_JSON_CONTRACT = {
     "type": "object",
     "required": [
@@ -988,6 +990,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     result["provenance"] = {
         "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
         "source_event_id": source_event_id, "evidence_ids": evidence_ids,
+        "engine_version": DELTA_ENGINE_VERSION,
         "model_provider": "configured_local_ollama", "model": model,
         "persisted": persist, "current_state_authority": "existing SolenOS care-continuity records; this delta is an interpretation, not a verified clinical fact",
     }
