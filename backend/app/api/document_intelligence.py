@@ -703,9 +703,10 @@ def review_document_candidate(
     analysis.review_history = history
     db.add(analysis)
     change_intelligence_status = "not_required"
+    execution = None
     if payload.decision == "accept":
         try:
-            execute_care_continuity_reconciliation(
+            execution = execute_care_continuity_reconciliation(
                 db,
                 person_id,
                 workflow="document_candidate_review",
@@ -736,4 +737,5 @@ def review_document_candidate(
         "written_to_lcr": bool(assertion_id),
         "review_required": payload.decision == "correct",
         "change_intelligence_status": change_intelligence_status,
+        "care_continuity_execution": execution,
     }
