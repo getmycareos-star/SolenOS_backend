@@ -43,6 +43,20 @@ def reconcile_person_change_intelligence(
     def assert_source_assertions_preserved(stage: str) -> None:
         if not protected_ids:
             return
+        pending_deletes = {
+            str(obj.id) for obj in db.deleted
+            if isinstance(obj, CareAssertion)
+            and obj.person_id == person_id
+            and str(obj.id) in protected_ids
+        }
+        if pending_deletes:
+            logger.error(
+                "Care reconciliation scheduled protected source assertions for deletion at stage %s",
+                stage,
+            )
+            raise RuntimeError(
+                f"Source assertion preservation failed during {stage}: pending deletion"
+            )
         present = {
             str(row[0]) for row in db.query(CareAssertion.id).filter(
                 CareAssertion.person_id == person_id,
