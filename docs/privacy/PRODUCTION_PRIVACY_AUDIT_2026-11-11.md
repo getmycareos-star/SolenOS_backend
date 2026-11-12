@@ -166,3 +166,12 @@ Backend `main` now contains initial fulfilment handlers. These are implementatio
 7. Expand correction coverage and define mixed-caregiver/third-party data handling before claiming universal correction or deletion fulfilment.
 
 At the time this section was added, GitHub Actions runs for the new source commits were queued and had not produced test conclusions. No production deployment or production secret change was performed. These handlers are not a production-readiness certification.
+
+
+## Remediation update — anonymous session lifecycle audit (source change; CI pending)
+
+Backend `main` now writes audit events for anonymous session creation, token rotation/refresh, and self-service revocation. Events are linked to the server-generated session ID and scoped caregiver/person identities. The event metadata records expiry and rotation/revocation state, never the raw bearer token. The session stores only a SHA-256 token digest. A regression test now checks refresh audit creation, revocation audit creation, and denial of the revoked token.
+
+This is a lifecycle audit improvement, not proof of secure browser credential storage. The current frontend API client stores the bearer token in browser localStorage; this remains exposed to same-origin script execution and must be treated as a material XSS/session-theft risk. A server-mediated HttpOnly Secure SameSite cookie/BFF design has not yet been implemented or tested. Existing isolation tests cover cross-person reads and caregiver-attribution spoofing, but complete operation-by-operation route coverage still requires a maintained endpoint inventory and automated negative authorization matrix.
+
+Latest source commit at this update: `81b3256d71a8c7158cbe2e518b2b97a8c19cfca6`. GitHub Actions workflows for backend validation, session/backend tests, PostgreSQL migration validation and document lifecycle integration were queued/pending at the time of this update. Do not mark this control verified until those exact-commit workflows complete successfully and production deployment parity is established.
