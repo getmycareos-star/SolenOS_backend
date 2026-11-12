@@ -136,6 +136,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert provenance["source_evidence_id"] == evidence_id
         assert provenance["source_text_sha256"] == hashlib.sha256(source.encode("utf-8")).hexdigest()
         assert provenance["model_authority"] == "review_only"
+        assert understood.json()["processing_history"] == [provenance]
         assert all(item["source_quote"] in source for item in understood.json()["observations"])
 
         # Re-running understanding is idempotent and does not create a second analysis.
