@@ -644,3 +644,65 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_document_understanding_retry_processes_only_remaining_pages(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    processed_pages = []
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        page_number = int(page_text.split("]", 1)[0].split()[-1])
+        processed_pages.append(page_number)
+        quote = page_text.split("\\n", 1)[1].strip()
+        return {
+            "observations": [{
+                "subject": "Patient",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Paged document caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        source = "\\n\\n".join(
+            f"[Page {page}]\\nPatient completed therapy session {page}."
+            for page in range(1, 27)
+        )
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+
+        first = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert first.status_code == 201, first.text
+        first_body = first.json()
+        assert first_body["intelligence_status"] == "partial"
+        assert first_body["processed_page_count"] == 25
+        assert first_body["unprocessed_page_numbers"] == [26]
+        assert processed_pages == list(range(1, 26))
+
+        resumed = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert resumed.status_code == 201, resumed.text
+        resumed_body = resumed.json()
+        assert resumed_body["intelligence_status"] == "available"
+        assert resumed_body["processed_page_count"] == 26
+        assert resumed_body["processed_page_numbers"] == list(range(1, 27))
+        assert resumed_body["unprocessed_page_numbers"] == []
+        assert processed_pages == list(range(1, 27))
+        assert len(resumed_body["processing_history"]) == 2
+        assert resumed_body["processing_history"][0]["source_text_sha256"] == resumed_body["processing_history"][1]["source_text_sha256"]
+    finally:
+        client.close()
+        app.dependency_overrides.pop(get_db, None)
