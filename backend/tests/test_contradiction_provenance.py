@@ -206,6 +206,20 @@ def test_assertion_epistemic_state_is_separate_from_review_lifecycle():
                 ),
             )
         assert exc.value.status_code == 422
+
+        # Conflict and absence describe the reconciled record, not a single
+        # caregiver assertion. They must be derived from competing reports or gaps.
+        for derived_state in ("conflicting", "missing"):
+            with pytest.raises(ValueError):
+                CareAssertionCreate(
+                    person_id=person.id,
+                    subject_type="care_recipient",
+                    subject_id=person.id,
+                    field="care_status",
+                    asserted_value="Not directly assertable",
+                    source_label="Invalid direct state",
+                    epistemic_state=derived_state,
+                )
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
