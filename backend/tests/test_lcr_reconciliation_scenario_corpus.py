@@ -28,7 +28,7 @@ OBSERVATION_VARIANTS = [
     ("appetite", "daughter reports reduced appetite", "daughter reports appetite improved", "appetite", "appetite improved"),
     ("pain", "daughter reports knee pain", "daughter reports knee pain eased", "knee pain", "knee pain eased"),
     ("orientation", "daughter reports disorientation", "daughter reports orientation improved", "orientation", "orientation improved"),
-    ("hydration", "daughter reports drinking less than usual", "daughter reports fluid intake improved", "fluid intake", "fluid intake improved"),
+    ("hydration", "daughter reports fluid intake is lower than usual", "daughter reports fluid intake improved", "fluid intake", "fluid intake improved"),
     ("agitation", "daughter reports increased agitation", "daughter reports agitation reduced", "agitation", "agitation reduced"),
     ("toileting", "daughter reports nighttime toileting increased", "daughter reports nighttime toileting eased", "toileting", "toileting eased"),
     ("communication", "daughter reports fewer clear responses", "daughter reports clearer responses", "responses", "clearer responses"),
@@ -211,3 +211,11 @@ def test_curated_corpus_has_exact_family_distribution_and_100_unique_people():
     assert len({scenario["scenario_id"] for scenario in SCENARIOS}) == 100
     assert len({scenario["person_id"] for scenario in SCENARIOS}) == 100
     assert Counter(scenario["family"] for scenario in SCENARIOS) == Counter(FAMILY_COUNTS)
+
+    # Every deterministic observation fixture must quote its normalized assertion
+    # name and value. Otherwise the Delta Engine correctly rejects a synthetic
+    # model claim that is not literally supported by the source event.
+    for scenario in SCENARIOS:
+        initial = scenario["incoming_events"][0]
+        assert initial.get("assertion_name", "").casefold() in initial["claim"].casefold()
+        assert initial.get("assertion_value", "").casefold() in initial["claim"].casefold()
