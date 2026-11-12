@@ -33,6 +33,9 @@ class InvitationAccept(BaseModel):
     password: str = Field(min_length=12, max_length=256)
     name: str = Field(min_length=1, max_length=120)
 
+class AccessScopeUpdate(BaseModel):
+    access_scope: str = Field(pattern="^(full_record|documents_only)$")
+
 
 def _audit_event(actor_id: str | None, person_id: str, action: str, target_type: str, target_id: str, metadata: dict | None = None):
     return AuditLogEvent(
@@ -77,6 +80,7 @@ def list_members(request: Request, db: Session = Depends(get_db)):
         "name": profile.name if profile else "Caregiver",
         "email": profile.email if profile else None,
         "role": grant.role,
+        "access_scope": grant.access_scope or "full_record",
         "status": grant.status,
         "can_manage_members": bool(grant.can_manage_members),
         "granted_at": grant.granted_at.isoformat() if grant.granted_at else None,
@@ -236,6 +240,34 @@ def revoke_invitation(invitation_id: str, request: Request, db: Session = Depend
     db.commit()
     return {"revoked": True, "invitation_id": invitation.id}
 
+
+
+@router.patch("/members/{caregiver_id}/access-scope")
+def update_member_access_scope(
+    caregiver_id: str,
+    payload: AccessScopeUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, actor_id = _actor_scope(request)
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    if grant is None:
+        raise HTTPException(status_code=404, detail="Active caregiver access was not found.")
+    if grant.role == "primary" and payload.access_scope != "full_record":
+        raise HTTPException(status_code=409, detail="The primary caregiver must retain full care-record access.")
+    grant.access_scope = payload.access_scope
+    grant.updated_at = datetime.now(timezone.utc)
+    db.add(_audit_event(actor_id, person_id, "caregiver.access_scope.updated", "caregiver_access_grant", grant.id, {
+        "caregiver_id": caregiver_id,
+        "access_scope": payload.access_scope,
+    }))
+    db.commit()
+    return {"updated": True, "caregiver_id": caregiver_id, "access_scope": grant.access_scope}
 
 @router.delete("/members/{caregiver_id}")
 def revoke_member_access(caregiver_id: str, request: Request, db: Session = Depends(get_db)):
