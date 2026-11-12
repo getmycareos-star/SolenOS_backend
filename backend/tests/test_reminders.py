@@ -735,3 +735,54 @@ def test_web_push_worker_does_not_attempt_delivery_with_incomplete_vapid_configu
         ),
     )
     assert delivery_service.deliver_pending_web_pushes(db=object()) == 0
+
+
+def test_disabling_reminders_cancels_pending_push_deliveries_without_quiet_hours_change():
+    from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
+
+    client = TestClient(app)
+    session = create_session(client, "Reminder preference cancellation")
+    db = TestSessionLocal()
+    try:
+        subscription = CarePushSubscription(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            endpoint_hash="a" * 64,
+            encrypted_subscription="encrypted-test-subscription",
+        )
+        notification = CareNotification(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="Reminder due",
+            body="A follow-up is due.",
+            category="reminder_due",
+            source_event_id="reminder-preference-regression",
+        )
+        db.add_all([subscription, notification])
+        db.flush()
+        delivery = CarePushDelivery(
+            notification_id=notification.id,
+            subscription_id=subscription.id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=datetime.now(timezone.utc),
+        )
+        db.add(delivery)
+        db.commit()
+        delivery_id = delivery.id
+    finally:
+        db.close()
+
+    response = client.put(
+        "/api/v1/notifications/preferences",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"reminders_enabled": False},
+    )
+    assert response.status_code == 200, response.text
+
+    db = TestSessionLocal()
+    try:
+        stored = db.query(CarePushDelivery).filter_by(id=delivery_id).one()
+        assert stored.status == "cancelled"
+    finally:
+        db.close()
