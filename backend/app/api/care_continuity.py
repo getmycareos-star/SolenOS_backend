@@ -1572,6 +1572,11 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
     person_id, caregiver_id = _scoped_identity(request, db)
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to review a medication record")
+    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+        raise HTTPException(
+            status_code=503,
+            detail="Medication review history is unavailable until the care-record revision migration is applied",
+        )
     rows = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         CareAssertion.subject_type == "medication",
