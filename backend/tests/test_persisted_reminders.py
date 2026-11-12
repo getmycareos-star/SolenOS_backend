@@ -206,6 +206,13 @@ def test_notification_preferences_validate_and_persist_quiet_hours_schedule():
     )
     assert equal_window.status_code == 422, equal_window.text
 
+    same_as_saved_end = client.put(
+        "/api/v1/notifications/preferences",
+        headers=headers,
+        json={"quiet_hours_start": "07:15"},
+    )
+    assert same_as_saved_end.status_code == 422, same_as_saved_end.text
+
     second_session = create_session(client, "Different caregiver")
     other = client.get(
         "/api/v1/notifications/preferences",
