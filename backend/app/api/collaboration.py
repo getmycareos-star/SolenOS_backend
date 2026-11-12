@@ -778,8 +778,12 @@ async def upload_evidence(
         raise HTTPException(status_code=422, detail="Upload retry key is invalid")
     request_fingerprint = hashlib.sha256(json.dumps({
         "sha256": digest,
+        "filename": filename,
+        "mime_type": mime_type,
         "evidence_type": evidence_type,
         "capture_method": capture_method,
+        "scan_review_status": review_status,
+        "scan_text_prepared": text_prepared,
         "capture_timestamp": capture_timestamp_value,
         "capture_page_number": capture_page_number,
         "rotation_degrees": rotation_degrees,
