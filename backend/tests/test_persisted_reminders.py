@@ -376,6 +376,17 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             caregiver_id=session["caregiver"]["id"],
             reminders_enabled=True,
         ))
+        db.flush()
+        subscription = db.query(CarePushSubscription).one()
+        stale_in_app_delivery = CarePushDelivery(
+            id="push-test-stale-in-app-delivery",
+            notification_id=in_app_notifications[0].id,
+            subscription_id=subscription.id,
+            status="pending",
+            attempt_count=1,
+            next_attempt_at=datetime.now(timezone.utc),
+        )
+        db.add(stale_in_app_delivery)
         db.commit()
 
         accepted = delivery_service.deliver_pending_web_pushes(
@@ -394,6 +405,9 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
         assert "You have a care update" in sent_payloads[0]["data"]
         for in_app_item in in_app_notifications:
             assert db.query(CarePushDelivery).filter_by(notification_id=in_app_item.id).count() == 0
+        db.refresh(stale_in_app_delivery)
+        assert stale_in_app_delivery.status == "cancelled"
+        assert stale_in_app_delivery.last_error_code == "in_app_only_category"
 
         preference = db.query(CareNotificationPreference).filter_by(
             person_id=session["person"]["id"],
