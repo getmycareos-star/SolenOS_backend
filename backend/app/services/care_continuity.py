@@ -949,35 +949,6 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
             continue
 
         matching = [candidate_by_source[key] for key in linked if key in candidate_by_source]
-        # Daily Capture and document extraction questions participate in
-        # the same lifecycle. They remain internal and unassessed until a
-        # deterministic necessity assessment exists. A source-backed accepted
-        # LCR assertion may supersede them; unanswered questions stay open.
-        extraction_linked = any(
-            source_kind in {"daily_capture_extraction", "document_extraction"}
-            for source_kind, _ in linked
-        )
-        if extraction_linked:
-            from app.services.uncertainty import _question_is_answered_by_current_lcr
-            answered_by_lcr = _question_is_answered_by_current_lcr(
-                db, person_id, question.question or ""
-            )
-            if not answered_by_lcr or question.status not in {"open", "unresolved"}:
-                counts["untouched"] += 1
-                continue
-            before_state = _open_question_state(question)
-            question.status = "closed"
-            question.closed_at = now
-            question.necessity = "not_assessed"
-            question.closed_reason = (
-                "automatically_superseded: an accepted, same-record LCR assertion "
-                "answers the extracted clarification and no unresolved field conflict remains"
-            )
-            _record_open_question_revision(
-                db, question, before_state=before_state, change_kind="updated"
-            )
-            counts["superseded"] += 1
-            continue
         necessary = next((
             item for item in matching
             if item.get("necessity") == "necessary"
@@ -1008,6 +979,35 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
                 )
             continue
 
+        # Daily Capture and document extraction questions participate in
+        # the same lifecycle. They remain internal and unassessed until a
+        # deterministic necessity assessment exists. A source-backed accepted
+        # LCR assertion may supersede them; unanswered questions stay open.
+        extraction_linked = any(
+            source_kind in {"daily_capture_extraction", "document_extraction"}
+            for source_kind, _ in linked
+        )
+        if extraction_linked:
+            from app.services.uncertainty import _question_is_answered_by_current_lcr
+            answered_by_lcr = _question_is_answered_by_current_lcr(
+                db, person_id, question.question or ""
+            )
+            if not answered_by_lcr or question.status not in {"open", "unresolved"}:
+                counts["untouched"] += 1
+                continue
+            before_state = _open_question_state(question)
+            question.status = "closed"
+            question.closed_at = now
+            question.necessity = "not_assessed"
+            question.closed_reason = (
+                "automatically_superseded: an accepted, same-record LCR assertion "
+                "answers the extracted clarification and no unresolved field conflict remains"
+            )
+            _record_open_question_revision(
+                db, question, before_state=before_state, change_kind="updated"
+            )
+            counts["superseded"] += 1
+            continue
         # Only questions created from these system-managed candidate sources are
         # auto-transitioned. User-authored clarification requests remain intact.
         if question.status not in {"open", "unresolved"}:
