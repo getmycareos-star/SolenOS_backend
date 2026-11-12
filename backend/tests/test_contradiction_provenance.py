@@ -202,10 +202,21 @@ def test_assertion_epistemic_state_is_separate_from_review_lifecycle():
                     field="diagnosis",
                     asserted_value="Verified condition",
                     source_label="Unverified input",
+                    source_text="A source report states a condition, but verification is not established.",
                     epistemic_state="verified",
                 ),
             )
         assert exc.value.status_code == 422
+
+        with pytest.raises(ValueError, match="must retain a source"):
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="care_status",
+                asserted_value="Source-free assertion",
+                source_label="Unattributed",
+            )
 
         # Conflict and absence describe the reconciled record, not a single
         # caregiver assertion. They must be derived from competing reports or gaps.
