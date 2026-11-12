@@ -16,7 +16,11 @@ from app.services.change_detection import (
     detect_numeric_observation_changes,
 )
 from app.services.pattern_detection import detect_cross_domain_patterns, detect_patterns
-from app.services.care_continuity import next_best_questions, reassess_open_question_lifecycle
+from app.services.care_continuity import (
+    next_best_questions,
+    reassess_open_question_lifecycle,
+    reconcile_information_gaps_from_accepted_assertions,
+)
 
 
 def reconcile_person_change_intelligence(
@@ -46,6 +50,10 @@ def reconcile_person_change_intelligence(
     detect_cross_domain_patterns(db, person_id, reference_time)
     detect_assertion_changes(db, person_id)
     detect_numeric_observation_changes(db, person_id)
+    # A reviewed, evidence-backed current-state assertion can settle the
+    # existence of an exact matching information gap. Conflicts and unreviewed
+    # reports remain unresolved; no assertion is upgraded to verified.
+    reconcile_information_gaps_from_accepted_assertions(db, person_id)
     # Keep source-linked clarification questions in step with every ordinary
     # evidence/assertion reconciliation. The caller retains transaction ownership.
     next_best_questions(db, person_id, persist=True, commit=False)
