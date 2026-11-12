@@ -1343,16 +1343,10 @@ def _companion_replay_response(
         .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         .all()
     )
-    source_message_id = metadata.get("source_message_id")
+    # Replay is a conversation transport guarantee, not a route back into the
+    # legacy Companion-to-LCR proposal workflow. Old pending proposals must stay
+    # in their own review surface and never be surfaced by Companion replay.
     care_update_candidates = []
-    if source_message_id:
-        proposals = db.query(AIOutputLCRProposal).filter(
-            AIOutputLCRProposal.person_id == person_id,
-            AIOutputLCRProposal.caregiver_id == caregiver_id,
-            AIOutputLCRProposal.source_message_id == source_message_id,
-            AIOutputLCRProposal.proposal_type == "companion_care_observation",
-        ).order_by(AIOutputLCRProposal.candidate_index.asc(), AIOutputLCRProposal.proposal_version.desc()).all()
-        care_update_candidates = [proposal_payload(item) for item in proposals if item.status == "pending_authorization"]
     return {
         "session_id": saved_session.id,
         "person_id": person_id,
