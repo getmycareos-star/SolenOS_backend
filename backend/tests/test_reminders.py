@@ -283,3 +283,36 @@ def test_due_reminder_delivery_skips_completed_and_disabled_reminders():
         ).count() == 0
     finally:
         db.close()
+
+
+def test_due_reminder_batch_does_not_starve_older_delivered_rows():
+    from app.models.notifications import CareNotification
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    session = create_session(client, "Caregiver batch")
+    due_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+    db = TestSessionLocal()
+    try:
+        reminders = [
+            CareReminder(
+                person_id=session["person"]["id"],
+                created_by_caregiver_id=session["caregiver"]["id"],
+                title=f"Follow up {index}",
+                due_at=due_at,
+                status="open",
+            )
+            for index in range(101)
+        ]
+        db.add_all(reminders)
+        db.commit()
+
+        assert deliver_due_reminders(db=db, now=datetime.now(timezone.utc)) == 100
+        assert deliver_due_reminders(db=db, now=datetime.now(timezone.utc)) == 1
+        assert db.query(CareNotification).filter(
+            CareNotification.caregiver_id == session["caregiver"]["id"],
+            CareNotification.category == "reminder_due",
+        ).count() == 101
+    finally:
+        db.close()
