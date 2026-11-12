@@ -79,8 +79,10 @@ def get_web_push_public_key(request: Request, db: Session = Depends(get_db)):
     settings = get_settings()
     key = settings.vapid_public_key.strip()
     if not _vapid_configuration_ready():
-        raise HTTPException(status_code=503, detail="Web Push delivery is not fully configured on this server")
-    return {"public_key": key}
+        # Capability discovery is not a failed request: in-app notifications
+        # remain available while Web Push credentials are not configured.
+        return {"available": False, "public_key": None, "reason": "not_configured"}
+    return {"available": True, "public_key": key}
 
 
 @router.post("/notifications/push/subscriptions", status_code=201)
