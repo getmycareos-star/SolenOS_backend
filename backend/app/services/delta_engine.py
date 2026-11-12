@@ -981,7 +981,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             # identity. A later observation may supersede the original
                             # assertion, but must not make the same earlier source
                             # occurrence eligible for a second assertion.
-                            CareAssertion.assertion_status.notin_(["rejected", "withdrawn"]),
+                            CareAssertion.assertion_status != "rejected",
                             CareAssertion.source_event_id != source_event_id,
                         ).order_by(CareAssertion.recorded_at.asc()).first()
                         if duplicate_assertion is not None:
