@@ -1321,6 +1321,15 @@ def test_appointment_outcomes_use_append_only_caregiver_review_before_lcr(client
         assert assertion.source_conversation_id is None
         assert assertion.source_message_id is None
         assert assertion.observed_at is not None
+        assert assertion.review_after_days == 30
+        assert len(assertion.evidence_ids or []) == 1
+        appointment_source = db.query(Evidence).filter(
+            Evidence.id == assertion.evidence_ids[0],
+            Evidence.person_id == owner["person"]["id"],
+        ).one()
+        assert appointment_source.source_type == "appointment_workspace_review"
+        assert appointment_source.evidence_kind == "caregiver_report"
+        assert proposals[0]["proposed_change"]["source_quote"] in appointment_source.source_text
         assert db.query(CareAssertion).filter(CareAssertion.source_proposal_id == proposals[0]["id"]).count() == 1
     finally:
         db.close()
