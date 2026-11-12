@@ -2065,6 +2065,21 @@ class CaregiverExportApprovalRequest(BaseModel):
     approved: bool = True
 
 
+def _caregiver_evidence_label(value) -> str:
+    status = str(value or "").strip().lower()
+    if status in {"confirmed", "verified", "clinically_verified", "source_verified"}:
+        return "Confirmed source record"
+    if status in {"reported", "caregiver_reported", "reported_by_caregiver", "caregiver_authored"}:
+        return "Reported"
+    if status in {"uncertain", "inferred", "unverified", "disputed", "conflicting", "rejected", "pending_review"}:
+        return "Uncertain or needs review"
+    if status in {"missing", "not_recorded", "not_assessed", "unavailable", "unknown", "not_available"}:
+        return "Missing or not recorded"
+    if status in {"needs_clarification", "clarification_required"}:
+        return "Needs clarification"
+    return "Status not classified"
+
+
 def _pdf_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
@@ -2140,7 +2155,7 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
         if isinstance(item, dict):
             lines.append(
                 f"{index}. {item.get('source_table', 'unknown')}/{item.get('source_id', 'unknown')}"
-                f" | {item.get('epistemic_status', 'not recorded')}"
+                f" | {_caregiver_evidence_label(item.get('epistemic_status'))}"
                 f" | recorded {item.get('recorded_at') or 'not recorded'}"
             )
     lines.extend([
