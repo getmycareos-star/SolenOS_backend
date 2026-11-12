@@ -1437,6 +1437,7 @@ def test_structured_observation_requires_exact_source_and_preserves_correction_h
     try:
         from app.core.database import get_db
         from app.models.care_continuity import EvidenceObservation
+        from app.models.privacy_delivery import AuditLogEvent
         app.dependency_overrides[get_db] = override_get_db
         db = TestingSessionLocal()
         person = Person(id="observation-person", name="Observation Person")
@@ -1492,8 +1493,20 @@ def test_structured_observation_requires_exact_source_and_preserves_correction_h
         assert second["correction_rationale"] == "Caregiver corrected the count."
         assert second["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
         assert "Related care summaries were refreshed" in second["reassessment_notice"]
+        assert second["reassessment_receipt"]["source_observation_id"] == second["id"]
+        assert second["reassessment_receipt"]["supersedes_observation_id"] == first["id"]
+        assert second["reassessment_receipt"]["affected_record_views"] == [
+            "living_care_record", "change_and_pattern_summaries", "open_questions", "claim_assessments",
+        ]
 
         db = TestingSessionLocal()
+        audit = db.query(AuditLogEvent).filter(
+            AuditLogEvent.target_id == second["id"],
+            AuditLogEvent.action == "evidence_observation.correct",
+        ).one()
+        assert audit.outcome == "success"
+        assert audit.record_metadata["source_evidence_id"] == "observation-evidence"
+        assert audit.record_metadata["affected_record_views"] == second["reassessment_receipt"]["affected_record_views"]
         original = db.query(EvidenceObservation).filter(EvidenceObservation.id == first["id"]).one()
         with pytest.raises(ValueError, match="append-only"):
             original.value_text = "two"
