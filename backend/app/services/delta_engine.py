@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
-from app.models.uncertainty import Contradiction, InformationGap, UncertaintyAssessment
+from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
