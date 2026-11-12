@@ -24,6 +24,19 @@ def _aware_due(value):
     return parsed.astimezone(timezone.utc)
 
 
+def _timezone_label(value):
+    """Retain the submitted UTC offset instead of replacing it with UTC."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return str(parsed.tzinfo)
+
+
 def _snapshot(loop):
     return {
         "id": loop.id, "person_id": loop.person_id, "caregiver_id": loop.caregiver_id,
@@ -104,7 +117,7 @@ def sync_appointment_followups(
                 owner_role=owner_role, owner_label=owner_label, source_type=SOURCE_TYPE, source_id=source_id,
                 source_fingerprint=fingerprint, evidence=evidence, uncertainty="reported",
                 deadline_at=due_at, deadline_source="explicit_user" if due_at else None,
-                deadline_timezone=str(due_at.tzinfo) if due_at else None,
+                deadline_timezone=_timezone_label(due_text),
                 priority="normal",
                 priority_reasons=["Explicit follow-up recorded in an appointment workspace"],
                 version=1, created_at=now, updated_at=now,
