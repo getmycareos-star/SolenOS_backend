@@ -367,12 +367,19 @@ def persist_source_clarification_questions(
             )) or None
             contexts = list(existing.context or [])
             context_key = (source_kind, source_record_id)
-            if not any(
-                (item.get("source_kind"), item.get("source_id")) == context_key
-                for item in contexts if isinstance(item, dict)
-            ):
+            matching_context = next(
+                (
+                    item for item in contexts
+                    if isinstance(item, dict)
+                    and (item.get("source_kind"), item.get("source_id")) == context_key
+                ),
+                None,
+            )
+            if matching_context is None:
                 contexts.append(source_context)
-                existing.context = contexts
+            elif necessity == "necessary":
+                matching_context["necessity_assessment"] = source_context["necessity_assessment"]
+            existing.context = contexts
             if necessity == "necessary":
                 existing.necessity = "necessary"
                 existing.necessity_rationale = necessity_rationale
