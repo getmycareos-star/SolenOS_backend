@@ -281,6 +281,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         normalized_action=payload.title.strip(),
         original_text=payload.title.strip(),
         modality="recommended",
+        is_medication_action=safety_candidate.is_medication_action,
         # A caregiver-selected reminder time is not a source-established action deadline.
         deadline=None,
         status="approved",
