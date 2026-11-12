@@ -388,6 +388,20 @@ def next_best_questions(
         InformationGap.person_id == person_id,
         InformationGap.lifecycle_status.in_([GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED, GapLifecycleStatus.PARTIALLY_RESOLVED]),
     ).all()
+    all_gap_evidence_ids = list(dict.fromkeys(
+        str(evidence_id)
+        for gap in gaps
+        for evidence_id in (gap.evidence_ids or [])
+        if evidence_id
+    ))
+    valid_gap_evidence_ids = set()
+    if all_gap_evidence_ids:
+        valid_gap_evidence_ids = {
+            str(row[0]) for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(all_gap_evidence_ids),
+            ).all()
+        }
     for item in gaps:
         priority = getattr(item.priority, "value", item.priority)
         # A gap becomes caregiver work only when a deterministic upstream
@@ -403,6 +417,9 @@ def next_best_questions(
             and isinstance(entry.get("decision_dependency"), str)
             and entry.get("decision_dependency", "").strip()
             and bool(item.evidence_ids)
+            and {
+                str(evidence_id) for evidence_id in (item.evidence_ids or []) if evidence_id
+            }.issubset(valid_gap_evidence_ids)
         ), None)
         necessity = "necessary" if explicit_assessment else "not_assessed"
         necessity_rationale = (
