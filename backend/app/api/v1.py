@@ -1151,7 +1151,7 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
             db,
             db_correction.person_id,
             workflow="care_record_correction",
-            caregiver_id=correction.caregiver_id,
+            source_caregiver_id=correction.caregiver_id,
             correction_id=db_correction.id,
         )
         db.commit()
