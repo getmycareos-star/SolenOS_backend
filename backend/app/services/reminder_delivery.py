@@ -230,6 +230,15 @@ def deliver_pending_web_pushes(db=None, now=None):
         )
         retry_delays = (60, 300, 1800, 7200, 21600)
         for delivery, notification, subscription in due:
+            # Re-read lifecycle state immediately before contacting the push
+            # provider. A source may have been resolved after the due query.
+            session.refresh(notification)
+            if notification.status != "active":
+                delivery.status = "cancelled"
+                delivery.last_error_code = "notification_no_longer_active"
+                delivery.last_error_message = "The care source no longer requires this notification."
+                session.commit()
+                continue
             preference = session.query(CareNotificationPreference).filter(
                 CareNotificationPreference.person_id == notification.person_id,
                 CareNotificationPreference.caregiver_id == notification.caregiver_id,
