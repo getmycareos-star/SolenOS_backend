@@ -1198,6 +1198,7 @@ def review_document_candidate(
     original = dict(candidate)
     assertion_id = None
     follow_up_id = None
+    medication_confirmation_id = None
     if payload.decision == "reject":
         candidate["review_status"] = "rejected_by_caregiver"
     elif payload.decision == "correct":
@@ -1346,6 +1347,18 @@ def review_document_candidate(
                 observation=observation,
                 quote=quote,
             )
+            medication_confirmation_id = _persist_document_medication_conflict_follow_up(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=evidence_id,
+                analysis_id=analysis_id,
+                upload=upload,
+                candidate=candidate,
+                subject=subject,
+                observation=observation,
+                quote=quote,
+            )
         except Exception as exc:
             db.rollback()
             logger.exception("Accepted document follow-up could not be persisted atomically")
@@ -1355,6 +1368,8 @@ def review_document_candidate(
             ) from exc
         if follow_up_id:
             candidate["accepted_follow_up_id"] = follow_up_id
+        if medication_confirmation_id:
+            candidate["medication_confirmation_follow_up_id"] = medication_confirmation_id
 
         candidate["review_status"] = "accepted_by_caregiver"
         candidate["accepted_assertion_id"] = assertion_id
@@ -1473,6 +1488,7 @@ def review_document_candidate(
         "source_record_ref": {"record_type": "care_assertion", "record_id": assertion_id} if assertion_id else None,
         "written_to_lcr": bool(assertion_id),
         "follow_up_record_ref": {"record_type": "open_loop", "record_id": follow_up_id} if follow_up_id else None,
+        "medication_confirmation_record_ref": {"record_type": "open_loop", "record_id": medication_confirmation_id} if medication_confirmation_id else None,
         "review_required": payload.decision == "correct",
         "change_intelligence_status": change_intelligence_status,
         "care_continuity_execution": execution,
