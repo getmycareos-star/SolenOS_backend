@@ -1034,6 +1034,19 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
             "INSERT INTO privacy_deletion_legacy_probe (id, person_id, caregiver_id, payload) "
             "VALUES ('legacy-delete-row', :person_id, :caregiver_id, 'private legacy data')"
         ), {"person_id": person_id, "caregiver_id": caregiver_id})
+        # This second legacy table has no direct subject identifier. It must
+        # still be erased before its parent because SET NULL would otherwise
+        # preserve the dependent personal data after root deletion.
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS privacy_deletion_indirect_probe ("
+            "id VARCHAR PRIMARY KEY, parent_ref VARCHAR, payload TEXT, "
+            "FOREIGN KEY (parent_ref) REFERENCES privacy_deletion_legacy_probe(id) ON DELETE SET NULL)"
+        ))
+        db.execute(text("DELETE FROM privacy_deletion_indirect_probe"))
+        db.execute(text(
+            "INSERT INTO privacy_deletion_indirect_probe (id, parent_ref, payload) "
+            "VALUES ('indirect-delete-row', 'legacy-delete-row', 'indirect private data')"
+        ))
         db.execute(text(
             "CREATE TABLE IF NOT EXISTS privacy_deletion_fk_probe ("
             "record_key VARCHAR NOT NULL, person_ref VARCHAR NOT NULL, payload TEXT, "
@@ -1121,6 +1134,11 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
             "SELECT COUNT(*) FROM privacy_deletion_legacy_probe WHERE id = 'legacy-delete-row'"
         )).scalar_one()
         assert legacy_remaining == 0
+        indirect_remaining = db.execute(text(
+            "SELECT COUNT(*) FROM privacy_deletion_indirect_probe WHERE id = 'indirect-delete-row'"
+        )).scalar_one()
+        assert indirect_remaining == 0
+        db.execute(text("DROP TABLE IF EXISTS privacy_deletion_indirect_probe"))
         dependent_remaining = db.execute(text(
             "SELECT COUNT(*) FROM privacy_deletion_fk_probe WHERE person_ref = :person_id"
         ), {"person_id": person_id}).scalar_one()
