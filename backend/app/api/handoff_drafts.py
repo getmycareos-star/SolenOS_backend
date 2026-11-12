@@ -25,6 +25,7 @@ from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion, EvidenceObservation
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.care_continuity import get_freshness
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
 logger = logging.getLogger(__name__)
@@ -289,7 +290,7 @@ TEMPLATES = {
         ("transition_summary", "Executive summary and current situation", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Reason for handoff", "Current situation", "Immediate priorities", "Clinician-assessed acuity if documented")),
         ("baseline", "Relevant history and baseline", ("care_facts", "care_timeline_entries", "care_events"), ("Documented diagnoses and source", "Relevant history", "Cognitive and functional baseline", "Changes from baseline", "Person's goals and preferences")),
         ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Freshness policy and assessment status", "Conflicts", "Corrections")),
-        ("medication_reconciliation", "Medication reconciliation", (), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
+        ("medication_reconciliation", "Medication reconciliation", ("medications", "allergies"), ("Caregiver-reviewed current medication reports", "Medication review status and source", "Allergies/reactions when recorded by a verified source", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
         ("clinical_functional", "Current clinical and functional assessment", (), ("Observations and measurements", "Symptoms and events", "Cognition/communication", "Mobility/ADLs", "Nutrition/hydration", "Sleep/mood/behaviour", "Equipment/environment")),
         ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "uncertainty_assessments", "care_facts", "care_events", "actions", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Issue", "Evidence/status", "Freshness review status", "Required response", "Owner", "Deadline")),
         ("care_plan", "Treatment and care plan", ("care_decisions", "actions"), ("Authorised plan", "Care delivered", "Response", "Pending investigations/consultations", "Unresolved decisions", "Escalation instructions")),
@@ -1421,6 +1422,115 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
         return {"status": "failed", "reason": "source_retrieval_failed", "label": "Uploaded documents and extracted text", "count": 0}, []
 
 
+
+def _verified_professional_medication_source(db: Session, person_id: str) -> tuple[dict, list[dict]]:
+    """Expose only unambiguous, explicitly caregiver-reviewed current medication reports.
+
+    This is not independent clinical verification. No medication history is promoted,
+    and no allergy source is inferred from free text.
+    """
+    label = "Caregiver-reviewed medication reports"
+    try:
+        rows = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            func.lower(CareAssertion.subject_type).in_(("medication", "medications")),
+            CareAssertion.assertion_kind == "current_state",
+            CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
+        ).order_by(CareAssertion.recorded_at.desc(), CareAssertion.id.desc()).all()
+        grouped: dict[str, list[CareAssertion]] = {}
+        for row in rows:
+            grouped.setdefault(str(row.subject_id), []).append(row)
+
+        revisions = None
+        if inspect(db.connection()).has_table("care_assertion_revisions"):
+            revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+
+        def reviewed_at(assertion: CareAssertion):
+            if revisions is None:
+                return None
+            return db.execute(
+                select(revisions.c.changed_at)
+                .where(
+                    revisions.c.person_id == person_id,
+                    revisions.c.assertion_id == assertion.id,
+                )
+                .order_by(revisions.c.revision_number.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+
+        output: list[dict] = []
+        excluded = 0
+        for subject_id, claims in grouped.items():
+            by_field: dict[str, list[CareAssertion]] = {}
+            for claim in claims:
+                by_field.setdefault(str(claim.field).strip().lower(), []).append(claim)
+
+            def current_claim(fields: tuple[str, ...]):
+                candidates = [claim for field in fields for claim in by_field.get(field, [])]
+                values = {" ".join(str(item.asserted_value or "").casefold().split()) for item in candidates}
+                if len(values) != 1 or not candidates:
+                    return None
+                accepted = next((item for item in candidates if item.assertion_status in {"accepted", "caregiver_reviewed"}), None)
+                if accepted is None or get_freshness(accepted, reviewed_at=reviewed_at(accepted)).get("status") != "within_review_window":
+                    return None
+                return accepted
+
+            name = current_claim(("name", "medication_name"))
+            status = current_claim(("status", "medication_status"))
+            if not name or not status or str(status.asserted_value).strip().casefold() != "active":
+                excluded += 1
+                continue
+            dose = current_claim(("dose", "strength"))
+            recorded_at = name.recorded_at
+            details = {
+                "medication_subject_id": subject_id,
+                "reported_name": str(name.asserted_value).strip(),
+                "reported_dose": str(dose.asserted_value).strip() if dose else None,
+                "reported_status": "active",
+                "review_status": "caregiver_reviewed_current_report",
+                "source_label": name.source_label,
+                "freshness": get_freshness(name, reviewed_at=reviewed_at(name)),
+                "interpretation_limit": (
+                    "Caregiver-reviewed current report within its configured review window. "
+                    "This is not independent clinical verification and does not prove administration."
+                ),
+            }
+            text = f"Caregiver-reviewed medication report: {details['reported_name']}"
+            if details["reported_dose"]:
+                text += f"; reported dose: {details['reported_dose']}"
+            output.append({
+                "source_type": "caregiver_reviewed_medication_report",
+                "source_table": "care_assertions",
+                "source_id": str(name.id),
+                "source_fingerprint": _fingerprint({
+                    "name": name.asserted_value, "status": status.asserted_value,
+                    "dose": dose.asserted_value if dose else None,
+                    "name_status": name.assertion_status, "status_status": status.assertion_status,
+                }),
+                "source_revision": _iso(recorded_at),
+                "source_revision_status": "timestamp_available" if recorded_at else "revision_unavailable",
+                "event_at": _iso(name.observed_at),
+                "recorded_at": _iso(recorded_at),
+                "due_at": None,
+                "details": details,
+                "epistemic_status": name.epistemic_state or "reported",
+                "record_status": "caregiver_reviewed_current_report",
+                "evidence_ids": list(name.evidence_ids or []),
+                "text": text,
+                "stale_warning": False,
+            })
+        return {
+            "status": "available" if output else "empty",
+            "label": label,
+            "count": len(output),
+            "excluded_unconfirmed_or_ambiguous_count": excluded,
+            "interpretation_limit": "Caregiver-reviewed reports only; not an independently verified clinical medication list.",
+        }, output
+    except Exception:
+        logger.exception("Professional handoff medication retrieval failed")
+        return {"status": "failed", "reason": "medication_source_retrieval_failed", "label": label, "count": 0}, []
+
+
 def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str) -> dict:
     """Qwen selects source references and sections; the backend attaches exact source text."""
     try:
@@ -1786,6 +1896,16 @@ def prepare_handoff_draft(
     document_status, document_records = _verified_document_source(db, person_id, caregiver_id)
     statuses["documents"] = document_status
     records.extend(document_records)
+    if payload.audience == "professional":
+        medication_status, medication_records = _verified_professional_medication_source(db, person_id)
+        statuses["medications"] = medication_status
+        records.extend(medication_records)
+        statuses["allergies"] = {
+            "status": "unavailable",
+            "reason": "no_verified_person_scoped_allergy_adapter",
+            "label": "Allergy and reaction records",
+            "count": 0,
+        }
     statuses["community"] = {"status": "not_authorized", "reason": "community_source_not_enabled", "count": 0}
 
     # Resolve only explicitly linked evidence and keep author/reporter/uploader,
@@ -1886,6 +2006,9 @@ def prepare_handoff_draft(
     daily_items = [item for item in records if item["source_table"] == "care_events" and item["source_type"] == "daily_care_observation"]
     if daily_items:
         sections.append({"title": "Daily Care observations", "items": daily_items})
+    medication_items = [item for item in records if item["source_table"] == "care_assertions" and item["source_type"] == "caregiver_reviewed_medication_report"]
+    if medication_items:
+        sections.append({"title": "Caregiver-reviewed medication reports", "items": medication_items})
     document_items = [item for item in records if item["source_table"] in {"capture_analyses", "evidence_uploads"}]
     if document_items:
         sections.append({"title": "Uploaded documents and extracted text", "items": document_items})
