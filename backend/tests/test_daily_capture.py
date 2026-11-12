@@ -2104,3 +2104,131 @@ def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatc
             db.close()
     finally:
         teardown_db()
+
+
+def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeypatch):
+    """Reference scenario: preserve a full day without shifting recordkeeping work to the caregiver."""
+    from app.api import v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        reports = [
+            "Mum slept poorly last night and seemed more unsettled this morning.",
+            "Mum barely touched her lunch today. She drank some water, though.",
+            "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose.",
+            "Mum was calmer this evening. She ate a little more at dinner and is now resting.",
+        ]
+        candidates_by_report = {
+            reports[0]: [
+                ("slept poorly last night", "reported"),
+                ("seemed more unsettled this morning", "uncertain"),
+            ],
+            reports[1]: [
+                ("barely touched her lunch today", "reported"),
+                ("drank some water", "reported"),
+            ],
+            reports[2]: [],
+            reports[3]: [
+                ("was calmer this evening", "reported"),
+                ("ate a little more at dinner", "reported"),
+                ("is now resting", "reported"),
+            ],
+        }
+
+        def extract_exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            observations = []
+            for observation, _status in candidates_by_report[source_text]:
+                observations.append({
+                    "subject": "Mum",
+                    "observation": observation,
+                    "source_quote": source_text,
+                    "review_status": "pending_review",
+                    "source_event_id": source_event_id,
+                })
+            return {"observations": observations, "open_questions": []}
+
+        monkeypatch.setattr(api_v1, "extract_review_candidates", extract_exact_source_candidates)
+        receipts = []
+        for index, report in enumerate(reports, start=1):
+            response = client.post(
+                "/api/v1/daily-care/entries",
+                headers=headers,
+                json={
+                    "person_id": "person-daily-test",
+                    "caregiver_id": "caregiver-daily-test",
+                    "capture_kind": "natural_language_update",
+                    "capture_idempotency_key": f"scenario-01-report-{index}",
+                    "notes": report,
+                },
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["success"] is True
+            receipts.append(response.json())
+
+        assert len({receipt["id"] for receipt in receipts}) == 4
+        assert all(receipt["evidence_ids"] for receipt in receipts)
+
+        db = TestingSessionLocal()
+        try:
+            events = [
+                db.query(CareEvent).filter_by(id=receipt["id"]).one()
+                for receipt in receipts
+            ]
+            assert [json.loads(event.description)["notes"] for event in events] == reports
+            assert all(event.created_by_caregiver_id == "caregiver-daily-test" for event in events)
+            assert [event.recorded_at for event in events] == sorted(event.recorded_at for event in events)
+
+            all_observations = []
+            for receipt in receipts:
+                evidence = db.query(Evidence).filter_by(id=receipt["evidence_ids"][0]).one()
+                assert evidence.person_id == "person-daily-test"
+                assert evidence.reported_by_caregiver_id == "caregiver-daily-test"
+                assert json.loads(evidence.source_text)["original_capture"]["notes"] == reports[receipts.index(receipt)]
+                all_observations.extend(
+                    db.query(EvidenceObservation).filter_by(
+                        person_id="person-daily-test",
+                        evidence_id=evidence.id,
+                    ).all()
+                )
+
+            by_value = {row.value_text: row for row in all_observations}
+            expected_values = {
+                "slept poorly last night",
+                "seemed more unsettled this morning",
+                "barely touched her lunch today",
+                "drank some water",
+                "was calmer this evening",
+                "ate a little more at dinner",
+                "is now resting",
+            }
+            assert set(by_value) == expected_values
+            assert by_value["seemed more unsettled this morning"].epistemic_status == "uncertain"
+            assert by_value["seemed more unsettled this morning"].hedge_marker == "seemed"
+            assert by_value["drank some water"].epistemic_status == "reported"
+            assert by_value["was calmer this evening"].epistemic_status == "reported"
+            assert "last night" in by_value["slept poorly last night"].context
+            assert "this morning" in by_value["seemed more unsettled this morning"].context
+            assert "lunch today" in by_value["barely touched her lunch today"].context
+            assert "this evening" in by_value["was calmer this evening"].context
+            assert all(row.observed_at is None and row.occurred_at is None for row in all_observations)
+            assert db.query(OpenQuestion).filter_by(
+                person_id="person-daily-test", status="open"
+            ).count() == 0
+        finally:
+            db.close()
+
+        history = client.get("/api/v1/events/person-daily-test", headers=headers)
+        assert history.status_code == 200, history.text
+        assert {row["id"] for row in history.json()} >= {receipt["id"] for receipt in receipts}
+
+        current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert current.status_code == 200, current.text
+        lcr_rows = [row for row in current.json()["items"] if row["id"] in {r["id"] for r in receipts}]
+        assert len(lcr_rows) == 4
+        assert all(row["source_type"] == "caregiver_report" for row in lcr_rows)
+        assert all(row["epistemic_status"] == "caregiver_reported" for row in lcr_rows)
+    finally:
+        teardown_db()
