@@ -416,6 +416,7 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
         "unexported_tables": [],
         "exclusions": [
             "Rows explicitly attributed to a different caregiver are excluded.",
+            "Actor, requester and generic created_by identifiers are not treated as caregiver ownership; tables without a reliable caregiver or person scope are listed as unexported.",
             "Provider backups, infrastructure logs and third-party processor data are not included.",
             "Derived rows without caregiver attribution are included only when person-scoped.",
         ],
@@ -428,9 +429,6 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
         "collected_by_caregiver_id",
         "changed_by_caregiver_id",
         "updated_by_caregiver_id",
-        "actor_id",
-        "requester_id",
-        "created_by",
     )
     with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for table in Base.metadata.sorted_tables:
@@ -998,9 +996,6 @@ def fulfil_approved_deletion(
         "collected_by_caregiver_id",
         "changed_by_caregiver_id",
         "updated_by_caregiver_id",
-        "actor_id",
-        "requester_id",
-        "created_by",
     )
     for table in tables:
         if table.name in excluded_tables or not table.primary_key.columns:
