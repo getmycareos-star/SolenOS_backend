@@ -204,7 +204,14 @@ def test_shared_coordinator_rejects_correction_from_another_caregiver(monkeypatc
 
 def test_shared_coordinator_validates_source_assertion_scope(monkeypatch):
     person = SimpleNamespace(id="person-1")
-    assertion = SimpleNamespace(id="assertion-1", person_id="person-1")
+    assertion = SimpleNamespace(
+        id="assertion-1",
+        person_id="person-1",
+        evidence_ids=[],
+        source_event_id=None,
+        source_message_id=None,
+        source_conversation_id=None,
+    )
     db = _session({Person: person, CareAssertion: assertion})
     reconciled = Mock()
     monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
@@ -219,6 +226,60 @@ def test_shared_coordinator_validates_source_assertion_scope(monkeypatch):
     assert result["source_assertion_id"] == "assertion-1"
     assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
     reconciled.assert_called_once_with(db, "person-1", None)
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_assertion_with_cross_person_evidence(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    assertion = SimpleNamespace(
+        id="assertion-1",
+        person_id="person-1",
+        evidence_ids=["evidence-from-person-2"],
+        source_event_id=None,
+        source_message_id=None,
+        source_conversation_id=None,
+    )
+    db = _session({Person: person, CareAssertion: assertion, Evidence: None})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="outside this care record"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="care_assertion_review",
+            source_assertion_id="assertion-1",
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_evidence_not_in_assertion_lineage(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    assertion = SimpleNamespace(
+        id="assertion-1",
+        person_id="person-1",
+        evidence_ids=["evidence-1"],
+        source_event_id=None,
+        source_message_id=None,
+        source_conversation_id=None,
+    )
+    evidence = SimpleNamespace(id="evidence-2", person_id="person-1")
+    db = _session({Person: person, CareAssertion: assertion, Evidence: evidence})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="not part of the source assertion"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="care_assertion_review",
+            source_assertion_id="assertion-1",
+            source_evidence_id="evidence-2",
+        )
+
+    reconciled.assert_not_called()
     db.commit.assert_not_called()
 
 
