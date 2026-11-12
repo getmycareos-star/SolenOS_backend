@@ -4319,3 +4319,100 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         db.close()
     finally:
         teardown_db()
+
+
+def test_source_questions_deduplicate_rephrasing_but_preserve_distinct_time_periods():
+    setup_db()
+    try:
+        from app.services.uncertainty import persist_source_clarification_questions
+
+        db = TestingSessionLocal()
+        person = Person(id="person-semantic-question", name="Semantic Question Person")
+        caregiver = Caregiver(
+            id="caregiver-semantic-question",
+            name="Semantic Question Caregiver",
+            email="semantic-question@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="evidence-semantic-question",
+            person_id=person.id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="She woke several times overnight.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_caregiver_id=caregiver.id,
+        )
+        first_event = CareEvent(
+            id="event-semantic-question-one",
+            person_id=person.id,
+            event_type="daily_care",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="First daily care report",
+            description="She woke several times overnight.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        second_event = CareEvent(
+            id="event-semantic-question-two",
+            person_id=person.id,
+            event_type="daily_care",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Second daily care report",
+            description="She woke several times overnight.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, first_event, second_event])
+        db.commit()
+
+        first = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction",
+            source_record_type="care_event",
+            source_record_id=first_event.id,
+            evidence_ids=[evidence.id],
+            questions=["How many times did she wake overnight?"],
+        )
+        db.commit()
+        assert len(first) == 1
+
+        second = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction",
+            source_record_type="care_event",
+            source_record_id=second_event.id,
+            evidence_ids=[evidence.id],
+            questions=[
+                "How often did she wake up overnight?",
+                "How often did she wake up overnight since Friday?",
+            ],
+        )
+        db.commit()
+
+        open_rows = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).all()
+        assert len(open_rows) == 2
+        assert len(second) == 2
+        merged = next(row for row in open_rows if row.id == first[0].id)
+        distinct_period = next(row for row in open_rows if row.id != first[0].id)
+        assert merged.evidence_ids == [evidence.id]
+        assert {
+            entry["source_id"]
+            for entry in merged.context
+            if isinstance(entry, dict) and entry.get("source_kind") == "daily_capture_extraction"
+        } == {first_event.id, second_event.id}
+        assert "since Friday" in distinct_period.question
+        assert distinct_period.id != merged.id
+    finally:
+        teardown_db()
