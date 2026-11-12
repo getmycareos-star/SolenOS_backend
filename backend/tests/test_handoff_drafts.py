@@ -1287,6 +1287,8 @@ def test_observation_correction_marks_prepared_handoff_source_stale(client, monk
         db.add_all([evidence, event, original])
         db.commit()
         event_id = event.id
+        evidence_id = evidence.id
+        original_observation_id = original.id
     finally:
         db.close()
 
@@ -1314,8 +1316,8 @@ def test_observation_correction_marks_prepared_handoff_source_stale(client, monk
         corrected = EvidenceObservation(
             id="handoff-corrected-observation-current",
             person_id=person_id,
-            evidence_id=evidence.id,
-            supersedes_observation_id=original.id,
+            evidence_id=evidence_id,
+            supersedes_observation_id=original_observation_id,
             correction_rationale="The caregiver corrected the original interpretation.",
             observation_kind="caregiver_report",
             epistemic_status="reported",
