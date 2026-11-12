@@ -344,6 +344,39 @@ def test_open_question_lifecycle():
         
         question_id = data["id"]
 
+        necessity_source = client.post(
+            "/api/v1/evidence",
+            json={
+                "person_id": "person-5",
+                "uploaded_by_caregiver_id": "caregiver-5",
+                "type": "document",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "caregiver_reported",
+                "source_text": "Appointment handoff record identifying a decision that depends on attendance status.",
+            },
+        )
+        assert necessity_source.status_code in {200, 201}, necessity_source.text
+        necessity_evidence_id = necessity_source.json()["id"]
+        unsupported_necessity = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "necessity": "necessary",
+                "necessity_rationale": "The handoff needs the attendance status.",
+            },
+        )
+        assert unsupported_necessity.status_code == 422, unsupported_necessity.text
+        assessed_necessity = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "necessity": "necessary",
+                "necessity_rationale": "The current handoff decision depends on whether the appointment occurred.",
+                "evidence_ids": [necessity_evidence_id],
+            },
+        )
+        assert assessed_necessity.status_code == 200, assessed_necessity.text
+        assert assessed_necessity.json()["necessity"] == "necessary"
+        assert assessed_necessity.json()["necessity_rationale"]
+
         # A caregiver can answer without uploading a separate document. The
         # answer is saved as a new, source-attributed caregiver report.
         first_answer = client.patch(
