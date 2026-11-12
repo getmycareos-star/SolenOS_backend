@@ -27,7 +27,7 @@ class CareNotification(Base):
     category = Column(String(40), nullable=False, default="care_update")
     priority = Column(String(20), nullable=False, default="normal")
     source_event_id = Column(String, nullable=True)
-    status = Column(String(16), nullable=False, default="active", server_default="active", index=True)
+    status = Column(String(16), nullable=False, default="active", server_default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     resolved_at = Column(DateTime(timezone=True), nullable=True)
