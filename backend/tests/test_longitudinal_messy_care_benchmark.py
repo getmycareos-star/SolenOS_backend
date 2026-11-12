@@ -950,3 +950,239 @@ def test_medication_mentions_do_not_count_as_prescribing_changes():
         "change_type": "discontinued",
         "evidence_excerpt": "The clinician discontinued amlodipine.",
     })
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    __import__("test_lcr_reconciliation_scenario_corpus").SCENARIOS,
+    ids=lambda item: item["scenario_id"],
+)
+def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monkeypatch):
+    """Run every curated timeline through Delta Engine with deterministic Qwen fixtures.
+
+    This exercises the real SQL persistence, evidence gates, contradiction/open-loop
+    persistence and person scoping. The model response is a controlled fixture, not
+    live-model evaluation or proof that Qwen independently understands the timeline.
+    """
+    import json
+    from app.models.care import CareEvent, Caregiver, Correction, Evidence
+    from app.models.care_continuity import CareAssertion, CareDeltaRun
+    from app.models.uncertainty import Contradiction, OpenQuestion
+    from app.services import delta_engine
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, scenario["scenario_id"])
+        ordered_events = sorted(
+            scenario["incoming_events"], key=lambda item: item.get("arrival", 0)
+        )
+        source_text_by_event = {}
+        model_result_by_call = {"value": None}
+
+        def fixture_result(event):
+            claim = event["claim"]
+            result = {
+                "event_summary": claim[:140],
+                "medications": [],
+                "conditions": [],
+                "symptoms": [],
+                "tests": [],
+                "follow_ups": [],
+                "contradictions": [],
+                "clinical_gaps": [{
+                    "gap": "current medication and administration details are missing",
+                    "why_it_matters": "The supplied history does not establish the current prescription or later dose administration.",
+                    "next_question": "Can the current medication list and administration record be confirmed?",
+                    "evidence_excerpt": claim,
+                }],
+                "caregiver_summary": claim[:140],
+                "clinician_summary": claim[:140],
+            }
+            topic = event.get("topic")
+            if topic == "sleep" and event.get("classification") != "duplicate_same_occurrence":
+                value = "poor sleep" if "poor sleep" in claim else "sleep improved"
+                result["symptoms"] = [{
+                    "change_type": "new",
+                    "name": "sleep",
+                    "previous": None,
+                    "current": value,
+                    "evidence_excerpt": claim,
+                    "certainty": "supported",
+                }]
+            elif topic == "cognition":
+                result["symptoms"] = [{
+                    "change_type": "new",
+                    "name": "confusion",
+                    "previous": None,
+                    "current": "increased confusion",
+                    "evidence_excerpt": claim,
+                    "certainty": "supported",
+                }]
+            elif topic == "medication":
+                result["medications"] = [{
+                    "change_type": "new",
+                    "name": "medication",
+                    "previous": None,
+                    "current": "medication mention",
+                    "evidence_excerpt": claim,
+                    "certainty": "supported",
+                }]
+            elif topic == "medication_administration":
+                result["medications"] = [{
+                    "change_type": "uncertain",
+                    "name": "medication",
+                    "previous": None,
+                    "current": "missed dose reported",
+                    "evidence_excerpt": claim,
+                    "certainty": "uncertain",
+                }]
+
+            if event.get("classification") == "historical_conflicting_evidence":
+                earlier = next(
+                    (text for text in source_text_by_event.values()
+                     if "hospital document" in text or "medication" in text),
+                    claim,
+                )
+                result["contradictions"] = [{
+                    "topic": "medication",
+                    "reports": [earlier, claim],
+                    "why_conflicting": "The supplied medication records do not establish one current prescription.",
+                    "evidence_excerpts": [earlier, claim],
+                }]
+            return result
+
+        monkeypatch.setattr(
+            delta_engine,
+            "_local_ollama_url",
+            lambda: ("http://127.0.0.1:11434", "curated-deterministic-fixture", 1.0),
+        )
+
+        def fake_qwen_chat(*args, **kwargs):
+            return json.dumps(model_result_by_call["value"])
+
+        monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen_chat)
+
+        original_event = None
+        for event_spec in ordered_events:
+            event_id = event_spec["id"]
+            evidence_id = event_spec["evidence_id"]
+            claim = event_spec["claim"]
+            source_text_by_event[event_id] = claim
+            event_day = event_spec.get("corrected_day", event_spec["day"])
+            occurred_at = NOW + timedelta(days=event_day)
+            evidence = Evidence(
+                id=evidence_id,
+                person_id=person.id,
+                type="document" if event_spec["kind"] == "document" else "note",
+                source_text=claim,
+                uploaded_by_caregiver_id=caregiver.id,
+            )
+            care_event = CareEvent(
+                id=event_id,
+                person_id=person.id,
+                event_type=event_spec["kind"],
+                status="recorded",
+                occurred_at=occurred_at,
+                title=claim[:120],
+                description=claim,
+                evidence_ids=[evidence_id],
+                created_by_caregiver_id=caregiver.id,
+                time_provenance="document_date" if event_spec["kind"] == "document" else "caregiver_observed",
+            )
+            db.add_all([evidence, care_event])
+            db.flush()
+
+            if event_spec["kind"] == "correction" and original_event is not None:
+                db.add(Correction(
+                    id=f"correction-{scenario['scenario_id']}",
+                    person_id=person.id,
+                    target_type="care_event",
+                    target_id=original_event.id,
+                    original_text=original_event.description or original_event.title,
+                    corrected_text=claim,
+                    reason="Caregiver supplied a correction to the original observation date.",
+                    caregiver_id=caregiver.id,
+                ))
+                db.flush()
+
+            if event_spec.get("corrects_event_id"):
+                original_event = db.query(CareEvent).filter(
+                    CareEvent.id == event_spec["corrects_event_id"],
+                    CareEvent.person_id == person.id,
+                ).one()
+
+            model_result_by_call["value"] = fixture_result(event_spec)
+            delta_engine.reconcile_event(
+                db,
+                person_id=person.id,
+                event_date=occurred_at,
+                source=event_spec["reporter"],
+                content=claim,
+                source_event_id=care_event.id,
+                evidence_ids=[evidence_id],
+                persist=True,
+                created_by_caregiver_id=caregiver.id,
+            )
+
+        persisted_event_ids = {
+            row[0] for row in db.query(CareEvent.id).filter(
+                CareEvent.person_id == person.id
+            ).all()
+        }
+        expected_event_ids = {event["id"] for event in ordered_events}
+        assert expected_event_ids.issubset(persisted_event_ids)
+
+        runs = db.query(CareDeltaRun).filter(
+            CareDeltaRun.person_id == person.id
+        ).all()
+        assert len(runs) == len(ordered_events)
+        assert {run.source_event_id for run in runs} == expected_event_ids
+        assert all(run.evidence_ids for run in runs)
+
+        # Medication references, historical lists and missed-dose reports are not
+        # sufficient to establish a current prescription.
+        medication_assertions = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id,
+            CareAssertion.subject_type == "medication",
+            CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
+        ).all()
+        assert medication_assertions == []
+
+        # Every persisted assertion must cite only evidence belonging to its own
+        # source event, never unrelated evidence from another event in the run.
+        evidence_owner = {
+            event["evidence_id"]: event["id"] for event in ordered_events
+        }
+        for assertion in db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id
+        ).all():
+            assert assertion.source_event_id in expected_event_ids
+            assert assertion.evidence_ids
+            assert all(
+                evidence_owner.get(evidence_id) == assertion.source_event_id
+                for evidence_id in assertion.evidence_ids
+            )
+
+        # Corrections remain additive audit records; the original source event is
+        # never deleted. A separate correction/supersession workflow owns active
+        # observation versioning and is not simulated by the Delta Engine fixture.
+        correction_rows = db.query(Correction).filter(
+            Correction.person_id == person.id
+        ).all()
+        assert len(correction_rows) == 1
+        assert correction_rows[0].target_id in persisted_event_ids
+        assert db.query(CareEvent).filter(
+            CareEvent.id == correction_rows[0].target_id,
+            CareEvent.person_id == person.id,
+        ).count() == 1
+
+        if any(event.get("classification") == "historical_conflicting_evidence"
+               for event in ordered_events):
+            assert db.query(Contradiction).filter(
+                Contradiction.person_id == person.id,
+                Contradiction.resolution_status == "unresolved",
+            ).count() >= 1
+
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).count() >= 1
