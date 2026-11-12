@@ -733,7 +733,7 @@ async def upload_evidence(
         "image/png": lambda blob: blob.startswith(b"\x89PNG\r\n\x1a\n"),
         "image/gif": lambda blob: blob.startswith((b"GIF87a", b"GIF89a")),
         "image/bmp": lambda blob: blob.startswith(b"BM"),
-        "image/tiff": lambda blob: blob.startswith((b"II*\\x00", b"MM\\x00*")),
+        "image/tiff": lambda blob: blob.startswith((b"II*\x00", b"MM\x00*")),
         "image/webp": lambda blob: len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": lambda blob: blob.startswith(b"PK\x03\x04"),
         "application/msword": lambda blob: blob.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
