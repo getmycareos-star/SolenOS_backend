@@ -495,7 +495,7 @@ def next_best_questions(
     # persisted evidence from this same care record.
     blocked_actions = db.query(Action).filter(
         Action.person_id == person_id,
-        Action.status == "needs_clarification",
+        Action.status.in_(("needs_clarification", "pending_confirmation")),
         Action.requires_confirmation.is_(True),
         Action.expired_at.is_(None),
         Action.cancelled_at.is_(None),
