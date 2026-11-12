@@ -3965,7 +3965,19 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
             status="open",
             priority=Priority.INFORMATIONAL,
         )
-        db.add_all([necessary, unassessed, optional])
+        legacy_ungrounded = OpenQuestion(
+            person_id=person.id,
+            question="Can you confirm the current medication dose?",
+            subject_type="person",
+            subject_id=person.id,
+            necessity="necessary",
+            necessity_rationale="A legacy request without persisted source evidence.",
+            status="open",
+            priority=Priority.HIGH,
+            context=[{"decision_dependency": "A handoff requires the dose."}],
+            evidence_ids=[],
+        )
+        db.add_all([necessary, unassessed, optional, legacy_ungrounded])
         db.commit()
 
         from app.services.uncertainty import UncertaintyEngine
