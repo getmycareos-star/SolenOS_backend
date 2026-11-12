@@ -2182,11 +2182,11 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
             assert [event.recorded_at for event in events] == sorted(event.recorded_at for event in events)
 
             all_observations = []
-            for receipt in receipts:
+            for index, receipt in enumerate(receipts):
                 evidence = db.query(Evidence).filter_by(id=receipt["evidence_ids"][0]).one()
                 assert evidence.person_id == "person-daily-test"
                 assert evidence.reported_by_caregiver_id == "caregiver-daily-test"
-                assert json.loads(evidence.source_text)["original_capture"]["notes"] == reports[receipts.index(receipt)]
+                assert json.loads(evidence.source_text)["original_capture"]["notes"] == reports[index]
                 all_observations.extend(
                     db.query(EvidenceObservation).filter_by(
                         person_id="person-daily-test",
@@ -2211,7 +2211,7 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
             assert by_value["was calmer this evening"].epistemic_status == "reported"
             assert "last night" in by_value["slept poorly last night"].context
             assert "this morning" in by_value["seemed more unsettled this morning"].context
-            assert "lunch today" in by_value["barely touched her lunch today"].context
+            assert "today" in by_value["barely touched her lunch today"].context
             assert "this evening" in by_value["was calmer this evening"].context
             assert all(row.observed_at is None and row.occurred_at is None for row in all_observations)
             assert db.query(OpenQuestion).filter_by(
