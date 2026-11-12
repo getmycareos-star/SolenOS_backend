@@ -286,3 +286,65 @@ def test_claim_dependency_graph_persists_and_rejects_cross_record_and_cycles(unc
 
     cross_record = add_dependency("claim-a", "claim-other")
     assert cross_record.status_code == 404, cross_record.text
+
+
+@pytest.mark.session_security
+def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_without_cross_person_leakage(
+    uncertainty_api_db,
+):
+    from app.models.uncertainty import OpenQuestion
+
+    client = _client_for(uncertainty_api_db, "a")
+    with uncertainty_api_db() as db:
+        db.add_all([
+            OpenQuestion(
+                person_id="benchmark-person-a",
+                question="Confirm the clinic result",
+                status="open",
+                necessity="necessary",
+                necessity_rationale="The follow-up is blocked until the clinic confirms the result.",
+                evidence_ids=["same-person-evidence-reference"],
+                context=[{"source_kind": "appointment_workspace_follow_up", "source_id": "loop-1"}],
+                intended_answerer_role="professional",
+            ),
+            OpenQuestion(
+                person_id="benchmark-person-a",
+                question="Confirm the clinic result",
+                status="open",
+                necessity="not_assessed",
+                evidence_ids=["same-person-evidence-reference"],
+                context=[{"source_kind": "appointment_workspace_follow_up", "source_id": "loop-2"}],
+            ),
+            OpenQuestion(
+                person_id="benchmark-person-a",
+                question="Is the care plan current?",
+                status="closed",
+                necessity="not_assessed",
+                closed_reason="automatically_suppressed:no_active_decision_dependency",
+                evidence_ids=[],
+                context=[{"source_kind": "document_extraction", "source_id": "doc-1"}],
+            ),
+            OpenQuestion(
+                person_id="benchmark-person-b",
+                question="Foreign person's duplicate",
+                status="open",
+                necessity="necessary",
+                necessity_rationale="Foreign record.",
+                context=[{"source_kind": "appointment_workspace_follow_up", "source_id": "foreign"}],
+            ),
+        ])
+        db.commit()
+
+    response = client.get("/api/v1/uncertainty/question-quality")
+    assert response.status_code == 200, response.text
+    metrics = response.json()
+    assert metrics["person_id"] == "benchmark-person-a"
+    assert metrics["active_questions"] == 2
+    assert metrics["caregiver_actionable_questions"] == 1
+    assert metrics["non_actionable_active_questions"] == 1
+    assert metrics["duplicate_question_groups"] == 1
+    assert metrics["duplicate_question_excess"] == 1
+    assert metrics["source_questions_awaiting_necessity_assessment"] == 1
+    assert metrics["manual_review_backlog"] == 1
+    assert metrics["automatically_suppressed_questions"] == 1
+    assert "Foreign person's duplicate" not in str(metrics)
