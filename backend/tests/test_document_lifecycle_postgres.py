@@ -376,7 +376,7 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
                 QwenBackgroundJob.person_id == person_id,
                 QwenBackgroundJob.evidence_ids_json == json.dumps([evidence_id]),
             ).all()
-            assert {job.workflow for job in cancelled_jobs} == {"document_intake", "living_care_record"}
+            assert {job.workflow for job in cancelled_jobs} == {"document_intake", "document_lifecycle", "living_care_record"}
             assert all(job.status == "cancelled" for job in cancelled_jobs)
             with pytest.raises(HTTPException) as denied:
                 extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
@@ -712,7 +712,13 @@ def test_postgres_document_medication_conflict_creates_professional_question_wit
             duplicate = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge-summary-copy.txt", raw)
             first_upload = db.query(EvidenceUpload).filter_by(evidence_id=uploaded["evidence_id"]).one()
             duplicate_upload = db.query(EvidenceUpload).filter_by(evidence_id=duplicate["evidence_id"]).one()
-            candidate = {"field_type": "medication", "page_number": 4}
+            candidate = {
+                "field_type": "medication",
+                "subject": "Aspirin",
+                "observation": quote,
+                "source_quote": quote,
+                "page_number": 4,
+            }
             active_medication = {
                 "medication_id": medication_id,
                 "name": "Aspirin",
