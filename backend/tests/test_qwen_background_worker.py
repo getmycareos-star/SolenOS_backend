@@ -276,3 +276,94 @@ def test_worker_waits_quietly_when_job_table_is_not_yet_migrated(tmp_path, monke
         assert "Qwen background job failed" not in caplog.text
     finally:
         engine.dispose()
+
+
+def test_worker_processes_document_intake_job_without_qwen_output(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    db = sessions()
+    job = QwenBackgroundJob(
+        person_id="person-test",
+        caregiver_id="caregiver-test",
+        task_text="Process saved document for caregiver review.",
+        context_text="",
+        evidence_ids_json=json.dumps(["evidence-document-1"]),
+        workflow="document_intake",
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    from app.api import document_lifecycle, document_intelligence
+    calls = []
+    monkeypatch.setattr(
+        document_lifecycle,
+        "extract_saved_document",
+        lambda evidence_id, request, session: (
+            calls.append(("extract", evidence_id, request.state.scoped_person_id))
+            or {"analysis_id": "analysis-1"}
+        ),
+    )
+    monkeypatch.setattr(
+        document_intelligence,
+        "analyze_saved_document",
+        lambda evidence_id, request, session: (
+            calls.append(("understand", evidence_id, request.state.scoped_caregiver_id))
+            or {"analysis_id": "analysis-1", "intelligence_status": "available", "candidate_count": 2}
+        ),
+    )
+    monkeypatch.setattr(
+        worker,
+        "qwen_chat",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("document intake must not invoke a second Qwen workflow")),
+    )
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    completed = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert completed.status == "completed"
+    assert completed.workflow == "document_intake"
+    result = json.loads(completed.result_text)
+    assert result[0]["analysis_id"] == "analysis-1"
+    assert result[0]["intelligence_status"] == "available"
+    assert calls == [
+        ("extract", "evidence-document-1", "person-test"),
+        ("understand", "evidence-document-1", "caregiver-test"),
+    ]
+    assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+    event = db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="document_intake_completed").one()
+    assert event.metadata_json["review_required"] is True
+    assert event.metadata_json["written_to_lcr"] is False
+    db.close()
+
+
+def test_worker_marks_permanent_document_extraction_errors_failed(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(sessions)
+    from app.api import document_lifecycle
+    monkeypatch.setattr(
+        document_lifecycle,
+        "extract_saved_document",
+        lambda *args, **kwargs: (_ for _ in ()).throw(HTTPException(status_code=415, detail="unsupported document")),
+    )
+    from app.api import document_intelligence
+    monkeypatch.setattr(
+        document_intelligence,
+        "analyze_saved_document",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("analysis must not run after extraction failure")),
+    )
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    job.workflow = "document_intake"
+    job.evidence_ids_json = json.dumps(["evidence-unsupported"])
+    db.commit()
+    db.close()
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    failed = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert failed.status == "failed"
+    assert failed.attempt_count == 1
+    assert failed.error_code == "unsupported document"
+    db.close()
