@@ -111,6 +111,50 @@ def _question_is_answered_by_current_lcr(
     return False
 
 
+def _clarification_question_key(value: str) -> tuple[str, ...]:
+    """Conservative deterministic identity for repeated source-review questions.
+
+    This is intentionally not an open-ended semantic guess. It normalizes
+    common grammatical variants and a small set of unambiguous care terms,
+    while retaining dates, negation, quantities and temporal qualifiers so
+    questions about different circumstances are not collapsed together.
+    """
+    text = " ".join(value.casefold().split())
+    text = re.sub(r"\\bhow\\s+many\\s+times\\b|\\bhow\\s+often\\b", " frequency ", text)
+    text = re.sub(r"\\b(?:during\\s+the\\s+night|at\\s+night)\\b", " overnight ", text)
+    aliases = {
+        "meds": "medication",
+        "medicine": "medication",
+        "medicines": "medication",
+        "medications": "medication",
+        "dosage": "dose",
+        "doses": "dose",
+        "waking": "wake",
+        "wakes": "wake",
+        "woke": "wake",
+        "awakened": "wake",
+        "awakes": "wake",
+        "regimen": "schedule",
+        "regimens": "schedule",
+        "currently": "current",
+        "now": "current",
+    }
+    ignored = {
+        "a", "an", "the", "what", "which", "who", "whom", "how", "when",
+        "where", "why", "is", "are", "was", "were", "be", "been", "being",
+        "do", "does", "did", "has", "have", "had", "can", "could", "would",
+        "should", "will", "may", "might", "must", "please", "you", "your",
+        "she", "he", "they", "them", "her", "his", "their", "it", "its",
+        "of", "to", "for", "from", "with", "about", "up",
+    }
+    tokens = [
+        aliases.get(token, token)
+        for token in re.findall(r"[a-z0-9]+", text)
+        if token not in ignored
+    ]
+    return tuple(sorted(tokens))
+
+
 def persist_source_clarification_questions(
     db: Session,
     *,
@@ -182,18 +226,19 @@ def persist_source_clarification_questions(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
-    existing_by_text = {
-        " ".join((row.question or "").casefold().split()): row
-        for row in existing_rows
-    }
+    existing_by_text = {}
+    # Rows are newest first; keep the newest matching question as the row to
+    # refresh, rather than allowing an older duplicate to overwrite it.
+    for row in existing_rows:
+        existing_by_text.setdefault(_clarification_question_key(row.question or ""), row)
     persisted: List[OpenQuestionModel] = []
     seen: set[str] = set()
     for value in (questions or [])[:20]:
         if not isinstance(value, str):
             continue
         question_text = " ".join(value.strip().split())[:300]
-        normalized = question_text.casefold()
-        if len(question_text) < 5 or normalized in seen:
+        normalized = _clarification_question_key(question_text)
+        if len(question_text) < 5 or not normalized or normalized in seen:
             continue
         # Operational extraction warnings belong in the document review panel,
         # not in the caregiver's list of questions.
