@@ -701,6 +701,7 @@ class UncertaintyEngine:
         manual_revision_objects = self.db.info.setdefault("manual_care_state_revision_objects", set())
         from app.services.care_continuity import _open_question_state, _record_open_question_revision
         before_state = _open_question_state(db_question)
+        explicit_update_fields = set(getattr(update, "model_fields_set", set()))
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         # Keep caller-supplied answer evidence distinct from evidence inherited
         # to validate the question's necessity. Otherwise a necessary question's
@@ -779,9 +780,14 @@ class UncertaintyEngine:
         )
         answer_content_changed = (
             db_question.status != "answered"
-            or ("answer" in update_data and answer != db_question.answer)
-            or ("answer_provenance" in update_data and answer_provenance != db_question.answer_provenance)
-            or "evidence_ids" in update_data
+            or ("answer" in explicit_update_fields and answer != db_question.answer)
+            or ("answer_provenance" in explicit_update_fields and answer_provenance != db_question.answer_provenance)
+            or (
+                "evidence_ids" in explicit_update_fields
+                and explicit_answer_evidence_ids != list(latest_answer_event.evidence_ids or [])
+                if latest_answer_event is not None else
+                "evidence_ids" in explicit_update_fields
+            )
         )
         if new_status == "answered" and answer_content_changed:
             supplied_evidence_ids = explicit_answer_evidence_ids
@@ -849,10 +855,13 @@ class UncertaintyEngine:
         answer_source = answer_provenance.strip() if isinstance(answer_provenance, str) else answer_provenance
         answer_was_recorded = new_status == "answered" and answer_content_changed and (
             db_question.status != "answered"
-            or answer_text != db_question.answer
-            or answer_source != db_question.answer_provenance
+            or ("answer" in explicit_update_fields and answer_text != db_question.answer)
+            or ("answer_provenance" in explicit_update_fields and answer_source != db_question.answer_provenance)
             or latest_answer_event is None
-            or list(latest_answer_event.evidence_ids or []) != answer_evidence_ids
+            or (
+                "evidence_ids" in explicit_update_fields
+                and list(latest_answer_event.evidence_ids or []) != answer_evidence_ids
+            )
         )
         if answer_was_recorded:
             if not self.caregiver_id:
