@@ -264,11 +264,28 @@ def next_best_questions(
     ).all()
     for item in gaps:
         priority = getattr(item.priority, "value", item.priority)
+        # A gap becomes caregiver work only when a deterministic upstream
+        # workflow explicitly records that a current care decision depends on
+        # the missing information. Priority alone is never a clinical-urgency
+        # or necessity signal.
+        explicit_assessment = next((
+            entry for entry in (item.context or [])
+            if isinstance(entry, dict)
+            and entry.get("caregiver_attention_required") is True
+            and isinstance(entry.get("necessity_rationale"), str)
+            and entry.get("necessity_rationale", "").strip()
+        ), None)
+        necessity = "necessary" if explicit_assessment else "not_assessed"
+        necessity_rationale = (
+            explicit_assessment["necessity_rationale"].strip()
+            if explicit_assessment else
+            "An information gap remains part of the care record. Missing information alone does not establish that asking the caregiver is necessary."
+        )
         candidates.append({
             "question": f"What is currently known about {item.field}?",
             "subject_type": item.subject_type, "subject_id": item.subject_id,
             "priority": priority if priority in {"critical", "high", "medium", "low", "informational"} else "informational",
-            "necessity": "not_assessed", "necessity_rationale": "An information gap remains part of the care record. Missing information alone does not establish that asking the caregiver is necessary.",
+            "necessity": necessity, "necessity_rationale": necessity_rationale,
             "reason": item.description or f"The record identifies {item.field} as missing or incomplete.",
             "evidence_ids": item.evidence_ids or [], "source_kind": "information_gap", "source_id": item.id,
             "_weight": _priority_weight(priority),
@@ -321,6 +338,8 @@ def next_best_questions(
                     subject_id=clean["subject_id"],
                     status="open",
                     priority=Priority(clean["priority"]),
+                    necessity=clean["necessity"],
+                    necessity_rationale=clean["necessity_rationale"],
                     evidence_ids=clean["evidence_ids"],
                     context=[source_context],
                 )
@@ -350,6 +369,8 @@ def next_best_questions(
                     matching["reason"] = source_context["reason"]
                 existing.context = contexts
                 existing.priority = Priority(clean["priority"]) if _priority_weight(clean["priority"]) > _priority_weight(existing.priority) else existing.priority
+                existing.necessity = clean["necessity"]
+                existing.necessity_rationale = clean["necessity_rationale"]
                 persisted_id = existing.id
         clean["persisted_question_id"] = persisted_id
         output.append(clean)
