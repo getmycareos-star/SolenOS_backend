@@ -4007,7 +4007,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         data["requested_by_caregiver_id"] = caregiver_id
     # The legacy caregiver_id points to caregiver_profiles, not session caregivers.
     # New session attribution uses a separate server-bound column.
-    if "caregiver_id" in table.c and resource not in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
+    if "caregiver_id" in table.c and resource not in ("assertions", "caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
         data["caregiver_id"] = caregiver_id
     if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations") and "reported_by_caregiver_id" in table.c:
         data["reported_by_caregiver_id"] = caregiver_id
