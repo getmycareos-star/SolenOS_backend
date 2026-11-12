@@ -356,6 +356,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 "/api/v1/upload",
                 "/api/v1/evidence",
                 "/api/v1/appointment-workspaces",
+                "/api/v1/appointments",
                 "/api/documents",
                 "/api/v1/sessions/refresh",
             )
