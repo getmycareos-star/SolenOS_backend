@@ -100,6 +100,8 @@ def persist_source_clarification_questions(
 
     existing_rows = db.query(OpenQuestionModel).filter(
         OpenQuestionModel.person_id == person_id,
+        OpenQuestionModel.subject_type == "person",
+        OpenQuestionModel.subject_id == person_id,
         OpenQuestionModel.status == "open",
     ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
     existing_by_text = {
