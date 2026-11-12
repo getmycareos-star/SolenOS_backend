@@ -16,6 +16,7 @@ from email.parser import BytesParser
 from html.parser import HTMLParser
 from datetime import datetime, timezone
 
+from aspose.email_foss.msg import MapiMessage
 import pypdfium2 as pdfium
 import pytesseract
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -416,7 +417,14 @@ def _scan_adjusted_image(image: Image.Image, evidence: Evidence | None) -> tuple
     return adjusted, True
 
 
-def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evidence | None = None) -> tuple[str, str]:
+def _extract(
+    upload: EvidenceUpload,
+    content: bytes | None = None,
+    evidence: Evidence | None = None,
+    *,
+    retry_only_pages: set[int] | None = None,
+    previous_source_text: str | None = None,
+) -> tuple[str, str]:
     content = _verified_content(upload) if content is None else content
     mime = (upload.mime_type or "").split(";", 1)[0].lower()
     filename = (upload.filename or "").lower()
@@ -447,12 +455,24 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             page_texts = [f"[Page {index + 1}]\n{text}" for index, text in enumerate(native_pages)]
             return _bounded_extraction("\n\n".join(page_texts), "server_pdf_text")
 
+        previous_page_blocks = {}
+        if retry_only_pages is not None and previous_source_text:
+            markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]\s*$", previous_source_text))
+            for marker_index, marker in enumerate(markers):
+                block_end = markers[marker_index + 1].start() if marker_index + 1 < len(markers) else len(previous_source_text)
+                previous_page_blocks[int(marker.group(1))] = previous_source_text[marker.start():block_end].strip()
+
         rendered = None
         page_texts = []
         try:
             rendered = pdfium.PdfDocument(content)
             for index, native_text in enumerate(native_pages):
                 page_number = index + 1
+                if retry_only_pages is not None and page_number not in retry_only_pages:
+                    previous_block = previous_page_blocks.get(page_number)
+                    if previous_block:
+                        page_texts.append(previous_block)
+                        continue
                 if len(native_text.strip()) >= MIN_NATIVE_PDF_TEXT_CHARS:
                     page_texts.append(f"[Page {page_number}]\n{native_text}")
                     continue
@@ -485,9 +505,11 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                     if exc.status_code == 413:
                         page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR page limit exceeded]")
                     else:
-                        page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
+                        # OCR execution failed; this page remains retryable.
+                        page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR engine error]")
                 except Exception:
-                    page_texts.append(f"[Page {page_number} OCR]\n[No readable text detected on this page]")
+                    # Rendering or OCR exceptions are processing failures, not proof of unreadability.
+                    page_texts.append(f"[Page {page_number} OCR]\n[Page not processed: OCR processing error]")
                 finally:
                     if image is not None:
                         image.close()
@@ -517,8 +539,26 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                     raise HTTPException(status_code=413, detail="Images are limited to 20 megapixels for OCR")
                 adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
                 try:
-                    extracted = _ocr_image(adjusted)
-                    quality_marker = _ocr_quality_marker(adjusted)
+                    try:
+                        extracted = _ocr_image(adjusted)
+                        quality_marker = _ocr_quality_marker(adjusted)
+                    except HTTPException as exc:
+                        if exc.status_code == 503:
+                            raise
+                        if exc.status_code == 413:
+                            extracted = ""
+                            quality_marker = None
+                            image_processing_failure = "image exceeds the OCR processing limit"
+                        else:
+                            extracted = ""
+                            quality_marker = None
+                            image_processing_failure = "OCR engine error"
+                    except Exception:
+                        extracted = ""
+                        quality_marker = None
+                        image_processing_failure = "OCR processing error"
+                    else:
+                        image_processing_failure = None
                 finally:
                     if used_scan_adjustments:
                         adjusted.close()
@@ -526,10 +566,15 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             raise
         except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The saved image could not be decoded for OCR") from exc
+        if image_processing_failure:
+            return _bounded_extraction(
+                f"[Image OCR]\n[Page 1 OCR]\n[Page not processed: {image_processing_failure}]",
+                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
+            )
         if not extracted:
-            raise HTTPException(
-                status_code=422,
-                detail="No readable text was found in the image. The original document remains preserved.",
+            return _bounded_extraction(
+                "[Image OCR]\n[Page 1 OCR]\n[No readable text detected on this page]",
+                "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image",
             )
         page_content = "\n".join(value for value in (quality_marker, extracted) if value)
         return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{page_content}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
@@ -569,10 +614,40 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
         return _bounded_extraction(extracted, "server_email_text")
 
     if mime == "application/vnd.ms-outlook" or filename.endswith(".msg"):
-        raise HTTPException(
-            status_code=415,
-            detail="Outlook .msg files are preserved, but extraction is not available on this server. Export the message as .eml or PDF and upload it again.",
-        )
+        temp_path = None
+        try:
+            # Parse a temporary copy of the already-verified original.
+            with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as temporary:
+                temporary.write(content)
+                temp_path = temporary.name
+            with MapiMessage.from_file(temp_path, strict=False) as message:
+                email_message = message.to_email_message()
+                plain_part = email_message.get_body(preferencelist=("plain",))
+                if plain_part is not None:
+                    body = str(plain_part.get_content() or "").strip()
+                else:
+                    html_part = email_message.get_body(preferencelist=("html",))
+                    parser = _HTMLText()
+                    if html_part is not None:
+                        parser.feed(str(html_part.get_content() or ""))
+                    body = parser.text()
+                headers = "\n".join(
+                    f"{name}: {email_message.get(name)}"
+                    for name in ("From", "To", "Cc", "Date", "Subject", "Message-ID")
+                    if email_message.get(name)
+                )
+                extracted = (headers + "\n\n" + body).strip()
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="The saved Outlook message could not be read") from exc
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+        if not extracted:
+            raise HTTPException(status_code=422, detail="The Outlook message contains no readable content")
+        return _bounded_extraction(extracted, "server_outlook_msg")
 
     if mime == "application/msword" or filename.endswith(".doc"):
         extracted = _extract_legacy_doc(content)
@@ -743,10 +818,13 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if metadata.get("kind") != "document_extraction_v1":
             continue
         _verify_persisted_extraction(row, upload, db, content)
-        if row.extraction_status == "partial":
-            # Retry OCR from the immutable original. If nothing improves, retain
-            # the same analysis ID; never create another evidence upload.
-            retry_text, retry_method = _extract(upload, content, evidence)
+        failed_pages = set(_unprocessed_page_numbers(row.source_text or ""))
+        if row.extraction_status == "partial" and failed_pages:
+            # Retry only failed pages; preserve completed and unreadable pages.
+            retry_text, retry_method = _extract(
+                upload, content, evidence, retry_only_pages=failed_pages,
+                previous_source_text=row.source_text or "",
+            )
             retry_text = _apply_capture_page_number(retry_text, evidence)
             if retry_text.strip() != (row.source_text or "").strip() or retry_method != metadata.get("extraction_method"):
                 retry_status, retry_metadata = _extraction_metadata(upload, retry_text, retry_method)
