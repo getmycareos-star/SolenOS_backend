@@ -1145,15 +1145,14 @@ def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
     try:
         seed_person_and_caregiver()
 
-        def fail_apply(self, correction, *, commit=True):
-            raise RuntimeError("injected correction learning failure")
+        def no_op_apply(self, correction, *, commit=True):
+            return None
 
-        monkeypatch.setattr(api_v1.LearningEngine, "apply_correction", fail_apply)
-        monkeypatch.setattr(
-            api_v1,
-            "reconcile_person_change_intelligence",
-            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("injected reconciliation failure")),
-        )
+        def fail_reconciliation(*args, **kwargs):
+            raise RuntimeError("injected reconciliation failure")
+
+        monkeypatch.setattr(api_v1.LearningEngine, "apply_correction", no_op_apply)
+        monkeypatch.setattr(api_v1, "execute_care_continuity_reconciliation", fail_reconciliation)
         response = TestClient(app).post(
             "/api/v1/corrections",
             headers=session_headers("person-daily-test", "caregiver-daily-test"),
@@ -1168,6 +1167,9 @@ def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
             },
         )
         assert response.status_code == 200, response.text
+        execution = response.json()["care_continuity_execution"]
+        assert execution["stages"] == {"correction": "committed", "reconciliation": "pending"}
+        assert execution["retry_required"] is True
         db = TestingSessionLocal()
         try:
             saved = db.query(Correction).filter_by(id=response.json()["id"]).one()

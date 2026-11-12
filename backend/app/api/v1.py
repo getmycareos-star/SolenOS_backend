@@ -1264,6 +1264,23 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
     db.add(db_correction)
     try:
         db.flush()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Correction receipt could not be persisted")
+        raise HTTPException(
+            status_code=503,
+            detail="The correction receipt could not be saved. Retry after refreshing the record.",
+        ) from exc
+
+    execution = {
+        "workflow": "care_record_correction",
+        "status": "pending",
+        "stages": {"correction": "committed", "reconciliation": "pending"},
+        "retry_required": True,
+        "failure_code": "reassessment_pending",
+    }
+    try:
         engine = LearningEngine(db)
         engine.apply_correction(db_correction, commit=False)
         engine.record_learning_event(
@@ -1284,14 +1301,23 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
             correction_id=db_correction.id,
         )
         db.commit()
+        execution.setdefault("stages", {})["correction"] = "committed"
         execution["stages"]["reconciliation"] = "committed"
-    except Exception as exc:
+        execution["status"] = "committed"
+        execution["retry_required"] = False
+    except Exception:
         db.rollback()
-        logger.exception("Correction and care-record reassessment could not be committed")
-        raise HTTPException(
-            status_code=503,
-            detail="The correction could not be saved with its care-record reassessment. Retry after refreshing the record.",
-        ) from exc
+        logger.exception(
+            "Correction receipt %s persisted; care-record reassessment remains pending",
+            db_correction.id,
+        )
+        execution = {
+            "workflow": "care_record_correction",
+            "status": "pending",
+            "stages": {"correction": "committed", "reconciliation": "pending"},
+            "retry_required": True,
+            "failure_code": "reassessment_pending",
+        }
 
     db.refresh(db_correction)
     db_correction.care_continuity_execution = execution
