@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.models.care import CareEvent, Evidence, Person
+from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.services import care_continuity_execution as execution
 
@@ -144,6 +144,55 @@ def test_shared_coordinator_rejects_companion_message_from_another_caregiver(mon
             caregiver_id="caregiver-1",
             source_message_id="message-1",
             source_conversation_id="conversation-1",
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_validates_correction_and_reassesses_in_caller_transaction(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    correction = SimpleNamespace(
+        id="correction-1",
+        person_id="person-1",
+        caregiver_id="caregiver-1",
+    )
+    db = _session({Person: person, Correction: correction})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    result = execution.execute_care_continuity_reconciliation(
+        db,
+        "person-1",
+        workflow="care_record_correction",
+        caregiver_id="caregiver-1",
+        correction_id="correction-1",
+    )
+
+    assert result["correction_id"] == "correction-1"
+    assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
+    reconciled.assert_called_once_with(db, "person-1", None)
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_correction_from_another_caregiver(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    correction = SimpleNamespace(
+        id="correction-1",
+        person_id="person-1",
+        caregiver_id="different-caregiver",
+    )
+    db = _session({Person: person, Correction: correction})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="authenticated caregiver"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="care_record_correction",
+            caregiver_id="caregiver-1",
+            correction_id="correction-1",
         )
 
     reconciled.assert_not_called()
