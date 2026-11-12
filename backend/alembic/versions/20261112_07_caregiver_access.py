@@ -44,40 +44,27 @@ def upgrade():
 
     # Existing server-issued sessions are the only historical proof that a
     # caregiver identity was granted record access. Do not grant access merely
-    # because a profile or email happens to exist.
-    op.execute(sa.text("""
+    # because a profile or email happens to exist. The baseline migration may
+    # already have created the current ORM shape (including access_scope), while
+    # older deployed schemas may not have that column yet.
+    grant_columns = {item["name"] for item in inspect(bind).get_columns("caregiver_access_grants")}
+    access_scope_column = ", access_scope" if "access_scope" in grant_columns else ""
+    access_scope_value = ", 'full_record'" if "access_scope" in grant_columns else ""
+
+    if bind.dialect.name == "sqlite":
+        grant_id = "lower(hex(randomblob(16)))"
+    else:
+        grant_id = "gen_random_uuid()::text"
+
+    op.execute(sa.text(f"""
         INSERT INTO caregiver_access_grants
-            (id, person_id, caregiver_id, caregiver_profile_id, role, status, can_manage_members, granted_at)
+            (id, person_id, caregiver_id, caregiver_profile_id, role{access_scope_column}, status, can_manage_members, granted_at)
         SELECT
-            lower(hex(randomblob(16))),
+            {grant_id},
             ranked.person_id,
             ranked.caregiver_id,
             p.id,
-            CASE WHEN ranked.position = 1 THEN 'primary' ELSE 'family' END,
-            'active',
-            CASE WHEN ranked.position = 1 THEN TRUE ELSE FALSE END,
-            COALESCE(ranked.first_created_at, CURRENT_TIMESTAMP)
-        FROM (
-            SELECT person_id, caregiver_id, MIN(created_at) AS first_created_at,
-                   ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY MIN(created_at), caregiver_id) AS position
-            FROM anonymous_sessions
-            GROUP BY person_id, caregiver_id
-        ) ranked
-        LEFT JOIN caregiver_profiles p
-          ON p.person_id = ranked.person_id AND p.session_caregiver_id = ranked.caregiver_id
-        WHERE NOT EXISTS (
-            SELECT 1 FROM caregiver_access_grants g
-            WHERE g.person_id = ranked.person_id AND g.caregiver_id = ranked.caregiver_id
-        )
-    """)) if bind.dialect.name == "sqlite" else op.execute(sa.text("""
-        INSERT INTO caregiver_access_grants
-            (id, person_id, caregiver_id, caregiver_profile_id, role, status, can_manage_members, granted_at)
-        SELECT
-            gen_random_uuid()::text,
-            ranked.person_id,
-            ranked.caregiver_id,
-            p.id,
-            CASE WHEN ranked.position = 1 THEN 'primary' ELSE 'family' END,
+            CASE WHEN ranked.position = 1 THEN 'primary' ELSE 'family' END{access_scope_value},
             'active',
             CASE WHEN ranked.position = 1 THEN TRUE ELSE FALSE END,
             ranked.first_created_at
