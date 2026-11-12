@@ -3053,6 +3053,7 @@ def test_normal_reconciliation_persists_only_actionable_source_linked_questions(
     try:
         from app.core.database import get_db
         from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+        from app.services.care_continuity import next_best_questions
         app.dependency_overrides[get_db] = override_get_db
 
         db = TestingSessionLocal()
