@@ -283,6 +283,32 @@ def test_shared_coordinator_rejects_evidence_not_in_assertion_lineage(monkeypatc
     db.commit.assert_not_called()
 
 
+def test_shared_coordinator_rejects_assertion_with_cross_person_source_event(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    assertion = SimpleNamespace(
+        id="assertion-1",
+        person_id="person-1",
+        evidence_ids=[],
+        source_event_id="event-from-person-2",
+        source_message_id=None,
+        source_conversation_id=None,
+    )
+    db = _session({Person: person, CareAssertion: assertion, CareEvent: None})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="outside this care record"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="care_assertion_review",
+            source_assertion_id="assertion-1",
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
 def test_shared_coordinator_rejects_assertion_from_another_person(monkeypatch):
     person = SimpleNamespace(id="person-1")
     db = _session({Person: person, CareAssertion: None})
