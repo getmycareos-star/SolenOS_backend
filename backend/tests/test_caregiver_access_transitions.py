@@ -297,6 +297,7 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
     inherited_item = next(item for item in inherited_loops.json()["items"] if item["id"] == existing_loop_id)
     assert inherited_item["assigned_caregiver_id"] == james["caregiver_id"]
     assert inherited_item["caregiver_id"] == primary["caregiver"]["id"]
+    assert inherited_item["owner_label"] == "James"
     assert len([item for item in inherited_loops.json()["items"] if item["title"] == "Confirm Margaret's clinic appointment"]) == 1
 
     db = TestSessionLocal()
