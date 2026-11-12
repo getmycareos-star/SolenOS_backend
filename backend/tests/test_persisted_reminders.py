@@ -403,7 +403,10 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
         assert "Private care event title" not in sent_payloads[0]["data"]
         assert "Private care details" not in sent_payloads[0]["data"]
         assert "You have a care update" in sent_payloads[0]["data"]
-        for in_app_item in in_app_notifications:
+        assert db.query(CarePushDelivery).filter_by(
+            notification_id=in_app_notifications[0].id
+        ).count() == 1
+        for in_app_item in in_app_notifications[1:]:
             assert db.query(CarePushDelivery).filter_by(notification_id=in_app_item.id).count() == 0
         db.refresh(stale_in_app_delivery)
         assert stale_in_app_delivery.status == "cancelled"
