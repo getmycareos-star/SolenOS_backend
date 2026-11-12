@@ -583,14 +583,15 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             with MapiMessage.from_file(temp_path) as message:
                 email_message = message.to_email_message()
                 plain_part = email_message.get_body(preferencelist=("plain",))
-                if plain_part is not None:
-                    body = str(plain_part.get_content() or "").strip()
-                else:
+                body = str(plain_part.get_content() or "").strip() if plain_part is not None else ""
+                if not body:
                     html_part = email_message.get_body(preferencelist=("html",))
                     parser = _HTMLText()
                     if html_part is not None:
                         parser.feed(str(html_part.get_content() or ""))
                     body = parser.text()
+                if not body:
+                    body = str(message.body or "").strip()
                 header_values = (
                     ("From", email_message.get("From")),
                     ("To", email_message.get("To")),
@@ -599,10 +600,10 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                     ("Subject", email_message.get("Subject") or message.subject),
                     ("Message-ID", email_message.get("Message-ID")),
                 )
-                headers = "\\n".join(
+                headers = "\n".join(
                     f"{name}: {value}" for name, value in header_values if value
                 )
-                extracted = (headers + "\\n\\n" + body).strip()
+                extracted = (headers + "\n\n" + body).strip()
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved Outlook message could not be read") from exc
         finally:
