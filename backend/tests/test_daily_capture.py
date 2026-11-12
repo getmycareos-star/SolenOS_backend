@@ -1882,3 +1882,88 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             db.close()
     finally:
         teardown_db()
+
+def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatch):
+    from app.api import v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum seems okay today. Nothing unusual that I noticed."
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [
+                    {
+                        "subject": "Mum",
+                        "observation": "seems okay today",
+                        "source_quote": original_report,
+                        "review_status": "pending_review",
+                        "source_event_id": source_event_id,
+                    },
+                    {
+                        "subject": "Mum",
+                        "observation": "nothing unusual that I noticed",
+                        "source_quote": original_report,
+                        "review_status": "pending_review",
+                        "source_event_id": source_event_id,
+                    },
+                ],
+                "open_questions": [],
+            }
+
+        monkeypatch.setattr(api_v1, "extract_review_candidates", exact_source_candidates)
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "minimal-absence-report-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert receipt["success"] is True
+        assert receipt["execution_status"]["source_preservation"] == "verified"
+
+        db = TestingSessionLocal()
+        try:
+            event = db.query(CareEvent).filter_by(id=receipt["id"]).one()
+            evidence = db.query(Evidence).filter_by(id=receipt["evidence_ids"][0]).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=evidence.id,
+            ).all()
+
+            assert json.loads(event.description)["notes"] == original_report
+            assert json.loads(evidence.source_text)["original_capture"]["notes"] == original_report
+            assert len(observations) == 2
+            by_value = {row.value_text: row for row in observations}
+            assert set(by_value) == {"seems okay today", "nothing unusual that I noticed"}
+            assert all(row.epistemic_status == "uncertain" for row in observations)
+            assert by_value["seems okay today"].hedge_marker == "seems"
+            assert by_value["nothing unusual that I noticed"].hedge_marker == "nothing unusual"
+            assert all(row.evidence_id == evidence.id for row in observations)
+            assert all(row.created_by_caregiver_id == "caregiver-daily-test" for row in observations)
+            assert all("not independently verified" in row.context for row in observations)
+        finally:
+            db.close()
+
+        current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert current.status_code == 200, current.text
+        item = next(row for row in current.json()["items"] if row["id"] == receipt["id"])
+        assert item["source_type"] == "caregiver_report"
+        assert item["epistemic_status"] == "caregiver_reported"
+        assert {row["value_text"] for row in item["derived_observations"]} == {
+            "seems okay today",
+            "nothing unusual that I noticed",
+        }
+        assert all(row["epistemic_status"] == "uncertain" for row in item["derived_observations"])
+    finally:
+        teardown_db()
