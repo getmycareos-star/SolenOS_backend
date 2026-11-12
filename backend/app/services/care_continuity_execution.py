@@ -106,6 +106,28 @@ def execute_care_continuity_reconciliation(
                 "The source evidence is not linked to the supplied source event"
             )
 
+    appointment_workspace = None
+    appointment_revision = None
+    if source_appointment_workspace_id:
+        appointment_workspace = db.query(AppointmentWorkspaceRecord).filter(
+            AppointmentWorkspaceRecord.id == source_appointment_workspace_id,
+            AppointmentWorkspaceRecord.person_id == person_id,
+        ).first()
+        if appointment_workspace is None:
+            raise CareContinuityExecutionError(
+                "The appointment workspace is missing or belongs to another care record"
+            )
+        if source_appointment_workspace_revision_id:
+            appointment_revision = db.query(AppointmentWorkspaceRevision).filter(
+                AppointmentWorkspaceRevision.id == source_appointment_workspace_revision_id,
+                AppointmentWorkspaceRevision.record_id == source_appointment_workspace_id,
+                AppointmentWorkspaceRevision.person_id == person_id,
+            ).first()
+            if appointment_revision is None:
+                raise CareContinuityExecutionError(
+                    "The appointment workspace source revision is missing or belongs to another care record"
+                )
+
     assertion = None
     if source_assertion_id:
         assertion = db.query(CareAssertion).filter(
@@ -199,6 +221,8 @@ def execute_care_continuity_reconciliation(
             "source_preservation": "verified",
             "evidence": "verified" if evidence_rows else "not_applicable",
             "source_message": "verified" if message is not None else "not_applicable",
+            "appointment_workspace_source": "verified" if appointment_workspace is not None else "not_applicable",
+            "appointment_workspace_revision": "verified" if appointment_revision is not None else "not_applicable",
             "reconciliation": "staged_in_caller_transaction",
             "longitudinal_retrieval": "not_verified",
         },
