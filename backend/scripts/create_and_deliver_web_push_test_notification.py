@@ -37,6 +37,7 @@ def main() -> None:
         ).one_or_none()
         if notification is None:
             raise SystemExit("the reminder worker has not created its due notification")
+        notification_id = notification.id
 
         subscriptions = db.query(CarePushSubscription).filter(
             CarePushSubscription.person_id == person_id,
@@ -48,7 +49,7 @@ def main() -> None:
 
         accepted = deliver_pending_web_pushes(db=db, now=datetime.now(timezone.utc) + timedelta(seconds=2))
         delivery = db.query(CarePushDelivery).filter(
-            CarePushDelivery.notification_id == notification.id,
+            CarePushDelivery.notification_id == notification_id,
             CarePushDelivery.subscription_id == subscriptions[0].id,
         ).one_or_none()
         if delivery is None or delivery.status != "accepted" or delivery.provider_accepted_at is None:
@@ -58,7 +59,7 @@ def main() -> None:
             )
 
     print(json.dumps({
-        "notification_id": notification.id,
+        "notification_id": notification_id,
         "delivery_status": "accepted",
         "provider_accepted": True,
         "source_reminder_id": reminder_id,
