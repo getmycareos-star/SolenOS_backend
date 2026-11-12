@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -1491,21 +1491,22 @@ def test_medication_authoring_starts_reported_and_requires_explicit_review():
             row.recorded_at = datetime.now(timezone.utc) - timedelta(days=60)
         db.commit()
         db.close()
-        with engine.begin() as connection:
-            connection.exec_driver_sql("""
-                CREATE TABLE care_assertion_revisions (
-                    id VARCHAR(36) PRIMARY KEY,
-                    person_id VARCHAR(36) NOT NULL,
-                    assertion_id VARCHAR(36) NOT NULL,
-                    revision_number INTEGER NOT NULL,
-                    previous_payload JSON,
-                    current_payload JSON,
-                    revision_reason TEXT,
-                    provenance_id VARCHAR(36),
-                    changed_by_caregiver_id VARCHAR(36),
-                    changed_at DATETIME NOT NULL
-                )
-            """)
+        if not inspect(engine).has_table("care_assertion_revisions"):
+            with engine.begin() as connection:
+                connection.exec_driver_sql("""
+                    CREATE TABLE care_assertion_revisions (
+                        id VARCHAR(36) PRIMARY KEY,
+                        person_id VARCHAR(36) NOT NULL,
+                        assertion_id VARCHAR(36) NOT NULL,
+                        revision_number INTEGER NOT NULL,
+                        previous_payload JSON,
+                        current_payload JSON,
+                        revision_reason TEXT,
+                        provenance_id VARCHAR(36),
+                        changed_by_caregiver_id VARCHAR(36),
+                        changed_at DATETIME NOT NULL
+                    )
+                """)
 
         stale_projection = client.get("/api/v1/care-continuity/medications", headers=headers)
         assert stale_projection.status_code == 200, stale_projection.text
