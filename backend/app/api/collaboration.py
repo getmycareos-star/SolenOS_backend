@@ -60,7 +60,7 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.companion_care_updates import proposal_payload
+from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.schemas.care_continuity import CareAssertionCreate
