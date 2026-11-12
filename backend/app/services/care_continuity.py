@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
 from app.models.care import CareEvent, Evidence
+from app.models.action import Action
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority, ResolutionMechanism
@@ -484,6 +485,87 @@ def next_best_questions(
                 "source_id": item.id, "_weight": 30,
             })
 
+    # Registered actions that are explicitly blocked for clarification are
+    # a deterministic source of necessary questions. This does not infer
+    # clinical urgency from model confidence or priority: the action itself
+    # must require confirmation, remain in needs_clarification, and cite
+    # persisted evidence from this same care record.
+    blocked_actions = db.query(Action).filter(
+        Action.person_id == person_id,
+        Action.status == "needs_clarification",
+        Action.requires_confirmation.is_(True),
+        Action.expired_at.is_(None),
+        Action.cancelled_at.is_(None),
+        Action.superseded_by_action_id.is_(None),
+    ).order_by(Action.created_at.asc(), Action.id.asc()).all()
+    action_evidence_ids = list(dict.fromkeys(
+        str(value)
+        for action in blocked_actions
+        for value in ([action.source_evidence_id] + list(action.source_evidence_ids or []))
+        if value
+    ))
+    valid_action_evidence_ids = {
+        str(row[0]) for row in db.query(Evidence.id).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(action_evidence_ids),
+        ).all()
+    } if action_evidence_ids else set()
+    for action in blocked_actions:
+        source_ids = list(dict.fromkeys(
+            str(value) for value in ([action.source_evidence_id] + list(action.source_evidence_ids or []))
+            if value
+        ))
+        if not source_ids or not set(source_ids).issubset(valid_action_evidence_ids):
+            continue
+        is_medication = bool(action.is_medication_action)
+        subject = (
+            str(action.subject_label or action.subject_id or "the recorded medication")
+            if is_medication else
+            str(action.subject_label or action.subject_id or "the recorded care action")
+        )
+        action_text = str(action.normalized_action or action.original_text or action.action_object or "").strip()
+        if is_medication:
+            question_text = f"Can the prescribing clinician confirm the current instruction for {subject}?"
+            answerer_role = "professional"
+            rationale = (
+                "This medication action is explicitly marked as needing clarification and requiring confirmation. "
+                "The instruction must not be acted on until its source is confirmed."
+            )
+            dependency = (
+                f"Medication action {action.id} is blocked pending confirmation; the care plan cannot rely on "
+                "this instruction until a responsible prescribing professional confirms it."
+            )
+        else:
+            question_text = f"Who can confirm the recorded care action for {subject} before it proceeds?"
+            answerer_role = "not_known"
+            rationale = (
+                "This registered care action is explicitly marked as needing clarification and requiring confirmation. "
+                "The action must not proceed until the responsible source confirms it."
+            )
+            dependency = (
+                f"Care action {action.id} is blocked pending confirmation; the next care step depends on "
+                "a responsible source confirming this recorded instruction."
+            )
+        candidates.append({
+            "question": question_text,
+            "subject_type": str(action.subject_type or "patient"),
+            "subject_id": str(action.subject_id or person_id),
+            "priority": "informational",
+            "necessity": "necessary",
+            "necessity_rationale": rationale,
+            "decision_dependency": dependency,
+            "reason": (
+                f"Persisted action status is needs_clarification; requires_confirmation is true. "
+                f"Source action: {action_text[:500]}"
+            ),
+            "evidence_ids": source_ids,
+            "source_kind": "registered_action",
+            "source_id": str(action.id),
+            "source_ids": [str(action.id)],
+            "intended_answerer_role": answerer_role,
+            "_weight": 20,
+        })
+
     gaps = db.query(InformationGap).filter(
         InformationGap.person_id == person_id,
         InformationGap.lifecycle_status.in_([GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED, GapLifecycleStatus.PARTIALLY_RESOLVED]),
@@ -648,6 +730,7 @@ def next_best_questions(
                     necessity=clean["necessity"],
                     necessity_rationale=clean["necessity_rationale"],
                     evidence_ids=clean["evidence_ids"],
+                    intended_answerer_role=clean.get("intended_answerer_role"),
                     context=[source_context],
                 )
                 db.add(question)
@@ -684,6 +767,8 @@ def next_best_questions(
                 existing.priority = Priority(clean["priority"]) if _priority_weight(clean["priority"]) > _priority_weight(existing.priority) else existing.priority
                 existing.necessity = clean["necessity"]
                 existing.necessity_rationale = clean["necessity_rationale"]
+                if clean.get("intended_answerer_role"):
+                    existing.intended_answerer_role = clean["intended_answerer_role"]
                 if existing_before != _open_question_state(existing):
                     _record_open_question_revision(
                         db, existing, before_state=existing_before, change_kind="updated"
