@@ -7,6 +7,7 @@ from app.models.memory import (
     LearningEvent as LearningEventModel,
 )
 from app.models.care import Insight as InsightModel
+from app.models.care_continuity import CareAssertion, CareRecordRelationship
 
 
 class SavePipelineEvent:
@@ -59,6 +60,76 @@ class LearningEngine:
         corrected_text = correction.corrected_text
         reason = correction.reason
         person_id = correction.person_id
+
+        if target_type == "care_assertion":
+            original = self.db.query(CareAssertion).filter(
+                CareAssertion.id == target_id,
+                CareAssertion.person_id == person_id,
+            ).with_for_update().first()
+            if original is None:
+                raise ValueError("Correction target assertion was not found for this care recipient")
+
+            # Idempotency: one correction can produce at most one replacement assertion.
+            existing_link = self.db.query(CareRecordRelationship).filter(
+                CareRecordRelationship.person_id == person_id,
+                CareRecordRelationship.source_type == "correction",
+                CareRecordRelationship.source_id == correction.id,
+                CareRecordRelationship.relationship_type == "corrects",
+                CareRecordRelationship.target_type == "care_assertion",
+            ).first()
+            if existing_link is not None:
+                if commit:
+                    self.db.commit()
+                return
+
+            original.assertion_status = "superseded"
+            replacement = CareAssertion(
+                person_id=person_id,
+                subject_type=original.subject_type,
+                subject_id=original.subject_id,
+                field=original.field,
+                assertion_kind=original.assertion_kind,
+                asserted_value=corrected_text,
+                source_event_id=None,
+                source_label="Caregiver correction (not independently verified)",
+                source_text=(
+                    f"Correction ID: {correction.id}; target assertion: {original.id}; "
+                    f"original value: {original.asserted_value}; corrected value: {corrected_text}; "
+                    f"reason: {reason or 'Not supplied'}"
+                ),
+                evidence_ids=[],
+                assertion_status="reported",
+                epistemic_state="reported",
+                observed_at=None,
+                created_by_caregiver_id=correction.caregiver_id,
+            )
+            self.db.add(replacement)
+            self.db.flush()
+            self.db.add_all([
+                CareRecordRelationship(
+                    person_id=person_id,
+                    source_type="correction",
+                    source_id=correction.id,
+                    relationship_type="corrects",
+                    target_type="care_assertion",
+                    target_id=replacement.id,
+                    provenance="Caregiver-submitted correction; replacement remains reported and unverified.",
+                    created_by_caregiver_id=correction.caregiver_id,
+                ),
+                CareRecordRelationship(
+                    person_id=person_id,
+                    source_type="care_assertion",
+                    source_id=original.id,
+                    relationship_type="superseded_by",
+                    target_type="care_assertion",
+                    target_id=replacement.id,
+                    provenance=f"Superseded by caregiver correction {correction.id}; original assertion retained.",
+                    created_by_caregiver_id=correction.caregiver_id,
+                ),
+            ])
+            if commit:
+                self.db.commit()
+            return
 
         if target_type == "insight":
             insight = self.db.query(InsightModel).filter(
