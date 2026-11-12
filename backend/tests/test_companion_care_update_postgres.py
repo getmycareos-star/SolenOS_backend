@@ -1,5 +1,6 @@
 """PostgreSQL integration for Companion-to-LCR review; requires an isolated migrated database."""
 import importlib
+import json
 import os
 
 import pytest
@@ -282,8 +283,8 @@ def test_postgres_qwen_assistance_summary_requires_explicit_caregiver_approval()
                 task_text="Summarize the saved medication observation.",
                 context_text="",
                 workflow="medication_day",
-                source_event_ids_json="[" + __import__("json").dumps(event_id) + "]",
-                source_evidence_ids_json=__import__("json").dumps(evidence_ids),
+                source_event_ids_json="[" + json.dumps(event_id) + "]",
+                source_evidence_ids_json=json.dumps(evidence_ids),
             )
             db.add(job)
             db.flush()
@@ -295,7 +296,7 @@ def test_postgres_qwen_assistance_summary_requires_explicit_caregiver_approval()
                 model_name="qwen-test",
                 output_text="The caregiver reported that the morning medication was taken.",
                 output_metadata={},
-                source_event_ids_json=__import__("json").dumps([event_id]),
+                source_event_ids_json=json.dumps([event_id]),
                 source_evidence_ids_json=__import__("json").dumps(evidence_ids),
                 review_status="pending_review",
                 review_required=True,
