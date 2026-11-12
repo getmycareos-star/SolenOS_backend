@@ -152,6 +152,14 @@ def downgrade():
         constraints = inspector.get_unique_constraints("caregiver_accounts")
         if not any(item.get("column_names") == ["person_id"] for item in constraints):
             op.create_unique_constraint("uq_caregiver_accounts_person_id", "caregiver_accounts", ["person_id"])
+    if inspector.has_table("caregiver_responsibility_transfers"):
+        for item in inspect(bind).get_indexes("caregiver_responsibility_transfers"):
+            op.drop_index(item["name"], table_name="caregiver_responsibility_transfers")
+        op.drop_table("caregiver_responsibility_transfers")
+    if inspector.has_table("caregiver_invitations"):
+        for item in inspect(bind).get_indexes("caregiver_invitations"):
+            op.drop_index(item["name"], table_name="caregiver_invitations")
+        op.drop_table("caregiver_invitations")
     if inspector.has_table("caregiver_access_grants"):
         for item in inspect(bind).get_indexes("caregiver_access_grants"):
             if item.get("name", "").startswith("ix_caregiver_access_grants_"):
