@@ -1161,18 +1161,25 @@ def list_document_processing_status(
             unreadable_pages = intelligence.get("unreadable_page_numbers") if isinstance(intelligence.get("unreadable_page_numbers"), list) else []
         extraction_status = analysis.extraction_status if analysis else "not_started"
         job_status = job.status if job else None
+        retry_exhausted_pages = extraction.get("retry_exhausted_page_numbers") if isinstance(extraction.get("retry_exhausted_page_numbers"), list) else []
+        retryable_pages = [
+            int(match.group(1))
+            for match in re.finditer(
+                r"(?m)^\\[Page\\s+(\\d+)\\s+OCR\\]\\n\\[Page not processed: (?:OCR engine error|OCR processing error)\\]",
+                analysis.source_text or "",
+            )
+            if int(match.group(1)) not in set(retry_exhausted_pages)
+        ] if analysis else []
         if job_status == "cancelled":
             processing_status = "cancelled"
-        elif job_status == "failed":
+        elif extraction_status in {"partial", "partially_processed"} or unprocessed_pages or unreadable_pages:
+            processing_status = "partially_processed"
+        elif job_status == "failed" or extraction_status == "failed":
             processing_status = "retry_required"
         elif job_status == "processing":
             processing_status = "processing"
         elif job_status == "queued":
             processing_status = "queued"
-        elif extraction_status == "failed":
-            processing_status = "failed"
-        elif extraction_status in {"partial", "partially_processed"} or unprocessed_pages or unreadable_pages:
-            processing_status = "partially_processed"
         elif analysis and extraction_status == "available" and intelligence.get("status") == "available":
             processing_status = "processed"
         elif analysis and extraction_status == "available":
@@ -1233,6 +1240,10 @@ def list_document_processing_status(
             "processed_page_numbers": processed_pages,
             "unprocessed_page_numbers": unprocessed_pages,
             "unreadable_page_numbers": unreadable_pages,
+            "retryable_page_numbers": retryable_pages,
+            "retry_exhausted_page_numbers": retry_exhausted_pages,
+            "retry_scheduled": bool(job_status == "queued" and retryable_pages),
+            "retry_required": bool(job_status == "failed" or retry_exhausted_pages),
             "review_required": bool(pending_review or processing_status == "review_required"),
             "written_to_lcr": any(
                 isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
