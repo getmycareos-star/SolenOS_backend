@@ -317,13 +317,32 @@ def next_best_questions(
         # Candidate generation is internal intelligence, not a caregiver request.
         # Persist only after a separate, explicit necessity assessment has marked it necessary.
         if persist and clean.get("necessity") == "necessary":
-            existing = db.query(OpenQuestion).filter(
+            matching_rows = db.query(OpenQuestion).filter(
                 OpenQuestion.person_id == person_id,
                 OpenQuestion.subject_type == clean["subject_type"],
                 OpenQuestion.subject_id == clean["subject_id"],
                 OpenQuestion.question == clean["question"],
-                OpenQuestion.status.in_(["open", "unresolved"]),
-            ).first()
+            ).order_by(OpenQuestion.asked_at.desc()).limit(50).all()
+            existing = next(
+                (row for row in matching_rows if row.status in {"open", "unresolved"}),
+                None,
+            )
+            if existing is None:
+                existing = next(
+                    (
+                        row for row in matching_rows
+                        if row.status == "closed"
+                        and str(row.closed_reason or "").startswith("automatically_")
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    # Reopen only a system-suppressed/superseded question after
+                    # a fresh explicit necessity assessment; never reopen a
+                    # caregiver-declined or manually closed request.
+                    existing.status = "open"
+                    existing.closed_at = None
+                    existing.closed_reason = None
             source_context = {
                 "source_kind": clean["source_kind"],
                 "source_id": clean["source_id"],
