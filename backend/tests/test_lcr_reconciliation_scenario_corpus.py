@@ -216,6 +216,11 @@ def test_curated_corpus_has_exact_family_distribution_and_100_unique_people():
     # name and value. Otherwise the Delta Engine correctly rejects a synthetic
     # model claim that is not literally supported by the source event.
     for scenario in SCENARIOS:
-        initial = scenario["incoming_events"][0]
-        assert initial.get("assertion_name", "").casefold() in initial["claim"].casefold()
-        assert initial.get("assertion_value", "").casefold() in initial["claim"].casefold()
+        for event in scenario["incoming_events"]:
+            if event.get("assertion_name"):
+                assert event["assertion_name"].casefold() in event["claim"].casefold(), (
+                    f"{scenario['scenario_id']}:{event['id']}: assertion name is not source-grounded"
+                )
+                assert event["assertion_value"].casefold() in event["claim"].casefold(), (
+                    f"{scenario['scenario_id']}:{event['id']}: assertion value is not source-grounded"
+                )
