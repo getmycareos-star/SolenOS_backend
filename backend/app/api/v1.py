@@ -1088,8 +1088,12 @@ def _validate_quick_check_in(payload: dict) -> None:
     }
     allowed_areas = completed_care if kind == "care_completed" else care_areas
     selected_areas = quick.get("selected_areas")
+    # A check-in is an overall caregiver impression, not a domain-by-domain
+    # assessment. All three supported impressions may be recorded without
+    # selecting care areas; an empty selection must never imply those areas
+    # were assessed or unchanged.
     overall_impression_only = (
-        kind == "same_as_usual"
+        kind in {"same_as_usual", "change", "uncertain"}
         and selected_areas == []
         and quick.get("scope") == "overall_impression_only"
     )
