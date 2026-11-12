@@ -1,14 +1,14 @@
 """Track next quiet-hours release time for due reminder notifications.
 
-Revision ID: 20261112_04_quiet_hours_release
+Revision ID: 20261112_05_quiet_release
 Revises: 20261112_03_web_push
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261112_04_quiet_hours_release"
-down_revision = "20261112_03_web_push"
+revision = "20261112_05_quiet_release"
+down_revision = "20261112_04_web_push"
 branch_labels = None
 depends_on = None
 
