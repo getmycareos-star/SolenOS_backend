@@ -737,7 +737,6 @@ def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
             "status": "deferred",
             "deferred_reason": "Waiting for the clinic to return the call.",
             "review_at": review_at.isoformat(),
-            "reason": "Recheck after the expected callback window.",
         },
     )
     assert deferred.status_code == 200, deferred.text
