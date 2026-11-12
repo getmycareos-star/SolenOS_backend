@@ -458,7 +458,7 @@ def _docx_bytes(text):
             "application/rtf",
             b"{\\rtf1\\ansi Patient\\'92s mobility\\par Needs a walking frame.}",
             "server_rtf_text",
-            "Needs a walking frame.",
+            "Patient’s mobility\\nNeeds a walking frame.",
         ),
         (
             "clinic-email.eml",
