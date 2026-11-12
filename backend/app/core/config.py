@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:support@solenosai.net"
 
     model_config = SettingsConfigDict(
         env_file=".env",
