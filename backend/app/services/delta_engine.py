@@ -23,7 +23,7 @@ from app.services.care_continuity import create_assertion
 from app.services.claim_provenance import build_claim_provenance
 
 
-DELTA_ENGINE_VERSION = "2026.11.12.5"
+DELTA_ENGINE_VERSION = "2026.11.12.6"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
@@ -35,6 +35,7 @@ DELTA_JSON_CONTRACT = {
         "event_summary": {"type": "string", "maxLength": 140},
         "medications": {
             "type": "array",
+            "maxItems": 1,
             "items": {
                 "type": "object",
                 "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
@@ -50,6 +51,7 @@ DELTA_JSON_CONTRACT = {
         },
         "conditions": {
             "type": "array",
+            "maxItems": 1,
             "items": {
                 "type": "object",
                 "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
@@ -65,6 +67,7 @@ DELTA_JSON_CONTRACT = {
         },
         "symptoms": {
             "type": "array",
+            "maxItems": 1,
             "items": {
                 "type": "object",
                 "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
@@ -80,6 +83,7 @@ DELTA_JSON_CONTRACT = {
         },
         "tests": {
             "type": "array",
+            "maxItems": 1,
             "items": {
                 "type": "object",
                 "required": ["name", "status", "ordered_date", "result_present", "evidence_excerpt"],
@@ -94,6 +98,7 @@ DELTA_JSON_CONTRACT = {
         },
         "follow_ups": {
             "type": "array",
+            "maxItems": 1,
             "items": {
                 "type": "object",
                 "required": ["action", "status", "due_date", "owner", "evidence_excerpt"],
@@ -108,19 +113,21 @@ DELTA_JSON_CONTRACT = {
         },
         "contradictions": {
             "type": "array",
+            "maxItems": 1,
             "items": {
                 "type": "object",
                 "required": ["topic", "reports", "why_conflicting", "evidence_excerpts"],
                 "properties": {
                     "topic": {"type": "string"},
-                    "reports": {"type": "array", "items": {"type": "string"}},
+                    "reports": {"type": "array", "maxItems": 2, "items": {"type": "string", "maxLength": 100}},
                     "why_conflicting": {"type": "string"},
-                    "evidence_excerpts": {"type": "array", "items": {"type": "string"}}
+                    "evidence_excerpts": {"type": "array", "maxItems": 2, "items": {"type": "string", "maxLength": 120}}
                 }
             }
         },
         "clinical_gaps": {
             "type": "array",
+            "maxItems": 1,
             "items": {
                 "type": "object",
                 "required": ["gap", "why_it_matters", "next_question", "evidence_excerpt"],
@@ -432,7 +439,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     system_prompt = (
         "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. "
         "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE, EXISTING_RECORD_CONTEXT, and EXISTING_UNRESOLVED_CARE_LOOPS; do not summarize the event in isolation. EXISTING_RECORD_CONTEXT contains prior persisted events/documents and is historical source material, not automatically verified current state. EXISTING_UNRESOLVED_CARE_LOOPS contains previously recorded gaps, questions, and unresolved contradictions that must be reconciled with the new event. Do not silently close a loop because the new event omits it; do not mark a loop verified complete based only on model inference. "
-        "Return only one JSON object matching the supplied schema. Do not emit markdown. "
+        "Return only one compact JSON object matching the supplied schema. Do not emit markdown or extra keys. "
         "Never invent a diagnosis, medication order, date, test result, follow-up completion, or causal explanation. "
         "Distinguish new information from a meaningful state change. Use unchanged only when the source supports it. "
         "A mention is not an instruction to start/stop/change a medicine unless the source clearly says so. "
@@ -441,7 +448,8 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "For symptoms, compare only when comparable prior observations exist; do not infer trends from incomparable reports. "
         "Clinical gaps and follow-ups must be grounded in supplied text/state. caregiver_summary uses clear plain language; clinician_summary preserves exact clinical terms. "
         "Do not diagnose, recommend treatment, or replace a clinician. Evidence excerpts must be short verbatim snippets from NEW_CARE_EVENT, EXISTING_ACTIVE_STATE, or EXISTING_RECORD_CONTEXT. When citing historical context, do not claim it is current unless its date/status supports that interpretation. "
-        "Keep event_summary, caregiver_summary, and clinician_summary to at most 18 words each. Keep evidence excerpts to the shortest exact quote that proves the finding. "
+        "Keep event_summary, caregiver_summary, and clinician_summary to at most 10 words each. Keep evidence excerpts to the shortest exact quote that proves the finding. " +
+        "Return at most one finding in each array and only when a distinct, source-supported change exists; otherwise return an empty array. Never repeat one fact across arrays. "
         "Do not speculate about medical risks or possible causes. An undocumented cause is unknown, not evidence of a risk. "
         "Do not create both a follow-up and a clinical gap for the same missing information; do not create either unless the source identifies a concrete unanswered care requirement or explicitly requests follow-up. "
         "A meal or fluid-intake observation is not itself a diagnosis or symptom: do not infer reduced appetite, dehydration, illness, or a cause from an amount eaten or drunk. "
