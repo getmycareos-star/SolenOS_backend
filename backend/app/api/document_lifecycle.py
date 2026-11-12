@@ -134,7 +134,13 @@ def _page_numbers(source_text: str, marker: str) -> list[int]:
 
 
 def _unreadable_page_numbers(source_text: str) -> list[int]:
-    return _page_numbers(source_text, "OCR") if "[No readable text detected on this page]" in (source_text or "") else []
+    return [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?m)^\\[Page\\s+(\\d+)\\s+OCR\\]\\n\\[No readable text detected on this page\\]",
+            source_text or "",
+        )
+    ]
 
 
 def _ocr_quality_by_page(source_text: str) -> list[dict]:
