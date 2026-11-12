@@ -994,6 +994,7 @@ def review_appointment_outcome_proposal(
                 db,
                 person_id,
                 workflow="appointment_outcome_review",
+                source_caregiver_id=caregiver_id,
                 source_assertion_id=assertion_id,
                 source_appointment_workspace_id=record.id,
                 source_appointment_workspace_revision_id=revision.id,
