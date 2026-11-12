@@ -25,6 +25,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
+from app.models.qwen_background_job import QwenBackgroundJob
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
@@ -219,7 +220,48 @@ def list_document_intelligence(
         items.append(_response(analysis))
         if len(items) >= limit:
             break
-    return {"items": items, "count": len(items), "identity_scope": "server_session_person_and_caregiver"}
+    jobs = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow == "document_intake",
+        QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
+    ).order_by(QwenBackgroundJob.created_at.desc()).limit(500).all()
+    processing_jobs = []
+    seen_evidence_ids = set()
+    for job in jobs:
+        try:
+            evidence_ids = json.loads(job.evidence_ids_json or "[]")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(evidence_ids, list):
+            continue
+        for evidence_id in evidence_ids:
+            if not isinstance(evidence_id, str) or evidence_id in seen_evidence_ids:
+                continue
+            seen_evidence_ids.add(evidence_id)
+            # The job is scoped to this same person and caregiver. Confirm the
+            # evidence still belongs to that scope before exposing job status.
+            owned = db.query(Evidence.id).filter(
+                Evidence.id == evidence_id,
+                Evidence.person_id == person_id,
+                Evidence.uploaded_by_caregiver_id == caregiver_id,
+                Evidence.type == "document",
+            ).first()
+            if owned is None:
+                continue
+            processing_jobs.append({
+                "evidence_id": evidence_id,
+                "job_id": job.id,
+                "status": job.status,
+                "attempt_count": job.attempt_count,
+                "error_code": job.error_code,
+            })
+    return {
+        "items": items,
+        "count": len(items),
+        "processing_jobs": processing_jobs,
+        "identity_scope": "server_session_person_and_caregiver",
+    }
 
 
 @router.post("/{evidence_id}/intelligence", status_code=201)
