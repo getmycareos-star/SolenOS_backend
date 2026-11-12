@@ -696,6 +696,15 @@ class UncertaintyEngine:
             isinstance(new_necessity_rationale, str) and new_necessity_rationale.strip()
         ):
             raise ValueError("A necessity assessment requires a recorded rationale.")
+        if "context" in update_data:
+            # Context updates are additive annotations, not destructive
+            # replacement of the source and decision-dependency trail that
+            # justified an existing necessary question.
+            merged_context = list(db_question.context or [])
+            for context_item in (update_data.get("context") or []):
+                if context_item not in merged_context:
+                    merged_context.append(context_item)
+            update_data["context"] = merged_context
         context_for_necessity = update_data.get("context", db_question.context)
         if new_necessity == "necessary" and not _has_decision_dependency(context_for_necessity):
             raise ValueError("A necessary caregiver question must identify the current care decision that depends on the answer.")
