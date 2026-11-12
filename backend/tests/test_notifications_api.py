@@ -203,3 +203,102 @@ def test_notification_feed_exposes_failed_push_delivery_truthfully(monkeypatch):
         assert all(row["id"] != "failed-push-notification" for row in foreign.json()["items"])
     finally:
         teardown()
+
+
+def test_web_push_provider_failure_is_never_recorded_as_accepted(monkeypatch):
+    import base64
+    import hashlib
+    import json
+    import sys
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from cryptography.fernet import Fernet
+    from app.services import reminder_delivery
+
+    client, first, _second = setup_client(monkeypatch)
+    try:
+        person_id = first["person"]["id"]
+        caregiver_id = first["caregiver"]["id"]
+        secret = "test-secret-for-web-push-delivery"
+        settings = SimpleNamespace(
+            secret_key=secret,
+            vapid_private_key="test-vapid-private-key",
+            vapid_subject="mailto:tests@example.invalid",
+        )
+        monkeypatch.setattr(reminder_delivery, "get_settings", lambda: settings)
+        monkeypatch.setattr(reminder_delivery, "vapid_configuration_error", lambda _settings: None)
+
+        class ProviderRejected(Exception):
+            response = None
+
+        def reject_delivery(**_kwargs):
+            raise ProviderRejected("simulated provider outage")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "pywebpush",
+            SimpleNamespace(WebPushException=ProviderRejected, webpush=reject_delivery),
+        )
+
+        cipher_key = base64.urlsafe_b64encode(
+            hashlib.sha256((secret + ":solenos-web-push-subscriptions:v1").encode("utf-8")).digest()
+        )
+        encrypted = Fernet(cipher_key).encrypt(
+            json.dumps({
+                "endpoint": "https://push.example.invalid/subscription",
+                "keys": {"p256dh": "test-p256dh", "auth": "test-auth"},
+            }).encode("utf-8")
+        ).decode("ascii")
+
+        now = datetime.now(timezone.utc) + timedelta(minutes=1)
+        db = TestSession()
+        try:
+            subscription = CarePushSubscription(
+                id="provider-failure-subscription",
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                endpoint_hash="p" * 64,
+                encrypted_subscription=encrypted,
+                created_at=now - timedelta(minutes=2),
+            )
+            notification = CareNotification(
+                id="provider-failure-notification",
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                title="Call the clinic",
+                body="Ask about the appointment.",
+                category="reminder_due",
+                priority="normal",
+                status="active",
+                created_at=now - timedelta(minutes=1),
+            )
+            db.add_all([subscription, notification])
+            db.flush()
+            delivery = CarePushDelivery(
+                id="provider-failure-delivery",
+                notification_id=notification.id,
+                subscription_id=subscription.id,
+                status="pending",
+                attempt_count=0,
+                next_attempt_at=now,
+            )
+            db.add(delivery)
+            db.commit()
+
+            current = now
+            for delay in (0, 60, 300, 1800, 7200):
+                current = now + timedelta(seconds=delay) if delay == 0 else current + timedelta(seconds=delay)
+                accepted = reminder_delivery.deliver_pending_web_pushes(db=db, now=current)
+                assert accepted == 0
+                db.refresh(delivery)
+
+            assert delivery.status == "failed"
+            assert delivery.attempt_count == 5
+            assert delivery.provider_accepted_at is None
+            assert delivery.last_error_code == "provider_error"
+            assert delivery.last_error_message == "Push provider rejected the request"
+        finally:
+            db.close()
+    finally:
+        teardown()
