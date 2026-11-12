@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timezone
 """End-to-end Companion proposal review tests using isolated persistence."""
 import importlib
 from fastapi.testclient import TestClient
@@ -7,6 +9,8 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
+from app.models.care import CareEvent
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -273,5 +277,127 @@ def test_idempotent_accept_replay_does_not_report_rejected_assertion_as_active_l
         assert replay.json()["idempotent_replay"] is True
         assert replay.json()["written_to_lcr"] is False
         assert replay.json()["assertion_id"] is None
+    finally:
+        teardown()
+
+
+
+def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(monkeypatch):
+    client = setup_client(monkeypatch, lambda text: {"observations": []})
+    try:
+        session = create_session(client, "Qwen summary review")
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        event_ids = ["qwen-source-event-1", "qwen-source-event-2"]
+        job_id = "qwen-summary-job-1"
+        output_id = "qwen-summary-output-1"
+        proposal_id = "qwen-summary-proposal-1"
+        generated = "The saved care record describes two caregiver-reported changes over the past week."
+
+        db = TestingSessionLocal()
+        try:
+            now = datetime.now(timezone.utc)
+            for index, event_id in enumerate(event_ids, start=1):
+                db.add(CareEvent(
+                    id=event_id,
+                    person_id=person_id,
+                    event_type="daily_care",
+                    status="recorded",
+                    occurred_at=now,
+                    title=f"Saved source event {index}",
+                    description=f"Caregiver-reported source event {index}.",
+                    evidence_ids=[],
+                    created_by_caregiver_id=caregiver_id,
+                ))
+            db.add(QwenBackgroundJob(
+                id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                status="completed",
+                task_text="Summarize the saved care record.",
+                context_text="",
+                workflow="living_care_record",
+                result_text=generated,
+                source_event_ids_json=json.dumps(event_ids),
+                source_evidence_ids_json="[]",
+            ))
+            db.add(QwenModelOutput(
+                id=output_id,
+                job_id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                workflow="living_care_record",
+                model_name="qwen-test",
+                output_text=generated,
+                source_event_ids_json=json.dumps(event_ids),
+                source_evidence_ids_json="[]",
+            ))
+            db.add(AIOutputLCRProposal(
+                id=proposal_id,
+                output_id=output_id,
+                job_id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                proposal_type="qwen_assistance_summary",
+                proposed_change_json={
+                    "asserted_value": generated,
+                    "information_status": "ai_generated_interpretation_pending_caregiver_review",
+                },
+                source_event_ids_json=event_ids,
+                source_evidence_ids_json=[],
+                rationale="Source-backed Qwen interpretation pending caregiver review.",
+                uncertainty_json={"epistemic_state": "inferred", "caregiver_approval_required": True},
+                status="pending_authorization",
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+        headers = {"Authorization": f"Bearer {session['access_token']}"}
+        before = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert before.status_code == 200, before.text
+        assert generated not in before.text
+
+        accepted = client.post(
+            f"/api/v1/companion/care-updates/qwen/{proposal_id}/review",
+            headers=headers,
+            json={"decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        body = accepted.json()
+        assert body["written_to_lcr"] is True
+        assert body["epistemic_state"] == "inferred"
+        assert body["reconciliation"]["stages"]["reconciliation"] == "committed"
+        assert body["reconciliation"]["source_event_ids"] == event_ids
+        assertion_id = body["assertion_id"]
+
+        after = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert after.status_code == 200, after.text
+        assert any(item.get("id") == assertion_id for item in after.json().get("items", []))
+
+        replay = client.post(
+            f"/api/v1/companion/care-updates/qwen/{proposal_id}/review",
+            headers=headers,
+            json={"decision": "accept"},
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+
+        db = TestingSessionLocal()
+        try:
+            assertion = db.query(CareAssertion).filter_by(id=assertion_id).one()
+            assert assertion.epistemic_state == "inferred"
+            assert assertion.assertion_status == "caregiver_reviewed"
+            assert assertion.source_proposal_id == proposal_id
+            proposal = db.query(AIOutputLCRProposal).filter_by(id=proposal_id).one()
+            assert proposal.status == "accepted"
+            output = db.query(QwenModelOutput).filter_by(id=output_id).one()
+            assert output.review_status == "accepted"
+            assert output.written_to_lcr is True
+            decisions = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal_id).all()
+            assert len(decisions) == 1
+            assert decisions[0].decision == "accepted"
+        finally:
+            db.close()
     finally:
         teardown()
