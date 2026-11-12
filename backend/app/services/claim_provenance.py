@@ -230,6 +230,18 @@ def build_distinct_event_aggregate(
             "interpretation_limit": "Some same-day reports have identical wording but no confirmed shared original. They may describe the same incident or separate incidents, so no total is stated until a caregiver reviews them.",
         }
 
+    if not unique:
+        return {
+            "status": "no_matching_records",
+            "topic": topic,
+            "window_label": window_label,
+            "count": 0,
+            "candidate_count": len(candidates),
+            "duplicate_event_ids": duplicate_ids,
+            "source_references": [],
+            "interpretation_limit": "No matching care-event records were found in this time window. This does not establish that no incident occurred.",
+        }
+
     references = [{
         "record_type": "care_event",
         "record_id": str(item.get("id")),
