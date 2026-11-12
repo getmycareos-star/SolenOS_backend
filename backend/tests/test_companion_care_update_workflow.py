@@ -50,10 +50,13 @@ def create_session(client, name):
     return response.json()
 
 
-def send(client, session, message):
+def send(client, session, message, *, client_turn_id=None):
+    payload = {"person_id": session["person"]["id"], "text": message}
+    if client_turn_id:
+        payload["client_turn_id"] = client_turn_id
     return client.post("/api/v1/conversation/message",
         headers={"Authorization": f"Bearer {session['access_token']}"},
-        json={"person_id": session["person"]["id"], "text": message})
+        json=payload)
 
 
 def review(client, session, proposal_id, payload):
