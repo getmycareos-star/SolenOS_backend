@@ -3059,7 +3059,7 @@ async def create_qwen_background_job(
         rows = db.query(EvidenceModel.id).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
-            EvidenceModel.evidence_status != "deleted_by_caregiver",
+            (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
             EvidenceModel.id.in_(payload.evidence_ids),
         ).all()
         if len({str(row[0]) for row in rows}) != len(set(payload.evidence_ids)):
