@@ -283,7 +283,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
             } if aggregate_match is not None else None),
             "source_references": matches,
         })
-    unmatched = sum(1 for claim in claims if claim["support_status"] != "matched_saved_wording")
+    unmatched = sum(1 for claim in claims if claim["support_status"] not in {"matched_saved_wording", "matched_validated_aggregate"})
     return {
         "version": "claim-provenance-v1",
         "coverage": "all_statements_matched" if claims and unmatched == 0 else (
