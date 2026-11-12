@@ -72,7 +72,11 @@ def pending(client, session):
 
 def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypatch):
     source = "Her sleep has been worse since last Friday."
-    client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}]})
+
+    def extraction_must_not_run(*args, **kwargs):
+        raise AssertionError("Companion must not invoke care-update extraction")
+
+    client = setup_client(monkeypatch, extraction_must_not_run)
     captured = []
 
     def fake_chat(base, model, messages, options=None):
