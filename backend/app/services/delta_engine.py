@@ -961,7 +961,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             item["historical_only"] = True
                             item["promotion_warning"] = "This event predates a later-dated care-state report. It is preserved in reconciliation history but not promoted as current state."
                             continue
-                    if assertion_kind == "time_bound_observation" and source_event_id and event_date is not None:
+                    if assertion_kind in {"time_bound_observation", "current_state"} and source_event_id and event_date is not None:
                         # Exact same subject/value at the same observed instant is a
                         # duplicate observation, not a second independent fact. Keep
                         # the new event/evidence intact and link it to the first assertion.
@@ -970,7 +970,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             CareAssertion.subject_type == domain.rstrip("s"),
                             CareAssertion.subject_id == subject_id,
                             CareAssertion.field == field,
-                            CareAssertion.assertion_kind == assertion_kind,
+                            CareAssertion.assertion_kind.in_(["time_bound_observation", "current_state"]),
                             CareAssertion.asserted_value == str(current),
                             or_(
                                 CareAssertion.source_label == source,
