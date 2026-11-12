@@ -668,7 +668,7 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
     import zipfile
     from datetime import datetime, timedelta, timezone
     from app.models.care import Caregiver, Evidence
-    from app.models.collaboration import EvidenceUpload
+    from app.models.collaboration import CommunityPost, CommunityReaction, EvidenceUpload
     from app.models.privacy_export import PrivacyExportArtifact
 
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "e" * 40)
@@ -695,6 +695,32 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
         )
         db.add(other_caregiver)
         db.flush()
+        own_post = CommunityPost(
+            id="requester-community-post",
+            caregiver_id=caregiver_id,
+            content="My own caregiver experience",
+        )
+        other_post = CommunityPost(
+            id="other-caregiver-community-post",
+            caregiver_id=other_caregiver.id,
+            content="Another caregiver private draft",
+        )
+        db.add_all([own_post, other_post])
+        db.flush()
+        db.add_all([
+            CommunityReaction(
+                id="requester-community-reaction",
+                post_id=own_post.id,
+                caregiver_id=caregiver_id,
+                reaction_type="support",
+            ),
+            CommunityReaction(
+                id="other-caregiver-community-reaction",
+                post_id=other_post.id,
+                caregiver_id=other_caregiver.id,
+                reaction_type="support",
+            ),
+        ])
         owned = Evidence(
             person_id=person_id,
             type="document",
@@ -785,6 +811,11 @@ def test_approved_export_persists_downloadable_archive_and_excludes_other_caregi
         assert owned_id in exported_ids
         assert other_id not in exported_ids
         assert manifest["document_files"][0]["evidence_id"] == owned_id
+        own_posts = json.loads(archive.read("records/community_posts.json"))
+        assert [item["id"] for item in own_posts] == ["requester-community-post"]
+        assert own_posts[0]["content"] == "My own caregiver experience"
+        own_reactions = json.loads(archive.read("records/community_reactions.json"))
+        assert [item["id"] for item in own_reactions] == ["requester-community-reaction"]
 
     replay = client.post(
         f"/api/v1/privacy/requests/{request_id}/fulfil-export",
