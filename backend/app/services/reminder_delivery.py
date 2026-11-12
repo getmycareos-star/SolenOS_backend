@@ -25,6 +25,9 @@ from app.models.reminder import CareReminder
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 30
 BATCH_SIZE = 100
+# Care changes and clarification requests stay in the authenticated inbox.
+# Browser push is reserved for explicitly due reminders.
+PUSH_NOTIFICATION_CATEGORIES = frozenset({"reminder_due"})
 
 
 def _notification_id(reminder):
@@ -192,6 +195,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CareNotification.caregiver_id == subscription.caregiver_id,
                 CareNotification.created_at >= subscription.created_at,
                 CareNotification.status == "active",
+                CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
             ).all()
             for notification in notifications:
                 existing = session.query(CarePushDelivery.id).filter(
@@ -219,6 +223,7 @@ def deliver_pending_web_pushes(db=None, now=None):
             .filter(
                 CarePushDelivery.status == "pending",
                 CareNotification.status == "active",
+                CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
                 CarePushDelivery.next_attempt_at <= current,
                 CarePushDelivery.attempt_count < 5,
                 CarePushSubscription.revoked_at.is_(None),
@@ -243,6 +248,12 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CareNotificationPreference.person_id == notification.person_id,
                 CareNotificationPreference.caregiver_id == notification.caregiver_id,
             ).first()
+            if preference is not None and not preference.reminders_enabled:
+                delivery.status = "cancelled"
+                delivery.last_error_code = "reminders_disabled"
+                delivery.last_error_message = "Caregiver disabled reminder notifications"
+                session.commit()
+                continue
             release_at = quiet_hours_release_at(preference, current)
             if release_at is not None and notification.priority not in {"emergency", "critical", "urgent"}:
                 delivery.next_attempt_at = release_at
