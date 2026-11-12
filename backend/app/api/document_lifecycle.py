@@ -357,7 +357,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 status_code=422,
                 detail="No readable text was found in the image. The original document remains preserved.",
             )
-        return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{extracted}", "server_tesseract_ocr_image")
+        return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{extracted}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
 
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or filename.endswith(".docx"):
         extracted = _extract_docx(content)
