@@ -91,9 +91,10 @@ def test_draft_returns_audience_specific_template_and_explicit_unassessed_sectio
     sections = {section["key"]: section for section in body["template_sections"]}
     assert expected_sections.issubset(sections)
     assert all(section["required_fields"] for section in body["template_sections"])
-    # Appointment records can support appointment details, but no medication adapter exists.
+    # Medication records are only populated through the dedicated caregiver-reviewed adapter.
     if audience == "professional":
-        assert sections["medication_reconciliation"]["coverage_status"] == "not_assessed"
+        assert sections["medication_reconciliation"]["coverage_status"] in {"no_records_returned", "unavailable"}
+        assert body["source_statuses"]["allergies"]["status"] == "unavailable"
     else:
         assert sections["health_medication"]["coverage_status"] == "no_records_returned"
     assert all("still requires review" in section["coverage_note"] for section in body["template_sections"])
@@ -623,6 +624,7 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
 
 def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
+    from app.models.privacy_delivery import HandoffDraft
 
     test_client, session = client
     person_id = session["person"]["id"]
