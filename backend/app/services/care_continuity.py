@@ -168,7 +168,7 @@ def get_freshness(
     now = _utc(now or datetime.now(timezone.utc))
     # A caregiver's explicit review starts a new review window. Keep the
     # original recorded_at/observed_at untouched as source provenance.
-    review_reference = reviewed_at if assertion.assertion_status == "accepted" else None
+    review_reference = reviewed_at if assertion.assertion_status in {"accepted", "caregiver_reviewed"} else None
     reference = _utc(review_reference) or _utc(assertion.observed_at) or _utc(assertion.recorded_at)
     age_days = max(0, (now - reference).days) if reference else None
     if assertion.assertion_kind == "time_bound_observation":
@@ -183,7 +183,7 @@ def get_freshness(
     elif assertion.review_after_days is None or age_days is None or age_days > assertion.review_after_days:
         status = "needs_confirmation"
         explanation = "The review window is missing/elapsed or the observation time is unavailable; confirm before treating this report as current."
-    elif assertion.assertion_status != "accepted":
+    elif assertion.assertion_status not in {"accepted", "caregiver_reviewed"}:
         status = "needs_confirmation"
         explanation = "This is a reported assertion, not an accepted current fact."
     else:
