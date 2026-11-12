@@ -60,30 +60,50 @@ def upgrade():
     else:
         grant_id = "gen_random_uuid()::text"
 
+    # Only an explicitly designated primary family caregiver receives
+    # administration rights. Session age is not evidence of authority.
     op.execute(sa.text(f"""
+        WITH explicit_primary_profiles AS (
+            SELECT person_id, id AS caregiver_profile_id
+            FROM caregiver_profiles
+            WHERE is_primary_designated = TRUE
+            UNION
+            SELECT person_id, caregiver_id AS caregiver_profile_id
+            FROM caregiver_roles
+            WHERE is_current = TRUE
+              AND role_type IN ('PRIMARY_FAMILY_CAREGIVER', 'primary_family_caregiver')
+        ),
+        primary_counts AS (
+            SELECT person_id, COUNT(*) AS primary_count
+            FROM explicit_primary_profiles
+            GROUP BY person_id
+        ),
+        session_identities AS (
+            SELECT person_id, caregiver_id, MIN(created_at) AS first_created_at
+            FROM anonymous_sessions
+            GROUP BY person_id, caregiver_id
+        )
         INSERT INTO caregiver_access_grants
             (id, person_id, caregiver_id, caregiver_profile_id, role, access_scope, status, can_manage_members, granted_at)
         SELECT
             {grant_id},
-            ranked.person_id,
-            ranked.caregiver_id,
+            s.person_id,
+            s.caregiver_id,
             p.id,
-            CASE WHEN ranked.position = 1 THEN 'primary' ELSE 'family' END,
+            CASE WHEN pc.primary_count = 1 AND ep.caregiver_profile_id = p.id THEN 'primary' ELSE 'family' END,
             'full_record',
             'active',
-            CASE WHEN ranked.position = 1 THEN TRUE ELSE FALSE END,
-            ranked.first_created_at
-        FROM (
-            SELECT person_id, caregiver_id, MIN(created_at) AS first_created_at,
-                   ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY MIN(created_at), caregiver_id) AS position
-            FROM anonymous_sessions
-            GROUP BY person_id, caregiver_id
-        ) ranked
+            CASE WHEN pc.primary_count = 1 AND ep.caregiver_profile_id = p.id THEN TRUE ELSE FALSE END,
+            s.first_created_at
+        FROM session_identities s
         LEFT JOIN caregiver_profiles p
-          ON p.person_id = ranked.person_id AND p.session_caregiver_id = ranked.caregiver_id
+          ON p.person_id = s.person_id AND p.session_caregiver_id = s.caregiver_id
+        LEFT JOIN explicit_primary_profiles ep
+          ON ep.person_id = s.person_id AND ep.caregiver_profile_id = p.id
+        LEFT JOIN primary_counts pc ON pc.person_id = s.person_id
         WHERE NOT EXISTS (
             SELECT 1 FROM caregiver_access_grants g
-            WHERE g.person_id = ranked.person_id AND g.caregiver_id = ranked.caregiver_id
+            WHERE g.person_id = s.person_id AND g.caregiver_id = s.caregiver_id
         )
     """))
 
