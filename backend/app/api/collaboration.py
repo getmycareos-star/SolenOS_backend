@@ -1327,6 +1327,11 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         raise HTTPException(status_code=404, detail="Document not found in this care record")
     if evidence.evidence_status == "deleted_by_caregiver":
         return {"evidence_id": evidence_id, "deleted": True, "idempotent_replay": True}
+    if (evidence.source_text or "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="This document has legacy text stored on its immutable evidence record. The source has not been deleted because that content cannot yet be safely redacted.",
+        )
     dependent_assertions = []
     for assertion in db.query(CareAssertion).filter(CareAssertion.person_id == person_id).all():
         if evidence_id in (assertion.evidence_ids or []):
