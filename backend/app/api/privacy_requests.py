@@ -969,8 +969,8 @@ def fulfil_approved_deletion(
     # Capture evidence primary keys before generic FK cleanup can null or otherwise
     # alter a nullable person_id. Erasure is verified by immutable row identity,
     # not only by a mutable ownership column.
-    evidence_ids_to_erase = db.query(Evidence.id).filter(
-        Evidence.person_id == person_id
+    evidence_ids_to_erase = db.execute(
+        select(Evidence.id).where(Evidence.person_id == person_id)
     ).scalars().all()
 
     bind = db.get_bind()
