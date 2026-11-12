@@ -1286,7 +1286,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
 def download_evidence(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scope(request, db)
     evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
-    if not evidence:
+    if not evidence or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Evidence not found")
     blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
     if not blob:
@@ -3213,6 +3213,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     EvidenceModel.person_id == person_id,
                     EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
                     EvidenceModel.type == "document",
+                    EvidenceModel.evidence_status != "deleted_by_caregiver",
                 ).first()
                 if source_document is None:
                     continue
