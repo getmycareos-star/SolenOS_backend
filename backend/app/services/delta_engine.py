@@ -912,11 +912,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     )
                     current = item.get("current")
                     change_type = str(item.get("change_type") or "").casefold()
-                    # A repeated unchanged report is useful in this run's audit
-                    # result but must not manufacture another active-state fact.
-                    # Competing/uncertain values remain visible for review and are
-                    # never promoted into normalized active state.
-                    if change_type in {"unchanged", "conflicting", "uncertain"} or item.get("historical_only"):
+                    assertion_kind = "time_bound_observation" if domain == "symptoms" else "current_state"
+                    # Unchanged current-state reports must not manufacture another
+                    # active-state fact. A symptom observation at a distinct time is
+                    # still a historical occurrence and must be retained; exact
+                    # same-time duplicates are linked to the existing assertion below.
+                    if change_type in {"conflicting", "uncertain"} or item.get("historical_only"):
+                        continue
+                    if change_type == "unchanged" and assertion_kind != "time_bound_observation":
                         continue
                     if domain == "medications" and change_type == "discontinued" and current is None:
                         current = "discontinued"
@@ -942,7 +945,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     else:
                         field = str(item.get("field") or "symptom_reported_state")
                         subject_id = name
-                    assertion_kind = "time_bound_observation" if domain == "symptoms" else "current_state"
                     if assertion_kind == "current_state" and event_date is not None:
                         incoming_day = event_date.date()
                         later_state_exists = any(

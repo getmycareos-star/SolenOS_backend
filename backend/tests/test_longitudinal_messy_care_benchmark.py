@@ -1150,32 +1150,6 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 db.flush()
 
             model_result_by_call["value"] = fixture_result(event_spec)
-            if event_spec.get("classification") == "duplicate_same_occurrence":
-                candidates = db.query(CareAssertion).filter(
-                    CareAssertion.person_id == person.id,
-                ).all()
-                print(
-                    "LCR_DUPLICATE_PRECHECK",
-                    scenario["scenario_id"],
-                    event_spec["id"],
-                    event_spec.get("duplicate_of"),
-                    occurred_at.isoformat(),
-                    [
-                        {
-                            "id": row.id,
-                            "subject_type": row.subject_type,
-                            "subject_id": row.subject_id,
-                            "field": row.field,
-                            "assertion_kind": row.assertion_kind,
-                            "asserted_value": row.asserted_value,
-                            "observed_at": row.observed_at.isoformat() if row.observed_at else None,
-                            "source_event_id": row.source_event_id,
-                            "created_by_caregiver_id": row.created_by_caregiver_id,
-                            "assertion_status": row.assertion_status,
-                        }
-                        for row in candidates
-                    ],
-                )
             delta_engine.reconcile_event(
                 db,
                 person_id=person.id,
