@@ -1033,6 +1033,34 @@ ABANDONMENT_INACTIVITY_DAYS = 30
 OPEN_LOOP_MAINTENANCE_INTERVAL_SECONDS = 900
 
 
+def _reopen_due_deferred_loops(db: Session, now: datetime) -> int:
+    """Wake deferred work at its persisted review time after any process restart."""
+    rows = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.status == "deferred",
+        OpenLoopRecord.review_at.is_not(None),
+        OpenLoopRecord.review_at <= now,
+    ).order_by(OpenLoopRecord.review_at.asc(), OpenLoopRecord.id.asc()).with_for_update().all()
+    reopened = 0
+    for loop in rows:
+        before = _snapshot(loop)
+        loop.status = "open"
+        loop.review_at = None
+        loop.updated_at = now
+        loop.version = (loop.version or 0) + 1
+        _audit(
+            db, loop, "deferred_review_due", before,
+            [{
+                "review_due_at": before.get("review_at"),
+                "reopened_at": now.isoformat(),
+                "deferred_reason_retained": bool(loop.deferred_reason),
+                "completion_inferred": False,
+            }],
+            actor="solenos_reconciliation",
+        )
+        reopened += 1
+    return reopened
+
+
 async def open_loop_maintenance_loop():
     """Periodically reassess deadlines and relevance; never infer completion."""
     while True:
@@ -1041,6 +1069,9 @@ async def open_loop_maintenance_loop():
         try:
             now = datetime.now(timezone.utc)
             cutoff = now - timedelta(days=ABANDONMENT_INACTIVITY_DAYS)
+            # The database is the queue: this scan recovers deferred follow-ups
+            # whose review time elapsed while the process was stopped.
+            reopened_due = _reopen_due_deferred_loops(db, now)
             rows = db.query(OpenLoopRecord).filter(
                 OpenLoopRecord.status.in_(OPEN_STATES),
             ).order_by(
@@ -1089,7 +1120,7 @@ async def open_loop_maintenance_loop():
                     loop.updated_at = prior_update
                     loop.version = prior_version
 
-            if changed:
+            if changed or reopened_due:
                 db.commit()
             else:
                 db.rollback()
