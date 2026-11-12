@@ -789,6 +789,13 @@ async def upload_evidence(
         "rotation_degrees": rotation_degrees,
         "crop_insets_percent": crop_insets,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    if ingestion_key and db.get_bind().dialect.name == "postgresql":
+        retry_lock_key = int.from_bytes(
+            hashlib.sha256(f"upload-retry:{scoped_person_id}:{ingestion_key}".encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": retry_lock_key})
     if ingestion_key:
         prior = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == scoped_person_id,
