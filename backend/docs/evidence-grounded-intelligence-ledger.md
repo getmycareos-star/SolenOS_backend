@@ -432,3 +432,19 @@ This slice does **not** close the full evidence capability map. Groups A–J and
 - [ ] Exact-current-main backend tests and frontend validation must pass before this slice is considered verified.
 - [ ] Exact wording matching is intentionally conservative. It does not prove semantic entailment for paraphrases or aggregate statements (for example, a count across multiple incidents); those statements remain unsupported until a stronger validated claim-to-source assessment is available.
 - [ ] Extend the same claim-level contract to appointment, handoff, professional summary, document Q&A, and other Qwen outputs; verify correction-triggered re-review and caregiver approval audit records across every workflow.
+
+## Workstream 2 extension — claim validation and correction propagation (2026-11-12)
+
+- [x] Validate monthly unsteadiness counts against person-scoped, dated care events. Only explicitly recorded event statuses are counted.
+- [x] Deduplicate repeated event references that share evidence, have identical wording at the same time, or have a caregiver-reviewed shared-origin relationship.
+- [x] Withhold totals when same-day reports may be duplicates, when linked source observations were corrected, or when the source window is incomplete.
+- [x] Do not turn an empty search into a zero-incident claim. No matching records means no confirmed total.
+- [x] Give Companion the validated count before generation and check the generated numerical statement against the same count afterward.
+- [x] Carry claim-specific source references through background Qwen jobs, LCR interpretation, Companion messages, handoff drafts, and Delta Engine findings and summaries.
+- [x] Enrich references with source labels, event and recording times, reporter/recorder attribution, original notes/documents, and structured observations where available.
+- [x] Keep unsupported Delta findings and summary statements explicitly unsupported; a source quote alone does not prove clinical truth, causation, or independent corroboration.
+- [x] Add source-observation history to handoff fingerprints so a correction makes a prepared handoff stale.
+- [x] Reconcile care intelligence when a new or corrected source observation is saved; return a correction receipt and persist an audit event listing directly affected and downstream dependent claims.
+- [x] Recompute claim-assessment impact through the complete dependency chain when a source observation is added or corrected.
+- [ ] General semantic entailment across arbitrary paraphrases, topics, and date windows remains out of scope for this bounded implementation. Unsupported statements must stay visibly unsupported until a separately validated rule is added.
+- [ ] Full execution of the backend and frontend test suites remains required before declaring the workstream verified.
