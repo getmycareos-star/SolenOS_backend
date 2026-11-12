@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -8,17 +8,9 @@ from app.core.database import Base
 
 class CareNotification(Base):
     __tablename__ = "care_notifications"
-    __table_args__ = (
-        Index(
-            "uq_care_notifications_active_source",
-            "person_id", "caregiver_id", "category", "source_event_id",
-            unique=True,
-            postgresql_where=text("status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"),
-            sqlite_where=text("status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"),
-        ),
-        Index("ix_care_notifications_scope_status_created", "person_id", "caregiver_id", "status", "created_at"),
-    )
-
+    # Status-dependent indexes are created by migration 20261112_06, after
+    # the status column exists. Keeping them in ORM metadata would make earlier
+    # reconciliation migrations attempt to create an index against the old schema.
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
