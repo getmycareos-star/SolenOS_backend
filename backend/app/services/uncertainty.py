@@ -894,6 +894,7 @@ class UncertaintyEngine:
                 OpenQuestionModel.subject_type == subject_type,
                 OpenQuestionModel.subject_id == subject_id,
                 OpenQuestionModel.status == "open",
+                OpenQuestionModel.necessity == "necessary",
             )
             .all()
         )
@@ -987,6 +988,7 @@ class UncertaintyEngine:
                 OpenQuestionModel.subject_type == subject_type,
                 OpenQuestionModel.subject_id == subject_id,
                 OpenQuestionModel.status == "open",
+                OpenQuestionModel.necessity == "necessary",
             )
             .count()
         )
