@@ -243,10 +243,12 @@ def review_capture_candidate(
                 stage_statuses={
                     "extraction": "available",
                     "assessment": "available",
-                    "review": "completed",
+                    "review": "required" if remaining_reviewable else "completed",
                 },
             )
-            execution["stages"]["review"] = "completed"
+            execution["stages"]["review"] = (
+                "required" if remaining_reviewable else "completed"
+            )
             execution["stages"]["reconciliation"] = "completed"
             analysis.execution_status = dict(execution["stages"])
             change_intelligence_status = "available"
