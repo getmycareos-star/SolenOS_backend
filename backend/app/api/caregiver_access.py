@@ -10,8 +10,9 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver
 from app.models.caregiver_account import CaregiverAccount
-from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation
-from app.models.caregiver_intelligence import CaregiverProfile
+from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
+from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility
+from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.api.accounts import _hash_password, _validate_email
 
@@ -233,3 +234,183 @@ def revoke_member_access(caregiver_id: str, request: Request, db: Session = Depe
     ).update({AnonymousSession.revoked_at: now}, synchronize_session=False)
     db.commit()
     return {"revoked": True, "caregiver_id": caregiver_id, "sessions_revoked": True}
+
+
+class ResponsibilityTransferCreate(BaseModel):
+    source_responsibility_id: str = Field(min_length=1, max_length=160)
+    to_caregiver_profile_id: str = Field(min_length=1, max_length=160)
+    related_record_type: str | None = Field(default=None, max_length=40)
+    related_record_id: str | None = Field(default=None, max_length=160)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+def _current_profile(request: Request, db: Session) -> tuple[str, str, CaregiverProfile]:
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=401, detail="A valid care-record session is required")
+    try:
+        profile = ensure_caregiver_profile_for_session(
+            db, person_id=str(person_id), session_caregiver_id=str(caregiver_id)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Caregiver identity is not linked to this care record") from exc
+    return str(person_id), str(caregiver_id), profile
+
+
+@router.post("/responsibility-transfers", status_code=201)
+def create_responsibility_transfer(
+    payload: ResponsibilityTransferCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, actor_id = _actor_scope(request)
+    source = db.query(CaregiverResponsibility).filter(
+        CaregiverResponsibility.id == payload.source_responsibility_id,
+        CaregiverResponsibility.person_id == person_id,
+    ).with_for_update().first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="The current responsibility was not found.")
+    if getattr(source.status, "value", source.status) in {"historical", "gap"}:
+        raise HTTPException(status_code=409, detail="This responsibility is no longer active.")
+    target = db.query(CaregiverProfile).filter(
+        CaregiverProfile.id == payload.to_caregiver_profile_id,
+        CaregiverProfile.person_id == person_id,
+    ).first()
+    if target is None or not target.session_caregiver_id:
+        raise HTTPException(status_code=404, detail="The invited caregiver identity was not found.")
+    target_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == target.session_caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).first()
+    if target_grant is None:
+        raise HTTPException(status_code=403, detail="The receiving caregiver is not authorised for this care record.")
+    if str(source.caregiver_id) == str(target.id):
+        raise HTTPException(status_code=409, detail="This responsibility is already assigned to that caregiver.")
+    pending = db.query(CaregiverResponsibilityTransfer).filter(
+        CaregiverResponsibilityTransfer.person_id == person_id,
+        CaregiverResponsibilityTransfer.source_responsibility_id == source.id,
+        CaregiverResponsibilityTransfer.status == "pending",
+    ).first()
+    if pending:
+        raise HTTPException(status_code=409, detail="A transfer for this responsibility is already awaiting a response.")
+
+    transfer = CaregiverResponsibilityTransfer(
+        person_id=person_id,
+        source_responsibility_id=source.id,
+        from_caregiver_profile_id=source.caregiver_id,
+        to_caregiver_profile_id=target.id,
+        created_by_caregiver_id=actor_id,
+        related_record_type=payload.related_record_type,
+        related_record_id=payload.related_record_id,
+        reason=payload.reason,
+        status="pending",
+    )
+    db.add(transfer)
+    db.commit()
+    db.refresh(transfer)
+    return {
+        "id": transfer.id,
+        "status": transfer.status,
+        "responsibility_type": source.responsibility_type,
+        "from_caregiver_profile_id": transfer.from_caregiver_profile_id,
+        "to_caregiver_profile_id": transfer.to_caregiver_profile_id,
+        "related_record_type": transfer.related_record_type,
+        "related_record_id": transfer.related_record_id,
+        "created_at": transfer.created_at.isoformat() if transfer.created_at else None,
+    }
+
+
+@router.get("/responsibility-transfers")
+def list_responsibility_transfers(request: Request, db: Session = Depends(get_db)):
+    person_id, _actor_id, profile = _current_profile(request, db)
+    query = db.query(CaregiverResponsibilityTransfer).filter(
+        CaregiverResponsibilityTransfer.person_id == person_id
+    )
+    if not bool(getattr(request.state, "caregiver_can_manage_members", False)):
+        query = query.filter(CaregiverResponsibilityTransfer.to_caregiver_profile_id == profile.id)
+    transfers = query.order_by(CaregiverResponsibilityTransfer.created_at.desc()).all()
+    return [{
+        "id": item.id,
+        "source_responsibility_id": item.source_responsibility_id,
+        "from_caregiver_profile_id": item.from_caregiver_profile_id,
+        "to_caregiver_profile_id": item.to_caregiver_profile_id,
+        "related_record_type": item.related_record_type,
+        "related_record_id": item.related_record_id,
+        "reason": item.reason,
+        "status": item.status,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "accepted_at": item.accepted_at.isoformat() if item.accepted_at else None,
+    } for item in transfers]
+
+
+@router.post("/responsibility-transfers/{transfer_id}/accept")
+def accept_responsibility_transfer(transfer_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, profile = _current_profile(request, db)
+    transfer = db.query(CaregiverResponsibilityTransfer).filter(
+        CaregiverResponsibilityTransfer.id == transfer_id,
+        CaregiverResponsibilityTransfer.person_id == person_id,
+        CaregiverResponsibilityTransfer.to_caregiver_profile_id == profile.id,
+        CaregiverResponsibilityTransfer.status == "pending",
+    ).with_for_update().first()
+    if transfer is None:
+        raise HTTPException(status_code=404, detail="Pending responsibility transfer not found.")
+    source = db.query(CaregiverResponsibility).filter(
+        CaregiverResponsibility.id == transfer.source_responsibility_id,
+        CaregiverResponsibility.person_id == person_id,
+    ).with_for_update().first()
+    if source is None or str(source.caregiver_id) != str(transfer.from_caregiver_profile_id) or getattr(source.status, "value", source.status) in {"historical", "gap"}:
+        transfer.status = "stale"
+        db.commit()
+        raise HTTPException(status_code=409, detail="The original responsibility changed before this transfer was accepted.")
+    now = datetime.now(timezone.utc)
+    source.status = ResponsibilityStatus.HISTORICAL
+    source.effective_end = now
+    replacement = CaregiverResponsibility(
+        person_id=person_id,
+        caregiver_id=profile.id,
+        responsibility_type=source.responsibility_type,
+        scope=source.scope,
+        effective_start=now,
+        effective_end=None,
+        status=ResponsibilityStatus.ACTIVE,
+        acceptance_status=ResponsibilityAcceptanceStatus.EXPLICIT,
+        assignment_source="accepted_caregiver_transfer",
+        is_joint=False,
+        joint_with_caregiver_id=None,
+        schedule_pattern=source.schedule_pattern,
+        provenance=source.provenance,
+    )
+    transfer.status = "accepted"
+    transfer.accepted_at = now
+    transfer.accepted_by_caregiver_id = session_caregiver_id
+    db.add(replacement)
+    db.commit()
+    db.refresh(replacement)
+    return {
+        "accepted": True,
+        "transfer_id": transfer.id,
+        "previous_responsibility_id": source.id,
+        "new_responsibility_id": replacement.id,
+        "responsibility_type": replacement.responsibility_type,
+        "related_record_type": transfer.related_record_type,
+        "related_record_id": transfer.related_record_id,
+    }
+
+
+@router.post("/responsibility-transfers/{transfer_id}/reject")
+def reject_responsibility_transfer(transfer_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, profile = _current_profile(request, db)
+    transfer = db.query(CaregiverResponsibilityTransfer).filter(
+        CaregiverResponsibilityTransfer.id == transfer_id,
+        CaregiverResponsibilityTransfer.person_id == person_id,
+        CaregiverResponsibilityTransfer.to_caregiver_profile_id == profile.id,
+        CaregiverResponsibilityTransfer.status == "pending",
+    ).with_for_update().first()
+    if transfer is None:
+        raise HTTPException(status_code=404, detail="Pending responsibility transfer not found.")
+    transfer.status = "rejected"
+    db.commit()
+    return {"rejected": True, "transfer_id": transfer.id}
