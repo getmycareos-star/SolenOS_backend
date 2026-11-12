@@ -328,9 +328,9 @@ class UncertaintyEngine:
             if claim is not None:
                 linked_evidence = list(dict.fromkeys(linked_evidence + list(claim.evidence_ids or [])))
                 payload["evidence_ids"] = linked_evidence or None
-            if not linked_evidence:
+            if not linked_evidence and claim is None:
                 raise ValueError(
-                    "A necessary caregiver question requires source evidence or a source-linked care assertion."
+                    "A necessary caregiver question requires persisted source evidence or a linked care assertion."
                 )
         allowed_answerer_roles = {
             "person_receiving_care", "reporting_caregiver", "other_caregiver",
