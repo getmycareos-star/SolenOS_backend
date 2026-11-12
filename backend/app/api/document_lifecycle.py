@@ -525,6 +525,47 @@ def _extract(
             if rendered is not None:
                 rendered.close()
         extracted = "\n\n".join(page_texts).strip()
+        if not extracted:
+            raise HTTPException(
+                status_code=422,
+                detail="No readable text was found after OCR. The original document remains preserved.",
+            )
+        method = "server_pdf_text_plus_tesseract_ocr" if any(native_pages) else "server_tesseract_ocr_pdf"
+        return _bounded_extraction(extracted, method)
+    if mime.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp")):
+        try:
+            with Image.open(io.BytesIO(content)) as image:
+                if image.width * image.height > MAX_IMAGE_PIXELS:
+                    raise HTTPException(status_code=413, detail="Images are limited to 20 megapixels for OCR")
+                adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
+                try:
+                    try:
+                        extracted = _ocr_image(adjusted)
+                        quality_marker = _ocr_quality_marker(adjusted)
+                    except HTTPException as exc:
+                        if exc.status_code == 503:
+                            raise
+                        if exc.status_code == 413:
+                            extracted = ""
+                            quality_marker = None
+                            image_processing_failure = "image exceeds the OCR processing limit"
+                        else:
+                            extracted = ""
+                            quality_marker = None
+                            image_processing_failure = "OCR engine error"
+                    except Exception:
+                        extracted = ""
+                        quality_marker = None
+                        image_processing_failure = "OCR processing error"
+                    else:
+                        image_processing_failure = None
+                finally:
+                    if used_scan_adjustments:
+                        adjusted.close()
+        except HTTPException:
+            raise
+        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+            raise HTTPException(status_code=422, detail="The saved image could not be decoded for OCR") from exc
         if image_processing_failure:
             return _bounded_extraction(
                 f"[Image OCR]\n[Page 1 OCR]\n[Page not processed: {image_processing_failure}]",
