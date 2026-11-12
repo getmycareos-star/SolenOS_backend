@@ -127,3 +127,119 @@ def test_correction_trace_keeps_the_prior_wording_and_reason():
     assert reference["correction_note"] == "This saved detail replaces an earlier version."
     assert reference["correction_rationale"] == "The caregiver corrected the time of the observation."
     assert reference["previous_source_excerpt"] == "She felt unsteady after lunch."
+
+from datetime import datetime, timedelta, timezone
+
+from app.services.claim_provenance import (
+    build_distinct_event_aggregate,
+    context_lines_to_source_records,
+)
+
+
+def test_three_incident_statement_is_supported_only_by_three_distinct_dated_events():
+    start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": "incident-1", "event_type": "mobility", "status": "recorded",
+            "occurred_at": datetime(2026, 11, 2, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness near the kitchen", "description": "She felt unsteady.",
+            "evidence_ids": ["source-note-1"],
+        },
+        {
+            "id": "incident-2", "event_type": "mobility", "status": "recorded",
+            "occurred_at": datetime(2026, 11, 6, 9, tzinfo=timezone.utc),
+            "title": "Lost balance while standing", "description": "She lost balance.",
+            "evidence_ids": ["source-note-2"],
+        },
+        {
+            "id": "incident-3", "event_type": "mobility", "status": "completed",
+            "occurred_at": datetime(2026, 11, 10, 10, tzinfo=timezone.utc),
+            "title": "Stumbled near the bathroom", "description": "She stumbled.",
+            "evidence_ids": ["source-note-3"],
+        },
+        {
+            "id": "duplicate-of-incident-1", "event_type": "mobility", "status": "recorded",
+            "occurred_at": datetime(2026, 11, 2, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness near the kitchen", "description": "She felt unsteady.",
+            "evidence_ids": ["source-note-1"],
+        },
+        {
+            "id": "pending-not-an-incident", "event_type": "mobility", "status": "pending",
+            "occurred_at": datetime(2026, 11, 11, 8, tzinfo=timezone.utc),
+            "title": "Unsteady while walking", "description": "Pending review.",
+            "evidence_ids": ["source-note-4"],
+        },
+    ]
+    aggregate = build_distinct_event_aggregate(
+        events, topic="unsteadiness", start_at=start, end_at=end,
+        window_label="this calendar month",
+    )
+    assert aggregate["status"] == "validated"
+    assert aggregate["count"] == 3
+    assert aggregate["duplicate_event_ids"] == ["duplicate-of-incident-1"]
+    assert [item["record_id"] for item in aggregate["source_references"]] == [
+        "incident-1", "incident-2", "incident-3",
+    ]
+    provenance = build_claim_provenance(
+        "Your mother has had three incidents of unsteadiness this month.",
+        [],
+        [aggregate],
+    )
+    claim = provenance["claims"][0]
+    assert claim["support_status"] == "matched_validated_aggregate"
+    assert len(claim["source_references"]) == 3
+    assert provenance["unmatched_statement_count"] == 0
+
+
+def test_numeric_claim_is_not_supported_when_its_count_does_not_match_the_events():
+    aggregate = build_distinct_event_aggregate(
+        [{
+            "id": "incident-one", "event_type": "mobility", "status": "recorded",
+            "occurred_at": datetime(2026, 11, 2, tzinfo=timezone.utc),
+            "title": "Unsteadiness near the kitchen", "description": "",
+        }],
+        topic="unsteadiness",
+        start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
+        window_label="this calendar month",
+    )
+    provenance = build_claim_provenance(
+        "Your mother has had three incidents of unsteadiness this month.",
+        [],
+        [aggregate],
+    )
+    assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+    assert provenance["claims"][0]["source_references"] == []
+
+
+def test_incomplete_aggregate_never_supports_a_numeric_claim():
+    aggregate = build_distinct_event_aggregate(
+        [],
+        topic="unsteadiness",
+        start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
+        window_label="this calendar month",
+        truncated=True,
+    )
+    provenance = build_claim_provenance(
+        "Your mother has had zero incidents of unsteadiness this month.",
+        [],
+        [aggregate],
+    )
+    assert aggregate["status"] == "incomplete_source_window"
+    assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+
+
+def test_qwen_context_sources_are_tied_to_their_own_record_reference():
+    records = context_lines_to_source_records([
+        "Recorded care event [event-1]: She felt unsteady near the kitchen.",
+        "Recorded appointment [appointment-1]: Routine visit scheduled.",
+        "No matching source was found.",
+    ])
+    assert [(item["record_type"], item["record_id"]) for item in records] == [
+        ("care_event", "event-1"),
+        ("appointment", "appointment-1"),
+    ]
+    provenance = build_claim_provenance("She felt unsteady near the kitchen.", records)
+    assert provenance["claims"][0]["source_references"][0]["record_id"] == "event-1"
