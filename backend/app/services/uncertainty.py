@@ -38,7 +38,7 @@ _QUESTION_FILLER_TOKENS = {
     "me", "of", "on", "or", "our", "please", "she", "should", "tell", "that",
     "the", "their", "them", "they", "this", "to", "take", "us", "was", "we", "were",
     "what", "when", "where", "which", "who", "why", "will", "would", "you",
-    "your", "know", "confirm",
+    "your", "know", "confirm", "taking", "taken",
 }
 _QUESTION_SYNONYMS = {
     "meds": "medication",
