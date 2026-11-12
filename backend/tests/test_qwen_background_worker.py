@@ -390,6 +390,62 @@ def test_worker_marks_permanent_document_extraction_errors_failed(tmp_path, monk
     db.close()
 
 
+def test_document_intake_bounds_retries_for_persistently_failed_extraction_pages(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    db = sessions()
+    job = QwenBackgroundJob(
+        person_id="person-test",
+        caregiver_id="caregiver-test",
+        task_text="Process saved document for caregiver review.",
+        evidence_ids_json=json.dumps(["evidence-stuck-pdf"]),
+        workflow="document_intake",
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    monkeypatch.setattr(
+        worker,
+        "_process_document_evidence",
+        lambda *args, **kwargs: (
+            {"analysis_id": "analysis-stuck", "extraction_status": "partial"},
+            {
+                "analysis_id": "analysis-stuck",
+                "intelligence_status": "partial",
+                "observations": [],
+                "unprocessed_page_numbers": [2],
+                "deferred_until_extraction_complete": True,
+            },
+        ),
+    )
+
+    for attempt in range(4):
+        assert asyncio.run(worker.process_one_qwen_job()) is True
+        db = sessions()
+        current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        if attempt < 3:
+            assert current.status == "queued"
+            current.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+        else:
+            assert current.status == "failed"
+            assert current.error_code == "document_extraction_retry_limit_reached"
+        db.close()
+
+    db = sessions()
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id,
+        event_type="document_intake_extraction_retry_scheduled",
+    ).count() == 3
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id,
+        event_type="document_intake_extraction_retry_exhausted",
+    ).count() == 1
+    db.close()
+
+
 def test_document_intake_requeues_remaining_page_windows_without_blocking_worker(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     db = sessions()
