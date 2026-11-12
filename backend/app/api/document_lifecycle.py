@@ -144,6 +144,28 @@ def _unprocessed_page_numbers(source_text: str) -> list[int]:
     ]
 
 
+def _retryable_page_numbers(source_text: str) -> list[int]:
+    """Return pages that failed transient processing, not pages blocked by limits."""
+    return [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed: (?:OCR engine error|OCR processing error)\]",
+            source_text or "",
+        )
+    ]
+
+
+def _blocked_page_numbers(source_text: str) -> list[int]:
+    """Return pages that cannot be retried without changing the source or limits."""
+    return [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed: (?:exceeds the 20-megapixel OCR limit|OCR page limit exceeded)\]",
+            source_text or "",
+        )
+    ]
+
+
 def _ocr_quality_by_page(source_text: str) -> list[dict]:
     results = []
     markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or ""))
@@ -821,7 +843,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if metadata.get("kind") != "document_extraction_v1":
             continue
         _verify_persisted_extraction(row, upload, db, content)
-        failed_pages = set(_unprocessed_page_numbers(row.source_text or ""))
+        failed_pages = set(_retryable_page_numbers(row.source_text or ""))
         if row.extraction_status == "partial" and failed_pages:
             # Retry only pages whose processing did not complete. Preserve
             # successful and successfully-processed-but-unreadable page results.
