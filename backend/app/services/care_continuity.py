@@ -479,15 +479,47 @@ def next_best_questions(
     candidates: List[Dict[str, Any]] = []
     contradictions = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
-        Contradiction.resolution_status == "unresolved",
+        Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
     ).all()
     for item in contradictions:
-        candidates.append({
-            "question": f"Two different reports conflict about {item.field}. What, if anything, confirms the current situation? Neither report has been selected as correct.",
-            "subject_type": item.subject_type, "subject_id": item.subject_id,
-            "priority": "high", "necessity": "not_assessed", "necessity_rationale": "A contradiction is retained for internal reconciliation; its presence alone does not establish that caregiver input is necessary.", "reason": "An unresolved contradiction prevents a reliable current-state conclusion.",
-            "evidence_ids": item.evidence_ids or [], "source_kind": "contradiction", "source_id": item.id, "source_ids": item.source_assertion_ids or [], "_weight": 40,
-        })
+        is_medication_conflict = (
+            str(item.subject_type or "").strip().casefold() in {"medication", "medications"}
+            or "medication" in str(item.field or "").casefold()
+        )
+        if is_medication_conflict:
+            # A competing current medication instruction is a concrete decision
+            # dependency. Keep the prescription unresolved and direct confirmation
+            # to a qualified professional; never generate a start/stop/dose action.
+            candidates.append({
+                "question": "Can the prescribing clinician or pharmacist confirm the current instruction for this medication?",
+                "subject_type": item.subject_type,
+                "subject_id": item.subject_id,
+                "priority": "high",
+                "necessity": "necessary",
+                "necessity_rationale": (
+                    "Different current medication reports remain in the care record. "
+                    "SolenOS cannot establish whether the instruction changed; a prescribing "
+                    "clinician or pharmacist must confirm it before the family relies on the reported change."
+                ),
+                "decision_dependency": (
+                    "The current medication instruction remains unconfirmed. Do not treat the "
+                    "reported start, stop, or dose change as established until a qualified professional confirms it."
+                ),
+                "reason": "A source-linked medication contradiction remains active; no report was selected as correct.",
+                "evidence_ids": item.evidence_ids or [],
+                "source_kind": "contradiction",
+                "source_id": item.id,
+                "source_ids": item.source_assertion_ids or [],
+                "intended_answerer_role": "professional",
+                "_weight": 50,
+            })
+        elif item.resolution_status == "unresolved":
+            candidates.append({
+                "question": f"Two different reports conflict about {item.field}. What, if anything, confirms the current situation? Neither report has been selected as correct.",
+                "subject_type": item.subject_type, "subject_id": item.subject_id,
+                "priority": "high", "necessity": "not_assessed", "necessity_rationale": "A contradiction is retained for internal reconciliation; its presence alone does not establish that caregiver input is necessary.", "reason": "An unresolved contradiction prevents a reliable current-state conclusion.",
+                "evidence_ids": item.evidence_ids or [], "source_kind": "contradiction", "source_id": item.id, "source_ids": item.source_assertion_ids or [], "_weight": 40,
+            })
 
     assertions = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
