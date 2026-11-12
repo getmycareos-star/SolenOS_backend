@@ -26,7 +26,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
-from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
@@ -264,6 +264,68 @@ def list_document_intelligence(
         "count": len(items),
         "processing_jobs": processing_jobs,
         "identity_scope": "server_session_person_and_caregiver",
+    }
+
+
+@router.post("/{evidence_id}/queue", status_code=202)
+def queue_document_intake(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    """Queue or resume document OCR and understanding without blocking the caregiver."""
+    person_id, caregiver_id = _identity(request, db)
+    _evidence, _upload = _source(evidence_id, person_id, caregiver_id, db)
+
+    job = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow == "document_intake",
+        QwenBackgroundJob.evidence_ids_json == json.dumps([evidence_id]),
+    ).order_by(QwenBackgroundJob.created_at.desc()).first()
+
+    if job is not None and job.status in {"queued", "processing"}:
+        return {
+            "job_id": job.id,
+            "evidence_id": evidence_id,
+            "status": job.status,
+            "idempotent_replay": True,
+        }
+
+    previous_status = job.status if job is not None else None
+    if job is None:
+        job = QwenBackgroundJob(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            task_text="Process saved document for caregiver review.",
+            context_text="",
+            evidence_ids_json=json.dumps([evidence_id]),
+            workflow="document_intake",
+            status="queued",
+        )
+        db.add(job)
+        db.flush()
+    else:
+        job.status = "queued"
+        job.attempt_count = 0
+        job.available_at = datetime.now(timezone.utc)
+        job.locked_at = None
+        job.completed_at = None
+        job.error_code = None
+        job.result_text = None
+
+    db.add(QwenJobEvent(
+        job_id=job.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        event_type="document_intake_retried" if previous_status else "document_intake_queued",
+        from_status=previous_status,
+        to_status="queued",
+        metadata_json={"source_evidence_id": evidence_id, "written_to_lcr": False},
+    ))
+    db.commit()
+    db.refresh(job)
+    return {
+        "job_id": job.id,
+        "evidence_id": evidence_id,
+        "status": job.status,
+        "idempotent_replay": False,
     }
 
 
