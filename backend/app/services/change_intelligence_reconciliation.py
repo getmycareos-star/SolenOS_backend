@@ -16,7 +16,7 @@ from app.services.change_detection import (
     detect_numeric_observation_changes,
 )
 from app.services.pattern_detection import detect_cross_domain_patterns, detect_patterns
-from app.services.care_continuity import next_best_questions
+from app.services.care_continuity import next_best_questions, reassess_open_question_lifecycle
 
 
 def reconcile_person_change_intelligence(
@@ -49,4 +49,8 @@ def reconcile_person_change_intelligence(
     # Keep source-linked clarification questions in step with every ordinary
     # evidence/assertion reconciliation. The caller retains transaction ownership.
     next_best_questions(db, person_id, persist=True, commit=False)
+    # Reassess previously necessary, source-linked requests after new evidence
+    # has been reconciled. Automatic close/reopen transitions are captured by
+    # the existing append-only care-state revision history.
+    reassess_open_question_lifecycle(db, person_id)
     db.flush()
