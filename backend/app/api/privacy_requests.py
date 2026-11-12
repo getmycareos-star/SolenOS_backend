@@ -1305,6 +1305,37 @@ def fulfil_approved_deletion(
                 detail="Evidence rows remain after committed deletion verification; request was not marked fulfilled",
             )
 
+        # A document upload is a separate payload row. Verify and erase it after
+        # the evidence/root deletion commit as well, before issuing a fulfilled
+        # receipt; this catches dependent-row cleanup that leaves orphaned bytes.
+        remaining_upload_ids = []
+        if evidence_ids_to_erase:
+            remaining_upload_ids = [
+                str(item[0]) for item in db.query(EvidenceUpload.evidence_id).filter(
+                    EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
+                ).all()
+            ]
+        if remaining_upload_ids:
+            if bind.dialect.name == "postgresql":
+                db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+            for evidence_id in remaining_upload_ids:
+                db.execute(
+                    text("DELETE FROM evidence_uploads WHERE evidence_id = :evidence_id"),
+                    {"evidence_id": evidence_id},
+                )
+            db.commit()
+            db.expire_all()
+            remaining_upload_ids = [
+                str(item[0]) for item in db.query(EvidenceUpload.evidence_id).filter(
+                    EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
+                ).all()
+            ]
+        if remaining_upload_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="Evidence upload bytes remain after committed deletion verification; request was not marked fulfilled",
+            )
+
         # Both root identities are now absent. Only now persist the redacted
         # request receipt and terminal audit event.
         pseudonym = "erased:" + hashlib.sha256(

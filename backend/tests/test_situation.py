@@ -88,6 +88,8 @@ def test_post_situation_creates_evidence_and_event():
         assert data["message"] == "Care input recorded successfully."
         assert data["analysis_status"] == "complete"
         assert data["analysis_warning"] is None
+        assert data["qwen_review_required"] is False
+        assert isinstance(data["qwen_review_available"], bool)
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
         assert data["events"][0]["time_provenance"] == "entry_time_defaulted"
