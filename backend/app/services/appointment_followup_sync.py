@@ -162,15 +162,18 @@ def sync_appointment_followups(
         loop.deadline_source = "explicit_user" if due_at else None
         loop.deadline_timezone = _timezone_label(due_text)
         loop.source_fingerprint = fingerprint
-        loop.outcome_status = "outcome_reported" if reported_complete else "outcome_unknown"
-        loop.outcome_evidence = (
-            list(loop.outcome_evidence or []) + [item for item in evidence if item not in (loop.outcome_evidence or [])]
-            if reported_complete else []
-        )
-        loop.verification_rule = (
-            "Completion was reported in the appointment workspace; keep it reported until supported by completion evidence."
-            if reported_complete else None
-        )
+        # A later workspace edit is not authority to erase an independently
+        # verified outcome. Workspace completion remains a report only.
+        if loop.outcome_status != "outcome_verified":
+            loop.outcome_status = "outcome_reported" if reported_complete else "outcome_unknown"
+            loop.outcome_evidence = (
+                list(loop.outcome_evidence or []) + [item for item in evidence if item not in (loop.outcome_evidence or [])]
+                if reported_complete else []
+            )
+            loop.verification_rule = (
+                "Completion was reported in the appointment workspace; keep it reported until supported by completion evidence."
+                if reported_complete else None
+            )
         existing_evidence = list(loop.evidence or [])
         for evidence_item in evidence:
             if evidence_item not in existing_evidence:
