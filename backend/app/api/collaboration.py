@@ -47,7 +47,7 @@ from app.models.collaboration import (
     ShareIntake,
 )
 from app.models.improvement_training_example import ImprovementTrainingExample
-from app.models.notifications import CareNotification, CareNotificationPreference
+from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -4852,6 +4852,20 @@ def update_care_notification_preferences(
             CareReminder.status == "open",
         ).update({CareReminder.notification_deferred_until: None}, synchronize_session=False)
     preference.updated_at = datetime.now(timezone.utc)
+    if any(value is not None for value in (
+        payload.quiet_hours_enabled, payload.quiet_hours_start,
+        payload.quiet_hours_end, payload.timezone_name,
+    )):
+        db.query(CarePushDelivery).join(
+            CareNotification, CareNotification.id == CarePushDelivery.notification_id
+        ).filter(
+            CareNotification.person_id == person_id,
+            CareNotification.caregiver_id == caregiver_id,
+            CarePushDelivery.status == "pending",
+        ).update(
+            {CarePushDelivery.next_attempt_at: datetime.now(timezone.utc)},
+            synchronize_session=False,
+        )
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
         person_id=person_id, caregiver_id=caregiver_id,
