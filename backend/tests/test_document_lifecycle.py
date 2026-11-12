@@ -12,6 +12,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Evidence
 from app.models.collaboration import EvidenceUpload
+from app.models.qwen_background_job import QwenBackgroundJob
 
 engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -235,6 +236,14 @@ def test_real_upload_endpoint_feeds_document_extraction(client):
     )
     assert uploaded.status_code == 201, uploaded.text
     evidence_id = uploaded.json()["evidence_id"]
+    processing_job_id = uploaded.json()["document_processing_job_id"]
+    assert processing_job_id
+    assert uploaded.json()["processing_status"] == "queued"
+    with TestSessionLocal() as db:
+        job = db.query(QwenBackgroundJob).filter_by(id=processing_job_id).one()
+        assert job.workflow == "document_intake"
+        assert job.status == "queued"
+        assert __import__("json").loads(job.evidence_ids_json) == [evidence_id]
 
     # Client-provided OCR/text must not enter the authoritative Evidence source.
     with TestSessionLocal() as db:
@@ -632,6 +641,8 @@ def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(clie
     )
     assert first.status_code == 201, first.text
     first_id = first.json()["evidence_id"]
+    first_job_id = first.json()["document_processing_job_id"]
+    assert first_job_id
 
     replay = test_client.post(
         "/api/v1/upload",
@@ -642,6 +653,7 @@ def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(clie
     assert replay.status_code == 201, replay.text
     assert replay.json()["evidence_id"] == first_id
     assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["document_processing_job_id"] == first_job_id
 
     changed = test_client.post(
         "/api/v1/upload",
