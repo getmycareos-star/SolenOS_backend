@@ -1191,8 +1191,9 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
             intelligence = metadata.get("document_intelligence")
             if analysis.extraction_status != "available" or not isinstance(intelligence, dict):
                 return None
-            if intelligence.get("status") != "available":
-                return None
+            # Candidate overflow is a review-batching state, not an
+            # incomplete page extraction. Compare the complete persisted
+            # candidate collection only when page processing itself is complete.
             if intelligence.get("unprocessed_page_numbers") or intelligence.get("unreadable_page_numbers"):
                 return None
             observations = intelligence.get("observations")
