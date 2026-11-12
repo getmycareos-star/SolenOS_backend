@@ -11,6 +11,9 @@ python -m pytest \
   backend/tests/test_document_lifecycle.py \
   backend/tests/test_document_intelligence_lifecycle.py \
   backend/tests/test_document_intelligence_postgres.py \
+  backend/tests/test_document_candidate_schema.py \
+  backend/tests/test_contradiction_provenance.py \
+  backend/tests/test_qwen_gateway_failures.py \
   backend/tests/test_unified_lcr_retrieval.py \
   backend/tests/test_daily_care_review_postgres.py \
   backend/tests/test_handoff_postgres_integration.py \
