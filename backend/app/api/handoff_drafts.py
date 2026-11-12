@@ -870,15 +870,16 @@ def save_handoff_draft_revision(
     serialized = json.dumps(edited_content, ensure_ascii=False, separators=(",", ":"), default=str)
     if len(serialized) > 40000:
         raise HTTPException(status_code=413, detail="Draft content exceeds the supported size")
+    current_sections = (draft.structured_content or {}).get("sections", [])
+    source_sections_unchanged = edited_content.get("sections", []) == current_sections
     if draft.generation_status == "generated":
-        valid_content = _validate_draft_quotes(edited_content, draft.source_snapshot or {})
+        valid_content = source_sections_unchanged and _validate_draft_quotes(edited_content, draft.source_snapshot or {})
     else:
         notes = edited_content.get("caregiver_notes", [])
-        current_sections = (draft.structured_content or {}).get("sections", [])
         generation = edited_content.get("generation")
         generated_sections = generation.get("sections", []) if isinstance(generation, dict) else []
         valid_content = (
-            edited_content.get("sections", []) == current_sections
+            source_sections_unchanged
             and not generated_sections
             and isinstance(notes, list)
             and len(notes) <= 20
