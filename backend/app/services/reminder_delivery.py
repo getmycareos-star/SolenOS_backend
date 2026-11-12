@@ -77,7 +77,21 @@ def quiet_hours_release_at(preference, now):
         release_date = local_now.date() + (timedelta(days=1) if current >= start else timedelta())
     if not quiet:
         return None
-    return datetime.combine(release_date, end, tzinfo=zone).astimezone(timezone.utc)
+    # Resolve DST transitions conservatively. For an ambiguous local end time
+    # (fall-back), choose the later instant so notifications are never released
+    # during the repeated quiet-hours interval. For a nonexistent local end time
+    # (spring-forward), choose the later UTC candidate, which maps to the first
+    # valid local instant after the clock jump.
+    local_end = datetime.combine(release_date, end)
+    candidates = [
+        local_end.replace(tzinfo=zone, fold=0).astimezone(timezone.utc),
+        local_end.replace(tzinfo=zone, fold=1).astimezone(timezone.utc),
+    ]
+    valid_candidates = [
+        candidate for candidate in candidates
+        if candidate.astimezone(zone).replace(tzinfo=None) == local_end
+    ]
+    return max(valid_candidates or candidates)
 
 
 def deliver_due_reminders(db=None, now=None):
