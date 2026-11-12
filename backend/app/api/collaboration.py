@@ -155,6 +155,18 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         }
     shared_origin_pairs = set()
     if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
+        shared_scope_filters = [
+            and_(
+                EvidenceSourceRelationship.scope_type == "evidence_pair",
+                EvidenceSourceRelationship.scope_id == "",
+            )
+        ]
+        selected_event_ids = [str(row.id) for row in selected]
+        if selected_event_ids:
+            shared_scope_filters.append(and_(
+                EvidenceSourceRelationship.scope_type.in_(("event", "care_event")),
+                EvidenceSourceRelationship.scope_id.in_(selected_event_ids),
+            ))
         shared_rows = db.query(EvidenceSourceRelationship).filter(
             EvidenceSourceRelationship.person_id == person_id,
             EvidenceSourceRelationship.source_independence_status.in_(("shared_origin", "copied_or_same_origin")),
@@ -162,6 +174,7 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
                 EvidenceSourceRelationship.source_evidence_id.in_(all_event_evidence_ids),
                 EvidenceSourceRelationship.related_evidence_id.in_(all_event_evidence_ids),
             ),
+            or_(*shared_scope_filters),
         ).all()
         shared_origin_pairs = {
             frozenset((str(item.source_evidence_id), str(item.related_evidence_id)))
@@ -339,6 +352,8 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
     if evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
         relationships = db.query(EvidenceSourceRelationship).filter(
             EvidenceSourceRelationship.person_id == person_id,
+            EvidenceSourceRelationship.scope_type == "evidence_pair",
+            EvidenceSourceRelationship.scope_id == "",
             or_(
                 EvidenceSourceRelationship.source_evidence_id.in_(evidence_ids),
                 EvidenceSourceRelationship.related_evidence_id.in_(evidence_ids),
