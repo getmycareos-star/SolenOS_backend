@@ -1405,7 +1405,7 @@ def review_document_candidate(
                 ),
                 commit=False,
             )
-            assertion_row.assertion_status = "accepted"
+            assertion_row.assertion_status = "reported" if assertion_subject_type == "medication" and document_field == "medication_status" else "accepted"
             db.flush()
         else:
             assertion_row = db.query(CareAssertion).filter(
@@ -1419,7 +1419,8 @@ def review_document_candidate(
         # Flush the assertion and its state revision in the same transaction as
         # the append-only review event below. No intermediate commit is allowed.
         db.flush()
-        if assertion_row.assertion_status != "accepted":
+        expected_assertion_status = "reported" if assertion_subject_type == "medication" and document_field == "medication_status" else "accepted"
+        if assertion_row.assertion_status != expected_assertion_status:
             raise HTTPException(status_code=503, detail="The caregiver review was not applied to the Living Care Record")
         try:
             follow_up_id = _persist_document_follow_up(
@@ -1559,6 +1560,7 @@ def review_document_candidate(
         "source_evidence_id": evidence_id,
         "source_record_ref": {"record_type": "care_assertion", "record_id": assertion_id} if assertion_id else None,
         "written_to_lcr": bool(assertion_id),
+        "assertion_status": assertion_row.assertion_status if assertion_id and assertion_row else None,
         "follow_up_record_ref": {"record_type": "open_loop", "record_id": follow_up_id} if follow_up_id else None,
         "review_required": payload.decision == "correct",
         "change_intelligence_status": change_intelligence_status,
