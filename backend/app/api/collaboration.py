@@ -630,6 +630,9 @@ def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None)
 
 
 def _ensure_document_intake_job(db: Session, person_id: str, caregiver_id: str, evidence_id: str):
+    inspector = inspect(db.get_bind())
+    if not inspector.has_table("qwen_background_jobs") or not inspector.has_table("qwen_job_events"):
+        return None
     evidence_ids_json = json.dumps([evidence_id])
     existing = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.person_id == person_id,
