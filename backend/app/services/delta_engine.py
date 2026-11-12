@@ -1378,9 +1378,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     "analysis": analysis,
                 })
             db.flush()
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            raise HTTPException(status_code=500, detail="The reconciliation could not be persisted; the transaction was rolled back.")
+            raise HTTPException(
+                status_code=500,
+                detail="The reconciliation could not be persisted; the transaction was rolled back.",
+            ) from exc
 
     result["computed_changes"] = computed
     result["provenance"] = {
