@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Evidence, Person
+from app.models.collaboration import ConversationMessage, ConversationSession
 from app.services.change_intelligence_reconciliation import (
     reconcile_person_change_intelligence,
 )
@@ -28,6 +29,8 @@ def execute_care_continuity_reconciliation(
     workflow: str,
     source_event_id: str | None = None,
     source_evidence_id: str | None = None,
+    source_message_id: str | None = None,
+    source_conversation_id: str | None = None,
     reference_time: datetime | None = None,
 ) -> dict[str, Any]:
     """Validate persisted lineage and stage the shared LCR reconciliation.
@@ -39,8 +42,10 @@ def execute_care_continuity_reconciliation(
         raise CareContinuityExecutionError("A person scope is required")
     if not isinstance(workflow, str) or not workflow.strip():
         raise CareContinuityExecutionError("A workflow identifier is required")
-    if not source_event_id and not source_evidence_id:
+    if not source_event_id and not source_evidence_id and not source_message_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
+    if source_message_id and not source_conversation_id:
+        raise CareContinuityExecutionError("A Companion source message must include its conversation reference")
 
     person = db.query(Person).filter(Person.id == person_id).first()
     if person is None:
@@ -75,6 +80,27 @@ def execute_care_continuity_reconciliation(
                 "The source evidence is not linked to the supplied source event"
             )
 
+    conversation = None
+    message = None
+    if source_message_id:
+        conversation = db.query(ConversationSession).filter(
+            ConversationSession.id == source_conversation_id,
+            ConversationSession.person_id == person_id,
+        ).first()
+        if conversation is None:
+            raise CareContinuityExecutionError(
+                "The Companion conversation is missing or belongs to another care record"
+            )
+        message = db.query(ConversationMessage).filter(
+            ConversationMessage.id == source_message_id,
+            ConversationMessage.session_id == source_conversation_id,
+            ConversationMessage.role == "user",
+        ).first()
+        if message is None:
+            raise CareContinuityExecutionError(
+                "The original caregiver-authored Companion message could not be verified"
+            )
+
     # Make pending assertions/review decisions visible to reconciliation in
     # this same unit of work. The caller retains commit/rollback ownership.
     db.flush()
@@ -87,9 +113,12 @@ def execute_care_continuity_reconciliation(
         "person_id": person_id,
         "source_event_id": source_event_id,
         "source_evidence_id": source_evidence_id,
+        "source_message_id": source_message_id,
+        "source_conversation_id": source_conversation_id,
         "stages": {
             "source_preservation": "verified",
             "evidence": "verified" if evidence is not None else "not_applicable",
+            "source_message": "verified" if message is not None else "not_applicable",
             "reconciliation": "staged_in_caller_transaction",
             "longitudinal_retrieval": "not_verified",
         },
