@@ -1107,8 +1107,26 @@ def link_corrected_document_version(
         raise HTTPException(status_code=409, detail="These files are exact duplicates, not corrected versions")
     if replacement.parent_evidence_id not in (None, original.id):
         raise HTTPException(status_code=409, detail="The replacement is already linked to another document version")
-    if original.parent_evidence_id == replacement.id:
-        raise HTTPException(status_code=409, detail="This link would create a document-version cycle")
+    existing_child = db.query(EvidenceModel.id).filter(
+        EvidenceModel.parent_evidence_id == original.id,
+        EvidenceModel.id != replacement.id,
+    ).first()
+    if existing_child:
+        raise HTTPException(status_code=409, detail="The earlier document already has a linked corrected version")
+    # Walk the predecessor chain so a multi-version cycle cannot be created.
+    cursor = original
+    visited = set()
+    while cursor is not None and cursor.parent_evidence_id:
+        if cursor.parent_evidence_id == replacement.id:
+            raise HTTPException(status_code=409, detail="This link would create a document-version cycle")
+        if cursor.id in visited:
+            raise HTTPException(status_code=409, detail="The existing document-version chain is inconsistent")
+        visited.add(cursor.id)
+        cursor = db.query(EvidenceModel).filter(
+            EvidenceModel.id == cursor.parent_evidence_id,
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        ).first()
     # A document can have one predecessor. The original remains preserved and
     # continues to support its historical interpretation.
     replacement.parent_evidence_id = original.id
