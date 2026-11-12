@@ -17,7 +17,7 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
-from app.models.collaboration import ConversationMessage
+from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
@@ -56,6 +56,36 @@ def review(client, session, proposal_id, payload):
 
 
 def pending(client, session):
+    # Seed a legacy proposal only after asserting that Companion did not create
+    # one from the conversation turn. This keeps the review API lifecycle tested
+    # without making it part of the conversational request path.
+    db = TestingSessionLocal()
+    try:
+        conversation = db.query(ConversationSession).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).order_by(ConversationSession.created_at.desc()).first()
+        assert conversation is not None
+        source_message = db.query(ConversationMessage).filter_by(
+            session_id=conversation.id, role="user",
+        ).order_by(ConversationMessage.created_at.desc()).first()
+        assert source_message is not None
+        existing = db.query(AIOutputLCRProposal).filter_by(
+            source_message_id=source_message.id,
+        ).count()
+        assert existing == 0, "Companion must not automatically create LCR proposals"
+        extraction = care_updates.extract_companion_care_candidates(source_message.content)
+        care_updates.persist_companion_candidates(
+            db,
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            conversation_id=conversation.id,
+            message_id=source_message.id,
+            source_text=source_message.content,
+            extraction=extraction,
+        )
+    finally:
+        db.close()
     response = client.get(
         "/api/v1/companion/care-updates",
         headers={"Authorization": f"Bearer {session['access_token']}"},
@@ -105,7 +135,7 @@ def test_postgres_companion_care_update_lifecycle(monkeypatch):
         replay = send(client, first, original, first_turn)
         assert replay.status_code == 200, replay.text
         assert replay.json()["idempotent_replay"] is True
-        assert len(replay.json()["care_update_candidates"]) == 1
+        assert replay.json()["care_update_candidates"] == []
 
         with TestingSessionLocal() as db:
             source_message = db.query(ConversationMessage).filter_by(id=proposal["source_message_id"]).one()
