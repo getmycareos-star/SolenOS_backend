@@ -996,6 +996,17 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
         )
         assert response.status_code == 200, response.text
         correction_id = response.json()["id"]
+        history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=20&offset=0",
+            headers=headers,
+        )
+        assert history.status_code == 200, history.text
+        correction_entry = next(
+            record for record in history.json()["records"]
+            if record["source_type"] == "correction" and record["source_id"] == correction_id
+        )
+        assert correction_entry["target_type"] == "care_event"
+        assert correction_entry["target_id"] == original_id
 
         db = TestingSessionLocal()
         try:
