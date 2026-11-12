@@ -332,13 +332,33 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             id="push-test-notification",
             person_id=session["person"]["id"],
             caregiver_id=session["caregiver"]["id"],
-            title="Private care event title",
-            body="Private care details that must not appear on the lock screen.",
-            category="care_update",
+            title="Private reminder title",
+            body="Private reminder details that must not appear on the lock screen.",
+            category="reminder_due",
             priority="normal",
             created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
         )
-        db.add(notification)
+        in_app_change = CareNotification(
+            id="push-test-in-app-change",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="A care change may be worth reviewing",
+            body="This belongs in the authenticated in-app inbox.",
+            category="care_change",
+            priority="normal",
+            source_event_id="meaningful-change",
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+        )
+        subscription = db.query(CarePushSubscription).one()
+        stale_delivery = CarePushDelivery(
+            id="push-test-stale-in-app-delivery",
+            notification_id=in_app_change.id,
+            subscription_id=subscription.id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=datetime.now(timezone.utc),
+        )
+        db.add_all([notification, in_app_change, stale_delivery])
         db.commit()
 
         accepted = delivery_service.deliver_pending_web_pushes(
@@ -350,10 +370,13 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             notification_id=notification.id
         ).one()
         assert delivery.status == "accepted"
+        db.refresh(stale_delivery)
+        assert stale_delivery.status == "cancelled"
+        assert stale_delivery.last_error_code == "in_app_only_category"
         assert delivery.provider_accepted_at is not None
         assert len(sent_payloads) == 1
-        assert "Private care event title" not in sent_payloads[0]["data"]
-        assert "Private care details" not in sent_payloads[0]["data"]
+        assert "Private reminder title" not in sent_payloads[0]["data"]
+        assert "Private reminder details" not in sent_payloads[0]["data"]
         assert "You have a care update" in sent_payloads[0]["data"]
     finally:
         db.close()
@@ -419,7 +442,7 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
             caregiver_id=session["caregiver"]["id"],
             title="Sensitive title",
             body="Sensitive care detail",
-            category="handoff",
+            category="reminder_due",
             priority="normal",
             created_at=datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc),
         )
