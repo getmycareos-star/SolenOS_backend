@@ -33,6 +33,8 @@ from app.api.document_lifecycle import extract_saved_document, get_document_extr
 from app.api.document_intelligence import (
     CandidateReview,
     analyze_saved_document,
+    list_document_intelligence,
+    queue_document_intake,
     review_document_candidate,
 )
 from app.models.care import Caregiver, Person
@@ -186,6 +188,16 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert processing_job.workflow == "document_intake"
             assert processing_job.status == "queued"
             assert json.loads(processing_job.evidence_ids_json) == [evidence_id]
+            queue_state = list_document_intelligence(_request(person_id, caregiver_id), 50, db)
+            assert any(
+                item["evidence_id"] == evidence_id and item["status"] == "queued"
+                for item in queue_state["processing_jobs"]
+            )
+            replayed_queue = queue_document_intake(
+                evidence_id, _request(person_id, caregiver_id), db
+            )
+            assert replayed_queue["job_id"] == processing_job_id
+            assert replayed_queue["idempotent_replay"] is True
 
         # Execute the real durable worker against PostgreSQL. Only the candidate
         # model output is deterministic; upload, extraction, persistence and job
