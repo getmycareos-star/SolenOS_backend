@@ -36,6 +36,15 @@ The current-medication projection returns a medication only when:
 Dose is optional and is included only when it has its own eligible, unambiguous
 assertion.
 
+## Review renewal
+
+The review window for an accepted assertion is measured from its latest explicit
+caregiver review revision in `care_assertion_revisions.changed_at`, not by
+rewriting the original `recorded_at` or observation time. When that window
+expires, the medication remains visible in the review queue with an overdue
+label. A new explicit review appends another revision and starts a new review
+window. The API refuses review when the append-only revision table is missing.
+
 ## Interpretation limits
 
 Caregiver-reviewed means a caregiver explicitly checked the report. It is not
