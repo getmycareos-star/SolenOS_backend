@@ -206,7 +206,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
         # Execute the real durable worker against PostgreSQL. Only the candidate
         # model output is deterministic; upload, extraction, persistence and job
         # lifecycle all use the real database and service implementations.
-        assert asyncio.run(worker.process_one_qwen_job()) is True
+        assert asyncio.run(worker.process_one_qwen_job(processing_job_id)) is True
         with Session() as db:
             completed_job = db.query(QwenBackgroundJob).filter_by(id=processing_job_id).one()
             assert completed_job.status == "completed"
