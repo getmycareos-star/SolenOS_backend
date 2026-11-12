@@ -641,6 +641,9 @@ def reconcile_information_gaps_from_accepted_assertions(
             "The missing field now has an accepted, source-backed current-state assertion. "
             "The assertion remains source-attributed and is not independently clinically verified."
         )
+        # The transition is system-generated; do not attribute it to the
+        # caregiver who last edited the gap.
+        gap.updated_by_caregiver_id = None
         gap.evidence_ids = list(dict.fromkeys(
             list(gap.evidence_ids or []) + evidence_ids
         ))
