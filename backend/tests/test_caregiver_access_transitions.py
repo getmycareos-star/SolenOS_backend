@@ -374,3 +374,70 @@ def test_responsibility_transfer_cannot_be_accepted_by_wrong_caregiver():
         headers=owner_headers,
     )
     assert wrong_accept.status_code == 404
+
+
+def test_primary_caregiver_authority_moves_only_after_recipient_acceptance():
+    client = TestClient(app)
+    sarah = create_primary(client)
+    sarah_headers = {"Authorization": f"Bearer {sarah['access_token']}"}
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=sarah_headers,
+        json={"email": "james@example.com"},
+    ).json()
+    james = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation["invitation_token"],
+            "email": "james@example.com",
+            "password": "a-long-test-password-123",
+            "name": "James",
+        },
+    ).json()
+    james_headers = {"Authorization": f"Bearer {james['access_token']}"}
+
+    requested = client.post(
+        "/api/v1/caregiver-access/primary-transfers",
+        headers=sarah_headers,
+        json={"to_caregiver_id": james["caregiver_id"], "reason": "James is taking over day-to-day care."},
+    )
+    assert requested.status_code == 201, requested.text
+    transfer_id = requested.json()["id"]
+
+    # Merely proposing the transition must not remove Sarah's authority.
+    still_primary = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=sarah_headers,
+        json={"email": "paperwork-helper@example.com"},
+    )
+    assert still_primary.status_code == 201, still_primary.text
+
+    accepted = client.post(
+        f"/api/v1/caregiver-access/primary-transfers/{transfer_id}/accept",
+        headers=james_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["accepted"] is True
+    assert accepted.json()["previous_caregiver_access_retained"] is True
+
+    members = client.get("/api/v1/caregiver-access/members", headers=james_headers)
+    assert members.status_code == 200, members.text
+    by_id = {item["caregiver_id"]: item for item in members.json()}
+    assert by_id[james["caregiver_id"]]["role"] == "primary"
+    assert by_id[james["caregiver_id"]]["can_manage_members"] is True
+    assert by_id[sarah["caregiver"]["id"]]["role"] == "family"
+    assert by_id[sarah["caregiver"]["id"]]["can_manage_members"] is False
+
+    sarah_cannot_manage = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=sarah_headers,
+        json={"email": "later-helper@example.com"},
+    )
+    assert sarah_cannot_manage.status_code == 403
+
+    # Sarah's active family access and historical identity are retained.
+    sarah_can_still_read = client.get(
+        f"/api/v1/evidence/{sarah['person']['id']}",
+        headers=sarah_headers,
+    )
+    assert sarah_can_still_read.status_code == 200
