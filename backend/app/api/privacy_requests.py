@@ -1098,6 +1098,17 @@ def fulfil_approved_deletion(
             name: inspector.get_foreign_keys(name) for name in dependency_tables
         }
         reachable_depth = {"persons": 0, "caregivers": 0}
+        # Legacy tables may carry a direct person_id/caregiver_id without a
+        # declared FK. Treat those scoped tables as additional graph roots so
+        # indirect legacy dependants are ordered and erased before their parent.
+        for table_name in dependency_tables:
+            if table_name in {"persons", "caregivers"}:
+                continue
+            column_names = {
+                column["name"] for column in inspector.get_columns(table_name)
+            }
+            if "person_id" in column_names or "caregiver_id" in column_names:
+                reachable_depth[table_name] = 1
         dependency_graph_converged = False
         for _ in range(len(dependency_tables) + 1):
             changed_depth = False
@@ -1108,7 +1119,11 @@ def fulfil_approved_deletion(
                     continue
                 for foreign_key in foreign_keys:
                     parent_name = foreign_key.get("referred_table")
-                    if parent_name not in reachable_depth:
+                    # Self-referencing tables (for example supersession chains)
+                    # are deleted as a scoped set. Treating the self-FK as a
+                    # table-order dependency makes the longest-depth walk grow
+                    # forever even though it does not introduce a table ordering.
+                    if parent_name not in reachable_depth or parent_name == child_name:
                         continue
                     candidate_depth = reachable_depth[parent_name] + 1
                     if child_name not in reachable_depth or candidate_depth > reachable_depth[child_name]:
