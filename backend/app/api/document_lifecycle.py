@@ -652,8 +652,11 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extraction_method": details.get("extraction_method"),
         "page_count": details.get("page_count", 1),
         "processed_page_numbers": details.get("processed_page_numbers", []),
-        "unreadable_page_numbers": details.get("unreadable_page_numbers", []),
-        "unprocessed_page_numbers": details.get("unprocessed_page_numbers", []),
+        # The persisted extraction text is authoritative for page-level
+        # readability. Recompute these lists on every response so a successful
+        # retry cannot retain stale failure markers from an earlier attempt.
+        "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
+        "unprocessed_page_numbers": _unprocessed_page_numbers(analysis.source_text or ""),
         "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "model_provenance": intelligence.get("model_provenance"),
         "processing_history": intelligence.get("processing_history", []),
