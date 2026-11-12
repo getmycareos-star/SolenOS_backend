@@ -79,7 +79,14 @@ def sync_appointment_followups(
         owner = item.get("owner_label", item.get("owner"))
         owner_label = owner.strip()[:200] if isinstance(owner, str) and owner.strip() else None
         raw_owner_role = item.get("owner_role")
-        owner_role = raw_owner_role.strip()[:100] if isinstance(raw_owner_role, str) and raw_owner_role.strip() else None
+        # SolenOS owns tracking and reassessment; an absent action owner stays
+        # explicitly unassigned rather than being silently pushed onto the
+        # caregiver who entered the appointment note.
+        owner_role = (
+            raw_owner_role.strip()[:100]
+            if isinstance(raw_owner_role, str) and raw_owner_role.strip()
+            else "unassigned"
+        )
         due_text = item.get("due") if isinstance(item.get("due"), str) else None
         due_at = _aware_due(due_text)
         source_status = item.get("status") if isinstance(item.get("status"), str) else "not_recorded"
