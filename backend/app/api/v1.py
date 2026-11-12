@@ -12,6 +12,7 @@ from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.lcr_context import build_lcr_context
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
 from app.models.collaboration import ConsentRecord, EvidenceUpload
@@ -947,6 +948,36 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         db.commit()
         execution["stages"]["reconciliation"] = "completed"
         change_intelligence_status = "available"
+        try:
+            projection = build_lcr_context(
+                db,
+                person_id,
+                caregiver_id=caregiver_id,
+                limit_per_source=1,
+            )
+            retrieval_status = (
+                "available"
+                if not projection.get("missing_required_sources")
+                else "unavailable"
+            )
+        except Exception:
+            retrieval_status = "unavailable"
+        execution["stages"]["longitudinal_retrieval"] = retrieval_status
+        execution_status["longitudinal_retrieval"] = retrieval_status
+        if analysis_persisted and analysis_id:
+            try:
+                persisted_analysis = db.query(CaptureAnalysisModel).filter(
+                    CaptureAnalysisModel.id == analysis_id,
+                    CaptureAnalysisModel.person_id == person_id,
+                    CaptureAnalysisModel.caregiver_id == caregiver_id,
+                ).first()
+                if persisted_analysis is not None:
+                    persisted_analysis.execution_status = dict(execution_status)
+                    db.add(persisted_analysis)
+                    db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("Could not persist retrieval status for event %s", event.id)
     except Exception:
         db.rollback()
         execution_status = {
