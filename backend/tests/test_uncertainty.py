@@ -854,6 +854,16 @@ def test_clarification_question_requires_same_record_claim_and_matching_subject_
         )
         db.add_all([person, caregiver, other_person, other_caregiver])
         db.flush()
+        claim_evidence = Evidence(
+            id="question-claim-evidence",
+            person_id=person.id,
+            type="daily_care",
+            source_text="Breakfast intake was lower than usual.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        )
+        db.add(claim_evidence)
+        db.flush()
         db.add_all([
             CareAssertion(
                 id="question-claim-own",
@@ -865,7 +875,7 @@ def test_clarification_question_requires_same_record_claim_and_matching_subject_
                 asserted_value="Breakfast intake was lower than usual.",
                 source_label="caregiver report",
                 source_text="Breakfast intake was lower than usual.",
-                evidence_ids=[],
+                evidence_ids=[claim_evidence.id],
                 assertion_status="reported",
             ),
             CareAssertion(
@@ -930,6 +940,7 @@ def test_clarification_question_requires_same_record_claim_and_matching_subject_
                 "intended_answerer_label": "Cardiology clinic",
                 "necessity": "necessary",
                 "necessity_rationale": "The current medication status is disputed and is needed for the appointment handoff.",
+                "context": [{"decision_dependency": "The appointment handoff cannot identify the current medication status without this answer."}],
             },
         )
         assert with_intent.status_code == 200, with_intent.text
@@ -1072,6 +1083,10 @@ def test_epistemic_view_summary():
                 "subject_type": "medication",
                 "subject_id": "med-1",
                 "priority": "medium",
+                "necessity": "necessary",
+                "necessity_rationale": "The medication status is needed for the next documented handoff.",
+                "evidence_ids": ["evidence-person-7-med-name"],
+                "context": [{"decision_dependency": "The handoff cannot describe the current medication status without this answer."}],
             },
         )
         
@@ -2891,6 +2906,19 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
         )
         db.add_all([person, caregiver, other_person, other_caregiver])
         db.flush()
+        historical_evidence = Evidence(
+            id="historical-question-evidence",
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="The mobility assessment outcome is still needed for the current care handoff.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        )
+        db.add(historical_evidence)
+        db.flush()
+        historical_question_context = [{
+            "decision_dependency": "The care handoff cannot state the assessment outcome without this answer."
+        }]
         old_asked_at = datetime(2024, 1, 15, 9, 30, tzinfo=timezone.utc)
         old_question = OpenQuestion(
             id="historical-open-question",
@@ -2899,6 +2927,10 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
             subject_type="appointment",
             subject_id="mobility-assessment",
             status="open",
+            necessity="necessary",
+            necessity_rationale="The mobility assessment outcome is needed for the current care handoff.",
+            evidence_ids=[historical_evidence.id],
+            context=historical_question_context,
             asked_at=old_asked_at,
             created_by_caregiver_id=caregiver.id,
         )
@@ -2909,6 +2941,10 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
             subject_type="appointment",
             subject_id="follow-up",
             status="open",
+            necessity="necessary",
+            necessity_rationale="The follow-up appointment status is needed for the current care handoff.",
+            evidence_ids=[historical_evidence.id],
+            context=historical_question_context,
             created_by_caregiver_id=caregiver.id,
         )
         db.add_all([old_question, recent_question])
