@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -774,5 +775,120 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             assert receipt.caregiver_id is None
     finally:
         client.close()
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
+
+
+def test_postgres_document_intelligence_resumes_all_page_windows_and_preserves_provenance(monkeypatch):
+    from app.api import document_intelligence
+    from app.services import qwen_background_worker as worker
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    monkeypatch.setattr(worker, "SessionLocal", Session)
+
+    async def idle_document_worker():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(main_module, "qwen_worker_loop", idle_document_worker)
+    monkeypatch.setattr(
+        document_intelligence,
+        "get_ollama_config",
+        lambda: (_ for _ in ()).throw(HTTPException(status_code=503, detail="test model unavailable")),
+    )
+    seen_pages = []
+
+    def deterministic_page_candidates(page_text, *, source_event_id, source_evidence_id=None):
+        match = re.search(r"Patient report: page (\d+) observation recorded\.", page_text)
+        assert match, page_text
+        page_number = int(match.group(1))
+        seen_pages.append(page_number)
+        quote = f"Patient report: page {page_number} observation recorded."
+        return {
+            "observations": [{
+                "subject": "Patient",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "postgresql_page_window_test",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(document_intelligence, "extract_review_candidates", deterministic_page_candidates)
+    api_client = TestClient(app)
+    try:
+        identity_response = api_client.post(
+            "/api/v1/sessions/anonymous",
+            json={"caregiver_name": "PostgreSQL multi-page document recipient"},
+        )
+        assert identity_response.status_code == 201, identity_response.text
+        identity = identity_response.json()
+        headers = {"Authorization": "Bearer " + identity["access_token"]}
+        content = "\n\n".join(
+            f"[Page {page_number}]\nPatient report: page {page_number} observation recorded."
+            for page_number in range(1, 27)
+        ).encode("utf-8")
+        uploaded = api_client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data={
+                "person_id": identity["person"]["id"],
+                "caregiver_id": identity["caregiver"]["id"],
+                "evidence_type": "document",
+            },
+            files={"file": ("twenty-six-page-care-record.txt", content, "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+
+        extraction = api_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=headers)
+        assert extraction.status_code == 201, extraction.text
+        analysis_id = extraction.json()["analysis_id"]
+
+        first = api_client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=headers)
+        assert first.status_code == 201, first.text
+        first_body = first.json()
+        assert first_body["intelligence_status"] == "partial"
+        assert first_body["processed_page_count"] == 25
+        assert first_body["total_page_count"] == 26
+        assert first_body["unprocessed_page_numbers"] == [26]
+        assert first_body["model_provenance"]["source_evidence_id"] == evidence_id
+        assert first_body["model_provenance"]["model_authority"] == "review_only"
+        assert first_body["model_provenance"]["provider"] == "unavailable_or_test_stub"
+        assert first_body["model_provenance"]["source_text_sha256"] == hashlib.sha256(content.decode("utf-8").encode("utf-8")).hexdigest()
+
+        second = api_client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=headers)
+        assert second.status_code == 201, second.text
+        second_body = second.json()
+        assert second_body["intelligence_status"] == "available"
+        assert second_body["processed_page_count"] == 26
+        assert second_body["total_page_count"] == 26
+        assert second_body["unprocessed_page_numbers"] == []
+        assert sorted(set(seen_pages)) == list(range(1, 27))
+        assert len(second_body["observations"]) == 26
+        assert len(second_body["processing_history"]) == 2
+        assert second_body["processing_history"][-1] == second_body["model_provenance"]
+        assert second_body["model_provenance"]["source_evidence_id"] == evidence_id
+        assert second_body["model_provenance"]["model_authority"] == "review_only"
+
+        with Session() as db:
+            saved = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+            intelligence = (saved.candidates or {}).get("document_intelligence") or {}
+            assert intelligence["status"] == "available"
+            assert len(intelligence["processed_page_numbers"]) == 26
+            assert intelligence["unprocessed_page_numbers"] == []
+            assert len(intelligence["processing_history"]) == 2
+    finally:
+        api_client.close()
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
