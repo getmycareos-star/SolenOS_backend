@@ -187,10 +187,14 @@ def deliver_pending_web_pushes(db=None, now=None):
             CarePushSubscription.revoked_at.is_(None)
         ).all()
         for subscription in subscriptions:
+            # Web Push is reserved for time-sensitive reminders and explicit
+            # handoff access changes. Care-change observations and clarification
+            # requests remain in the authenticated in-app inbox.
             notifications = session.query(CareNotification).filter(
                 CareNotification.person_id == subscription.person_id,
                 CareNotification.caregiver_id == subscription.caregiver_id,
                 CareNotification.created_at >= subscription.created_at,
+                CareNotification.category.in_(("reminder_due", "handoff")),
             ).all()
             for notification in notifications:
                 existing = session.query(CarePushDelivery.id).filter(
