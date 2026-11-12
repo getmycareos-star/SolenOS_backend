@@ -135,6 +135,7 @@ def test_real_tesseract_ocr_extracts_uploaded_scanned_image(client):
     assert retrieved.status_code == 200, retrieved.text
     extracted = retrieved.json()["extracted_text"]
     assert extracted.startswith("[Image OCR]")
+    assert "OCR quality:" not in extracted
     assert "Patient walked 20 metres" in extracted
     assert "12 October" in extracted
 
@@ -227,6 +228,7 @@ def test_real_tesseract_ocr_extracts_scanned_pdf_with_page_provenance(client):
     assert retrieved.status_code == 200, retrieved.text
     extracted = retrieved.json()["extracted_text"]
     assert "[Page 1 OCR]" in extracted
+    assert "OCR quality:" not in extracted
     assert "Patient walked 20 metres" in extracted
 
 
