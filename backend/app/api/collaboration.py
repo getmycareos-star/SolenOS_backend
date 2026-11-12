@@ -1376,10 +1376,30 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     jobs = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.person_id == person_id,
         QwenBackgroundJob.caregiver_id == caregiver_id,
-        QwenBackgroundJob.workflow == "document_intake",
-        QwenBackgroundJob.evidence_ids_json == json.dumps([evidence_id]),
         QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
     ).with_for_update().all()
+    jobs = [
+        job for job in jobs
+        if evidence_id in (
+            json.loads(job.evidence_ids_json or "[]")
+            if isinstance(job.evidence_ids_json, str) else []
+        )
+    ]
+    # A completed assistant output may already contain document-derived text.
+    # Do not erase its source while leaving that derived response available.
+    for output in db.query(QwenModelOutput).filter(
+        QwenModelOutput.person_id == person_id,
+        QwenModelOutput.caregiver_id == caregiver_id,
+    ).all():
+        try:
+            output_sources = json.loads(output.source_evidence_ids_json or "[]")
+        except (TypeError, ValueError):
+            output_sources = []
+        if evidence_id in output_sources:
+            raise HTTPException(
+                status_code=409,
+                detail="This document is referenced by a saved assistant response. Resolve that derived response before deleting the source.",
+            )
     for job in jobs:
         previous_status = job.status
         job.status = "cancelled"
