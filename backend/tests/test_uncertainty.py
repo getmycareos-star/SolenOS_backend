@@ -4684,3 +4684,152 @@ def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim(
     finally:
         db.close()
         teardown_db()
+
+
+def test_scenario_03_food_intake_date_correction_supersedes_without_erasing_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care_continuity import EvidenceObservation
+        from app.models.privacy_delivery import AuditLogEvent
+
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="scenario03-food-person", name="Margaret")
+        caregiver = Caregiver(
+            id="scenario03-food-caregiver",
+            name="Sarah",
+            email="scenario03-food@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        original_text = "Sarah reported that Margaret barely ate lunch on Monday."
+        correction_text = (
+            "Sarah corrected the date: Margaret ate most of her lunch on Monday. "
+            "It was Tuesday when Margaret barely ate lunch."
+        )
+        db.add_all([
+            person,
+            caregiver,
+            Evidence(
+                id="scenario03-food-original",
+                person_id=person.id,
+                type="caregiver_report",
+                source_text=original_text,
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="caregiver_report",
+            ),
+            Evidence(
+                id="scenario03-food-correction",
+                person_id=person.id,
+                type="caregiver_report",
+                source_text=correction_text,
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="caregiver_report",
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        original_passage = "Margaret barely ate lunch on Monday."
+        original_start = original_text.index(original_passage)
+        original_response = client.post(
+            "/api/v1/care-continuity/evidence/scenario03-food-original/observations",
+            json={
+                "observation_kind": "caregiver_report",
+                "epistemic_status": "reported",
+                "subject_label": "Margaret",
+                "attribute": "food_intake",
+                "value_text": "barely ate lunch",
+                "source_passage": original_passage,
+                "source_span_start": original_start,
+                "source_span_end": original_start + len(original_passage),
+                "observed_at": "2026-11-09T12:00:00+00:00",
+                "reported_at": "2026-11-09T18:00:00+00:00",
+                "extraction_method": "human_entered",
+                "extraction_version": "scenario-03",
+            },
+        )
+        assert original_response.status_code == 201, original_response.text
+        original = original_response.json()
+
+        monday_passage = "Margaret ate most of her lunch on Monday."
+        monday_start = correction_text.index(monday_passage)
+        monday_response = client.post(
+            "/api/v1/care-continuity/evidence/scenario03-food-correction/observations",
+            json={
+                "observation_kind": "caregiver_report",
+                "epistemic_status": "reported",
+                "subject_label": "Margaret",
+                "attribute": "food_intake",
+                "value_text": "ate most of her lunch",
+                "source_passage": monday_passage,
+                "source_span_start": monday_start,
+                "source_span_end": monday_start + len(monday_passage),
+                "observed_at": "2026-11-09T12:00:00+00:00",
+                "reported_at": "2026-11-12T09:00:00+00:00",
+                "extraction_method": "human_entered",
+                "extraction_version": "scenario-03",
+            },
+        )
+        assert monday_response.status_code == 201, monday_response.text
+
+        tuesday_passage = "It was Tuesday when Margaret barely ate lunch."
+        tuesday_start = correction_text.index(tuesday_passage)
+        correction_response = client.post(
+            "/api/v1/care-continuity/evidence/scenario03-food-correction/observations",
+            json={
+                "observation_kind": "caregiver_report",
+                "epistemic_status": "reported",
+                "subject_label": "Margaret",
+                "attribute": "food_intake",
+                "value_text": "barely ate lunch",
+                "source_passage": tuesday_passage,
+                "source_span_start": tuesday_start,
+                "source_span_end": tuesday_start + len(tuesday_passage),
+                "observed_at": "2026-11-10T12:00:00+00:00",
+                "reported_at": "2026-11-12T09:00:00+00:00",
+                "supersedes_observation_id": original["id"],
+                "correction_rationale": "Sarah corrected the observation date from Monday to Tuesday.",
+                "extraction_method": "caregiver_correction",
+                "extraction_version": "scenario-03",
+            },
+        )
+        assert correction_response.status_code == 201, correction_response.text
+        corrected = correction_response.json()
+        assert corrected["supersedes_observation_id"] == original["id"]
+        assert corrected["observed_at"].startswith("2026-11-10")
+        assert corrected["reported_at"].startswith("2026-11-12")
+        assert corrected["reassessment_receipt"]["supersedes_observation_id"] == original["id"]
+        assert corrected["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
+
+        with TestingSessionLocal() as verify_db:
+            original_row = verify_db.query(EvidenceObservation).filter_by(
+                id=original["id"], person_id=person.id
+            ).one()
+            corrected_row = verify_db.query(EvidenceObservation).filter_by(
+                id=corrected["id"], person_id=person.id
+            ).one()
+            all_rows = verify_db.query(EvidenceObservation).filter_by(
+                person_id=person.id, attribute="food_intake"
+            ).all()
+            superseded_ids = {
+                row.supersedes_observation_id for row in all_rows
+                if row.supersedes_observation_id
+            }
+            current_rows = [row for row in all_rows if row.id not in superseded_ids]
+            audit = verify_db.query(AuditLogEvent).filter_by(
+                target_id=corrected["id"],
+                action="evidence_observation.correct",
+            ).one()
+
+            assert original_row.observed_at.isoformat().startswith("2026-11-09")
+            assert original_row.value_text == "barely ate lunch"
+            assert corrected_row.observed_at.isoformat().startswith("2026-11-10")
+            assert corrected_row.value_text == original_row.value_text
+            assert len([row for row in current_rows if row.value_text == "barely ate lunch"]) == 1
+            assert len([row for row in current_rows if row.value_text == "ate most of her lunch"]) == 1
+            assert audit.record_metadata["supersedes_observation_id"] == original["id"]
+    finally:
+        teardown_db()
