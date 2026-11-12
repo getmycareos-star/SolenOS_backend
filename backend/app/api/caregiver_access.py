@@ -422,8 +422,10 @@ def list_responsibility_transfers(request: Request, db: Session = Depends(get_db
             "source_responsibility_id": item.source_responsibility_id,
             "responsibility_type": source.responsibility_type if source else "Care responsibility",
             "from_caregiver_profile_id": item.from_caregiver_profile_id,
+            "from_caregiver_id": from_profile.session_caregiver_id if from_profile else None,
             "from_caregiver_name": from_profile.name if from_profile else "Previous caregiver",
             "to_caregiver_profile_id": item.to_caregiver_profile_id,
+            "to_caregiver_id": to_profile.session_caregiver_id if to_profile else None,
             "to_caregiver_name": to_profile.name if to_profile else "Caregiver",
             "related_record_type": item.related_record_type,
             "related_record_id": item.related_record_id,
@@ -603,15 +605,28 @@ def list_primary_transfers(request: Request, db: Session = Depends(get_db)):
     query = db.query(CaregiverPrimaryTransfer).filter(CaregiverPrimaryTransfer.person_id == person_id)
     if not bool(getattr(request.state, "caregiver_can_manage_members", False)):
         query = query.filter(CaregiverPrimaryTransfer.to_caregiver_id == session_caregiver_id)
-    return [{
-        "id": item.id,
-        "from_caregiver_id": item.from_caregiver_id,
-        "to_caregiver_id": item.to_caregiver_id,
-        "reason": item.reason,
-        "status": item.status,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
-        "accepted_at": item.accepted_at.isoformat() if item.accepted_at else None,
-    } for item in query.order_by(CaregiverPrimaryTransfer.created_at.desc()).all()]
+    result = []
+    for item in query.order_by(CaregiverPrimaryTransfer.created_at.desc()).all():
+        from_profile = db.query(CaregiverProfile).filter(
+            CaregiverProfile.person_id == person_id,
+            CaregiverProfile.session_caregiver_id == item.from_caregiver_id,
+        ).first()
+        to_profile = db.query(CaregiverProfile).filter(
+            CaregiverProfile.person_id == person_id,
+            CaregiverProfile.session_caregiver_id == item.to_caregiver_id,
+        ).first()
+        result.append({
+            "id": item.id,
+            "from_caregiver_id": item.from_caregiver_id,
+            "from_caregiver_name": from_profile.name if from_profile else "Previous caregiver",
+            "to_caregiver_id": item.to_caregiver_id,
+            "to_caregiver_name": to_profile.name if to_profile else "Caregiver",
+            "reason": item.reason,
+            "status": item.status,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "accepted_at": item.accepted_at.isoformat() if item.accepted_at else None,
+        })
+    return result
 
 
 @router.post("/primary-transfers/{transfer_id}/accept")
