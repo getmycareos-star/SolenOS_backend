@@ -977,7 +977,10 @@ def fulfil_approved_deletion(
         select(Evidence.id).where(Evidence.person_id == person_id)
     ).scalars().all()
 
-    bind = db.get_bind()
+    # Inspect the active request transaction. Engine-level inspection can
+    # check out the same SQLite StaticPool connection and roll back pending
+    # erasure statements when the inspection connection closes.
+    bind = db.connection()
     inspector = sa_inspect(bind)
     if inspector.has_table("legal_holds"):
         holds = db.execute(
