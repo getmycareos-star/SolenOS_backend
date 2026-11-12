@@ -1468,3 +1468,85 @@ def test_caregiver_approved_export_refuses_stale_source(client, monkeypatch):
         json={"approved": True},
     )
     assert approved.status_code == 409
+
+
+def test_professional_handoff_includes_only_reviewed_current_medication_reports(client, monkeypatch):
+    from app.models.care_continuity import CareAssertion
+    from app.api import handoff_drafts
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    now = datetime.now(timezone.utc)
+    db = TestSessionLocal()
+    try:
+        db.add_all([
+            CareAssertion(
+                id="professional-medication-name",
+                person_id=person_id,
+                subject_type="medication",
+                subject_id="professional-med-1",
+                field="name",
+                asserted_value="Example prescribed medicine",
+                source_label="Caregiver report",
+                assertion_status="accepted",
+                epistemic_state="reported",
+                observed_at=now,
+                review_after_days=30,
+                created_by_caregiver_id=session["caregiver"]["id"],
+            ),
+            CareAssertion(
+                id="professional-medication-status",
+                person_id=person_id,
+                subject_type="medication",
+                subject_id="professional-med-1",
+                field="status",
+                asserted_value="active",
+                source_label="Caregiver report",
+                assertion_status="accepted",
+                epistemic_state="reported",
+                observed_at=now,
+                review_after_days=30,
+                created_by_caregiver_id=session["caregiver"]["id"],
+            ),
+            CareAssertion(
+                id="professional-medication-unreviewed",
+                person_id=person_id,
+                subject_type="medication",
+                subject_id="professional-med-2",
+                field="name",
+                asserted_value="Unreviewed medicine",
+                source_label="Document extraction",
+                assertion_status="reported",
+                epistemic_state="reported",
+                observed_at=now,
+                review_after_days=30,
+                created_by_caregiver_id=session["caregiver"]["id"],
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(
+        handoff_drafts,
+        "_generate_grounded_handoff",
+        lambda *args, **kwargs: {"status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": "test", "sections": []},
+    )
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 14},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_statuses"]["medications"]["status"] == "available"
+    medication_refs = [
+        item for item in body["source_references"]
+        if item["source_type"] == "caregiver_reviewed_medication_report"
+    ]
+    assert len(medication_refs) == 1
+    assert medication_refs[0]["details"]["reported_name"] == "Example prescribed medicine"
+    assert medication_refs[0]["details"]["interpretation_limit"].startswith("Caregiver-reviewed current report")
+    assert "Unreviewed medicine" not in str(body["sections"])
+    assert body["source_statuses"]["allergies"]["status"] == "unavailable"
+
