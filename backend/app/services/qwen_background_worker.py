@@ -296,7 +296,14 @@ async def process_one_qwen_job() -> bool:
                     current.error_code = exc.detail[:48] if isinstance(exc, HTTPException) else (
                         str(exc)[:48] if isinstance(exc, ValueError) else "qwen_processing_failed"
                     )
-                    if isinstance(exc, ValueError) and str(exc) == "community_disabled":
+                    permanent_http_error = (
+                        isinstance(exc, HTTPException)
+                        and 400 <= int(exc.status_code) < 500
+                        and int(exc.status_code) != 429
+                    )
+                    if (
+                        isinstance(exc, ValueError) and str(exc) == "community_disabled"
+                    ) or permanent_http_error:
                         current.status = "failed"
                     elif current.attempt_count < 3:
                         current.status = "queued"
