@@ -541,8 +541,12 @@ class UncertaintyEngine:
         if self.person_id is not None and person_id != self.person_id:
             return []
         scoped_person_id = self.person_id or person_id
+        # This method backs the caregiver-facing questions endpoint. Unassessed
+        # and optional candidates remain in the record for internal intelligence,
+        # but must not be presented as caregiver work.
         query = self.db.query(OpenQuestionModel).filter(
-            OpenQuestionModel.person_id == scoped_person_id
+            OpenQuestionModel.person_id == scoped_person_id,
+            OpenQuestionModel.necessity == "necessary",
         )
         if subject_type:
             query = query.filter(OpenQuestionModel.subject_type == subject_type)
