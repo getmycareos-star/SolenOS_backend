@@ -130,6 +130,7 @@ def build_distinct_event_aggregate(
     end_at: datetime,
     window_label: str,
     truncated: bool = False,
+    shared_origin_evidence_pairs: set[frozenset[str]] | None = None,
 ) -> dict[str, Any]:
     """Count distinct, dated, explicitly tagged event records; never infer from prose alone."""
     if topic not in _EVENT_TOPIC_TERMS:
@@ -173,20 +174,45 @@ def build_distinct_event_aggregate(
 
     unique = []
     duplicate_ids = []
+    ambiguous_ids = []
     seen_evidence_sets = []
+    reviewed_shared_pairs = shared_origin_evidence_pairs or set()
     for event in sorted(candidates, key=lambda item: (item["_occurred"], str(item.get("id") or ""))):
         evidence_ids = {str(value) for value in (event.get("evidence_ids") or []) if value}
         signature = (event["_occurred"].isoformat(), event["_searchable"])
-        duplicate_of_existing = any(
-            (evidence_ids and existing_ids and evidence_ids.intersection(existing_ids))
-            or signature == existing_signature
-            for _, existing_ids, existing_signature in seen_evidence_sets
-        )
+        date_signature = (event["_occurred"].date().isoformat(), event["_searchable"])
+        duplicate_of_existing = False
+        ambiguous_with_existing = False
+        for _, existing_ids, existing_signature, existing_date_signature in seen_evidence_sets:
+            shared_origin = any(
+                frozenset((left, right)) in reviewed_shared_pairs
+                for left in evidence_ids for right in existing_ids if left != right
+            )
+            if (evidence_ids and existing_ids and evidence_ids.intersection(existing_ids)) or shared_origin or signature == existing_signature:
+                duplicate_of_existing = True
+                break
+            if date_signature == existing_date_signature:
+                ambiguous_with_existing = True
         if duplicate_of_existing:
             duplicate_ids.append(str(event.get("id")))
             continue
+        if ambiguous_with_existing:
+            ambiguous_ids.append(str(event.get("id")))
         unique.append(event)
-        seen_evidence_sets.append((event, evidence_ids, signature))
+        seen_evidence_sets.append((event, evidence_ids, signature, date_signature))
+
+    if ambiguous_ids:
+        return {
+            "status": "ambiguous_duplicate_candidates",
+            "topic": topic,
+            "window_label": window_label,
+            "count": None,
+            "candidate_count": len(candidates),
+            "duplicate_event_ids": duplicate_ids,
+            "ambiguous_event_ids": ambiguous_ids,
+            "source_references": [],
+            "interpretation_limit": "Some same-day reports have identical wording but no confirmed shared original. They may describe the same incident or separate incidents, so no total is stated until a caregiver reviews them.",
+        }
 
     references = [{
         "record_type": "care_event",
