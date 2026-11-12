@@ -1494,7 +1494,7 @@ def test_medication_authoring_starts_reported_and_requires_explicit_review():
         if not inspect(engine).has_table("care_assertion_revisions"):
             with engine.begin() as connection:
                 connection.exec_driver_sql("""
-                    CREATE TABLE care_assertion_revisions (
+                    CREATE TABLE IF NOT EXISTS care_assertion_revisions (
                         id VARCHAR(36) PRIMARY KEY,
                         person_id VARCHAR(36) NOT NULL,
                         assertion_id VARCHAR(36) NOT NULL,
