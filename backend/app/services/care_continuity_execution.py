@@ -28,7 +28,7 @@ def execute_care_continuity_reconciliation(
     person_id: str,
     *,
     workflow: str,
-    caregiver_id: str | None = None,
+    source_caregiver_id: str | None = None,
     source_event_id: str | None = None,
     source_evidence_id: str | None = None,
     source_evidence_ids: list[str] | None = None,
@@ -53,7 +53,7 @@ def execute_care_continuity_reconciliation(
     ))
     if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
-    if source_message_id and (not source_conversation_id or not caregiver_id):
+    if source_message_id and (not source_conversation_id or not source_caregiver_id):
         raise CareContinuityExecutionError(
             "A Companion source message must include its conversation and caregiver references"
         )
@@ -85,12 +85,12 @@ def execute_care_continuity_reconciliation(
             )
         evidence_rows.append(evidence)
 
-    if event is not None and caregiver_id and str(event.created_by_caregiver_id) != str(caregiver_id):
+    if event is not None and source_caregiver_id and str(event.created_by_caregiver_id) != str(source_caregiver_id):
         raise CareContinuityExecutionError(
             "The source event was not created by the authenticated caregiver"
         )
-    if caregiver_id and any(
-        str(item.uploaded_by_caregiver_id) != str(caregiver_id)
+    if source_caregiver_id and any(
+        str(item.uploaded_by_caregiver_id) != str(source_caregiver_id)
         for item in evidence_rows
     ):
         raise CareContinuityExecutionError(
@@ -124,7 +124,7 @@ def execute_care_continuity_reconciliation(
             raise CareContinuityExecutionError(
                 "The correction is missing or belongs to another care record"
             )
-        if caregiver_id and str(correction.caregiver_id) != str(caregiver_id):
+        if source_caregiver_id and str(correction.caregiver_id) != str(source_caregiver_id):
             raise CareContinuityExecutionError(
                 "The correction was not created by the authenticated caregiver"
             )
@@ -135,7 +135,7 @@ def execute_care_continuity_reconciliation(
         conversation = db.query(ConversationSession).filter(
             ConversationSession.id == source_conversation_id,
             ConversationSession.person_id == person_id,
-            ConversationSession.caregiver_id == caregiver_id,
+            ConversationSession.caregiver_id == source_caregiver_id,
         ).first()
         if conversation is None:
             raise CareContinuityExecutionError(
@@ -161,7 +161,7 @@ def execute_care_continuity_reconciliation(
         "contract_version": "1.0",
         "workflow": workflow,
         "person_id": person_id,
-        "caregiver_id": caregiver_id,
+        "source_caregiver_id": source_caregiver_id,
         "source_event_id": source_event_id,
         "source_evidence_id": source_evidence_id or (evidence_ids[0] if len(evidence_ids) == 1 else None),
         "source_evidence_ids": evidence_ids,
