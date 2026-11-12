@@ -708,6 +708,11 @@ def test_postgres_document_medication_conflict_creates_professional_question_wit
             db.commit()
             active_status_id = active_status.id
 
+        from app.api.care_continuity import current_medication_records
+        with Session() as db:
+            projection = current_medication_records(_request(person_id, caregiver_id), db)
+            assert any(item.get("medication_id") == medication_id for item in projection.get("medications", []))
+
         with Session() as db:
             uploaded = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge-summary.txt", raw)
             duplicate = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge-summary-copy.txt", raw)
