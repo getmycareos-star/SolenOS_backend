@@ -27,7 +27,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.qwen_gateway import qwen_chat
 from app.services.lcr_context import build_lcr_context
-from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(prefix="/daily-care/intelligence", tags=["daily-care-qwen"])
 
@@ -608,25 +608,42 @@ def review_daily_care_lcr_proposal(
     analysis.candidates = updated_candidates
     analysis.review_history = history
     db.add(analysis)
-    db.commit()
-    db.refresh(analysis)
-
     change_intelligence_status = "not_required"
+    execution = None
     if payload.decision == "accept":
-        # A caregiver-approved assertion is now part of the authoritative LCR.
-        # Recompute derived change/pattern assessments from persisted sources rather
-        # than waiting for a later workspace refresh.
+        # Keep the caregiver-approved assertion, proposal review, source lineage,
+        # shared question lifecycle and reconciliation in one transaction. A
+        # failed reconciliation must not leave an accepted LCR write behind.
         try:
-            reconcile_person_change_intelligence(db, person_id)
+            db.flush()
+            assertion_id = str(proposal.get("accepted_assertion_id") or "")
+            if not assertion_id:
+                raise RuntimeError("Accepted Daily Care proposal has no persisted assertion reference")
+            execution = execute_care_continuity_reconciliation(
+                db,
+                person_id,
+                workflow="daily_care_proposal_review",
+                source_assertion_id=assertion_id,
+                source_evidence_ids=evidence_ids,
+            )
             db.commit()
+            db.refresh(analysis)
             change_intelligence_status = "available"
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            change_intelligence_status = "unavailable"
+            logger.exception("Daily Care proposal reconciliation failed for analysis %s", analysis_id)
+            raise HTTPException(
+                status_code=503,
+                detail="The Daily Care review could not be committed with care-record reconciliation. Retry the review.",
+            ) from exc
+    else:
+        db.commit()
+        db.refresh(analysis)
 
     return {
         "analysis_id": analysis_id,
         "change_intelligence_status": change_intelligence_status,
+        "care_continuity_execution": execution,
         "proposal": proposal,
         "decision": payload.decision,
         "review_history_count": len(history),
