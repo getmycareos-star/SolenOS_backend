@@ -918,7 +918,7 @@ def save_handoff_draft_revision(
     draft.approval_revision = None
     draft.approval_content_sha256 = None
     draft.approval_parameters = None
-    draft.validation_status = "exact_quote_reference_validation_passed"
+    draft.validation_status = "exact_quote_reference_validation_passed" if draft.generation_status == "generated" else "source_records_unchanged_caregiver_notes_attributed"
     db.add(revision)
     db.add(draft)
     db.add(AuditLogEvent(
