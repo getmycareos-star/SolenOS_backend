@@ -290,16 +290,21 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
                     })
         if aggregate_match is not None:
             matches = list(aggregate_match.get("source_references") or [])
+        elif aggregate_review is not None:
+            matches = []
+        support_status = (
+            "matched_validated_aggregate" if aggregate_match is not None else
+            "aggregate_count_mismatch" if aggregate_review and aggregate_review.get("status") == "count_mismatch" else
+            "aggregate_not_validated" if aggregate_review is not None else
+            "matched_saved_wording" if current_matches else
+            "matched_historical_only" if matches else
+            "not_matched_to_saved_wording"
+        )
         claims.append({
             "claim_id": f"statement-{index + 1}",
             "text": statement,
-            "support_status": (
-                "matched_validated_aggregate" if aggregate_match is not None else
-                "matched_saved_wording" if current_matches else
-                "matched_historical_only" if matches else
-                "not_matched_to_saved_wording"
-            ),
-            "validation_basis": "distinct_dated_event_aggregation" if aggregate_match is not None else "exact_saved_wording" if current_matches else "historical_wording_only" if matches else "no_support_match",
+            "support_status": support_status,
+            "validation_basis": "distinct_dated_event_aggregation" if aggregate_match is not None else "aggregate_count_mismatch" if support_status == "aggregate_count_mismatch" else "aggregate_not_validated" if support_status == "aggregate_not_validated" else "exact_saved_wording" if current_matches else "historical_wording_only" if matches else "no_support_match",
             "aggregate": ({
                 "topic": aggregate_match.get("topic"),
                 "window_label": aggregate_match.get("window_label"),
@@ -307,6 +312,13 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
                 "candidate_count": aggregate_match.get("candidate_count"),
                 "duplicate_event_ids": aggregate_match.get("duplicate_event_ids", []),
             } if aggregate_match is not None else None),
+            "aggregate_review": ({
+                "status": aggregate_review.get("status"),
+                "topic": aggregate_review.get("topic"),
+                "window_label": aggregate_review.get("window_label"),
+                "count": aggregate_review.get("count"),
+                "interpretation_limit": aggregate_review.get("interpretation_limit"),
+            } if aggregate_review is not None else None),
             "source_references": matches,
         })
     unmatched = sum(1 for claim in claims if claim["support_status"] not in {"matched_saved_wording", "matched_validated_aggregate"})
