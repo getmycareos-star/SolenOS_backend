@@ -515,6 +515,40 @@ def test_overdue_filter_is_applied_before_pagination_and_reports_total():
     assert [item["id"] for item in body["items"]] == [overdue_loop["id"]]
     assert body["items"][0]["overdue"] is True
 
+def test_system_reassessment_audits_deadlines_without_infering_completion():
+    client = TestClient(app)
+    _, headers = session(client, "System follow-up recipient")
+    overdue = create_loop(
+        client, headers, "follow_up", title="Check the outstanding clinic result",
+        deadline_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        deadline_source="explicit_user",
+    )
+
+    reassessed = client.post("/api/v1/open-loops/reassess", headers=headers)
+    assert reassessed.status_code == 200, reassessed.text
+    assert reassessed.json()["audited_count"] >= 1
+
+    current = client.get(f"/api/v1/open-loops/{overdue['id']}", headers=headers)
+    assert current.status_code == 200, current.text
+    assert current.json()["status"] == "open"
+    assert current.json()["priority"] == "high"
+    assert current.json()["closure_result"] is None
+
+    history = client.get(f"/api/v1/open-loops/{overdue['id']}/history", headers=headers)
+    assert history.status_code == 200, history.text
+    reassessment_events = [
+        event for event in history.json()
+        if event["event_type"] == "reassessed"
+    ]
+    assert reassessment_events
+    assert any(
+        item.get("deadline_passed") is True
+        and item.get("completion_inferred") is False
+        for event in reassessment_events
+        for item in (event.get("evidence") or [])
+    )
+
+
 def test_dependent_unblocks_only_after_verified_prerequisite_closure():
     client = TestClient(app)
     _, headers = session(client, "Dependency recipient")
