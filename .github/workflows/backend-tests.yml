@@ -345,6 +345,20 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_qwen
+          POSTGRES_PASSWORD: solenos_qwen_ci
+          POSTGRES_DB: solenos_qwen
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_qwen -d solenos_qwen"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -363,10 +377,17 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          database_url="postgresql+psycopg2://solenos_qwen:solenos_qwen_ci@host.docker.internal:5432/solenos_qwen"
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            --env DATABASE_URL="$database_url" \
+            solenos-backend:qwen-ci alembic upgrade head
+
           docker run --detach --name solenos-qwen-e2e \
+            --add-host=host.docker.internal:host-gateway \
             --publish 8080:8080 \
             --env APP_ENV=ci \
-            --env DATABASE_URL=sqlite:////tmp/solenos-qwen-e2e.db \
+            --env DATABASE_URL="$database_url" \
             --env SECRET_KEY=ci-only-secret \
             --env OLLAMA_MODEL=qwen3.5:4b \
             solenos-backend:qwen-ci
