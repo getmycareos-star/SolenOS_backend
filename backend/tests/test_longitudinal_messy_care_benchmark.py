@@ -1477,7 +1477,7 @@ def test_correction_supersedes_assertion_and_preserves_append_only_history():
 def test_scenario_03_multi_person_medication_conflict_preserves_source_history():
     """Scenario 03: separate family reports and administration evidence never pick a medication winner."""
     from app.models.care import Evidence
-    from app.models.uncertainty import Contradiction
+    from app.models.uncertainty import Contradiction, OpenQuestion
     from app.models.care_continuity import CareAssertion
     from app.schemas.care_continuity import CareAssertionCreate
     from app.services.care_continuity import create_assertion
@@ -1563,6 +1563,10 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
     )
     assert review_response.status_code == 200, review_response.text
 
+    before_conflict = client.get("/api/v1/care-continuity/medications", headers=headers)
+    assert before_conflict.status_code == 200, before_conflict.text
+    assert [item["medication_id"] for item in before_conflict.json()["medications"]] == [medication_id]
+
     # James's verbal instruction is a separate reported assertion. It creates
     # an unresolved conflict with the existing caregiver-reviewed record.
     with TestingSessionLocal() as db:
@@ -1601,6 +1605,11 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
         assert all(row.ingested_at is not None for row in stored)
         assert len({row.occurred_at for row in stored}) == 3
 
+    medication_list = client.get("/api/v1/care-continuity/medications", headers=headers)
+    assert medication_list.status_code == 200, medication_list.text
+    assert medication_list.json()["medications"] == []
+    assert medication_list.json()["pending_review"] == []
+
         claims = verify_db.query(CareAssertion).filter(
             CareAssertion.person_id == person.id,
             CareAssertion.subject_id == medication_id,
@@ -1626,3 +1635,19 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
         assert set(conflict.source_assertion_ids or []) == {
             active_claims[0].id, james_claim.id
         }
+
+        # Conflicting current medication reports are not projected as a
+        # current or pending medication schedule, and a professional-directed
+        # confirmation question is persisted instead of a caregiver guessing.
+        medication_questions = verify_db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.subject_id == medication_id,
+            OpenQuestion.intended_answerer_role == "professional",
+            OpenQuestion.status == "open",
+        ).all()
+        assert len(medication_questions) == 1
+        question = medication_questions[0]
+        assert question.necessity == "necessary"
+        assert getattr(question.priority, "value", question.priority) == "high"
+        assert "prescribing clinician or pharmacist" in question.question
+        assert set(question.evidence_ids or []) == {saved_ids[1]}
