@@ -1187,5 +1187,5 @@ def test_jpeg_png_bmp_and_tiff_images_use_server_ocr(monkeypatch):
         upload.filename = filename
         extracted, method = document_lifecycle._extract(upload, output.getvalue())
 
-        assert method == "server_image_ocr"
+        assert method == "server_tesseract_ocr_image"
         assert "Follow-up appointment on November 20." in extracted
