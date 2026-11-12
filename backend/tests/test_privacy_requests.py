@@ -986,6 +986,17 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
             "INSERT INTO privacy_deletion_legacy_probe (id, person_id, caregiver_id, payload) "
             "VALUES ('legacy-delete-row', :person_id, :caregiver_id, 'private legacy data')"
         ), {"person_id": person_id, "caregiver_id": caregiver_id})
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS privacy_deletion_fk_probe ("
+            "record_key VARCHAR NOT NULL, person_ref VARCHAR NOT NULL, payload TEXT, "
+            "PRIMARY KEY (record_key, person_ref), "
+            "FOREIGN KEY (person_ref) REFERENCES persons(id))"
+        ))
+        db.execute(text("DELETE FROM privacy_deletion_fk_probe"))
+        db.execute(text(
+            "INSERT INTO privacy_deletion_fk_probe (record_key, person_ref, payload) "
+            "VALUES ('composite-dependent-row', :person_id, 'private dependent data')"
+        ), {"person_id": person_id})
         db.add_all([upload, event, reaction])
         db.commit()
         evidence_id = evidence.id
@@ -1056,6 +1067,11 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
             "SELECT COUNT(*) FROM privacy_deletion_legacy_probe WHERE id = 'legacy-delete-row'"
         )).scalar_one()
         assert legacy_remaining == 0
+        dependent_remaining = db.execute(text(
+            "SELECT COUNT(*) FROM privacy_deletion_fk_probe WHERE person_ref = :person_id"
+        ), {"person_id": person_id}).scalar_one()
+        assert dependent_remaining == 0
+        db.execute(text("DROP TABLE IF EXISTS privacy_deletion_fk_probe"))
         db.execute(text("DROP TABLE IF EXISTS privacy_deletion_legacy_probe"))
         receipt = db.query(DataSubjectRequest).filter(DataSubjectRequest.id == request_id).one()
         assert receipt.request_status == "fulfilled"
