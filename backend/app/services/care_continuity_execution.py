@@ -64,7 +64,7 @@ def execute_care_continuity_reconciliation(
         [value for value in (source_evidence_ids or []) if isinstance(value, str) and value.strip()]
         + ([source_evidence_id] if source_evidence_id else [])
     ))
-    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id and not source_appointment_workspace_id and not source_handoff_draft_id:
+    if not event_ids and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id and not source_appointment_workspace_id and not source_handoff_draft_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
     if source_message_id and (not source_conversation_id or not source_caregiver_id):
         raise CareContinuityExecutionError(
