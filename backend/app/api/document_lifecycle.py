@@ -766,6 +766,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         # retry cannot retain stale failure markers from an earlier attempt.
         "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
         "unprocessed_page_numbers": _unprocessed_page_numbers(analysis.source_text or ""),
+        "retryable_page_numbers": _retryable_page_numbers(analysis.source_text or ""),
+        "blocked_page_numbers": _blocked_page_numbers(analysis.source_text or ""),
         "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "model_provenance": intelligence.get("model_provenance"),
         "processing_history": intelligence.get("processing_history", []),
