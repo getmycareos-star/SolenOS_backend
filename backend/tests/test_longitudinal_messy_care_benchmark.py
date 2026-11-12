@@ -1626,6 +1626,7 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
     assert medication_conflicts[0]["status"] == "unresolved"
     assert medication_conflicts[0]["evidence_ids"] == [saved_ids[1]]
 
+    with TestingSessionLocal() as verify_db:
         claims = verify_db.query(CareAssertion).filter(
             CareAssertion.person_id == person.id,
             CareAssertion.subject_id == medication_id,
