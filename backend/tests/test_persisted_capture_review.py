@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
-import app.api.v1 as api_v1_module
+import app.services.care_execution as care_execution
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
@@ -66,7 +66,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         "open_questions": [],
         "possible_safety_flags": [],
     }
-    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: candidates)
+    monkeypatch.setattr(care_execution, "extract_review_candidates", lambda *args, **kwargs: candidates)
 
     saved = client.post(
         "/api/v1/daily/log",
@@ -354,4 +354,99 @@ def test_daily_capture_cannot_promote_model_observation_not_supported_by_source_
         record = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
         assert record.candidates["observations"][0]["review_status"] == "pending_review"
     finally:
+        db.close()
+
+
+def test_daily_capture_uses_shared_execution_and_persisted_evidence(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Shared execution recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    generated = {
+        "observations": [{
+            "subject": "sleep",
+            "observation": "Mum slept badly",
+            "source_quote": "Mum slept badly",
+            "review_status": "pending_review",
+        }],
+        "open_questions": [],
+    }
+    extraction_sources = []
+    reconciled_people = []
+
+    def extract(source_text, *, source_event_id, source_evidence_id=None):
+        extraction_sources.append((source_text, source_event_id, source_evidence_id))
+        return generated
+
+    def reconcile(db, person_id):
+        reconciled_people.append(person_id)
+
+    monkeypatch.setattr(care_execution, "extract_review_candidates", extract)
+    monkeypatch.setattr(care_execution, "reconcile_person_change_intelligence", reconcile)
+
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": "Mum slept badly last night.",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["execution_status"] == {
+        "source_status": "source_preserved",
+        "evidence_status": "evidence_persisted",
+        "extraction_status": "extraction_available",
+        "assessment_status": "assessment_pending",
+        "review_status": "review_required",
+        "reconciliation_status": "reconciliation_completed",
+        "retrieval_status": "retrieval_available",
+    }
+    assert len(extraction_sources) == 1
+    assert reconciled_people == [session["person"]["id"]]
+
+    db = TestSessionLocal()
+    try:
+        analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
+        evidence = db.query(Evidence).filter_by(id=body["evidence_ids"][0]).one()
+        assert extraction_sources[0][0] == evidence.source_text
+        assert analysis.source_text == evidence.source_text
+        assert analysis.execution_status == body["execution_status"]
+        assert analysis.source_event_id == body["id"]
+        assert analysis.source_evidence_id == evidence.id
+    finally:
+        db.close()
+
+
+def test_capture_analysis_helper_can_leave_commit_to_the_workflow():
+    client = TestClient(app)
+    session = create_session(client, "Transaction boundary recipient")
+    db = TestSessionLocal()
+
+    def unexpected_commit():
+        raise AssertionError("shared persistence helper must not commit when commit=False")
+
+    original_commit = db.commit
+    db.commit = unexpected_commit
+    try:
+        analysis = persist_capture_analysis(
+            db,
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            source_event_id=None,
+            source_evidence_id=None,
+            source_text="Caregiver reported an observation.",
+            extraction_status="available",
+            candidates={"observations": []},
+            commit=False,
+        )
+        assert analysis.id
+        assert db.query(CaptureAnalysis).filter_by(id=analysis.id).one().source_text == "Caregiver reported an observation."
+    finally:
+        db.commit = original_commit
+        db.rollback()
         db.close()
