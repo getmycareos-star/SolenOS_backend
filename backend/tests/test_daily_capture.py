@@ -1478,6 +1478,39 @@ def test_medication_authoring_starts_reported_and_requires_explicit_review():
         assert len(projection.json()["pending_review"]) == 1
         assert projection.json()["pending_review"][0]["medication_id"] == report["medication_id"]
 
+        # Simulate a report that has remained unreviewed beyond its original
+        # review window. It must stay visible for review, not silently disappear.
+        db = TestingSessionLocal()
+        stale_rows = db.query(CareAssertion).filter_by(
+            person_id="person-daily-test",
+            subject_type="medication",
+            subject_id=report["medication_id"],
+        ).all()
+        for row in stale_rows:
+            row.recorded_at = datetime.now(timezone.utc) - timedelta(days=60)
+        db.commit()
+        db.close()
+        with engine.begin() as connection:
+            connection.exec_driver_sql("""
+                CREATE TABLE care_assertion_revisions (
+                    id VARCHAR(36) PRIMARY KEY,
+                    person_id VARCHAR(36) NOT NULL,
+                    assertion_id VARCHAR(36) NOT NULL,
+                    revision_number INTEGER NOT NULL,
+                    previous_payload JSON,
+                    current_payload JSON,
+                    revision_reason TEXT,
+                    provenance_id VARCHAR(36),
+                    changed_by_caregiver_id VARCHAR(36),
+                    changed_at DATETIME NOT NULL
+                )
+            """)
+
+        stale_projection = client.get("/api/v1/care-continuity/medications", headers=headers)
+        assert stale_projection.status_code == 200, stale_projection.text
+        assert len(stale_projection.json()["pending_review"]) == 1
+        assert stale_projection.json()["pending_review"][0]["review_overdue"] is True
+
         reviewed = client.post(
             f"/api/v1/care-continuity/medications/{report['medication_id']}/review",
             headers=headers,
