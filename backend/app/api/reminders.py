@@ -134,6 +134,7 @@ def snooze_reminder(
     if snooze_until > now + timedelta(days=30):
         raise HTTPException(status_code=422, detail="Snooze time cannot be more than 30 days away")
     reminder.due_at = snooze_until
+    reminder.notification_deferred_until = None
     reminder.snoozed_at = now
     reminder.snoozed_by_caregiver_id = caregiver_id
     reminder.snooze_count = (reminder.snooze_count or 0) + 1
