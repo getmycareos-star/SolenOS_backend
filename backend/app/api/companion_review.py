@@ -453,13 +453,14 @@ def review_companion_care_update(
             assertion.assertion_status = "caregiver_reviewed"
             assertion_id = assertion.id
         else:
-            existing_assertion.assertion_status = "caregiver_reviewed"
-            existing_assertion.asserted_value = accepted_value
-            existing_assertion.source_label = "Caregiver-reviewed Companion conversation"
-            existing_assertion.source_text = source_quote + (("\nCaregiver-supplied correction context: " + correction_context) if correction_context else "")
-            existing_assertion.observed_at = _parse_explicit_event_time(original.get("event_time_text"))
-            existing_assertion.event_time_text = original.get("event_time_text")
-            existing_assertion.updated_by_caregiver_id = caregiver_id
+            expected_source_text = source_quote + (("\nCaregiver-supplied correction context: " + correction_context) if correction_context else "")
+            if (
+                existing_assertion.asserted_value != accepted_value
+                or existing_assertion.source_text != expected_source_text
+                or existing_assertion.source_message_id != source_message.id
+                or existing_assertion.source_conversation_id != session.id
+            ):
+                raise HTTPException(status_code=409, detail="An existing care-record assertion differs from this proposal; it was not overwritten")
             assertion_id = existing_assertion.id
         proposal.status = "accepted"
         db.add(AIOutputLCRDecision(
