@@ -141,7 +141,37 @@ def test_create_information_gap():
 
         db = TestingSessionLocal()
         from app.services.care_continuity import next_best_questions
+        # Even a legacy/directly-written assessment marker cannot create a
+        # caregiver request without persisted source evidence.
+        ungrounded_gap = InformationGap(
+            person_id="person-1",
+            subject_type="sleep",
+            subject_id="sleep-pattern",
+            field="usual_sleep_schedule",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="Usual sleep schedule is not documented.",
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The next care decision depends on the sleep schedule.",
+                "decision_dependency": "A documented schedule is required to evaluate the new care plan.",
+            }],
+            evidence_ids=[],
+        )
+        db.add(ungrounded_gap)
+        db.flush()
         candidates = next_best_questions(db, "person-1", persist=True, commit=False)
+        ungrounded_candidate = next(
+            item for item in candidates
+            if item["source_kind"] == "information_gap"
+            and item["subject_id"] == "sleep-pattern"
+        )
+        assert ungrounded_candidate["necessity"] == "not_assessed"
+        assert db.query(OpenQuestion).filter_by(
+            person_id="person-1", subject_id="sleep-pattern"
+        ).count() == 0
         assert any(
             item["source_kind"] == "information_gap"
             and item["necessity"] == "necessary"
