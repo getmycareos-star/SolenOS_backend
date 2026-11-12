@@ -90,6 +90,7 @@ def _open_question_state(question: OpenQuestion) -> Dict[str, Any]:
         "status": question.status,
         "necessity": question.necessity,
         "necessity_rationale": question.necessity_rationale,
+        "intended_answerer_role": question.intended_answerer_role,
         "priority": str(getattr(question.priority, "value", question.priority)),
         "evidence_ids": list(question.evidence_ids or []),
         "context": list(question.context or []),
@@ -919,7 +920,7 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
     counts = {"kept": 0, "suppressed": 0, "superseded": 0, "reopened": 0, "untouched": 0}
     managed_sources = {
         "information_gap", "contradiction", "stale_or_unreviewed_assertion",
-        "daily_capture_extraction", "document_extraction",
+        "daily_capture_extraction", "document_extraction", "registered_action",
     }
 
     for question in questions:
