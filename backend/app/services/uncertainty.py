@@ -242,6 +242,10 @@ def persist_source_clarification_questions(
 
     persisted: List[OpenQuestionModel] = []
     seen: set[tuple[str, ...]] = set()
+    # Source extraction writes their own immutable revision rows. Suppress the
+    # ORM listener while these explicit revisions are recorded, or each insert
+    # and update would be audited twice.
+    manual_revision_objects = db.info.setdefault("manual_care_state_revision_objects", set())
     for value in (questions or [])[:20]:
         if not isinstance(value, str):
             continue
@@ -349,38 +353,47 @@ def persist_source_clarification_questions(
                 context=contexts_to_add,
                 created_by_caregiver_id=caregiver_id,
             )
-            db.add(existing)
-            db.flush()
-            _record_open_question_revision(
-                db, existing, before_state=None, change_kind="created",
-                actor=f"source_workflow:{source_kind}",
-            )
+            manual_revision_objects.add(id(existing))
+            try:
+                db.add(existing)
+                db.flush()
+                _record_open_question_revision(
+                    db, existing, before_state=None, change_kind="created",
+                    actor=f"source_workflow:{source_kind}",
+                )
+            finally:
+                manual_revision_objects.discard(id(existing))
             existing_by_text[normalized] = existing
         else:
             before_state = _open_question_state(existing)
-            existing.evidence_ids = list(dict.fromkeys(
-                list(existing.evidence_ids or []) + assessed_evidence_ids
-            )) or None
-            if matched_gap and existing.necessity != "necessary":
-                existing.subject_type = subject_type
-                existing.subject_id = subject_id
-                existing.necessity = necessity
-                existing.necessity_rationale = necessity_rationale
-                existing.priority = priority
-            contexts = list(existing.context or [])
-            for new_context in contexts_to_add:
-                context_key = (new_context.get("source_kind"), new_context.get("source_id"))
-                if not any(
-                    (item.get("source_kind"), item.get("source_id")) == context_key
-                    for item in contexts if isinstance(item, dict)
-                ):
-                    contexts.append(new_context)
-            existing.context = contexts
-            if before_state != _open_question_state(existing):
-                _record_open_question_revision(
-                    db, existing, before_state=before_state,
-                    change_kind="updated", actor=f"source_workflow:{source_kind}",
-                )
+            manual_revision_objects.add(id(existing))
+            try:
+                existing.evidence_ids = list(dict.fromkeys(
+                    list(existing.evidence_ids or []) + assessed_evidence_ids
+                )) or None
+                if matched_gap and existing.necessity != "necessary":
+                    existing.subject_type = subject_type
+                    existing.subject_id = subject_id
+                    existing.necessity = necessity
+                    existing.necessity_rationale = necessity_rationale
+                    existing.priority = priority
+                contexts = list(existing.context or [])
+                for new_context in contexts_to_add:
+                    context_key = (new_context.get("source_kind"), new_context.get("source_id"))
+                    if not any(
+                        (item.get("source_kind"), item.get("source_id")) == context_key
+                        for item in contexts if isinstance(item, dict)
+                    ):
+                        contexts.append(new_context)
+                existing.context = contexts
+                if before_state != _open_question_state(existing):
+                    _record_open_question_revision(
+                        db, existing, before_state=before_state,
+                        change_kind="updated", actor=f"source_workflow:{source_kind}",
+                    )
+                db.flush()
+            finally:
+                manual_revision_objects.discard(id(existing))
         persisted.append(existing)
 
     # Reconcile the newly linked source against accepted LCR assertions and
