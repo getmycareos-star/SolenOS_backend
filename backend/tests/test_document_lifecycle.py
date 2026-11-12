@@ -222,6 +222,45 @@ def test_real_tesseract_ocr_extracts_scanned_pdf_with_page_provenance(client):
     assert "Patient walked 20 metres" in extracted
 
 
+def test_scanned_pdf_processes_more_than_25_pages_and_reports_partial_results(client, monkeypatch):
+    from fastapi import HTTPException
+    from pypdf import PdfWriter
+    from app.api import document_lifecycle
+
+    writer = PdfWriter()
+    for _ in range(30):
+        writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+    test_client, session = client
+    evidence_id = persist_document(session, output.getvalue(), "thirty-page-scan.pdf", "application/pdf")
+    calls = {"count": 0}
+
+    def page_ocr(_image):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise HTTPException(status_code=422, detail="Page OCR failed")
+        return f"Extracted page {calls['count']}"
+
+    monkeypatch.setattr(document_lifecycle, "_ocr_image", page_ocr)
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["extraction_status"] == "partial"
+    assert payload["page_count"] == 30
+    assert payload["unreadable_page_numbers"] == [2]
+    assert payload["unprocessed_page_numbers"] == []
+    assert payload["processed_page_numbers"] == list(range(1, 31))
+    assert calls["count"] == 30
+    retrieved = test_client.get(f"/api/v1/documents/analyses/{payload['analysis_id']}", headers=auth)
+    assert retrieved.status_code == 200, retrieved.text
+    assert "[Page 2 OCR]" in retrieved.json()["extracted_text"]
+    assert "[No readable text detected on this page]" in retrieved.json()["extracted_text"]
+    assert "Extracted page 30" in retrieved.json()["extracted_text"]
+
+
 def test_real_upload_endpoint_feeds_document_extraction(client):
     test_client, session = client
     auth = {"Authorization": f"Bearer {session['access_token']}"}
@@ -355,7 +394,7 @@ def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_te
     image.save(output, format="JPEG", quality=8)
     image.close()
     original_bytes = output.getvalue()
-    monkeypatch.setattr(document_lifecycle.pytesseract, "image_to_string", lambda *args, **kwargs: "")
+    monkeypatch.setattr(document_lifecycle.pytesseract, "image_to_data", lambda *args, **kwargs: {"text": [], "conf": [], "block_num": [], "par_num": [], "line_num": []})
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     uploaded = test_client.post(
         "/api/v1/upload",
