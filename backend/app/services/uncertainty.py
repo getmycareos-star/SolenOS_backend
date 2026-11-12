@@ -246,6 +246,17 @@ class UncertaintyEngine:
         db_gap = InformationGapModel(**payload)
         try:
             self.db.add(db_gap)
+            self.db.flush()
+            # Creating a structured, evidence-backed necessity assessment is
+            # itself a source-workflow event. Materialize/reassess the single
+            # shared question lifecycle in this transaction, not on a later
+            # dashboard or manual refresh.
+            from app.services.care_continuity import (
+                next_best_questions,
+                reassess_open_question_lifecycle,
+            )
+            next_best_questions(self.db, scoped_person_id, persist=True, commit=False)
+            reassess_open_question_lifecycle(self.db, scoped_person_id)
             self.db.commit()
             self.db.refresh(db_gap)
             return db_gap
@@ -311,6 +322,15 @@ class UncertaintyEngine:
             setattr(db_gap, field, value)
 
         try:
+            # A necessity assessment added or withdrawn on an existing gap
+            # must immediately create, suppress, or supersede its linked
+            # caregiver request and append the lifecycle audit revision.
+            from app.services.care_continuity import (
+                next_best_questions,
+                reassess_open_question_lifecycle,
+            )
+            next_best_questions(self.db, scoped_person_id, persist=True, commit=False)
+            reassess_open_question_lifecycle(self.db, scoped_person_id)
             self.db.commit()
             self.db.refresh(db_gap)
             return db_gap
