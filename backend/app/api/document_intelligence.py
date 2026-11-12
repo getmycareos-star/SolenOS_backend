@@ -192,7 +192,6 @@ def _existing_assertion_for_exact_document_duplicate(
         CareAssertion.field == field,
         CareAssertion.assertion_kind == "document_reviewed_observation",
         CareAssertion.source_text == source_quote,
-        CareAssertion.created_by_caregiver_id == caregiver_id,
     ).order_by(CareAssertion.recorded_at.desc()).all()
     duplicate_group_ids = {
         str(row[0])
