@@ -14,7 +14,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import inspect as sa_inspect, select, text
+from sqlalchemy import MetaData, Table, inspect as sa_inspect, select, text
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -479,9 +479,7 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
                 continue
             raw_table = sa_inspect(db.get_bind()).get_columns(raw_name)
             raw_columns = {column["name"] for column in raw_table}
-            reflected = __import__("sqlalchemy").Table(
-                raw_name, __import__("sqlalchemy").MetaData(), autoload_with=db.get_bind()
-            )
+            reflected = Table(raw_name, MetaData(), autoload_with=db.get_bind())
             if "person_id" in raw_columns:
                 predicate = reflected.c.person_id == person_id
                 raw_owner = next((column for column in owner_columns if column in raw_columns), None)
