@@ -348,8 +348,23 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 status_code=403,
                 content={"detail": "This caregiver no longer has access to this care record."},
             )
+        access_scope = getattr(access_grant, "access_scope", "full_record") or "full_record"
+        if access_scope == "documents_only":
+            path = request.url.path
+            allowed_document_prefixes = (
+                "/api/v1/documents",
+                "/api/v1/appointment-workspaces",
+                "/api/documents",
+                "/api/v1/sessions/refresh",
+            )
+            if not any(path == prefix or path.startswith(prefix + "/") for prefix in allowed_document_prefixes):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "This caregiver's access is limited to documents and appointment paperwork."},
+                )
         request.state.caregiver_access_grant_id = access_grant.id
         request.state.caregiver_access_role = access_grant.role
+        request.state.caregiver_access_scope = access_scope
         request.state.caregiver_can_manage_members = bool(access_grant.can_manage_members)
         request.state.anonymous_session_id = session.id
         request.state.scoped_person_id = scoped_person_id
