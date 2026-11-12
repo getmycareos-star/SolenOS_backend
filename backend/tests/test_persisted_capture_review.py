@@ -11,6 +11,7 @@ from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
+from app.models.uncertainty import OpenQuestion
 
 pytestmark = pytest.mark.session_security
 
@@ -64,7 +65,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
             "review_status": "pending_review",
             "source_event_id": "event-from-capture",
         }],
-        "open_questions": [],
+        "open_questions": ["How long has this been happening?"],
         "possible_safety_flags": [],
     }
     monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: candidates)
@@ -86,6 +87,22 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert body["qwen_extraction_status"] == "available"
     assert body["qwen_analysis_id"]
     assert body["qwen_written_to_lcr"] is False
+
+    db = TestSessionLocal()
+    try:
+        clarification = db.query(OpenQuestion).filter_by(
+            person_id=session["person"]["id"],
+            question="How long has this been happening?",
+            status="open",
+        ).one()
+        assert clarification.evidence_ids == body["evidence_ids"]
+        assert clarification.created_by_caregiver_id == session["caregiver"]["id"]
+        assert clarification.context[0]["source_kind"] == "daily_capture_extraction"
+        assert clarification.context[0]["source_record_refs"][0] == {
+            "record_type": "care_event", "record_id": body["id"]
+        }
+    finally:
+        db.close()
 
     reviewed = client.post(
         f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
