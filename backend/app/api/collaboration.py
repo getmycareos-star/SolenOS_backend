@@ -3288,6 +3288,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
     source_assertion_ids: list[str] = []
     source_lcr_context_ids: list[str] = []
     source_lcr_record_refs: list[dict[str, str]] = []
+    validated_aggregates: list[dict] = []
     source_freshness_assessment_ids: list[str] = []
     freshness_source_status = "not_retrieved"
     lcr_context_coverage: dict = {"status": "not_retrieved_for_emergency"}

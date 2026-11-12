@@ -145,6 +145,7 @@ def test_shared_coordinator_rejects_companion_message_from_another_caregiver(mon
             "person-1",
             workflow="companion_care_update_review",
             source_caregiver_id="caregiver-1",
+            caregiver_id="caregiver-1",
             source_message_id="message-1",
             source_conversation_id="conversation-1",
         )
