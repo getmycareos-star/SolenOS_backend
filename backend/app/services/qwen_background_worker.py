@@ -152,7 +152,7 @@ async def process_one_qwen_job() -> bool:
                 ),
                 QwenBackgroundJob.available_at <= now,
             )
-            .order_by(QwenBackgroundJob.created_at.asc())
+            .order_by(QwenBackgroundJob.available_at.asc(), QwenBackgroundJob.created_at.asc())
             .with_for_update(skip_locked=True)
             .first()
         )
