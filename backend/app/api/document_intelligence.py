@@ -31,7 +31,6 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.uncertainty import persist_source_clarification_questions
 from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, medication_details_for_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
@@ -183,7 +182,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
         "open_questions": intelligence.get("open_questions", []),
-        "review_required": any(
+        "review_required": False,
+        "review_available": any(
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in observations
         ),
@@ -347,21 +347,6 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if existing.get("status") == "partial" and isinstance(pending_pages, list) and pending_pages:
             resume_intelligence = existing
         else:
-            try:
-                persist_source_clarification_questions(
-                    db,
-                    person_id=person_id,
-                    caregiver_id=caregiver_id,
-                    source_kind="document_extraction",
-                    source_record_type="evidence",
-                    source_record_id=str(evidence.id),
-                    evidence_ids=[str(evidence.id)],
-                    questions=existing.get("open_questions") or [],
-                )
-                db.commit()
-            except Exception:
-                db.rollback()
-                logger.exception("Could not backfill saved document clarification questions for evidence %s", evidence.id)
             return _response(analysis)
 
     source_text = (analysis.source_text or "").strip()
@@ -535,16 +520,8 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     }
     analysis.candidates = metadata
     db.add(analysis)
-    persist_source_clarification_questions(
-        db,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        source_kind="document_extraction",
-        source_record_type="evidence",
-        source_record_id=str(evidence.id),
-        evidence_ids=[str(evidence.id)],
-        questions=metadata["document_intelligence"]["open_questions"],
-    )
+    # Keep model-generated questions with the source analysis; only create
+    # active caregiver tasks when a consequential decision depends on an answer.
     db.commit()
     db.refresh(analysis)
     return _response(analysis)
