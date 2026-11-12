@@ -423,7 +423,7 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
     with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for table in Base.metadata.sorted_tables:
             name = table.name
-            if name in {"privacy_export_artifacts", "community_posts", "community_reactions", "share_intakes", "caregiver_accounts", "recovery_code_sets", "anonymous_sessions"}:
+            if name in {"privacy_export_artifacts", "share_intakes", "caregiver_accounts", "recovery_code_sets", "anonymous_sessions"}:
                 continue
             columns = set(table.c.keys())
             if name == "persons":
