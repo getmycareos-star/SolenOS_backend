@@ -545,6 +545,16 @@ def _verify_persisted_extraction(
     return content
 
 
+def _unreadable_page_numbers(source_text: str) -> list[int]:
+    markers = list(re.finditer(r"(?m)^\\[Page\\s+(\\d+)", source_text or ""))
+    unreadable = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
+        if "[No readable text detected on this page]" in source_text[marker.end():end]:
+            unreadable.append(int(marker.group(1)))
+    return unreadable
+
+
 def _response(analysis: CaptureAnalysis) -> dict:
     details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
     intelligence = details.get("document_intelligence")
@@ -557,15 +567,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extraction_status": analysis.extraction_status,
         "extraction_method": details.get("extraction_method"),
         "page_count": details.get("page_count") or 1,
-        "unreadable_page_numbers": [
-            int(match.group(1))
-            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)", analysis.source_text or "")
-            if "[No readable text detected on this page]" in (
-                (analysis.source_text or "")[match.end():re.search(r"(?m)^\\[Page\\s+\\d+", analysis.source_text or "", pos=match.end()).start()]
-                if re.search(r"(?m)^\\[Page\\s+\\d+", analysis.source_text or "", pos=match.end())
-                else (analysis.source_text or "")[match.end():]
-            )
-        ],
+        "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
         "source_text_sha256": hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest(),
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
