@@ -244,6 +244,37 @@ jobs:
                   missing_columns = required_columns - columns
                   if missing_columns:
                       raise SystemExit(f"{table} missing common envelope columns: {sorted(missing_columns)}")
+              required_push_and_reminder_columns = {
+                  "care_reminders": {
+                      "id", "person_id", "created_by_caregiver_id", "due_at", "status",
+                      "snoozed_at", "snoozed_by_caregiver_id", "snooze_count",
+                      "delivery_generation", "notification_deferred_until",
+                  },
+                  "care_notification_preferences": {
+                      "person_id", "caregiver_id", "quiet_hours_enabled", "quiet_hours_start",
+                      "quiet_hours_end", "timezone_name", "reminders_enabled",
+                  },
+                  "care_push_subscriptions": {
+                      "id", "person_id", "caregiver_id", "endpoint_hash",
+                      "encrypted_subscription", "created_at", "last_seen_at", "revoked_at",
+                  },
+                  "care_push_deliveries": {
+                      "id", "notification_id", "subscription_id", "status", "attempt_count",
+                      "next_attempt_at", "last_attempt_at", "provider_accepted_at",
+                      "last_error_code", "last_error_message",
+                  },
+              }
+              for table, required in required_push_and_reminder_columns.items():
+                  if table not in existing:
+                      raise SystemExit(f"missing reminder/push table: {table}")
+                  cur.execute(
+                      "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=%s",
+                      (table,),
+                  )
+                  columns = {row[0] for row in cur.fetchall()}
+                  missing_columns = required - columns
+                  if missing_columns:
+                      raise SystemExit(f"{table} missing reminder/push columns: {sorted(missing_columns)}")
               cur.execute(
                   "SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='notification_read_receipts' AND indexname='uq_notification_read_receipt_reader'"
               )
