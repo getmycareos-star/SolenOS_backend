@@ -228,6 +228,7 @@ SOURCES = {
         "recorded_time_fields": ("created_at", "updated_at"),
         "due_time_fields": ("deadline",),
         "detail_fields": ("source_authority", "actor_label", "subject_label", "action_type", "modality", "condition_text", "trigger_text", "deadline", "status", "source_evidence_id"),
+        "require_caregiver_owned_evidence": True,
         "include_unresolved_outside_window": True,
     },
     "evidence_freshness_assessments": {
@@ -1652,6 +1653,7 @@ def prepare_handoff_draft(
                 evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
                 query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
                     evidence_table.c.person_id == person_id,
+                    evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
                 )
             timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
             if timestamp_columns:
