@@ -814,7 +814,7 @@ def review_document_candidate(
             CareAssertion.field == document_field,
             CareAssertion.assertion_kind == "document_reviewed_observation",
             CareAssertion.source_text == quote,
-            CareAssertion.assertion_status.notin_(["rejected", "superseded"]),
+            CareAssertion.assertion_status.in_(["accepted", "caregiver_reviewed"]),
         ).order_by(CareAssertion.recorded_at.desc()).all()
         assertion_row = next(
             (
