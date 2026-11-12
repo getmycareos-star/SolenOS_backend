@@ -714,7 +714,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     capture_page_number = capture.get("page_number")
     if capture.get("method") == "scan" and isinstance(capture_page_number, int) and not isinstance(capture_page_number, bool):
         source_text = source_text.replace("[Page 1 OCR]", f"[Page {capture_page_number} OCR]", 1)
-    total_pages = len(re.findall(r"(?m)^\\[Page\\s+\\d+", source_text)) or 1
+    total_pages = len(re.findall(r"(?m)^\[Page\s+\d+", source_text)) or 1
     unreadable_pages = _unreadable_page_numbers(source_text)
     unprocessed_pages = _unprocessed_page_numbers(source_text)
     processed_pages = sorted(set(range(1, total_pages + 1)) - set(unprocessed_pages))
@@ -734,7 +734,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
             "extraction_method": method,
             **classify_document(upload.filename or "", source_text),
-            "page_count": len(re.findall(r"(?m)^\[Page\s+\d+", source_text)) or 1,
+            "page_count": total_pages,
             "observations": [],
             "open_questions": [],
         },
