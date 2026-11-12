@@ -141,7 +141,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "required": False,
         "fields": [
             "id", "loop_type", "title", "description", "status", "outcome_status",
-            "owner_role", "owner_label", "uncertainty", "missing_information", "options",
+            "caregiver_id", "assigned_caregiver_id", "owner_role", "owner_label", "uncertainty", "missing_information", "options",
             "request_text", "recipient_label", "requested_at", "last_contact_at",
             "verification_rule", "deadline_at", "deadline_source", "deadline_timezone",
             "consequence_of_delay", "priority", "priority_reasons", "deferred_reason",
