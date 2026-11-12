@@ -603,3 +603,95 @@ def test_only_responsible_caregiver_can_change_registered_action():
     )
     assert visible.status_code == 200, visible.text
     assert len(visible.json()) == 1
+
+
+def test_explicit_action_clarification_creates_and_resolves_one_source_grounded_question():
+    from app.models.uncertainty import OpenQuestion
+    from app.models.care_continuity import CareStateRevision
+
+    client = TestClient(app)
+    session = create_session(client, "Medication follow-up recipient")
+    evidence = create_evidence(
+        client, session,
+        "Caregiver report: the discharge papers list a medication, but the current instruction needs confirmation from the prescriber.",
+    )
+    created = client.post(
+        f"/api/v1/registered-actions/{session['person']['id']}/approve",
+        headers=headers(session),
+        json=approval_payload(
+            evidence["id"],
+            idempotency_key="registered-action-necessity-001",
+            suggestion_id="registered-action-necessity-001",
+            title="Call the prescribing clinician to confirm the medication instruction",
+        ),
+    )
+    assert created.status_code == 201, created.text
+    action_id = created.json()["id"]
+
+    blocked = client.patch(
+        f"/api/v1/registered-actions/{action_id}/status",
+        headers=headers(session),
+        json={
+            "status": "needs_clarification",
+            "expected_version": created.json()["version"],
+            "reason": "The current instruction is not established by the saved source.",
+        },
+    )
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["requires_confirmation"] is True
+
+    db = TestSessionLocal()
+    try:
+        questions = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == session["person"]["id"],
+            OpenQuestion.status == "open",
+            OpenQuestion.necessity == "necessary",
+        ).all()
+        linked = [
+            q for q in questions
+            if any(
+                isinstance(ctx, dict)
+                and ctx.get("source_kind") == "registered_action"
+                and str(ctx.get("source_id")) == action_id
+                for ctx in (q.context or [])
+            )
+        ]
+        assert len(linked) == 1
+        question = linked[0]
+        assert question.evidence_ids == [evidence["id"]]
+        assert question.intended_answerer_role == "professional"
+        assert "prescribing clinician" in question.question
+        assert question.created_by_caregiver_id is None
+        revisions_before = db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == session["person"]["id"],
+            CareStateRevision.target_type == "open_questions",
+            CareStateRevision.target_id == question.id,
+        ).count()
+        assert revisions_before >= 1
+    finally:
+        db.close()
+
+    resumed = client.patch(
+        f"/api/v1/registered-actions/{action_id}/status",
+        headers=headers(session),
+        json={
+            "status": "approved",
+            "expected_version": blocked.json()["version"],
+        },
+    )
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["requires_confirmation"] is False
+
+    db = TestSessionLocal()
+    try:
+        question = db.query(OpenQuestion).filter(OpenQuestion.id == linked[0].id).one()
+        assert question.status == "closed"
+        assert question.answered_at is None
+        assert question.closed_reason.startswith("automatically_superseded")
+        assert db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == session["person"]["id"],
+            CareStateRevision.target_type == "open_questions",
+            CareStateRevision.target_id == question.id,
+        ).count() > revisions_before
+    finally:
+        db.close()
