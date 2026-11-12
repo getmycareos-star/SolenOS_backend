@@ -404,6 +404,13 @@ def test_incomplete_document_blocks_interpretation_and_candidate_acceptance(monk
             db.commit()
             analysis_id = analysis.id
 
+        listed = client.get("/api/v1/documents/intelligence", headers=auth)
+        assert listed.status_code == 200, listed.text
+        listed_analysis = next(item for item in listed.json()["items"] if item["analysis_id"] == analysis_id)
+        assert listed_analysis["interpretation_blocked"] is True
+        assert listed_analysis["observations"] == []
+        assert listed_analysis["review_required"] is False
+
         review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
