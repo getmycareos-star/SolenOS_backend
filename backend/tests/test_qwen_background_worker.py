@@ -278,6 +278,41 @@ def test_worker_waits_quietly_when_job_table_is_not_yet_migrated(tmp_path, monke
         engine.dispose()
 
 
+def test_document_worker_defers_intelligence_until_failed_extraction_pages_are_retried(monkeypatch, tmp_path):
+    from app.api import document_lifecycle, document_intelligence
+
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    extraction = {
+        "analysis_id": "analysis-incomplete",
+        "extraction_status": "partial",
+        "page_count": 3,
+        "unprocessed_page_numbers": [2],
+    }
+    monkeypatch.setattr(
+        document_lifecycle,
+        "extract_saved_document",
+        lambda *args, **kwargs: extraction,
+    )
+    monkeypatch.setattr(
+        document_intelligence,
+        "analyze_saved_document",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("AI interpretation must wait until failed extraction pages are retried")
+        ),
+    )
+
+    result = worker._process_document_evidence(
+        "evidence-incomplete-pdf",
+        "person-test",
+        "caregiver-test",
+    )
+
+    assert result[0] is extraction
+    assert result[1]["intelligence_status"] == "partial"
+    assert result[1]["unprocessed_page_numbers"] == [2]
+    assert result[1]["deferred_until_extraction_complete"] is True
+
+
 def test_worker_processes_document_intake_job_without_qwen_output(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     db = sessions()
