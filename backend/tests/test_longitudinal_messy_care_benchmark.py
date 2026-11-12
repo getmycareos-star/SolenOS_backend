@@ -1076,7 +1076,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             evidence_id = event_spec["evidence_id"]
             claim = event_spec["claim"]
             source_text_by_event[event_id] = claim
-            event_day = event_spec.get("corrected_day", event_spec["day"])
+            event_day = event_spec.get("corrected_day", event_spec["day"]) + event_spec.get("effective_day_offset", 0)
             occurred_at = NOW + timedelta(days=event_day)
             evidence = Evidence(
                 id=evidence_id,
