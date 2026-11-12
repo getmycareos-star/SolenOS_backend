@@ -378,6 +378,36 @@ def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = De
         source_id=db_evidence.id,
         caregiver_id=evidence.uploaded_by_caregiver_id,
     )
+    execution = None
+    try:
+        execution = execute_care_continuity_reconciliation(
+            db,
+            db_evidence.person_id,
+            workflow="add_record_evidence",
+            source_evidence_id=db_evidence.id,
+        )
+        db.commit()
+        execution["stages"]["reconciliation"] = "committed"
+    except Exception:
+        db.rollback()
+        db.refresh(db_evidence)
+        execution = {
+            "contract_version": "1.0",
+            "workflow": "add_record_evidence",
+            "person_id": db_evidence.person_id,
+            "source_evidence_id": db_evidence.id,
+            "stages": {
+                "source_preservation": "verified",
+                "evidence": "verified",
+                "reconciliation": "unavailable",
+            },
+            "transaction_owner": "caller",
+        }
+        logger.exception(
+            "Shared care-continuity execution failed after durable Add Record evidence %s",
+            db_evidence.id,
+        )
+    db_evidence.care_continuity_execution = execution
     return db_evidence
 
 
