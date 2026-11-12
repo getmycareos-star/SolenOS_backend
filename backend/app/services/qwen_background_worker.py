@@ -301,6 +301,15 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
             state=SimpleNamespace(scoped_person_id=job.person_id, scoped_caregiver_id=job.caregiver_id)
         )
         result = await qwen_support_assist(payload, fake_request, db)
+        # The source may have been deleted while inference was running. A
+        # cancelled job must never persist a derived answer after that deletion.
+        current_job = db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.id == job.id
+        ).with_for_update().first()
+        if current_job is None or current_job.status == "cancelled":
+            db.rollback()
+            return True
+        job = current_job
         if result.get("ai_generated") is not True or result.get("provider_status") != "available":
             raise RuntimeError("Qwen background worker received a response without confirmed live inference")
         model_name = str(result.get("model") or os.getenv("OLLAMA_MODEL") or "").strip()
