@@ -4237,7 +4237,24 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
-        db.add_all([person, caregiver, evidence, event])
+        gap = InformationGap(
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="sleep_schedule",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="The current sleep schedule is needed for the active care handoff.",
+            evidence_ids=[evidence.id],
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The active handoff cannot describe the current sleep schedule without resolving this field.",
+                "decision_dependency": "The handoff content depends on the current sleep schedule.",
+            }],
+        )
+        db.add_all([person, caregiver, evidence, event, gap])
         db.commit()
 
         daily = persist_source_clarification_questions(
@@ -4254,6 +4271,14 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         )[0]
         db.commit()
         assert daily.id == document.id
+        assert daily.necessity == "necessary"
+        assert daily.subject_type == "person"
+        assert daily.subject_id == person.id
+        assert evidence.id in (daily.evidence_ids or [])
+        assert any(
+            item.get("source_kind") == "information_gap" and item.get("source_id") == gap.id
+            for item in (daily.context or []) if isinstance(item, dict)
+        )
 
         # Accepted source evidence does not settle a field while a competing
         # assertion remains unresolved.
@@ -4294,6 +4319,8 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
 
         conflict.resolution_status = "resolved"
         db.flush()
+        from app.services.care_continuity import reconcile_information_gaps_from_accepted_assertions
+        reconcile_information_gaps_from_accepted_assertions(db, person.id)
         second = reassess_open_question_lifecycle(db, person.id)
         db.refresh(daily)
         assert daily.status == "closed"
