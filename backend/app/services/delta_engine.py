@@ -967,7 +967,24 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         # Exact same subject/value at the same observed instant is a
                         # duplicate observation, not a second independent fact. Keep
                         # the new event/evidence intact and link it to the first assertion.
-                        duplicate_assertion = db.query(CareAssertion).join(
+                        def _same_occurrence_instant(left, right):
+                            if left is None or right is None:
+                                return False
+                            left_utc = left.replace(tzinfo=timezone.utc) if left.tzinfo is None else left.astimezone(timezone.utc)
+                            right_utc = right.replace(tzinfo=timezone.utc) if right.tzinfo is None else right.astimezone(timezone.utc)
+                            return left_utc == right_utc
+
+                        reporter_filter = (
+                            or_(
+                                CareAssertion.source_label == source,
+                                CareAssertion.created_by_caregiver_id == created_by_caregiver_id,
+                            )
+                            if created_by_caregiver_id
+                            else CareAssertion.source_label == source
+                        )
+                        duplicate_candidates = db.query(
+                            CareAssertion, CareEvent.occurred_at
+                        ).join(
                             CareEvent,
                             CareEvent.id == CareAssertion.source_event_id,
                         ).filter(
@@ -978,43 +995,42 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             CareAssertion.field == field,
                             CareAssertion.assertion_kind.in_(["time_bound_observation", "current_state"]),
                             CareAssertion.asserted_value == str(current),
-                            or_(
-                                CareAssertion.source_label == source,
-                                CareAssertion.created_by_caregiver_id == created_by_caregiver_id,
-                            ) if created_by_caregiver_id else (CareAssertion.source_label == source),
-                            # The original source event's occurrence time is the
-                            # duplicate identity. Assertion observed_at may be corrected
-                            # later and must not make an earlier source occurrence eligible
-                            # for a second assertion.
-                            CareEvent.occurred_at == event_date,
+                            reporter_filter,
                             CareAssertion.assertion_status != "rejected",
                             CareAssertion.source_event_id != source_event_id,
-                        ).order_by(CareAssertion.recorded_at.asc()).first()
+                        ).order_by(CareAssertion.recorded_at.asc()).all()
+                        # Compare normalized UTC instants in Python. This avoids
+                        # backend-specific timestamp equality differences while
+                        # retaining exact-occurrence semantics.
+                        duplicate_assertion = next(
+                            (
+                                candidate for candidate, source_occurred_at in duplicate_candidates
+                                if _same_occurrence_instant(source_occurred_at, event_date)
+                            ),
+                            None,
+                        )
                         if duplicate_assertion is None:
-                            # Legacy assertions may have an exact occurrence time
-                            # and source attribution but no source_event_id. SQL
-                            # NULL != event_id is UNKNOWN, so include NULL lineage
-                            # explicitly rather than silently admitting a duplicate.
-                            duplicate_assertion = db.query(CareAssertion).filter(
+                            # Legacy assertions may have no source event lineage.
+                            legacy_candidates = db.query(CareAssertion).filter(
                                 CareAssertion.person_id == person_id,
                                 CareAssertion.subject_type == domain.rstrip("s"),
                                 CareAssertion.subject_id == subject_id,
                                 CareAssertion.field == field,
-                                # Duplicate identity is the same person, subject, value,
-                                # reporter and observed instant. Assertion kind must not
-                                # let the same source occurrence be promoted twice.
                                 CareAssertion.asserted_value == str(current),
-                                CareAssertion.observed_at == event_date,
                                 or_(
                                     CareAssertion.source_event_id.is_(None),
                                     CareAssertion.source_event_id != source_event_id,
                                 ),
                                 CareAssertion.assertion_status != "rejected",
-                                or_(
-                                    CareAssertion.source_label == source,
-                                    CareAssertion.created_by_caregiver_id == created_by_caregiver_id,
-                                ) if created_by_caregiver_id else (CareAssertion.source_label == source),
-                            ).order_by(CareAssertion.recorded_at.asc()).first()
+                                reporter_filter,
+                            ).order_by(CareAssertion.recorded_at.asc()).all()
+                            duplicate_assertion = next(
+                                (
+                                    candidate for candidate in legacy_candidates
+                                    if _same_occurrence_instant(candidate.observed_at, event_date)
+                                ),
+                                None,
+                            )
                         if duplicate_assertion is not None:
                             existing_duplicate_link = db.query(CareRecordRelationship.id).filter(
                                 CareRecordRelationship.person_id == person_id,
