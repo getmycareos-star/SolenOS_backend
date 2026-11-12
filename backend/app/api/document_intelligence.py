@@ -83,6 +83,27 @@ def _metadata(analysis: CaptureAnalysis) -> dict:
     return value
 
 
+def _require_complete_extraction(analysis: CaptureAnalysis) -> None:
+    """Do not interpret or accept facts from a document with missing page content."""
+    source_text = analysis.source_text or ""
+    unreadable_pages = _unreadable_page_numbers(source_text)
+    unprocessed_pages = _unprocessed_page_numbers(source_text)
+    if analysis.extraction_status != "available" or unreadable_pages or unprocessed_pages:
+        details = []
+        if unreadable_pages:
+            details.append("unreadable pages: " + ", ".join(map(str, unreadable_pages)))
+        if unprocessed_pages:
+            details.append("pages not yet processed: " + ", ".join(map(str, unprocessed_pages)))
+        reason = "; ".join(details) or "the extraction is not marked complete"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Document interpretation is blocked until every page has a complete extraction. "
+                f"Found {reason}. Retry failed pages or upload a clearer copy before review."
+            ),
+        )
+
+
 def _source(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
@@ -388,6 +409,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     if metadata.get("binary_sha256") != upload.sha256:
         raise HTTPException(status_code=409, detail="The extraction does not match the preserved original file")
     _verify_persisted_extraction(analysis, upload, db)
+    _require_complete_extraction(analysis)
     metadata = _metadata(analysis)
     existing = _intelligence(analysis)
     resume_intelligence = {}
@@ -770,6 +792,7 @@ def review_document_candidate(
     if metadata.get("binary_sha256") != upload.sha256:
         raise HTTPException(status_code=409, detail="The original document no longer matches the extracted source")
     _verify_persisted_extraction(analysis, upload, db)
+    _require_complete_extraction(analysis)
     metadata = _metadata(analysis)
     intelligence = _intelligence(analysis)
     observations = intelligence.get("observations")
