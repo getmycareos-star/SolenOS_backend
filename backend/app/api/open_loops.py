@@ -247,6 +247,14 @@ def _reassess(db, loop):
         deadline = deadline.replace(tzinfo=timezone.utc)
     if deadline and deadline <= now and loop.status not in TERMINAL_STATES:
         reasons.append("Persisted deadline has passed")
+    elif (
+        deadline
+        and now < deadline <= now + timedelta(hours=24)
+        and loop.status not in TERMINAL_STATES
+    ):
+        # A deadline is an explicit operational commitment, not a clinical
+        # urgency signal. Surface it in the existing Open Loop projection.
+        reasons.append("Explicit follow-up deadline is within 24 hours")
     if loop.loop_type == "contradiction" and loop.status not in TERMINAL_STATES:
         reasons.append("Competing claims remain unresolved")
     if loop.missing_information:
@@ -257,7 +265,11 @@ def _reassess(db, loop):
         reasons.append("Critical consequence of delay was explicitly recorded")
     if loop.status == "review_abandoned":
         reasons.append("Inactive item requires human review; this is not closure")
-    if reasons and ("Persisted deadline has passed" in reasons or loop.consequence_of_delay == "critical"):
+    if reasons and (
+        "Persisted deadline has passed" in reasons
+        or "Explicit follow-up deadline is within 24 hours" in reasons
+        or loop.consequence_of_delay == "critical"
+    ):
         loop.priority = "high"
     elif reasons:
         loop.priority = "normal"
