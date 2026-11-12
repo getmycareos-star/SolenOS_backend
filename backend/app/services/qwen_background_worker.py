@@ -201,12 +201,28 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
             for evidence_id in evidence_ids:
                 if not isinstance(evidence_id, str) or not evidence_id.strip():
                     raise ValueError("document_intake_evidence_id_invalid")
+                current_job = db.query(QwenBackgroundJob).filter(
+                    QwenBackgroundJob.id == job.id
+                ).with_for_update().first()
+                if current_job is None or current_job.status == "cancelled":
+                    db.rollback()
+                    return True
                 extraction, intelligence = await asyncio.to_thread(
                     _process_document_evidence,
                     evidence_id,
                     job.person_id,
                     job.caregiver_id,
                 )
+                # A caregiver may delete the source while OCR/model work is in
+                # flight. Never let this stale worker overwrite cancellation or
+                # requeue the deleted document after the processing call returns.
+                current_job = db.query(QwenBackgroundJob).filter(
+                    QwenBackgroundJob.id == job.id
+                ).with_for_update().first()
+                if current_job is None or current_job.status == "cancelled":
+                    db.rollback()
+                    return True
+                job = current_job
                 completed.append({
                     "evidence_id": evidence_id,
                     "analysis_id": extraction.get("analysis_id"),
@@ -337,6 +353,11 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
             try:
                 db.rollback()
                 current = db.query(QwenBackgroundJob).filter(QwenBackgroundJob.id == job.id).first()
+                if current is not None and current.status == "cancelled" and current.error_code == "document_deleted":
+                    # The caregiver's deletion is terminal. Do not turn it into
+                    # a retry merely because an already-running worker returned.
+                    db.rollback()
+                    return True
                 if current is not None:
                     previous_status = current.status
                     current.locked_at = None
