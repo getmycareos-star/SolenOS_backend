@@ -322,6 +322,25 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             ).all() if appointment_ids else []
         )
     }
+    evidence_ids.update(
+        str(evidence_id)
+        for item in appointments.values()
+        for evidence_id in (item.evidence_ids or [])
+        if evidence_id
+    )
+    evidence_ids.update(
+        str(item.source_evidence_id)
+        for item in documents.values() if item.source_evidence_id
+    )
+    missing_evidence_ids = evidence_ids - set(evidence)
+    if missing_evidence_ids:
+        evidence.update({
+            str(item.id): item
+            for item in db.query(EvidenceModel).filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.id.in_(missing_evidence_ids),
+            ).all()
+        })
     handoffs = {
         str(item.id): item for item in (
             db.query(CaregiverHandoff).filter(
@@ -451,9 +470,18 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
         elif record.get("record_type") == "appointment" and record_id in appointments:
             item = appointments[record_id]
             record.update({
-                "source_text": " ".join(part for part in (item.title, item.status, item.scheduled_at.isoformat() if item.scheduled_at else "") if part),
-                "source_excerpt": item.title,
+                "source_text": " ".join(part for part in (
+                    item.title, item.provider or "", item.healthcare_org or "", item.status,
+                    item.scheduled_at.isoformat() if item.scheduled_at else "",
+                    item.preparation_notes or "", item.medication_questions or "",
+                ) if part),
+                "source_excerpt": " — ".join(part for part in (item.title, item.provider or "", item.preparation_notes or "") if part)[:700],
                 "record_status": item.status,
+                "related_evidence_ids": [str(value) for value in (item.evidence_ids or [])],
+                "related_evidence": [
+                    summary for evidence_id in (item.evidence_ids or [])
+                    if (summary := evidence_summary(str(evidence_id))) is not None
+                ],
             })
         elif record.get("record_type") == "care_handoff" and record_id in handoffs:
             item = handoffs[record_id]
