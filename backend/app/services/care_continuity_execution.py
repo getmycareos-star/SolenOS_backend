@@ -31,6 +31,7 @@ def execute_care_continuity_reconciliation(
     workflow: str,
     source_caregiver_id: str | None = None,
     source_event_id: str | None = None,
+    source_event_ids: list[str] | None = None,
     source_evidence_id: str | None = None,
     source_evidence_ids: list[str] | None = None,
     source_message_id: str | None = None,
@@ -50,6 +51,10 @@ def execute_care_continuity_reconciliation(
         raise CareContinuityExecutionError("A person scope is required")
     if not isinstance(workflow, str) or not workflow.strip():
         raise CareContinuityExecutionError("A workflow identifier is required")
+    event_ids = list(dict.fromkeys(
+        [value for value in (source_event_ids or []) if isinstance(value, str) and value.strip()]
+        + ([source_event_id] if source_event_id else [])
+    ))
     evidence_ids = list(dict.fromkeys(
         [value for value in (source_evidence_ids or []) if isinstance(value, str) and value.strip()]
         + ([source_evidence_id] if source_evidence_id else [])
@@ -65,16 +70,17 @@ def execute_care_continuity_reconciliation(
     if person is None:
         raise CareContinuityExecutionError("The care record could not be verified")
 
-    event = None
-    if source_event_id:
+    events = []
+    for event_id in event_ids:
         event = db.query(CareEvent).filter(
-            CareEvent.id == source_event_id,
+            CareEvent.id == event_id,
             CareEvent.person_id == person_id,
         ).first()
         if event is None:
             raise CareContinuityExecutionError(
-                "The source event is missing or belongs to another care record"
+                "A source event is missing or belongs to another care record"
             )
+        events.append(event)
 
     evidence_rows = []
     for evidence_id in evidence_ids:
@@ -88,9 +94,12 @@ def execute_care_continuity_reconciliation(
             )
         evidence_rows.append(evidence)
 
-    if event is not None and source_caregiver_id and str(event.created_by_caregiver_id) != str(source_caregiver_id):
+    if source_caregiver_id and any(
+        str(event.created_by_caregiver_id) != str(source_caregiver_id)
+        for event in events
+    ):
         raise CareContinuityExecutionError(
-            "The source event was not created by the authenticated caregiver"
+            "A source event was not created by the authenticated caregiver"
         )
     if source_caregiver_id and any(
         str(item.uploaded_by_caregiver_id) != str(source_caregiver_id)
@@ -99,11 +108,15 @@ def execute_care_continuity_reconciliation(
         raise CareContinuityExecutionError(
             "The source evidence was not uploaded by the authenticated caregiver"
         )
-    if event is not None and evidence_rows:
-        linked_ids = set(event.evidence_ids or [])
+    if events and evidence_rows:
+        linked_ids = {
+            str(evidence_id)
+            for event in events
+            for evidence_id in (event.evidence_ids or [])
+        }
         if not set(evidence_ids).issubset(linked_ids):
             raise CareContinuityExecutionError(
-                "The source evidence is not linked to the supplied source event"
+                "The source evidence is not linked to the supplied source events"
             )
 
     assertion = None
@@ -186,7 +199,8 @@ def execute_care_continuity_reconciliation(
         "workflow": workflow,
         "person_id": person_id,
         "source_caregiver_id": source_caregiver_id,
-        "source_event_id": source_event_id,
+        "source_event_id": source_event_id or (event_ids[0] if len(event_ids) == 1 else None),
+        "source_event_ids": event_ids,
         "source_evidence_id": source_evidence_id or (evidence_ids[0] if len(evidence_ids) == 1 else None),
         "source_evidence_ids": evidence_ids,
         "source_message_id": source_message_id,
