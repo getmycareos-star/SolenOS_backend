@@ -1,14 +1,14 @@
 """Persist encrypted Web Push subscriptions and delivery receipts.
 
-Revision ID: 20261112_03_web_push
+Revision ID: 20261112_04_web_push
 Revises: 20261112_02_reminder_snooze_quiet_hours
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261112_03_web_push"
-down_revision = "20261112_02_reminder_snooze_quiet_hours"
+revision = "20261112_04_web_push"
+down_revision = "20261112_03_snooze_quiet"
 branch_labels = None
 depends_on = None
 
