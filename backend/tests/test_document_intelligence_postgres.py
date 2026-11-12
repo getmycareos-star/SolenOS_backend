@@ -741,7 +741,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 reviewer_id="independent-erasure-reviewer",
                 db=db,
             )
-            assert deletion_result["request_status"] == "fulfilled"
+            assert deletion_result["status"] == "fulfilled"
 
         with Session() as db:
             assert db.query(Evidence).filter_by(id=evidence_id).count() == 0
