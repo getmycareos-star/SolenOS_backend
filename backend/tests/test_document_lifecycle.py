@@ -751,6 +751,15 @@ def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatc
         upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
         assert upload.content == original
         assert upload.sha256 == hashlib.sha256(original).hexdigest()
+        saved_evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        metadata = json.loads(saved_evidence.extra_metadata or "{}")
+        assert metadata["capture"]["method"] == "scan"
+        assert metadata["capture"]["page_number"] == 3
+        assert metadata["scan_processing"]["rotation_degrees"] == 90
+        assert metadata["scan_processing"]["crop_insets_percent"] == {
+            "top": 10.0, "right": 20.0, "bottom": 10.0, "left": 10.0
+        }
+        assert metadata["scan_processing"]["client_declared_review_status"] == "not_reviewed"
     assert observed["size"] != Image.open(io.BytesIO(original)).size
 
 
