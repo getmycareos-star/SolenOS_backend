@@ -3599,7 +3599,10 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
     output = []
     if inspect(db.get_bind()).has_table("open_questions"):
         questions = _table(db, "open_questions")
-        rows = db.execute(select(questions).where(questions.c.person_id == scoped_person_id)).mappings().all()
+        rows = db.execute(select(questions).where(
+            questions.c.person_id == scoped_person_id,
+            questions.c.necessity == "necessary",
+        )).mappings().all()
         for raw in rows:
             row = _jsonable(dict(raw))
             if str(row.get("status") or "open").casefold() not in {"open", "unanswered", "pending"}:
@@ -3616,26 +3619,9 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
                 "source_ids": [row.get("id")],
                 "persisted_question_id": row.get("id"),
             })
-    if inspect(db.get_bind()).has_table("information_gaps"):
-        gaps = _table(db, "information_gaps")
-        rows = db.execute(select(gaps).where(gaps.c.person_id == scoped_person_id)).mappings().all()
-        for raw in rows:
-            row = _jsonable(dict(raw))
-            if str(row.get("lifecycle_status") or "open").casefold() not in {"open", "unresolved", "pending"}:
-                continue
-            description = row.get("description") or f"Information gap for {row.get('subject_type') or 'care record'}: {row.get('field') or 'unspecified field'}"
-            output.append({
-                "question": description,
-                "subject_type": row.get("subject_type") or "care_record",
-                "subject_id": row.get("subject_id") or scoped_person_id,
-                "priority": str(row.get("priority") or "informational"),
-                "reason": str(row.get("gap_reason") or "Persisted information gap; it has not been resolved."),
-                "evidence_ids": row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else [],
-                "source_kind": "information_gap",
-                "source_id": row.get("id"),
-                "source_ids": [row.get("id")],
-                "persisted_question_id": None,
-            })
+    # Open information gaps remain internal care memory. They are not
+    # caregiver questions unless the necessity assessment promotes them into
+    # a source-linked OpenQuestion above.
     return output
 
 
