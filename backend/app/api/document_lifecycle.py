@@ -525,6 +525,15 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             return _response(row)
 
     source_text, method = _extract(upload, content, evidence)
+    try:
+        capture_metadata = evidence.extra_metadata if isinstance(evidence.extra_metadata, dict) else json.loads(evidence.extra_metadata or "{}")
+    except (TypeError, ValueError):
+        capture_metadata = {}
+    capture_metadata = capture_metadata if isinstance(capture_metadata, dict) else {}
+    capture = capture_metadata.get("capture") if isinstance(capture_metadata.get("capture"), dict) else {}
+    capture_page_number = capture.get("page_number")
+    if capture.get("method") == "scan" and isinstance(capture_page_number, int) and not isinstance(capture_page_number, bool):
+        source_text = source_text.replace("[Page 1 OCR]", f"[Page {capture_page_number} OCR]", 1)
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
