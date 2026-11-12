@@ -938,7 +938,10 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
     from datetime import datetime, timezone
     from app.models.care import CareEvent, Evidence, Person, Caregiver
     from app.models.collaboration import CommunityPost, CommunityReaction, EvidenceUpload
+    from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
+    from app.models.qwen_background_job import QwenBackgroundJob
     from app.models.privacy_delivery import AuditLogEvent
+    import json
 
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "g" * 40)
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
@@ -977,6 +980,37 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver_id,
         )
+        analysis = CaptureAnalysis(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_evidence_id=evidence.id,
+            source_text="Synthetic extracted document text to erase.",
+            extraction_status="available",
+            candidates={"kind": "document_extraction_v1", "observations": []},
+        )
+        db.add(analysis)
+        db.flush()
+        review_event = DocumentReviewEvent(
+            analysis_id=analysis.id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_evidence_id=evidence.id,
+            candidate_index=0,
+            decision_version=1,
+            decision="reject",
+            rationale="Synthetic caregiver review decision to erase.",
+            before_state={"review_status": "pending_review"},
+            after_state={"review_status": "rejected"},
+        )
+        processing_job = QwenBackgroundJob(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            task_text="Process saved document for caregiver review.",
+            context_text="",
+            evidence_ids_json=json.dumps([evidence.id]),
+            workflow="document_intake",
+            status="queued",
+        )
         post = CommunityPost(
             id="deletion-community-post",
             caregiver_id=caregiver_id,
@@ -1011,10 +1045,13 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
             "INSERT INTO privacy_deletion_fk_probe (record_key, person_ref, payload) "
             "VALUES ('composite-dependent-row', :person_id, 'private dependent data')"
         ), {"person_id": person_id})
-        db.add_all([upload, event, reaction])
+        db.add_all([upload, event, reaction, review_event, processing_job])
         db.commit()
         evidence_id = evidence.id
         event_id = event.id
+        analysis_id = analysis.id
+        review_event_id = review_event.id
+        processing_job_id = processing_job.id
     finally:
         db.close()
 
@@ -1074,6 +1111,9 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
         assert db.query(Caregiver).filter(Caregiver.id == caregiver_id).count() == 0
         assert db.query(Evidence).filter(Evidence.id == evidence_id).count() == 0
         assert db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).count() == 0
+        assert db.query(CaptureAnalysis).filter(CaptureAnalysis.id == analysis_id).count() == 0
+        assert db.query(DocumentReviewEvent).filter(DocumentReviewEvent.id == review_event_id).count() == 0
+        assert db.query(QwenBackgroundJob).filter(QwenBackgroundJob.id == processing_job_id).count() == 0
         assert db.query(CareEvent).filter(CareEvent.id == event_id).count() == 0
         assert db.query(CommunityPost).filter(CommunityPost.id == "deletion-community-post").count() == 0
         assert db.query(CommunityReaction).filter(CommunityReaction.id == "deletion-community-reaction").count() == 0
