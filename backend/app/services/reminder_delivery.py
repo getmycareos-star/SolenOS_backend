@@ -1,8 +1,7 @@
-"""Durable in-app delivery for due care reminders.
+"""Durable reminder and Web Push delivery workers.
 
-Quiet hours defer notification creation; they do not alter the reminder due time.
-This worker does not claim to send Web Push or native device notifications.
-"""
+Quiet hours defer notification creation; they do not alter reminder due times.
+Provider acceptance is recorded separately from device presentation.
 import asyncio
 import json
 import logging
@@ -204,6 +203,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CarePushSubscription.revoked_at.is_(None),
             )
             .order_by(CarePushDelivery.next_attempt_at.asc())
+            .with_for_update(skip_locked=True)
             .limit(100)
             .all()
         )
