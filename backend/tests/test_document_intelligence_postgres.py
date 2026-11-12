@@ -505,6 +505,17 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert all(item["source_evidence_id"] == evidence_id for item in candidates)
         assert all(item["source_quote"] in source for item in candidates)
         assert understood.json()["written_to_lcr"] is False
+        provenance = understood.json()["model_provenance"]
+        assert provenance["provider"] in {"private_ollama", "unavailable_or_test_stub"}
+        assert provenance["processing_version"] == "document_intelligence_v1"
+        assert provenance["prompt_version"] == "source_grounded_review_candidates_v1"
+        assert provenance["extraction_source"] == "persisted_server_extraction"
+        assert provenance["source_evidence_id"] == evidence_id
+        assert provenance["source_text_sha256"] == hashlib.sha256(source.encode("utf-8")).hexdigest()
+        assert provenance["model_authority"] == "review_only"
+        assert provenance["model_digest"] is None
+        assert provenance["model_digest_status"] == "not_exposed_by_ollama_chat_response"
+        assert understood.json()["processing_history"][-1] == provenance
 
         # Rejecting a candidate and correcting another do not create LCR assertions.
         rejected = client.post(
