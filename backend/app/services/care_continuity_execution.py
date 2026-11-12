@@ -171,10 +171,15 @@ def execute_care_continuity_reconciliation(
                 )
 
         if assertion.source_message_id:
-            assertion_conversation = db.query(ConversationSession).filter(
+            assertion_conversation_query = db.query(ConversationSession).filter(
                 ConversationSession.id == assertion.source_conversation_id,
                 ConversationSession.person_id == person_id,
-            ).first()
+            )
+            if source_caregiver_id:
+                assertion_conversation_query = assertion_conversation_query.filter(
+                    ConversationSession.caregiver_id == source_caregiver_id
+                )
+            assertion_conversation = assertion_conversation_query.first()
             assertion_message = db.query(ConversationMessage).filter(
                 ConversationMessage.id == assertion.source_message_id,
                 ConversationMessage.session_id == assertion.source_conversation_id,
