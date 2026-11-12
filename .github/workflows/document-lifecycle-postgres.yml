@@ -1,3 +1,4 @@
+# Document ingestion resume regression coverage runs against the current main implementation.
 name: Document lifecycle PostgreSQL integration
 
 on:
