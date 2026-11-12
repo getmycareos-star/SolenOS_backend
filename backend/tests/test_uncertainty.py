@@ -3991,7 +3991,19 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
             context=[{"decision_dependency": "A handoff requires the dose."}],
             evidence_ids=[],
         )
-        db.add_all([necessary, unassessed, optional, legacy_ungrounded])
+        legacy_invalid_source = OpenQuestion(
+            person_id=person.id,
+            question="Can you confirm the medication instruction?",
+            subject_type="person",
+            subject_id=person.id,
+            necessity="necessary",
+            necessity_rationale="Legacy row references an evidence ID that does not exist.",
+            status="open",
+            priority=Priority.HIGH,
+            context=[{"decision_dependency": "A current handoff depends on this instruction."}],
+            evidence_ids=["missing-evidence-id"],
+        )
+        db.add_all([necessary, unassessed, optional, legacy_ungrounded, legacy_invalid_source])
         db.commit()
 
         from app.services.uncertainty import UncertaintyEngine
