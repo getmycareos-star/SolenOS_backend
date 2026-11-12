@@ -18,6 +18,7 @@ class CareReminder(Base):
     due_at = Column(DateTime(timezone=True), nullable=False, index=True)
     status = Column(String(16), nullable=False, default="open", server_default="open", index=True)
     snoozed_at = Column(DateTime(timezone=True), nullable=True)
+    notification_deferred_until = Column(DateTime(timezone=True), nullable=True, index=True)
     snoozed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     snooze_count = Column(Integer, nullable=False, default=0, server_default="0")
     delivery_generation = Column(Integer, nullable=False, default=0, server_default="0")
