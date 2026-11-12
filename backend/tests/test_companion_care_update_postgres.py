@@ -92,8 +92,8 @@ def test_postgres_companion_messages_do_not_create_care_proposals(monkeypatch):
             assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
         assert extracted == []
     finally:
+        client.close()
         app.dependency_overrides.clear()
-        Base.metadata.drop_all(bind=engine)
 
 
 def test_postgres_qwen_assistance_summary_requires_explicit_caregiver_approval():
