@@ -538,6 +538,17 @@ def test_system_reassessment_audits_deadlines_without_infering_completion():
     assert due_soon_current.status_code == 200, due_soon_current.text
     assert due_soon_current.json()["priority"] == "high"
     assert "within 24 hours" in " ".join(due_soon_current.json()["priority_reasons"])
+    due_soon_history = client.get(
+        f"/api/v1/open-loops/{due_soon['id']}/history", headers=headers
+    )
+    assert due_soon_history.status_code == 200, due_soon_history.text
+    assert any(
+        item.get("deadline_within_24_hours") is True
+        and item.get("completion_inferred") is False
+        for event in due_soon_history.json()
+        if event["event_type"] == "reassessed"
+        for item in (event.get("evidence") or [])
+    )
 
     current = client.get(f"/api/v1/open-loops/{overdue['id']}", headers=headers)
     assert current.status_code == 200, current.text
