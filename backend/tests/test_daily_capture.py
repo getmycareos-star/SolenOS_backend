@@ -1300,6 +1300,7 @@ def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
 
 def test_insight_correction_preserves_original_and_appends_caregiver_history():
     setup_db()
+    db = None
     try:
         seed_person_and_caregiver()
         db = TestingSessionLocal()
@@ -1350,7 +1351,8 @@ def test_insight_correction_preserves_original_and_appends_caregiver_history():
         assert memory.value[0]["caregiver_id"] == "caregiver-daily-test"
         assert memory.value[0]["information_status"] == "caregiver_reported_correction"
     finally:
-        db.close()
+        if db is not None:
+            db.close()
         teardown_db()
 
 
