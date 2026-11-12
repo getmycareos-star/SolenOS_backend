@@ -791,11 +791,12 @@ def next_best_questions(
 def reconcile_information_gaps_from_accepted_assertions(
     db: Session, person_id: str
 ) -> Dict[str, int]:
-    """Resolve only exact-field gaps covered by accepted, source-backed current-state assertions.
+    """Resolve exact-field gaps covered by fresh, accepted, source-backed assertions.
 
-    This records that the missing field now has a reviewed source assertion. It
-    does not upgrade the assertion to verified or choose between conflicting
-    reports. The caller owns the transaction.
+    Current-state, document-reviewed and time-bound observations retain their
+    distinct epistemic meaning. A time-bound observation can settle only an
+    exact event-specific gap while its explicit review window remains current.
+    No assertion is upgraded to independently verified.
     """
     active_statuses = (
         GapLifecycleStatus.OPEN,
@@ -823,7 +824,17 @@ def reconcile_information_gaps_from_accepted_assertions(
     for assertion in assertions:
         # An accepted but expired assertion is historical context, not enough
         # to close a currently open information gap.
-        if get_freshness(assertion, now)["status"] != "within_review_window":
+        freshness_status = get_freshness(assertion, now)["status"]
+        if assertion.assertion_kind == "time_bound_observation":
+            observed_at = _utc(assertion.observed_at)
+            if (
+                observed_at is None
+                or not assertion.review_after_days
+                or assertion.review_after_days <= 0
+                or now > observed_at + timedelta(days=assertion.review_after_days)
+            ):
+                continue
+        elif freshness_status != "within_review_window":
             continue
         ids = list(dict.fromkeys(str(value) for value in (assertion.evidence_ids or []) if value))
         if not ids:
