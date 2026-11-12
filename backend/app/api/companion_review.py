@@ -305,7 +305,7 @@ def review_companion_care_update(
                 db,
                 person_id,
                 workflow="companion_care_update_review",
-                caregiver_id=caregiver_id,
+                source_caregiver_id=caregiver_id,
                 source_message_id=source_message.id,
                 source_conversation_id=session.id,
             )
