@@ -12,6 +12,8 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 from app.models.care_continuity import CareRecordRelationship
+from app.models.memory import ReasoningMemory
+from app.services.learning import LearningEngine
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -1294,6 +1296,62 @@ def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
     finally:
         teardown_db()
 
+
+
+def test_insight_correction_preserves_original_and_appends_caregiver_history():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        db = TestingSessionLocal()
+        original = Insight(
+            id="insight-original-correction",
+            person_id="person-daily-test",
+            title="Possible sleep disruption",
+            description="The record suggests sleep may be worsening.",
+            insight_type="pattern",
+            confidence=0.72,
+            evidence_ids=[],
+            is_active=True,
+        )
+        correction = Correction(
+            id="correction-insight-append-only",
+            person_id="person-daily-test",
+            target_type="insight",
+            target_id=original.id,
+            original_text=original.description,
+            corrected_text="The caregiver says sleep was not worsening.",
+            reason="The earlier interpretation did not reflect the caregiver's account.",
+            caregiver_id="caregiver-daily-test",
+        )
+        db.add_all([original, correction])
+        db.commit()
+
+        LearningEngine(db).apply_correction(correction)
+        db.expire_all()
+
+        saved = db.query(Insight).filter_by(id="insight-original-correction").one()
+        assert saved.description == "The record suggests sleep may be worsening."
+        assert saved.is_active is False
+        link = db.query(CareRecordRelationship).filter_by(
+            person_id="person-daily-test",
+            source_type="correction",
+            source_id="correction-insight-append-only",
+            relationship_type="corrects",
+            target_type="insight",
+            target_id="insight-original-correction",
+        ).one()
+        assert "original insight retained unchanged" in link.provenance
+        memory = db.query(ReasoningMemory).filter_by(
+            person_id="person-daily-test",
+            memory_type="correction_history",
+            key="insight_insight-original-correction",
+        ).one()
+        assert memory.value[0]["corrected"] == "The caregiver says sleep was not worsening."
+        assert memory.value[0]["caregiver_id"] == "caregiver-daily-test"
+        assert memory.value[0]["information_status"] == "caregiver_reported_correction"
+    finally:
+        db.close()
+        teardown_db()
 
 
 def test_quick_checkin_accepts_three_overall_impressions_without_domain_assessment():
