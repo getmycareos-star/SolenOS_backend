@@ -98,4 +98,5 @@ class SituationResponse(BaseModel):
     qwen_extraction_status: Literal["available", "unavailable", "not_applicable"] = "not_applicable"
     qwen_candidates: Optional[Dict[str, Any]] = None
     qwen_review_required: bool = False
+    qwen_review_available: bool = False
     qwen_written_to_lcr: bool = False
