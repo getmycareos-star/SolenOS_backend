@@ -707,6 +707,53 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         original_after = client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
         assert original_after.status_code == 200
         assert hashlib.sha256(original_after.content).hexdigest() == upload_receipt["sha256"]
+
+        # Exercise the actual approved-erasure service against PostgreSQL. The
+        # review-history trigger must allow deletion only inside this transaction.
+        from app.api.privacy_requests import PrivacyDeletionFulfilment, fulfil_approved_deletion
+        from app.models.privacy_request import DataSubjectRequest
+        from app.models.care import Evidence
+        from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
+
+        with Session() as db:
+            deletion_request = DataSubjectRequest(
+                requester_id=caregiver_id,
+                actor_id=caregiver_id,
+                subject_id=person_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                request_type="deletion",
+                request_status="approved_pending_fulfilment_assessment",
+                requested_at=datetime.now(timezone.utc),
+                record_metadata={"review": {"reviewer_id": "independent-approver"}},
+            )
+            db.add(deletion_request)
+            db.commit()
+            deletion_request_id = deletion_request.id
+
+        with Session() as db:
+            deletion_result = fulfil_approved_deletion(
+                deletion_request_id,
+                PrivacyDeletionFulfilment(
+                    backup_erasure_verified=True,
+                    backup_retention_evidence="Verified that all backups containing this synthetic record are expired.",
+                ),
+                reviewer_id="independent-erasure-reviewer",
+                db=db,
+            )
+            assert deletion_result["request_status"] == "fulfilled"
+
+        with Session() as db:
+            assert db.query(Evidence).filter_by(id=evidence_id).count() == 0
+            assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 0
+            assert db.query(CaptureAnalysis).filter_by(id=analysis_id).count() == 0
+            assert db.query(DocumentReviewEvent).filter_by(analysis_id=analysis_id).count() == 0
+            assert db.query(QwenBackgroundJob).filter_by(id=processing_job_id).count() == 0
+            assert db.query(CareAssertion).filter_by(id=assertion_id).count() == 0
+            receipt = db.query(DataSubjectRequest).filter_by(id=deletion_request_id).one()
+            assert receipt.request_status == "fulfilled"
+            assert receipt.person_id is None
+            assert receipt.caregiver_id is None
     finally:
         client.close()
         app.dependency_overrides.pop(get_db, None)
