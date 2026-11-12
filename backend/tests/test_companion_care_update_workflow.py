@@ -10,7 +10,7 @@ from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
 from app.models.care import CareEvent
-from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -331,6 +331,15 @@ def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(m
                 output_text=generated,
                 source_event_ids_json=json.dumps(event_ids),
                 source_evidence_ids_json="[]",
+            ))
+            db.add(QwenSafetyEvaluation(
+                output_id=output_id,
+                job_id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                risk_class="unassessed",
+                decision="review_required",
+                human_review_required=True,
             ))
             db.add(AIOutputLCRProposal(
                 id=proposal_id,
