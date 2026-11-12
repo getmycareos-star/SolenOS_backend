@@ -547,7 +547,7 @@ jobs:
               http://127.0.0.1:8080/api/v1/daily-care/intelligence/ask || true)
             if [ "$daily_status" = "200" ]; then
               daily_answer=$(cat /tmp/qwen-daily-care.json)
-              if python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["status"] == "completed", d; assert isinstance(d["answer"],str) and d["answer"].strip(), d; assert d["written_to_lcr"] is False, d; assert d["proposal_analysis_id"] is None, d; assert d["history_scope"]["records_sent_to_model"] >= 1, d; assert any(s["source_id"] == sys.argv[2] for s in d["source_records"]), d' "$daily_answer" "$daily_event_id" 2>/dev/null; then
+              if python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["status"] == "completed", d; assert isinstance(d["answer"],str) and d["answer"].strip(), d; assert d["written_to_lcr"] is False, d; assert d["review_required"] is False, d; assert d["review_available"] is False, d; assert d["proposal_analysis_id"] is None, d; assert d["history_scope"]["records_sent_to_model"] >= 1, d; assert any(s["source_id"] == sys.argv[2] for s in d["source_records"]), d' "$daily_answer" "$daily_event_id" 2>/dev/null; then
                 daily_ready=1
                 break
               fi
@@ -791,7 +791,7 @@ jobs:
             -H "$auth_header" -H "Content-Type: application/json" \
             -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: no observation supplied.\"}" \
             http://127.0.0.1:8080/api/v1/daily/log)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True; candidates=d["qwen_candidates"]; assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"]); assert all(x.get("source_quote") and x["source_quote"] in "CI-only daily capture: no observation supplied." for x in candidates["observations"])' "$daily"
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is False; candidates=d["qwen_candidates"]; assert d["qwen_review_available"] is bool(candidates["observations"]); assert d["execution_status"]["review"] == ("available" if candidates["observations"] else "not_required"); assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"]); assert all(x.get("source_quote") and x["source_quote"] in "CI-only daily capture: no observation supplied." for x in candidates["observations"])' "$daily"
           events_after_daily=$(curl --fail --silent --show-error -H "$auth_header" \
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"

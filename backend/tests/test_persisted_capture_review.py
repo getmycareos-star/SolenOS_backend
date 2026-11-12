@@ -95,21 +95,24 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     body = saved.json()
     assert body["qwen_extraction_status"] == "available"
     assert body["qwen_analysis_id"]
+    assert body["qwen_review_required"] is False
+    assert body["qwen_review_available"] is True
+    assert body["execution_status"]["review"] == "available"
     assert body["qwen_written_to_lcr"] is False
 
     db = TestSessionLocal()
     try:
-        clarification = db.query(OpenQuestion).filter_by(
+        # Model-generated questions remain source-linked suggestions. They do
+        # not become active caregiver clarification work without a material
+        # decision dependency.
+        assert db.query(OpenQuestion).filter_by(
             person_id=session["person"]["id"],
             question="How long has this been happening?",
             status="open",
-        ).one()
-        assert clarification.evidence_ids == body["evidence_ids"]
-        assert clarification.created_by_caregiver_id == session["caregiver"]["id"]
-        assert clarification.context[0]["source_kind"] == "daily_capture_extraction"
-        assert clarification.context[0]["source_record_refs"][0] == {
-            "record_type": "care_event", "record_id": body["id"]
-        }
+        ).count() == 0
+        analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
+        assert analysis.candidates["open_questions"] == ["How long has this been happening?"]
+        assert source in analysis.source_text
     finally:
         db.close()
 
@@ -431,7 +434,7 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
     assert body["execution_status"]["evidence"] == "verified"
     assert body["execution_status"]["extraction"] == "available"
     assert body["execution_status"]["assessment"] == "pending"
-    assert body["execution_status"]["review"] == "required"
+    assert body["execution_status"]["review"] == "available"
     assert body["execution_status"]["reconciliation"] == "completed"
     assert body["execution_status"]["longitudinal_retrieval"] in {"available", "unavailable"}
 

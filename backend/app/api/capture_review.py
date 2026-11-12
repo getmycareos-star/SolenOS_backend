@@ -220,14 +220,14 @@ def review_capture_candidate(
             "source_message": "not_applicable",
             "extraction": "available",
             "assessment": "pending",
-            "review": "required",
+            "review": "available",
             "reconciliation": "not_attempted",
             "longitudinal_retrieval": "not_verified",
         }
     else:
         analysis.execution_status = dict(analysis.execution_status)
     analysis.execution_status["review"] = (
-        "required" if remaining_reviewable else "completed"
+        "available" if remaining_reviewable else "completed"
     )
     db.add(analysis)
 

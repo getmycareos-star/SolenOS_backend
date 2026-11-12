@@ -79,7 +79,8 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert understanding.status_code == 201, understanding.text
         data = understanding.json()
         assert data["analysis_id"] == analysis_id
-        assert data["review_required"] is True
+        assert data["review_required"] is False
+        assert data["review_available"] is True
         assert data["written_to_lcr"] is False
         assert data["intelligence_status"] == "partial"
         assert data["processed_page_numbers"] == [1, 2]

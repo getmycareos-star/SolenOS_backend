@@ -281,7 +281,7 @@ def _history_bundle(
 class DailyCareQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=3000)
     history_query: str | None = Field(default=None, max_length=500)
-    prepare_lcr_proposals: bool = True
+    prepare_lcr_proposals: bool = False
 
 
 class ProposalReview(BaseModel):
@@ -331,7 +331,8 @@ async def ask_daily_care_qwen(
             "proposal_analysis_id": None,
             "proposals": [],
             "history_scope": {**bundle["counts"], "lcr_context": bundle.get("lcr_context", {})},
-            "review_required": True,
+            "review_required": False,
+            "review_available": False,
             "written_to_lcr": False,
         }
 
@@ -415,24 +416,26 @@ async def ask_daily_care_qwen(
         if exc.status_code == 503:
             return {
                 "status": "qwen_unavailable",
-                "answer": "Daily Care records remain available, but Qwen could not answer this request right now. Try again later.",
+                "answer": "Your saved care records remain available, but SolenOS could not answer this question right now. Try again later.",
                 "source_records": [],
                 "proposal_analysis_id": None,
                 "proposals": [],
                 "history_scope": bundle["counts"],
-                "review_required": True,
+                "review_required": False,
+                "review_available": False,
                 "written_to_lcr": False,
             }
         raise
     except (ValueError, TypeError, json.JSONDecodeError):
         return {
             "status": "qwen_invalid_response",
-            "answer": "Daily Care records remain available, but Qwen did not return a usable grounded response. No LCR changes were made.",
+            "answer": "Your saved care records remain available, but SolenOS could not prepare a reliable answer. No care-record changes were made.",
             "source_records": [],
             "proposal_analysis_id": None,
             "proposals": [],
             "history_scope": bundle["counts"],
-            "review_required": True,
+            "review_required": False,
+            "review_available": False,
             "written_to_lcr": False,
         }
 
@@ -491,9 +494,11 @@ async def ask_daily_care_qwen(
             "oldest_record_at": bundle["oldest_record_at"],
             "newest_record_at": bundle["newest_record_at"],
         },
-        "review_required": True,
+        "review_required": False,
+        "review_available": bool(proposals),
+        "proposals_requested": payload.prepare_lcr_proposals,
         "written_to_lcr": False,
-        "notice": "Qwen's answer is assistance, not an LCR fact. Proposed changes remain pending until a caregiver reviews them.",
+        "notice": "This answer is assistance, not an established care fact. Optional suggestions are separate and change the care record only after you explicitly approve one.",
     }
 
 
