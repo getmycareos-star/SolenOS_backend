@@ -184,9 +184,12 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
             "notify-deferred-loop", caregiver_one.id, now + timedelta(hours=2),
             status="deferred",
         )
+        stale_overdue_loop = open_loop(
+            "notify-stale-overdue-loop", caregiver_one.id, now - timedelta(hours=48),
+        )
         db.add_all([
             due_loop, later_loop, outside_window_loop,
-            policy_deadline_loop, deferred_loop,
+            policy_deadline_loop, deferred_loop, stale_overdue_loop,
         ])
         db.flush()
 
@@ -226,6 +229,9 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         ).count() == 0
         assert db.query(CareNotification).filter(
             CareNotification.source_event_id.like("notify-deferred-loop|%")
+        ).count() == 0
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id.like("notify-stale-overdue-loop|%")
         ).count() == 0
         assert db.query(CareNotification).filter(CareNotification.person_id == other_person.id).count() == 0
         assert db.query(CareNotification).filter(
