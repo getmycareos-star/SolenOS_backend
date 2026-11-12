@@ -518,15 +518,26 @@ def test_overdue_filter_is_applied_before_pagination_and_reports_total():
 def test_system_reassessment_audits_deadlines_without_infering_completion():
     client = TestClient(app)
     _, headers = session(client, "System follow-up recipient")
+    now = datetime.now(timezone.utc)
     overdue = create_loop(
         client, headers, "follow_up", title="Check the outstanding clinic result",
-        deadline_at=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        deadline_at=(now - timedelta(days=1)).isoformat(),
+        deadline_source="explicit_user",
+    )
+    due_soon = create_loop(
+        client, headers, "follow_up", title="Prepare the upcoming appointment handoff",
+        deadline_at=(now + timedelta(hours=12)).isoformat(),
         deadline_source="explicit_user",
     )
 
     reassessed = client.post("/api/v1/open-loops/reassess", headers=headers)
     assert reassessed.status_code == 200, reassessed.text
-    assert reassessed.json()["audited_count"] >= 1
+    assert reassessed.json()["audited_count"] >= 2
+
+    due_soon_current = client.get(f"/api/v1/open-loops/{due_soon['id']}", headers=headers)
+    assert due_soon_current.status_code == 200, due_soon_current.text
+    assert due_soon_current.json()["priority"] == "high"
+    assert "within 24 hours" in " ".join(due_soon_current.json()["priority_reasons"])
 
     current = client.get(f"/api/v1/open-loops/{overdue['id']}", headers=headers)
     assert current.status_code == 200, current.text
