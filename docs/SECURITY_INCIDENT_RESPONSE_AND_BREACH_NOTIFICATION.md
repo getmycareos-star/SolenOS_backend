@@ -110,11 +110,34 @@ Do not claim logs are immutable or tamper-proof merely because they are in Postg
 
 ## 8. Incident register and timeline
 
-Migration 20261027_08_privacy_delivery defines durable privacy_incidents and privacy_incident_events tables alongside audit, sensitive-access and authorization-decision tables. Table existence is not proof of an operator workflow, API, retention policy, backup, alert or access control.
+Migration 20261027_08_privacy_delivery defines durable `privacy_incidents` and `privacy_incident_events` tables alongside audit, sensitive-access and authorization-decision tables. The backend also contains a restricted operator API at `/api/v1/security/incidents`. The API is code-present; it is not evidence that the production secret is configured, that the production schema is current, or that an incident-response rehearsal has passed.
 
 Every incident record must include: incident ID/status/severity/type/owner; detected and reported times; systems/deployment SHA/provider cases; minimum-necessary affected identity/resource references; data categories/jurisdictions/estimated affected-person count; containment actions and timestamps; evidence references and digests; findings/unknowns/confidence; legal assessment and decision-maker; notification decisions/content/channel/sent time/delivery evidence; recovery verification, root cause, corrective actions and review date.
 
 Append a timeline event for every material action or decision. Correct earlier events with a superseding correction event; do not silently rewrite history.
+
+### Restricted operator API
+
+The current backend routes are:
+
+- `POST /api/v1/security/incidents` — create an incident and its initial timeline event in one database transaction.
+- `GET /api/v1/security/incidents` — list incidents, bounded to 1–100 results.
+- `GET /api/v1/security/incidents/{incident_id}/events` — retrieve a bounded timeline.
+- `POST /api/v1/security/incidents/{incident_id}/events` — append a redacted timeline event.
+- `PATCH /api/v1/security/incidents/{incident_id}/status` — update status and append a status-change event.
+
+All routes require the `X-SolenOS-Incident-Admin-Token` header. The backend compares it against `SOLENOS_INCIDENT_ADMIN_TOKEN`; if the configured value is absent or shorter than 32 characters, the API returns 503. A missing or incorrect request token returns 401.
+
+**Security limitations:** this is a shared-secret gate, not individual operator authentication or role-based access control. Timeline events currently identify the actor generically as `incident_operator`; the API does not establish an individually attributable operator identity. Do not expose this token to the frontend, browser, mobile application, client logs, source control or general-purpose automation. Configure it only as a restricted backend secret and use the API only from a controlled operator environment. Rotate it immediately if exposure is suspected. Do not treat the API as a complete incident console or as proof of immutable audit history.
+
+Before operational use, an authorized operator must:
+1. Configure a randomly generated secret of at least 32 characters as `SOLENOS_INCIDENT_ADMIN_TOKEN` in the backend secret manager; never paste the value into source control or this document.
+2. Verify that the deployed backend is running the expected source commit and that migrations are current.
+3. Verify unauthorized requests are rejected and authorized requests can create, list, append, and update a synthetic incident.
+4. Verify the incident and every timeline event persist in PostgreSQL after a process restart and can be retrieved by the authorized operator.
+5. Record the test outcome without recording the secret or real caregiver data.
+
+Until those checks pass, use the approved restricted database procedure below as the controlled fallback. Do not issue ad hoc UPDATE/DELETE statements against incident evidence or audit history.
 
 ### Database operator reference
 
@@ -136,8 +159,6 @@ FROM privacy_incident_events
 WHERE incident_id = :incident_id
 ORDER BY occurred_at, id;
 ```
-
-Do not issue ad hoc UPDATE/DELETE statements against incident evidence or audit history. The repository currently has no verified role-protected incident-management API/console; restricted database operations remain a manual operational dependency until an authenticated operator workflow is implemented and tested.
 
 ## 9. Legal, regulatory and contractual assessment
 
