@@ -4003,6 +4003,51 @@ def _observation_datetime(value: Any, field_name: str):
     return parsed
 
 
+def _claims_affected_by_source_evidence(db: Session, person_id: str, evidence_id: str) -> dict[str, list[str]]:
+    """Find direct claims and every downstream claim that depends on them."""
+    claims = db.query(CareAssertion).filter(CareAssertion.person_id == person_id).all()
+    assessments = (
+        db.query(EvidenceClaimAssessment)
+        .filter(EvidenceClaimAssessment.person_id == person_id)
+        .order_by(EvidenceClaimAssessment.claim_version.desc())
+        .all()
+    )
+    latest_by_claim = {}
+    for assessment in assessments:
+        latest_by_claim.setdefault(str(assessment.claim_id), assessment)
+    direct = set()
+    for claim in claims:
+        linked_ids = {str(value) for value in (claim.evidence_ids or [])}
+        assessment = latest_by_claim.get(str(claim.id))
+        links = assessment.evidence_links if assessment and isinstance(assessment.evidence_links, list) else []
+        linked_ids.update(
+            str(item.get("evidence_id"))
+            for item in links
+            if isinstance(item, dict) and item.get("evidence_id")
+        )
+        if str(evidence_id) in linked_ids:
+            direct.add(str(claim.id))
+    edges = db.query(EvidenceClaimDependency).filter(
+        EvidenceClaimDependency.person_id == person_id,
+        EvidenceClaimDependency.dependency_type.in_({"derived_from", "requires"}),
+    ).all()
+    affected = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        for edge in edges:
+            prerequisite_id = str(edge.depends_on_claim_id)
+            dependent_id = str(edge.claim_id)
+            if prerequisite_id in affected and dependent_id not in affected:
+                affected.add(dependent_id)
+                changed = True
+    return {
+        "directly_affected_claim_ids": sorted(direct),
+        "dependent_claim_ids": sorted(affected - direct),
+        "affected_claim_ids": sorted(affected),
+    }
+
+
 @router.post("/evidence/{evidence_id}/observations", status_code=201)
 def create_evidence_observation(
     evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)
@@ -4153,6 +4198,7 @@ def create_evidence_observation(
             workflow="evidence_observation_corrected" if superseded_observation is not None else "evidence_observation_added",
             source_evidence_id=evidence.id,
         )
+        affected_claims = _claims_affected_by_source_evidence(db, person_id, str(evidence.id))
         db.commit()
         execution["stages"]["reconciliation"] = "committed"
         db.refresh(row)
@@ -4165,10 +4211,23 @@ def create_evidence_observation(
         raise HTTPException(status_code=503, detail="The detail could not be saved with its care-record reassessment") from exc
     response = _evidence_observation_response(row)
     response["care_continuity_execution"] = execution
+    response["reassessment_receipt"] = {
+        "source_evidence_id": str(evidence.id),
+        "source_observation_id": str(row.id),
+        "supersedes_observation_id": str(row.supersedes_observation_id) if row.supersedes_observation_id else None,
+        **affected_claims,
+        "affected_record_views": [
+            "living_care_record",
+            "change_and_pattern_summaries",
+            "open_questions",
+            "claim_assessments",
+        ],
+    }
+    affected_count = len(affected_claims["affected_claim_ids"])
     response["reassessment_notice"] = (
-        "Earlier information was kept. Related care summaries were refreshed, and claims using this source may need caregiver review."
+        f"Earlier information was kept. Related care summaries were refreshed. {affected_count} related care statement(s) need another review."
         if superseded_observation is not None else
-        "The original source was kept. Related care summaries were refreshed."
+        f"The original source was kept. Related care summaries were refreshed. {affected_count} related care statement(s) may need review."
     )
     return response
 
