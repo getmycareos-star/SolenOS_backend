@@ -617,6 +617,9 @@ def test_postgres_accepted_document_follow_up_is_persisted_once_and_not_booked()
             assert loop.evidence[0]["evidence_id"] == first["evidence_id"]
             assert db.query(OpenLoopOccurrence).filter_by(person_id=person_id, source_id=loop.source_id).count() == 1
             assert db.query(OpenLoopEvent).filter_by(person_id=person_id, loop_id=loop.id).count() == 1
+            with pytest.raises(HTTPException) as blocked:
+                delete_uploaded_document(first["evidence_id"], _request(person_id, caregiver_id), db)
+            assert blocked.value.status_code == 409
     finally:
         engine.dispose()
 
@@ -750,6 +753,9 @@ def test_postgres_document_medication_conflict_creates_professional_question_wit
             assert question.status == "open"
             assert question.priority.value == "high"
             assert uploaded["evidence_id"] in question.evidence_ids
+            status = list_document_processing_status(_request(person_id, caregiver_id), 10, db)
+            assert status["items"][0]["medication_conflict"] is True
+            assert status["items"][0]["medication_report_saved"] is False
             assert question.context[0]["source_sha256"] == first_upload.sha256
             assert question.context[0]["existing_medication_review_after_days"] == 30
             assert "prescribing clinician or pharmacist" in question.question
