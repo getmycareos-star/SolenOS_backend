@@ -295,24 +295,16 @@ def test_worker_processes_document_intake_job_without_qwen_output(tmp_path, monk
     job_id = job.id
     db.close()
 
-    from app.api import document_lifecycle, document_intelligence
     calls = []
-    monkeypatch.setattr(
-        document_lifecycle,
-        "extract_saved_document",
-        lambda evidence_id, request, session: (
-            calls.append(("extract", evidence_id, request.state.scoped_person_id))
-            or {"analysis_id": "analysis-1"}
-        ),
-    )
-    monkeypatch.setattr(
-        document_intelligence,
-        "analyze_saved_document",
-        lambda evidence_id, request, session: (
-            calls.append(("understand", evidence_id, request.state.scoped_caregiver_id))
-            or {"analysis_id": "analysis-1", "intelligence_status": "available", "candidate_count": 2}
-        ),
-    )
+
+    def process(evidence_id, person_id, caregiver_id):
+        calls.append((evidence_id, person_id, caregiver_id))
+        return (
+            {"analysis_id": "analysis-1"},
+            {"analysis_id": "analysis-1", "intelligence_status": "available", "observations": [{"observation": "candidate 1"}, {"observation": "candidate 2"}]},
+        )
+
+    monkeypatch.setattr(worker, "_process_document_evidence", process)
     monkeypatch.setattr(
         worker,
         "qwen_chat",
@@ -327,10 +319,8 @@ def test_worker_processes_document_intake_job_without_qwen_output(tmp_path, monk
     result = json.loads(completed.result_text)
     assert result[0]["analysis_id"] == "analysis-1"
     assert result[0]["intelligence_status"] == "available"
-    assert calls == [
-        ("extract", "evidence-document-1", "person-test"),
-        ("understand", "evidence-document-1", "caregiver-test"),
-    ]
+    assert result[0]["candidate_count"] == 2
+    assert calls == [("evidence-document-1", "person-test", "caregiver-test")]
     assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
     event = db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="document_intake_completed").one()
     assert event.metadata_json["review_required"] is True
@@ -339,26 +329,22 @@ def test_worker_processes_document_intake_job_without_qwen_output(tmp_path, monk
 
 
 def test_worker_marks_permanent_document_extraction_errors_failed(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     job_id = _seed_job(sessions)
-    from app.api import document_lifecycle
-    monkeypatch.setattr(
-        document_lifecycle,
-        "extract_saved_document",
-        lambda *args, **kwargs: (_ for _ in ()).throw(HTTPException(status_code=415, detail="unsupported document")),
-    )
-    from app.api import document_intelligence
-    monkeypatch.setattr(
-        document_intelligence,
-        "analyze_saved_document",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("analysis must not run after extraction failure")),
-    )
     db = sessions()
     job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
     job.workflow = "document_intake"
     job.evidence_ids_json = json.dumps(["evidence-unsupported"])
     db.commit()
     db.close()
+
+    monkeypatch.setattr(
+        worker,
+        "_process_document_evidence",
+        lambda *args, **kwargs: (_ for _ in ()).throw(HTTPException(status_code=415, detail="unsupported document")),
+    )
 
     assert asyncio.run(worker.process_one_qwen_job()) is True
     db = sessions()
@@ -385,35 +371,35 @@ def test_document_intake_requeues_remaining_page_windows_without_blocking_worker
     job_id = job.id
     db.close()
 
-    from app.api import document_lifecycle, document_intelligence
-    monkeypatch.setattr(
-        document_lifecycle,
-        "extract_saved_document",
-        lambda *args, **kwargs: {"analysis_id": "analysis-long"},
-    )
     passes = {"count": 0}
 
-    def analyze(*args, **kwargs):
+    def process(evidence_id, person_id, caregiver_id):
         passes["count"] += 1
         if passes["count"] == 1:
-            return {
+            return (
+                {"analysis_id": "analysis-long"},
+                {
+                    "analysis_id": "analysis-long",
+                    "intelligence_status": "partial",
+                    "observations": [{"observation": "page one candidate"}],
+                    "processed_page_count": 12,
+                    "total_page_count": 30,
+                    "unprocessed_page_numbers": list(range(13, 31)),
+                },
+            )
+        return (
+            {"analysis_id": "analysis-long"},
+            {
                 "analysis_id": "analysis-long",
-                "intelligence_status": "partial",
-                "observations": [{"observation": "page one candidate"}],
-                "processed_page_count": 12,
+                "intelligence_status": "available",
+                "observations": [{"observation": "page one candidate"}, {"observation": "page 30 candidate"}],
+                "processed_page_count": 30,
                 "total_page_count": 30,
-                "unprocessed_page_numbers": list(range(13, 31)),
-            }
-        return {
-            "analysis_id": "analysis-long",
-            "intelligence_status": "available",
-            "observations": [{"observation": "page one candidate"}, {"observation": "page 30 candidate"}],
-            "processed_page_count": 30,
-            "total_page_count": 30,
-            "unprocessed_page_numbers": [],
-        }
+                "unprocessed_page_numbers": [],
+            },
+        )
 
-    monkeypatch.setattr(document_intelligence, "analyze_saved_document", analyze)
+    monkeypatch.setattr(worker, "_process_document_evidence", process)
     assert asyncio.run(worker.process_one_qwen_job()) is True
     db = sessions()
     queued = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
