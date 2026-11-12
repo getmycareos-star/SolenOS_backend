@@ -16,6 +16,8 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy import MetaData, String, Table, and_, cast, desc, false, func, inspect, or_, select
 from sqlalchemy.orm import Session
 
+from app.services.epistemic_contract import assertion_information_status
+
 # Only caregiver-relevant fields are exposed. Internal storage paths, raw tokens,
 # and operational secrets are deliberately excluded.
 SOURCE_SPECS: dict[str, dict[str, Any]] = {
@@ -343,21 +345,7 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
     if source_name == "assertions":
-        epistemic = str(item.get("epistemic_state") or "reported").casefold()
-        lifecycle = str(item.get("assertion_status") or "reported").casefold()
-        if epistemic == "inferred":
-            return "inferred_interpretation", "AI- or rule-derived interpretation; caregiver review does not make it independently verified."
-        if epistemic == "verified":
-            return "verified_after_review", "A persisted verification state is recorded; retain its source and verification history."
-        if epistemic == "observed":
-            return "source_attributed_observation", "A direct observation is recorded with its source and observation time."
-        if epistemic == "conflicting":
-            return "conflicting_information", "Conflicting information is present; do not select a winner automatically."
-        if epistemic in {"uncertain", "missing"}:
-            return epistemic, "The information is uncertain or missing; do not present it as established."
-        if lifecycle in {"accepted", "caregiver_reviewed"}:
-            return "caregiver_reviewed_report", "A caregiver reviewed this report; review does not establish independent or clinical verification."
-        return "caregiver_reported_assertion", "Caregiver-attributed report admitted to the LCR as unverified; do not present it as established fact."
+        return assertion_information_status(item.get("epistemic_state"), item.get("assertion_status"))
     if source_name == "document_extractions":
         return (
             "document_extracted_unreviewed",
