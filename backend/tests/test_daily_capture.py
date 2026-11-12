@@ -1182,3 +1182,39 @@ def test_correction_receipt_survives_secondary_processing_failure(monkeypatch):
     finally:
         teardown_db()
 
+
+
+def test_quick_checkin_accepts_three_overall_impressions_without_domain_assessment():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        for index, kind in enumerate(("same_as_usual", "change", "uncertain")):
+            response = client.post(
+                "/api/v1/daily/log",
+                headers=headers,
+                json={
+                    "person_id": "person-daily-test",
+                    "caregiver_id": "caregiver-daily-test",
+                    "medications": [],
+                    "vitals": [],
+                    "scales": [],
+                    "notes": "",
+                    "quick_check_in": {
+                        "schema_version": 1,
+                        "kind": kind,
+                        "selected_areas": [],
+                        "scope": "overall_impression_only",
+                        "caregiver_reported_at": "2026-11-12T10:00:00+00:00",
+                        "epistemic_status": "caregiver_reported",
+                        "idempotency_key": f"overall-checkin-{index:03d}",
+                        "note": None,
+                    },
+                },
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["success"] is True
+            assert response.json()["event_type"] == "quick_daily_checkin"
+    finally:
+        teardown_db()
