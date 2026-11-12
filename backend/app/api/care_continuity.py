@@ -2138,6 +2138,42 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     """Compose an explainable assessment from persisted LCR sources; never invent care facts."""
     context = build_lcr_context(db, person_id, limit_per_source=50)
     sources = context.get("sources") or {}
+    # CareAssertion reconciliation writes source-linked conflicts to the
+    # canonical contradictions table. The general LCR retrieval projection
+    # also has a separate care_conflicts collection, so include these
+    # assertion conflicts explicitly in the situation assessment rather than
+    # silently omitting them from caregiver-facing conflict review.
+    from app.models.uncertainty import Contradiction
+    persisted_contradictions = db.query(Contradiction).filter(
+        Contradiction.person_id == person_id,
+        Contradiction.resolution_status.in_(
+            ("unresolved", "reopened", "qualified", "partially_resolved")
+        ),
+    ).order_by(Contradiction.created_at.asc(), Contradiction.id.asc()).limit(100).all()
+    conflict_source = dict(sources.get("conflicts") or {})
+    conflict_items = list(conflict_source.get("items") or [])
+    existing_conflict_ids = {
+        str(item.get("id")) for item in conflict_items
+        if isinstance(item, dict) and item.get("id")
+    }
+    for contradiction in persisted_contradictions:
+        if str(contradiction.id) in existing_conflict_ids:
+            continue
+        conflict_items.append({
+            "id": str(contradiction.id),
+            "subject_type": contradiction.subject_type,
+            "subject_id": contradiction.subject_id,
+            "field": contradiction.field,
+            "status": contradiction.resolution_status,
+            "description": contradiction.description,
+            "evidence_ids": list(contradiction.evidence_ids or []),
+            "claim_refs": list(contradiction.source_assertion_ids or []),
+            "source_label": "Competing saved care reports",
+            "created_at": contradiction.created_at,
+        })
+    conflict_source["items"] = conflict_items
+    conflict_source["count"] = len(conflict_items)
+    sources = {**sources, "conflicts": conflict_source}
     candidate_evidence_ids: set[str] = set()
     for source_name, source_value in sources.items():
         for source_item in source_value.get("items") or []:
