@@ -1,3 +1,4 @@
+import hashlib
 import io
 
 import pytest
@@ -979,3 +980,43 @@ def test_document_processing_status_does_not_leak_across_anonymous_sessions(clie
     assert status.status_code == 200, status.text
     assert all(item["evidence_id"] != evidence_id for item in status.json()["processing_jobs"])
     assert all(item["source_evidence_id"] != evidence_id for item in status.json()["items"])
+
+
+def test_upload_and_extract_bmp_and_tiff_document_scans(client):
+    """Formats supported by Pillow/Tesseract extraction must pass upload signature checks."""
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    source = Image.open(io.BytesIO(_scanned_text_image())).convert("RGB")
+
+    for extension, image_format, mime_type in (
+        ("bmp", "BMP", "image/bmp"),
+        ("tiff", "TIFF", "image/tiff"),
+    ):
+        buffer = io.BytesIO()
+        source.save(buffer, format=image_format)
+        original = buffer.getvalue()
+        uploaded = test_client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": session["person"]["id"],
+                "caregiver_id": session["caregiver"]["id"],
+                "evidence_type": "document",
+                "capture_method": "upload",
+                "capture_timestamp": "2026-11-12T06:00:00Z",
+            },
+            files={"file": (f"care-scan.{extension}", original, mime_type)},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        with TestSessionLocal() as db:
+            saved = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+            assert saved.content == original
+            assert saved.sha256 == hashlib.sha256(original).hexdigest()
+
+        extracted = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        assert extracted.json()["extraction_method"] == "server_tesseract_ocr_image"
+
+    source.close()
+
