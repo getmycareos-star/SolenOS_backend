@@ -474,7 +474,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             headers = "\\n".join(
                 f"{name}: {message.get(name)}" for name in ("From", "To", "Date", "Subject") if message.get(name)
             )
-            extracted = (headers + "\\n\\n" + str(extracted or "")).strip()
+            extracted = (headers + "\n\n" + str(extracted or "")).strip()
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved email could not be read") from exc
         if not extracted:
