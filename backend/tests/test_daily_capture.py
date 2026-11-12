@@ -1450,6 +1450,109 @@ def test_daily_capture_preserves_explicit_event_time_and_server_recorded_time_se
         teardown_db()
 
 
+
+def test_medication_authoring_starts_reported_and_requires_explicit_review():
+    from app.models.care_continuity import CareAssertion
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+
+        created = client.post(
+            "/api/v1/care-continuity/medications",
+            headers=headers,
+            json={"name": "Metformin", "dose": "500 mg", "note": "Listed on the discharge papers", "review_after_days": 30},
+        )
+        assert created.status_code == 201, created.text
+        report = created.json()
+        assert report["record_status"] == "awaiting_caregiver_review"
+        assert report["name"] == "Metformin"
+        assert len(report["assertions"]) == 3
+        assert {row["assertion_status"] for row in report["assertions"]} == {"reported"}
+
+        projection = client.get("/api/v1/care-continuity/medications", headers=headers)
+        assert projection.status_code == 200, projection.text
+        assert projection.json()["medications"] == []
+        assert len(projection.json()["pending_review"]) == 1
+        assert projection.json()["pending_review"][0]["medication_id"] == report["medication_id"]
+
+        reviewed = client.post(
+            f"/api/v1/care-continuity/medications/{report['medication_id']}/review",
+            headers=headers,
+            json={},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["record_status"] == "caregiver_reviewed_current_report"
+        assert len(reviewed.json()["assertions"]) == 3
+        assert {row["assertion_status"] for row in reviewed.json()["assertions"]} == {"accepted"}
+
+        current = client.get("/api/v1/care-continuity/medications", headers=headers)
+        assert current.status_code == 200, current.text
+        assert current.json()["count"] == 1
+        assert current.json()["medications"][0]["name"] == "Metformin"
+        assert current.json()["medications"][0]["dose"] == "500 mg"
+        assert current.json()["pending_review"] == []
+
+        db = TestingSessionLocal()
+        try:
+            stored = db.query(CareAssertion).filter_by(
+                person_id="person-daily-test",
+                subject_type="medication",
+                subject_id=report["medication_id"],
+            ).all()
+            assert len(stored) == 3
+            assert all(row.source_label == "Caregiver report" for row in stored)
+            assert all(row.created_by_caregiver_id == "caregiver-daily-test" for row in stored)
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_medication_authoring_and_review_are_person_scoped():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        db = TestingSessionLocal()
+        foreign_person = Person(id="person-medication-other", name="Other Person")
+        foreign_caregiver = Caregiver(
+            id="caregiver-medication-other",
+            name="Other Caregiver",
+            email="medication-other@example.invalid",
+            relationship="Family",
+            person_id=foreign_person.id,
+        )
+        db.add_all([foreign_person, foreign_caregiver])
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        owner_headers = session_headers("person-daily-test", "caregiver-daily-test")
+        foreign_headers = session_headers("person-medication-other", "caregiver-medication-other")
+        created = client.post(
+            "/api/v1/care-continuity/medications",
+            headers=owner_headers,
+            json={"name": "Private medicine", "review_after_days": 30},
+        )
+        assert created.status_code == 201, created.text
+        medication_id = created.json()["medication_id"]
+
+        foreign_review = client.post(
+            f"/api/v1/care-continuity/medications/{medication_id}/review",
+            headers=foreign_headers,
+            json={},
+        )
+        assert foreign_review.status_code == 404
+        foreign_projection = client.get("/api/v1/care-continuity/medications", headers=foreign_headers)
+        assert foreign_projection.status_code == 200
+        assert foreign_projection.json()["medications"] == []
+        assert foreign_projection.json()["pending_review"] == []
+    finally:
+        teardown_db()
+
+
 def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assertions():
     from app.models.care_continuity import CareAssertion
 
