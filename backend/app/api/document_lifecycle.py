@@ -472,7 +472,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 if html_body is not None:
                     parser.feed(html_body.get_content())
                 extracted = parser.text()
-            headers = "\\n".join(
+            headers = "\n".join(
                 f"{name}: {message.get(name)}" for name in ("From", "To", "Date", "Subject") if message.get(name)
             )
             extracted = (headers + "\n\n" + str(extracted or "")).strip()
