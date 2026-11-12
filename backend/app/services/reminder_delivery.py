@@ -202,6 +202,30 @@ def deliver_pending_web_pushes(db=None, now=None):
     )
     cipher = Fernet(cipher_key)
     try:
+        # A delivery can become stale before its retry time arrives. Cancel it
+        # even when it is no longer eligible for the due query below; otherwise
+        # superseded/in-app-only messages remain pending forever.
+        stale_pending = (
+            session.query(CarePushDelivery)
+            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
+            .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
+            .filter(
+                CarePushDelivery.status == "pending",
+                or_(
+                    CareNotification.status != "active",
+                    CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
+                    CarePushSubscription.revoked_at.is_not(None),
+                ),
+            )
+            .all()
+        )
+        for delivery in stale_pending:
+            delivery.status = "cancelled"
+            delivery.last_error_code = "notification_no_longer_deliverable"
+            delivery.last_error_message = "The source is no longer active or this device is no longer subscribed."
+        if stale_pending:
+            session.commit()
+
         # Only notify a device about events created after that device was linked.
         subscriptions = session.query(CarePushSubscription).filter(
             CarePushSubscription.revoked_at.is_(None)
