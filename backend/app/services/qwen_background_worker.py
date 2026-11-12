@@ -199,6 +199,8 @@ async def process_one_qwen_job() -> bool:
                 "source_notification_ids": result.get("source_notification_ids", []),
                 "source_freshness_assessment_ids": result.get("source_freshness_assessment_ids", []),
                 "source_freshness_status": result.get("source_freshness_status", "not_applicable"),
+                "claim_provenance": result.get("claim_provenance", {}),
+                "validated_aggregates": result.get("validated_aggregates", []),
             },
             source_event_ids_json=json.dumps(result.get("source_event_ids", [])),
             source_evidence_ids_json=json.dumps(result.get("source_evidence_ids", [])),
