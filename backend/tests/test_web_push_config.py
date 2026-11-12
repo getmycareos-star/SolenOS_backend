@@ -59,6 +59,12 @@ def test_vapid_configuration_rejects_non_https_and_non_mailto_subjects():
     assert "subject" in vapid_configuration_error(
         _settings(public_key, private_key, "https:///missing-host")
     )
+    assert "subject" in vapid_configuration_error(
+        _settings(public_key, private_key, "https://[malformed")
+    )
+    assert vapid_configuration_error(
+        _settings(public_key, private_key, "https://solenosai.net/vapid")
+    ) is None
 
 
 def test_vapid_configuration_requires_both_keys():
