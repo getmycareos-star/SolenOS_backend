@@ -413,6 +413,7 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
         "scope": {"person_id": person_id, "requesting_caregiver_id": caregiver_id},
         "record_sets": {},
         "document_files": [],
+        "unexported_tables": [],
         "exclusions": [
             "Rows explicitly attributed to a different caregiver are excluded.",
             "Provider backups, infrastructure logs and third-party processor data are not included.",
@@ -465,6 +466,50 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
             manifest["record_sets"][name] = len(records)
             if archive_buffer.tell() > MAX_PRIVACY_EXPORT_BYTES:
                 raise HTTPException(status_code=413, detail="Privacy export exceeds the 100 MiB archive limit")
+
+        # Include migration-created tables not registered in the ORM when their
+        # ownership can be established from person_id or caregiver attribution.
+        # Record unscopable tables in the manifest rather than silently implying
+        # that every database table was included.
+        inspector = sa_inspect(db.get_bind())
+        registered_tables = set(Base.metadata.tables)
+        excluded_raw_tables = {"alembic_version", "legal_holds"}
+        for raw_name in inspector.get_table_names():
+            if raw_name in registered_tables or raw_name in excluded_raw_tables:
+                continue
+            raw_table = sa_inspect(db.get_bind()).get_columns(raw_name)
+            raw_columns = {column["name"] for column in raw_table}
+            reflected = __import__("sqlalchemy").Table(
+                raw_name, __import__("sqlalchemy").MetaData(), autoload_with=db.get_bind()
+            )
+            if "person_id" in raw_columns:
+                predicate = reflected.c.person_id == person_id
+                raw_owner = next((column for column in owner_columns if column in raw_columns), None)
+                if raw_owner:
+                    predicate = predicate & (reflected.c[raw_owner] == caregiver_id)
+            else:
+                raw_owner = next((column for column in owner_columns if column in raw_columns), None)
+                if raw_owner:
+                    predicate = reflected.c[raw_owner] == caregiver_id
+                else:
+                    manifest["unexported_tables"].append({
+                        "table": raw_name,
+                        "reason": "No recognized person or caregiver ownership column; excluded to prevent cross-user disclosure.",
+                    })
+                    continue
+            rows = db.execute(reflected.select().where(predicate)).mappings().all()
+            if rows:
+                records = [
+                    {key: _export_value(value) for key, value in row.items()}
+                    for row in rows
+                ]
+                archive.writestr(
+                    f"records/{re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_name)}.json",
+                    json.dumps(records, ensure_ascii=False, sort_keys=True, default=str),
+                )
+                manifest["record_sets"][raw_name] = len(records)
+                if archive_buffer.tell() > MAX_PRIVACY_EXPORT_BYTES:
+                    raise HTTPException(status_code=413, detail="Privacy export exceeds the 100 MiB archive limit")
 
         # Conversation messages do not carry person_id themselves; scope them
         # through the caregiver-owned conversation sessions.
