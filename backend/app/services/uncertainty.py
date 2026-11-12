@@ -81,6 +81,53 @@ def _question_duplicate_key(value: str) -> str:
     return " ".join(sorted(set(canonical)))
 
 
+def _explicit_source_dependency_quote(source_text: str) -> str | None:
+    """Return a short source excerpt only when it states a confirmation prerequisite."""
+    normalized = " ".join((source_text or "").split())
+    patterns = (
+        r"\b(?:must|needs? to|has to|should)\s+(?:be\s+)?(?:confirmed|verified|checked)\b.{0,100}\b(?:before|prior to|until)\b.{0,80}",
+        r"\b(?:confirm|verify|check)\b.{0,120}\b(?:before|prior to|until)\b.{0,80}",
+        r"\b(?:do not|don't|must not|should not)\s+(?:give|administer|start|stop|change|use)\b.{0,120}\b(?:until|unless)\b.{0,80}",
+        r"\b(?:requires?|needs?)\s+confirmation\b.{0,100}\b(?:before|prior to|until)\b.{0,80}",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return normalized[max(0, match.start() - 50):min(len(normalized), match.end() + 50)][:240]
+    return None
+
+
+_QUESTION_TIME_QUALIFIERS = {
+    "current", "last", "next", "this", "today", "tomorrow", "yesterday",
+    "before", "after", "since", "until", "week", "month", "day", "night",
+    "morning", "afternoon", "evening", "monday", "tuesday", "wednesday",
+    "thursday", "friday", "saturday", "sunday", "january", "february",
+    "march", "april", "may", "june", "july", "august", "september",
+    "october", "november", "december",
+}
+
+
+def _source_dependency_matches_question(question_text: str, source_quote: str) -> bool:
+    question_tokens = set(_question_duplicate_key(question_text).split())
+    source_tokens = set(_question_duplicate_key(source_quote).split())
+    if not question_tokens or not source_tokens:
+        return False
+    # Never promote a question about a different time period or date than the
+    # explicit prerequisite recorded in the source.
+    temporal_tokens = question_tokens.intersection(_QUESTION_TIME_QUALIFIERS)
+    if not temporal_tokens.issubset(source_tokens):
+        return False
+    return len(question_tokens.intersection(source_tokens)) >= 2
+
+
+def _explicit_dependency_for_question(source_texts: list[str], question_text: str) -> str | None:
+    for source_text in source_texts:
+        quote = _explicit_source_dependency_quote(source_text)
+        if quote and _source_dependency_matches_question(question_text, quote):
+            return quote
+    return None
+
+
 
 def _has_decision_dependency(context) -> bool:
     """Only a structured, explicit current-decision dependency can justify a request."""
