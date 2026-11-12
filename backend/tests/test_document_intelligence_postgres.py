@@ -476,6 +476,8 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert uploaded.status_code == 201, uploaded.text
         upload_receipt = uploaded.json()
         evidence_id = upload_receipt["evidence_id"]
+        processing_job_id = upload_receipt["document_processing_job_id"]
+        assert processing_job_id, "document upload must return its durable processing job ID"
         assert upload_receipt["persisted"] is True
         assert upload_receipt["sha256"] == hashlib.sha256(source.encode("utf-8")).hexdigest()
 
@@ -741,7 +743,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 reviewer_id="independent-erasure-reviewer",
                 db=db,
             )
-            assert deletion_result["request_status"] == "fulfilled"
+            assert deletion_result["status"] == "fulfilled"
 
         with Session() as db:
             assert db.query(Evidence).filter_by(id=evidence_id).count() == 0
