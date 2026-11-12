@@ -56,6 +56,16 @@ class PushSubscriptionDelete(BaseModel):
     endpoint: str = Field(min_length=20, max_length=2048)
 
 
+def _vapid_configuration_ready() -> bool:
+    settings = get_settings()
+    subject = settings.vapid_subject.strip()
+    return bool(
+        settings.vapid_public_key.strip()
+        and settings.vapid_private_key.strip()
+        and (subject.startswith("mailto:") or subject.startswith("https://"))
+    )
+
+
 def _cipher() -> Fernet:
     secret = get_settings().secret_key or "local-development-only-not-for-production"
     key = base64.urlsafe_b64encode(
@@ -71,9 +81,10 @@ def _endpoint_hash(endpoint: str) -> str:
 @router.get("/notifications/push/public-key")
 def get_web_push_public_key(request: Request, db: Session = Depends(get_db)):
     _scope(request, db)
-    key = get_settings().vapid_public_key.strip()
-    if not key:
-        raise HTTPException(status_code=503, detail="Web Push is not configured on this server")
+    settings = get_settings()
+    key = settings.vapid_public_key.strip()
+    if not _vapid_configuration_ready():
+        raise HTTPException(status_code=503, detail="Web Push delivery is not fully configured on this server")
     return {"public_key": key}
 
 
@@ -84,8 +95,8 @@ def register_web_push_subscription(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
-    if not get_settings().vapid_public_key.strip():
-        raise HTTPException(status_code=503, detail="Web Push is not configured on this server")
+    if not _vapid_configuration_ready():
+        raise HTTPException(status_code=503, detail="Web Push delivery is not fully configured on this server")
     endpoint_hash = _endpoint_hash(payload.endpoint)
     subscription = db.query(CarePushSubscription).filter(
         CarePushSubscription.endpoint_hash == endpoint_hash
