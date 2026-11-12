@@ -45,7 +45,19 @@ def send(client, session, message, turn_id):
 
 
 def test_postgres_companion_persists_conversation_without_creating_care_updates(monkeypatch):
-    Base.metadata.create_all(bind=engine)
+    from sqlalchemy import inspect
+
+    required_tables = {
+        ConversationMessage.__tablename__,
+        ConversationSession.__tablename__,
+        AIOutputLCRProposal.__tablename__,
+        CareAssertion.__tablename__,
+    }
+    missing_tables = required_tables - set(inspect(engine).get_table_names())
+    assert not missing_tables, (
+        "Companion PostgreSQL integration requires the migration-owned schema; "
+        f"missing tables: {sorted(missing_tables)}"
+    )
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     captured = []
