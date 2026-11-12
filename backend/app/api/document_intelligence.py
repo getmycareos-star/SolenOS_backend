@@ -35,6 +35,7 @@ from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
@@ -219,6 +220,127 @@ def _existing_assertion_for_exact_document_duplicate(
             detail="An exact duplicate document already has a different reviewed interpretation of this passage. No second Living Care Record assertion was created.",
         )
     return assertion_row
+
+
+def _persist_document_follow_up(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    evidence_id: str,
+    analysis_id: str,
+    upload: EvidenceUpload,
+    candidate: dict,
+    subject: str,
+    observation: str,
+    quote: str,
+) -> str | None:
+    """Create an existing Open Loop only for a clear, caregiver-accepted follow-up recommendation."""
+    if candidate.get("field_type") != "appointment":
+        return None
+    searchable = " ".join((subject, observation, quote)).casefold()
+    actionable_phrase = any(term in searchable for term in (
+        "follow-up", "follow up", "clinic review", "follow-up review",
+        "review within", "schedule a review", "arrange a review",
+    ))
+    recommendation_phrase = any(term in searchable for term in (
+        "recommend", "recommended", "should arrange", "follow-up", "follow up",
+        "review within", "schedule a review", "arrange a review",
+    ))
+    if not actionable_phrase or not recommendation_phrase:
+        return None
+
+    source_fingerprint = hashlib.sha256(
+        f"{upload.sha256}|{quote}|document_follow_up".encode("utf-8")
+    ).hexdigest()
+    source_id = f"document-follow-up:{source_fingerprint}"
+    existing = db.query(OpenLoopRecord).join(
+        OpenLoopOccurrence, OpenLoopOccurrence.loop_id == OpenLoopRecord.id
+    ).filter(
+        OpenLoopRecord.person_id == person_id,
+        OpenLoopRecord.loop_type == "follow_up",
+        OpenLoopOccurrence.source_type == "document_candidate",
+        OpenLoopOccurrence.source_id == source_id,
+    ).first()
+    if existing is not None:
+        return str(existing.id)
+
+    page_number = candidate.get("page_number")
+    evidence = [{
+        "kind": "document_candidate",
+        "evidence_id": evidence_id,
+        "analysis_id": analysis_id,
+        "page_number": page_number,
+        "source_quote": quote,
+        "verification": "caregiver_accepted_document_candidate",
+    }]
+    now = datetime.now(timezone.utc)
+    title = (
+        "Arrange the recommended clinic review"
+        if "clinic" in searchable or "review" in searchable
+        else "Follow up on the hospital's recommendation"
+    )
+    description = (
+        "The hospital document recommends a follow-up. "
+        "The source wording is preserved below; this does not mean an appointment has been booked.\n\n"
+        f"Source statement: {quote}"
+    )
+    loop = OpenLoopRecord(
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        loop_type="follow_up",
+        title=title,
+        description=description,
+        evidence=evidence,
+        uncertainty="unknown",
+        source_type="document_candidate",
+        source_id=source_id,
+        source_fingerprint=source_fingerprint,
+        status="open",
+        priority="normal",
+        created_at=now,
+        updated_at=now,
+        version=1,
+    )
+    db.add(loop)
+    db.flush()
+    occurrence = OpenLoopOccurrence(
+        loop_id=loop.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        source_type="document_candidate",
+        source_id=source_id,
+        source_fingerprint=source_fingerprint,
+        evidence=evidence,
+        idempotency_key=source_id,
+        occurred_at=now,
+        created_at=now,
+    )
+    db.add(occurrence)
+    db.add(OpenLoopEvent(
+        loop_id=loop.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        event_type="created_from_document_review",
+        before_state=None,
+        after_state={
+            "id": loop.id,
+            "loop_type": "follow_up",
+            "title": title,
+            "description": description,
+            "status": "open",
+            "source_type": "document_candidate",
+            "source_id": source_id,
+            "evidence": evidence,
+            "uncertainty": "unknown",
+            "created_at": now.isoformat(),
+        },
+        evidence=evidence,
+        idempotency_key=source_id,
+        actor=caregiver_id,
+        created_at=now,
+    ))
+    return str(loop.id)
 
 
 def _analysis_for_evidence(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
