@@ -34,7 +34,6 @@ from app.services.document_candidate_schema import classify_document
 router = APIRouter(prefix="/documents", tags=["document lifecycle"])
 MAX_EXTRACTED_CHARS = 100_000
 MAX_PDF_PAGES = 100
-MAX_OCR_PAGES = 25
 MIN_NATIVE_PDF_TEXT_CHARS = 40
 MAX_IMAGE_PIXELS = 20_000_000
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
@@ -343,10 +342,14 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             native_pages = []
             for page in reader.pages:
                 try:
-                    page_text = page.extract_text(extraction_mode="layout") or ""
-                except TypeError:
-                    # Older pypdf versions do not expose layout extraction.
-                    page_text = page.extract_text() or ""
+                    try:
+                        page_text = page.extract_text(extraction_mode="layout") or ""
+                    except TypeError:
+                        # Older pypdf versions do not expose layout extraction.
+                        page_text = page.extract_text() or ""
+                except Exception:
+                    # Preserve page order and let OCR attempt this page.
+                    page_text = ""
                 native_pages.append(page_text.strip())
         except HTTPException:
             raise
@@ -363,11 +366,8 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
             page_texts = [f"[Page {index + 1}]\n{text}" for index, text in enumerate(native_pages)]
             return _bounded_extraction("\n\n".join(page_texts), "server_pdf_text")
 
-        if len(ocr_page_indexes) > MAX_OCR_PAGES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Scanned PDF pages are limited to {MAX_OCR_PAGES} per extraction.",
-            )
+        # OCR every scanned page within the overall 100-page PDF bound.
+        # A single damaged/unsupported page must not discard readable pages.
         rendered = None
         try:
             rendered = pdfium.PdfDocument(content)
@@ -376,35 +376,36 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 if len(native_text.strip()) >= MIN_NATIVE_PDF_TEXT_CHARS:
                     page_texts.append(f"[Page {index + 1}]\n{native_text}")
                     continue
-                page = rendered[index]
+                page = None
+                bitmap = None
+                image = None
                 try:
+                    page = rendered[index]
                     width, height = page.get_size()
                     if width * height * 4 > MAX_IMAGE_PIXELS:
-                        raise HTTPException(
-                            status_code=413,
-                            detail=f"PDF page {index + 1} exceeds the 20-megapixel OCR limit.",
-                        )
+                        raise ValueError("page exceeds OCR pixel limit")
                     bitmap = page.render(scale=2)
                     image = bitmap.to_pil()
-                    try:
-                        ocr_text = _ocr_image(image)
-                    finally:
-                        image.close()
-                        bitmap.close()
+                    ocr_text = _ocr_image(image)
                     if ocr_text:
                         combined_text = "\n".join(value for value in (native_text.strip(), ocr_text) if value)
                         page_texts.append(f"[Page {index + 1} OCR]\n{combined_text}")
-                    elif native_text.strip():
-                        page_texts.append(f"[Page {index + 1}]\n{native_text.strip()}")
                     else:
-                        # Keep unreadable page identity explicit; never invent content.
                         page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
+                except Exception:
+                    # Do not expose engine internals or discard the rest of the PDF.
+                    page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
                 finally:
-                    page.close()
+                    if image is not None:
+                        image.close()
+                    if bitmap is not None:
+                        bitmap.close()
+                    if page is not None:
+                        page.close()
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=422, detail="The saved PDF page could not be rendered for OCR") from exc
+            raise HTTPException(status_code=422, detail="The saved PDF pages could not be rendered for OCR") from exc
         finally:
             if rendered is not None:
                 rendered.close()
@@ -544,6 +545,16 @@ def _verify_persisted_extraction(
     return content
 
 
+def _unreadable_page_numbers(source_text: str) -> list[int]:
+    markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)", source_text or ""))
+    unreadable = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
+        if "[No readable text detected on this page]" in source_text[marker.end():end]:
+            unreadable.append(int(marker.group(1)))
+    return unreadable
+
+
 def _response(analysis: CaptureAnalysis) -> dict:
     details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
     intelligence = details.get("document_intelligence")
@@ -555,6 +566,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "source_evidence_id": analysis.source_evidence_id,
         "extraction_status": analysis.extraction_status,
         "extraction_method": details.get("extraction_method"),
+        "page_count": details.get("page_count") or 1,
+        "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
         "source_text_sha256": hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest(),
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
@@ -618,7 +631,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         source_event_id=None,
         source_evidence_id=evidence_id,
         source_text=source_text,
-        extraction_status="available",
+        extraction_status="partial" if "[No readable text detected on this page]" in source_text else "available",
         candidates={
             "kind": "document_extraction_v1",
             "filename": upload.filename,
