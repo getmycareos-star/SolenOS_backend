@@ -1332,6 +1332,7 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
         grouped.setdefault(str(row.subject_id), []).append(row)
 
     active_records: list[dict[str, Any]] = []
+    pending_records: list[dict[str, Any]] = []
     for subject_id, claims in grouped.items():
         by_field: dict[str, list[CareAssertion]] = {}
         for claim in claims:
@@ -1364,6 +1365,30 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
         name_claim = accepted_current(("name", "medication_name"))
         status_claim = accepted_current(("status", "medication_status"))
         if not name_claim or not status_claim or str(status_claim.asserted_value).strip().casefold() != "active":
+            def pending_claim(field_names: tuple[str, ...]) -> CareAssertion | None:
+                candidates = [claim for field_name in field_names for claim in by_field.get(field_name, [])]
+                live = [item for item in candidates if item.assertion_status in {"reported", "review_required"}]
+                values = {" ".join(str(item.asserted_value or "").casefold().split()) for item in live}
+                if len(values) != 1 or not live:
+                    return None
+                candidate = live[0]
+                if candidate.epistemic_state not in {"reported", "observed"}:
+                    return None
+                if get_freshness(candidate).get("status") != "within_review_window":
+                    return None
+                return candidate
+            pending_name = pending_claim(("name", "medication_name"))
+            pending_status = pending_claim(("status", "medication_status"))
+            if pending_name and pending_status and str(pending_status.asserted_value).strip().casefold() == "active":
+                pending_dose = pending_claim(("dose", "strength"))
+                pending_records.append({
+                    "medication_id": subject_id,
+                    "name": str(pending_name.asserted_value).strip(),
+                    "dose": str(pending_dose.asserted_value).strip() if pending_dose else None,
+                    "record_status": "awaiting_caregiver_review",
+                    "source_label": pending_name.source_label,
+                    "recorded_at": pending_name.recorded_at,
+                })
             continue
         dose_claim = accepted_current(("dose", "strength"))
         active_records.append({
@@ -1387,6 +1412,7 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
     active_records.sort(key=lambda item: (item["name"].casefold(), item["medication_id"]))
     return {
         "medications": active_records,
+        "pending_review": pending_records,
         "count": len(active_records),
         "source": "care_assertions",
         "history_events_promoted": False,
