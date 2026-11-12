@@ -31,8 +31,6 @@ from app.models.care import CareEvent, Caregiver, Person
 from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import (
     CareAssertion,
-    EvidenceObservation,
-    EvidenceSourceRelationship,
     EvidenceFreshnessAssessment,
     EvidenceFreshnessPolicy,
     EvidenceSourceRelationship,
