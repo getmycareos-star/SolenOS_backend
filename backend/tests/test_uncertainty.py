@@ -4306,6 +4306,10 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         assert _question_is_answered_by_current_lcr(
             db, person.id, daily.question
         ) is True
+        # The production coordinator closes the exact matching LCR gap before
+        # question lifecycle reconciliation. Exercise that same ordering.
+        from app.services.care_continuity import reconcile_information_gaps_from_accepted_assertions
+        reconcile_information_gaps_from_accepted_assertions(db, person.id)
         second = reassess_open_question_lifecycle(db, person.id)
         db.refresh(daily)
         assert daily.status == "closed"
