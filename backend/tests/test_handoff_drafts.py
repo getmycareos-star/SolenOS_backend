@@ -1406,3 +1406,66 @@ def test_handoff_includes_only_valid_necessary_open_questions(client):
     ]
     assert "handoff-necessary-question" in question_refs
     assert "handoff-unassessed-question" not in question_refs
+
+
+def test_caregiver_approved_professional_export_returns_pdf_and_requires_approval(client, monkeypatch):
+    from app.api import handoff_drafts
+    from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
+
+    test_client, session = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", lambda *args, **kwargs: {
+        "status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": "test", "sections": [],
+    })
+    monkeypatch.setattr(handoff_drafts, "_draft_source_freshness", lambda *args, **kwargs: {"status": "current"})
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 14},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+
+    blocked = test_client.get(f"/api/v1/handoff-drafts/{draft_id}/export.pdf", headers=headers)
+    assert blocked.status_code == 409
+
+    approved = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve-export",
+        headers=headers,
+        json={"approved": True},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["approved"] is True
+    assert approved.json()["review_status"] == "approved"
+
+    exported = test_client.get(f"/api/v1/handoff-drafts/{draft_id}/export.pdf", headers=headers)
+    assert exported.status_code == 200, exported.text
+    assert exported.headers["content-type"].startswith("application/pdf")
+    assert exported.content.startswith(b"%PDF-1.4")
+    assert b"CAREGIVER-REVIEWED" not in exported.content
+    assert b"SOLENOS CARE SUMMARY" in exported.content
+    assert "no-store" in exported.headers.get("cache-control", "")
+
+
+def test_caregiver_approved_export_refuses_stale_source(client, monkeypatch):
+    from app.api import handoff_drafts
+
+    test_client, session = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", lambda *args, **kwargs: {
+        "status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": "test", "sections": [],
+    })
+    monkeypatch.setattr(handoff_drafts, "_draft_source_freshness", lambda *args, **kwargs: {"status": "stale"})
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 14},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+    approved = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve-export",
+        headers=headers,
+        json={"approved": True},
+    )
+    assert approved.status_code == 409
