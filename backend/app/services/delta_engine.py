@@ -535,8 +535,13 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     )
                 item["claim_supported"] = claim_supported
                 if not claim_supported:
-                    item["certainty"] = "uncertain"
-                    item["provenance_warning"] = "The reported value or state change could not be independently matched to the new event or current-state evidence."
+                    item["provenance_warning"] = "The reported value is source-grounded, but its subject label was not stated verbatim in the source."
+                    # Symptom entries are time-bound caregiver observations. Keep
+                    # them as reported observations when the exact source excerpt
+                    # is present; do not let a later unrelated assertion retroactively
+                    # decide whether the earlier subject label was acceptable.
+                    if domain != "symptoms":
+                        item["certainty"] = "uncertain"
             if not item["evidence_supported"]:
                 item["provenance_warning"] = "Evidence excerpt could not be verified against supplied source text."
                 if domain in {"medications", "conditions", "symptoms"}:
@@ -1001,7 +1006,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                             CareAssertion.subject_type == domain.rstrip("s"),
                             CareAssertion.subject_id == subject_id,
                             CareAssertion.field == field,
-                            CareAssertion.assertion_kind.in_(["time_bound_observation", "current_state"]),
                             CareAssertion.asserted_value == str(current),
                             reporter_filter,
                             CareAssertion.assertion_status != "rejected",
