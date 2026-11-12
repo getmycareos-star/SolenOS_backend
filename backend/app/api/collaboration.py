@@ -746,6 +746,17 @@ async def upload_evidence(
         raise HTTPException(status_code=422, detail="Scan crop leaves too little page area")
     text_prepared = (scan_text_prepared or "false").strip().lower() == "true"
 
+    # Direct route-function integrations may omit newer optional multipart fields.
+    # FastAPI's Form sentinel is not a submitted value; normalize it to safe defaults.
+    if not isinstance(capture_method, str):
+        capture_method = "upload"
+    if not isinstance(capture_timestamp, str):
+        capture_timestamp = ""
+    if not isinstance(ingestion_key, str):
+        ingestion_key = ""
+    if isinstance(capture_page_number, bool) or not isinstance(capture_page_number, int):
+        capture_page_number = None
+
     capture_method = (capture_method or "upload").strip().lower()
     if capture_method not in {"scan", "snap", "upload", "share", "text", "voice"}:
         raise HTTPException(status_code=422, detail="Unsupported capture method")
