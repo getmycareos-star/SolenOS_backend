@@ -345,6 +345,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
                 "topic": aggregate_review.get("topic"),
                 "window_label": aggregate_review.get("window_label"),
                 "count": aggregate_review.get("count"),
+                "affected_event_count": aggregate_review.get("affected_event_count"),
                 "interpretation_limit": aggregate_review.get("interpretation_limit"),
             } if aggregate_review is not None else None),
             "source_references": matches,
