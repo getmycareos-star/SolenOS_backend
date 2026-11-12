@@ -200,6 +200,74 @@ def test_shared_coordinator_rejects_correction_from_another_caregiver(monkeypatc
     db.commit.assert_not_called()
 
 
+def test_shared_coordinator_returns_verified_readback_and_stage_statuses(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    event = SimpleNamespace(
+        id="event-1",
+        evidence_ids=["evidence-1"],
+        created_by_caregiver_id="caregiver-1",
+    )
+    evidence = SimpleNamespace(
+        id="evidence-1",
+        person_id="person-1",
+        uploaded_by_caregiver_id="caregiver-1",
+    )
+    db = _session({Person: person, CareEvent: event, Evidence: evidence})
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", Mock())
+    monkeypatch.setattr(
+        execution,
+        "build_lcr_context",
+        Mock(return_value={"missing_required_sources": []}),
+    )
+
+    result = execution.execute_care_continuity_reconciliation(
+        db,
+        "person-1",
+        workflow="daily_capture",
+        caregiver_id="caregiver-1",
+        source_event_id="event-1",
+        source_evidence_id="evidence-1",
+        stage_statuses={
+            "extraction": "available",
+            "assessment": "pending",
+            "review": "required",
+        },
+    )
+
+    assert result["stages"] == {
+        "source_preservation": "verified",
+        "evidence": "verified",
+        "source_message": "not_applicable",
+        "extraction": "available",
+        "assessment": "pending",
+        "review": "required",
+        "reconciliation": "staged_in_caller_transaction",
+        "longitudinal_retrieval": "available",
+    }
+    db.commit.assert_not_called()
+    db.rollback.assert_not_called()
+
+
+def test_shared_coordinator_rejects_unknown_stage_status_before_reconciliation(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    event = SimpleNamespace(id="event-1", evidence_ids=[])
+    db = _session({Person: person, CareEvent: event})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="Unsupported execution stage"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="daily_capture",
+            source_event_id="event-1",
+            stage_statuses={"unknown": "done"},
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
 def test_shared_coordinator_validates_source_assertion_scope(monkeypatch):
     person = SimpleNamespace(id="person-1")
     assertion = SimpleNamespace(id="assertion-1", person_id="person-1")
