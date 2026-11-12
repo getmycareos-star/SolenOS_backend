@@ -675,7 +675,7 @@ def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatc
             "scan_rotation_degrees": "90",
             "scan_crop_json": '{"top":10,"right":20,"bottom":10,"left":10}',
         },
-        files={"file": ("scan_page_3.jpg", original, "image/jpeg")},
+        files={"file": ("scan_page_3.png", original, "image/png")},
     )
     assert uploaded.status_code == 201, uploaded.text
     evidence_id = uploaded.json()["evidence_id"]
