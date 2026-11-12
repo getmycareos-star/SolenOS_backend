@@ -62,31 +62,45 @@ def upgrade():
 
     # Only an explicitly designated primary family caregiver receives
     # administration rights. Session age is not evidence of authority.
+    # Revoke/expiry state is respected; account owners remain eligible to sign
+    # in again even if their last bearer session has expired.
+    if bind.dialect.name == "sqlite":
+        grant_id = "lower(hex(randomblob(16)))"
+    else:
+        grant_id = "gen_random_uuid()::text"
+
     op.execute(sa.text(f"""
-        WITH explicit_primary_profiles AS (
-            SELECT person_id, id AS caregiver_profile_id
+        WITH explicit_primary_caregivers AS (
+            SELECT person_id, session_caregiver_id AS caregiver_id
             FROM caregiver_profiles
-            WHERE is_primary_designated = TRUE
+            WHERE is_primary_designated = TRUE AND session_caregiver_id IS NOT NULL
             UNION
-            SELECT person_id, caregiver_id AS caregiver_profile_id
-            FROM caregiver_roles
-            WHERE is_current = TRUE
-              AND CAST(role_type AS VARCHAR) IN ('PRIMARY_FAMILY_CAREGIVER', 'primary_family_caregiver')
+            SELECT r.person_id, p.session_caregiver_id AS caregiver_id
+            FROM caregiver_roles r
+            JOIN caregiver_profiles p ON p.id = r.caregiver_id
+            WHERE r.is_current = TRUE
+              AND CAST(r.role_type AS VARCHAR) IN ('PRIMARY_FAMILY_CAREGIVER', 'primary_family_caregiver')
+              AND p.session_caregiver_id IS NOT NULL
             UNION
-            SELECT p.person_id, p.id AS caregiver_profile_id
-            FROM caregiver_profiles p
-            JOIN caregiver_accounts a
-              ON a.person_id = p.person_id
-             AND a.caregiver_id = p.session_caregiver_id
+            SELECT person_id, caregiver_id
+            FROM caregiver_accounts
         ),
         primary_counts AS (
-            SELECT person_id, COUNT(*) AS primary_count
-            FROM explicit_primary_profiles
+            SELECT person_id, COUNT(DISTINCT caregiver_id) AS primary_count
+            FROM explicit_primary_caregivers
             GROUP BY person_id
         ),
-        session_identities AS (
-            SELECT person_id, caregiver_id, MIN(created_at) AS first_created_at
+        identity_sources AS (
+            SELECT person_id, caregiver_id, created_at AS first_seen_at
             FROM anonymous_sessions
+            WHERE revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+            UNION ALL
+            SELECT person_id, caregiver_id, CURRENT_TIMESTAMP AS first_seen_at
+            FROM caregiver_accounts
+        ),
+        session_identities AS (
+            SELECT person_id, caregiver_id, MIN(first_seen_at) AS first_created_at
+            FROM identity_sources
             GROUP BY person_id, caregiver_id
         )
         INSERT INTO caregiver_access_grants
@@ -96,16 +110,16 @@ def upgrade():
             s.person_id,
             s.caregiver_id,
             p.id,
-            CASE WHEN pc.primary_count = 1 AND ep.caregiver_profile_id = p.id THEN 'primary' ELSE 'family' END,
+            CASE WHEN pc.primary_count = 1 AND ep.caregiver_id = s.caregiver_id THEN 'primary' ELSE 'family' END,
             'full_record',
             'active',
-            CASE WHEN pc.primary_count = 1 AND ep.caregiver_profile_id = p.id THEN TRUE ELSE FALSE END,
+            CASE WHEN pc.primary_count = 1 AND ep.caregiver_id = s.caregiver_id THEN TRUE ELSE FALSE END,
             s.first_created_at
         FROM session_identities s
         LEFT JOIN caregiver_profiles p
           ON p.person_id = s.person_id AND p.session_caregiver_id = s.caregiver_id
-        LEFT JOIN explicit_primary_profiles ep
-          ON ep.person_id = s.person_id AND ep.caregiver_profile_id = p.id
+        LEFT JOIN explicit_primary_caregivers ep
+          ON ep.person_id = s.person_id AND ep.caregiver_id = s.caregiver_id
         LEFT JOIN primary_counts pc ON pc.person_id = s.person_id
         WHERE NOT EXISTS (
             SELECT 1 FROM caregiver_access_grants g
