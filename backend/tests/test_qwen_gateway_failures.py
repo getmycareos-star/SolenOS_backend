@@ -144,3 +144,27 @@ def test_qwen35_gateway_rejects_thinking_only_response(monkeypatch):
     assert error.value.status_code == 502
     assert error.value.detail["code"] == "empty_model_response"
     assert error.value.detail["reason"] == "missing_message_content"
+
+
+def test_production_qwen_gateway_rejects_public_inference_egress(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://public-model.example.com:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen-test")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    monkeypatch.delenv("OLLAMA_SIDECAR_ENABLED", raising=False)
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.get_ollama_config()
+
+    assert error.value.status_code == 503
+    assert "private Railway" in error.value.detail
+
+
+def test_production_qwen_gateway_accepts_only_private_railway_runtime(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://solenos-ollama.railway.internal:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen-test")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+
+    base, model, _timeout = qwen_gateway.get_ollama_config()
+
+    assert base == "http://solenos-ollama.railway.internal:11434"
+    assert model == "qwen-test"
