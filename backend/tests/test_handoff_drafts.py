@@ -1286,6 +1286,7 @@ def test_observation_correction_marks_prepared_handoff_source_stale(client, monk
         )
         db.add_all([evidence, event, original])
         db.commit()
+        event_id = event.id
     finally:
         db.close()
 
@@ -1304,7 +1305,7 @@ def test_observation_correction_marks_prepared_handoff_source_stale(client, monk
     draft_id = prepared.json()["draft_id"]
     event_reference = next(
         item for item in prepared.json()["source_references"]
-        if item["source_id"] == event.id
+        if item["source_id"] == event_id
     )
     assert event_reference["details"]["source_observation_history"]["records"][0]["source_state"] == "current_version"
 
