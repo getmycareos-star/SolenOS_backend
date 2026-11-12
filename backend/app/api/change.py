@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence, Correction
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
@@ -22,7 +22,6 @@ from app.schemas.change import (
 from app.services.change_detection import detect_event_changes, detect_assertion_changes, detect_numeric_observation_changes
 from app.services.situation_formation import detect_situations, update_situations
 from app.services.explanation import explain_situation
-from app.models.care import Evidence
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import (
     ObservationCoverageCreate, ObservationCoverageRecord, CoverageAssessment,
@@ -98,6 +97,182 @@ def list_baselines(person_id: str, request: Request, subject_type: Optional[str]
     if subject_type:
         query = query.filter(Baseline.subject_type == subject_type)
     return query.order_by(Baseline.created_at.desc()).all()
+
+
+@router.get("/baselines/{person_id}/comparison")
+def get_baseline_comparison(person_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return versioned baselines and same-person source evidence for LCR comparison.
+
+    This is a read-only projection. It does not create or rewrite baselines or
+    change assessments; clients must treat incomplete history as unknown.
+    """
+    _require_person_scope(request, db, person_id)
+    baselines = (
+        db.query(Baseline)
+        .filter(Baseline.person_id == person_id)
+        .order_by(Baseline.subject_type.asc(), Baseline.subject_id.asc(), Baseline.created_at.desc())
+        .all()
+    )
+    # Include active current-domain assessments even when no baseline exists.
+    # Bound the read projection while retaining the full durable history elsewhere.
+    relevant_changes = (
+        db.query(Change)
+        .filter(Change.person_id == person_id)
+        .order_by(Change.created_at.desc(), Change.id.asc())
+        .limit(201)
+        .all()
+    )
+    changes_truncated = len(relevant_changes) > 200
+    relevant_changes = relevant_changes[:200]
+    source_ids = {
+        evidence_id
+        for row in baselines
+        for evidence_id in (row.evidence_ids or [])
+        if evidence_id
+    }
+    source_ids.update(
+        evidence_id
+        for row in relevant_changes
+        for evidence_id in (row.evidence_ids or [])
+        if evidence_id
+    )
+    events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id, CareEvent.id.in_(source_ids))
+        .order_by(CareEvent.occurred_at.asc(), CareEvent.recorded_at.asc(), CareEvent.id.asc())
+        .all()
+        if source_ids else []
+    )
+    original_evidence_ids = {
+        evidence_id for event in events for evidence_id in (event.evidence_ids or []) if evidence_id
+    }
+    source_evidence = (
+        db.query(Evidence)
+        .filter(Evidence.person_id == person_id, Evidence.id.in_(original_evidence_ids))
+        .order_by(Evidence.uploaded_at.asc(), Evidence.id.asc())
+        .all()
+        if original_evidence_ids else []
+    )
+    correction_target_ids = source_ids | original_evidence_ids
+    corrections = (
+        db.query(Correction)
+        .filter(
+            Correction.person_id == person_id,
+            Correction.target_id.in_(correction_target_ids),
+        )
+        .order_by(Correction.created_at.asc(), Correction.id.asc())
+        .all()
+        if correction_target_ids else []
+    )
+    return {
+        "person_id": person_id,
+        "as_of": datetime.now(timezone.utc),
+        "baselines": [
+            {
+                "id": row.id,
+                "subject_type": row.subject_type,
+                "subject_id": row.subject_id,
+                "baseline_type": row.baseline_type.value if row.baseline_type else None,
+                "window_start": row.window_start,
+                "window_end": row.window_end,
+                "event_count": row.event_count,
+                "frequency_per_period": row.frequency_per_period,
+                "state_value": row.state_value,
+                "confidence": row.confidence.value if row.confidence else None,
+                "is_stable": bool(row.is_stable),
+                "coverage_status": row.coverage_status,
+                "history_completeness": row.history_completeness,
+                "analysis_version": row.analysis_version,
+                "documentation_bias_flag": bool(row.documentation_bias_flag),
+                "evidence_ids": row.evidence_ids or [],
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+                "is_active": bool(row.is_active),
+                "superseded_by_baseline_id": row.superseded_by_baseline_id,
+            }
+            for row in baselines
+        ],
+        "changes_truncated": changes_truncated,
+        "changes": [
+            {
+                "id": row.id,
+                "subject_type": row.subject_type,
+                "subject_id": row.subject_id,
+                "baseline_id": row.baseline_id,
+                "previous_state": row.previous_state,
+                "current_state": row.current_state,
+                "explanation": row.explanation,
+                "change_type": row.change_type.value if row.change_type else None,
+                "change_direction": row.change_direction.value if row.change_direction else None,
+                "confidence": row.confidence,
+                "confirmation_status": row.confirmation_status,
+                "attention_candidate": bool(row.attention_candidate),
+                "follow_up_candidate": bool(row.follow_up_candidate),
+                "significance_verdict": row.significance_verdict.value if row.significance_verdict else None,
+                "comparison_window_start": row.comparison_window_start,
+                "comparison_window_end": row.comparison_window_end,
+                "persistence_days": row.persistence_days,
+                "is_persistent": row.is_persistent,
+                "evidence_ids": row.evidence_ids or [],
+                "is_active": bool(row.is_active),
+                "superseded_by_change_id": row.superseded_by_change_id,
+                "created_at": row.created_at,
+            }
+            for row in relevant_changes
+        ],
+        "source_evidence": [
+            {
+                "id": row.id,
+                "type": row.type,
+                "evidence_kind": row.evidence_kind,
+                "epistemic_status": row.epistemic_status,
+                "source_text": row.source_text,
+                "uploaded_at": row.uploaded_at,
+                "uploaded_by_caregiver_id": row.uploaded_by_caregiver_id,
+                "original_author": row.original_author,
+                "reported_by_label": row.reported_by_label,
+                "reported_by_caregiver_id": row.reported_by_caregiver_id,
+                "occurred_at": row.occurred_at,
+                "reported_at": row.reported_at,
+                "source_type": row.source_type,
+                "original_source_reference": row.original_source_reference,
+                "parent_evidence_id": row.parent_evidence_id,
+                "ingested_at": row.ingested_at,
+                "evidence_status": row.evidence_status,
+            }
+            for row in source_evidence
+        ],
+        "corrections": [
+            {
+                "id": row.id,
+                "target_type": row.target_type,
+                "target_id": row.target_id,
+                "original_text": row.original_text,
+                "corrected_text": row.corrected_text,
+                "reason": row.reason,
+                "caregiver_id": row.caregiver_id,
+                "created_at": row.created_at,
+            }
+            for row in corrections
+        ],
+        "events": [
+            {
+                "id": row.id,
+                "event_type": row.event_type,
+                "status": row.status,
+                "title": row.title,
+                "description": row.description,
+                "occurred_at": row.occurred_at,
+                "recorded_at": row.recorded_at,
+                "created_by_caregiver_id": row.created_by_caregiver_id,
+                "time_provenance": row.time_provenance,
+                "evidence_ids": row.evidence_ids or [],
+            }
+            for row in events
+        ],
+        "read_only": True,
+        "notice": "Source records are returned only when they belong to this care record. Missing records are not evidence that an event did not occur.",
+    }
 
 
 @router.get("/changes/detect", response_model=List[ChangeSchema])
