@@ -1267,9 +1267,11 @@ def fulfil_approved_deletion(
         # behavior that a pre-commit person_id query cannot detect.
         remaining_evidence_ids = []
         if evidence_ids_to_erase:
-            remaining_evidence_ids = db.query(Evidence.id).filter(
-                Evidence.id.in_(evidence_ids_to_erase)
-            ).scalars().all()
+            remaining_evidence_ids = [
+                str(item[0]) for item in db.query(Evidence.id).filter(
+                    Evidence.id.in_(evidence_ids_to_erase)
+                ).all()
+            ]
         if remaining_evidence_ids:
             for evidence_id in remaining_evidence_ids:
                 db.execute(
@@ -1278,9 +1280,11 @@ def fulfil_approved_deletion(
                 )
             db.commit()
             db.expire_all()
-            remaining_evidence_ids = db.query(Evidence.id).filter(
-                Evidence.id.in_(evidence_ids_to_erase)
-            ).scalars().all()
+            remaining_evidence_ids = [
+                str(item[0]) for item in db.query(Evidence.id).filter(
+                    Evidence.id.in_(evidence_ids_to_erase)
+                ).all()
+            ]
         if remaining_evidence_ids:
             raise HTTPException(
                 status_code=409,
