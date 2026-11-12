@@ -1690,6 +1690,7 @@ def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_re
         "follow_ups": [{
             "action": "Confirm the laboratory result with the clinic",
             "owner": "Clinic",
+            "owner_role": "professional",
             "due": "2026-11-15T09:00:00-05:00",
             "status": "Open",
         }],
@@ -1711,6 +1712,8 @@ def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_re
     assert loop.deadline_at is not None
     assert loop.deadline_source == "explicit_user"
     assert loop.owner_label == "Clinic"
+    assert loop.owner_role == "professional"
+    assert loop.evidence[0]["reported_owner_role"] == "professional"
     db.close()
 
     removed = test_client.patch(f"/api/v1/appointment-workspaces/{record_id}", headers=headers, json={
