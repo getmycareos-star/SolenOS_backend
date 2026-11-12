@@ -5,6 +5,7 @@ that cannot be matched to an exact source passage remain explicitly unsupported.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -175,7 +176,7 @@ def build_distinct_event_aggregate(
     seen_evidence_sets = []
     for event in sorted(candidates, key=lambda item: (item["_occurred"], str(item.get("id") or ""))):
         evidence_ids = {str(value) for value in (event.get("evidence_ids") or []) if value}
-        signature = (event["_occurred"].date().isoformat(), event["_searchable"])
+        signature = (event["_occurred"].isoformat(), event["_searchable"])
         duplicate_of_existing = any(
             (evidence_ids and existing_ids and evidence_ids.intersection(existing_ids))
             or signature == existing_signature
