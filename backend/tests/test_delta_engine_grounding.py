@@ -131,4 +131,5 @@ def test_delta_json_contract_bounds_each_finding_list_for_compact_inference():
         _parse_model_json(json.dumps(payload))
     assert exc.value.status_code == 502
     assert "item limit" in str(exc.value.detail)
-    assert DELTA_JSON_CONTRACT["medications"]["maxItems"] == 1
+    for finding_list in ("medications", "conditions", "symptoms", "tests", "follow_ups", "contradictions", "clinical_gaps"):
+        assert DELTA_JSON_CONTRACT["properties"][finding_list]["maxItems"] == 1
