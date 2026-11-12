@@ -558,6 +558,7 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
     source_records = snapshot.get("source_records", [])
     stale = []
     unknown = []
+    professional_medication_records = None
     try:
         bind = db.get_bind()
         inspector = inspect(bind)
@@ -573,7 +574,15 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 unknown.append(f"{source_table or 'unknown'}:{source_id or 'unknown'}")
                 continue
             current = None
-            if item.get("source_type") == "daily_care_observation":
+            if item.get("source_type") == "caregiver_reviewed_medication_report":
+                if professional_medication_records is None:
+                    _, professional_medication_records = _verified_professional_medication_source(db, draft.person_id)
+                matching = next(
+                    (record for record in professional_medication_records if str(record.get("source_id")) == source_id),
+                    None,
+                )
+                current = matching.get("source_fingerprint") if matching else None
+            elif item.get("source_type") == "daily_care_observation":
                 event = db.query(CareEvent).filter(
                     CareEvent.id == source_id,
                     CareEvent.person_id == draft.person_id,
