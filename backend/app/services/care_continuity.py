@@ -335,7 +335,9 @@ def set_assertion_status(db: Session, assertion_id: str, person_id: str, status:
     # record in the same transaction so accepted evidence can settle exact
     # information gaps and obsolete requests are lifecycle-managed immediately.
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
-    reconcile_person_change_intelligence(db, person_id)
+    reconcile_person_change_intelligence(
+        db, person_id, protected_assertion_ids=[assertion.id]
+    )
     db.commit()
     db.refresh(assertion)
     return assertion
