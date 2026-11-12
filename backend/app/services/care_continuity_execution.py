@@ -156,10 +156,35 @@ def execute_care_continuity_reconciliation(
             raise CareContinuityExecutionError(
                 "The supplied evidence is not part of the source assertion's persisted lineage"
             )
-        if assertion.source_event_id and event_ids and assertion.source_event_id not in event_ids:
-            raise CareContinuityExecutionError(
-                "The source assertion does not belong to the supplied source event"
-            )
+        if assertion.source_event_id:
+            assertion_event = db.query(CareEvent).filter(
+                CareEvent.id == assertion.source_event_id,
+                CareEvent.person_id == person_id,
+            ).first()
+            if assertion_event is None:
+                raise CareContinuityExecutionError(
+                    "The source assertion references an event missing from or outside this care record"
+                )
+            if event_ids and assertion.source_event_id not in event_ids:
+                raise CareContinuityExecutionError(
+                    "The source assertion does not belong to the supplied source event"
+                )
+
+        if assertion.source_message_id:
+            assertion_conversation = db.query(ConversationSession).filter(
+                ConversationSession.id == assertion.source_conversation_id,
+                ConversationSession.person_id == person_id,
+            ).first()
+            assertion_message = db.query(ConversationMessage).filter(
+                ConversationMessage.id == assertion.source_message_id,
+                ConversationMessage.session_id == assertion.source_conversation_id,
+                ConversationMessage.role == "user",
+            ).first()
+            if assertion_conversation is None or assertion_message is None:
+                raise CareContinuityExecutionError(
+                    "The source assertion references a Companion message missing from or outside this care record"
+                )
+
         if source_message_id and (
             str(assertion.source_message_id or "") != str(source_message_id)
             or str(assertion.source_conversation_id or "") != str(source_conversation_id)
