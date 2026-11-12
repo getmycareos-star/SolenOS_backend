@@ -170,7 +170,13 @@ from starlette.requests import Request
 
 from app.models.care import Caregiver, Evidence, Person
 from app.models.collaboration import EvidenceUpload
-from app.api.collaboration import upload_evidence
+from app.api.collaboration import (
+    upload_evidence,
+    delete_uploaded_document,
+    link_corrected_document_version,
+    compare_document_version,
+    DocumentVersionLinkRequest,
+)
 from app.models.capture_analysis import CaptureAnalysis
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
 
@@ -288,4 +294,160 @@ def test_postgres_document_upload_extraction_retry_persistence_and_person_isolat
     finally:
         # CI database is disposable. Leave fixture rows intact if append-only
         # audit dependencies exist; unique IDs prevent collisions between runs.
+        engine.dispose()
+
+
+def _upload_document_for_lifecycle(db, person_id: str, caregiver_id: str, filename: str, content: bytes):
+    return asyncio.run(upload_evidence(
+        _request(person_id, caregiver_id),
+        UploadFile(
+            filename=filename,
+            file=io.BytesIO(content),
+            headers=Headers({"content-type": "text/plain"}),
+        ),
+        person_id,
+        caregiver_id,
+        "document",
+        "",
+        "not_provided",
+        "0",
+        "{}",
+        "false",
+        db,
+    ))
+
+
+def test_postgres_document_deletion_erases_original_and_uncommitted_extraction():
+    """A caregiver deletion removes the binary and derived text, and stops retries."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-delete-person-{suffix}"
+    caregiver_id = f"doc-delete-caregiver-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document deletion fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Document deletion caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            original = b"Private unrelated document content. " + suffix.encode("ascii")
+            uploaded = _upload_document_for_lifecycle(db, person_id, caregiver_id, "unrelated-private.txt", original)
+            evidence_id = uploaded["evidence_id"]
+            assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
+
+        with Session() as db:
+            result = delete_uploaded_document(evidence_id, _request(person_id, caregiver_id), db)
+            assert result["deleted"] is True
+            assert result["original_file_removed"] is True
+            assert result["derived_extraction_removed"] is True
+
+        with Session() as db:
+            evidence = db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).one()
+            assert evidence.evidence_status == "deleted_by_caregiver"
+            assert "filename" not in json.loads(evidence.extra_metadata or "{}")
+            assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 0
+            assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
+            assert db.query(QwenBackgroundJob).filter(
+                QwenBackgroundJob.person_id == person_id,
+                QwenBackgroundJob.workflow == "document_intake",
+                QwenBackgroundJob.evidence_ids_json == json.dumps([evidence_id]),
+            ).one().status == "cancelled"
+            with pytest.raises(HTTPException) as denied:
+                extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
+            assert denied.value.status_code == 404
+    finally:
+        engine.dispose()
+
+
+def test_postgres_document_deletion_refuses_to_orphan_lcr_assertions():
+    """A source document cannot be erased while a live LCR assertion depends on it."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-dependent-person-{suffix}"
+    caregiver_id = f"doc-dependent-caregiver-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document dependency fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Document dependency caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            uploaded = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "source-document.txt",
+                b"Source document supports a care assertion.",
+            )
+            evidence_id = uploaded["evidence_id"]
+            db.add(CareAssertion(
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="observation",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="A source-grounded assertion.",
+                source_label="Caregiver-reviewed document",
+                source_text="Source document supports a care assertion.",
+                evidence_ids=[evidence_id],
+                assertion_status="accepted",
+                created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+        with Session() as db:
+            with pytest.raises(HTTPException) as blocked:
+                delete_uploaded_document(evidence_id, _request(person_id, caregiver_id), db)
+            assert blocked.value.status_code == 409
+            assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
+    finally:
+        engine.dispose()
+
+
+def test_postgres_corrected_document_version_link_is_explicit_and_non_destructive():
+    """A corrected upload links to its predecessor without replacing either original."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-version-person-{suffix}"
+    caregiver_id = f"doc-version-caregiver-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document version fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Document version caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            previous = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "discharge-summary.txt",
+                b"Original discharge date: Monday.",
+            )
+            replacement = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "discharge-summary-corrected.txt",
+                b"Corrected discharge date: Tuesday.",
+            )
+
+        with Session() as db:
+            linked = link_corrected_document_version(
+                previous["evidence_id"],
+                DocumentVersionLinkRequest(replacement_evidence_id=replacement["evidence_id"]),
+                _request(person_id, caregiver_id),
+                db,
+            )
+            assert linked["relationship"] == "corrected_version_of"
+            assert linked["automatic_lcr_replacement"] is False
+
+        with Session() as db:
+            current = db.query(Evidence).filter_by(id=replacement["evidence_id"], person_id=person_id).one()
+            predecessor = db.query(Evidence).filter_by(id=previous["evidence_id"], person_id=person_id).one()
+            assert current.parent_evidence_id == predecessor.id
+            assert db.query(EvidenceUpload).filter_by(evidence_id=current.id).count() == 1
+            assert db.query(EvidenceUpload).filter_by(evidence_id=predecessor.id).count() == 1
+            comparison = compare_document_version(current.id, _request(person_id, caregiver_id), db)
+            assert comparison["comparison_status"] == "pending"
+            assert comparison["lcr_changed"] is False
+    finally:
         engine.dispose()
