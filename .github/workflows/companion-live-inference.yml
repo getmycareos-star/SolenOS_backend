@@ -3,11 +3,22 @@ name: Companion live Qwen inference evaluation
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/companion-live-inference.yml"
+      - "backend/app/services/qwen*"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/api/companion_review.py"
+      - "backend/live_tests/**"
+      - "backend/tests/test_companion_care_update_postgres.py"
+      - "backend/tests/test_qwen_background_worker.py"
 permissions:
   contents: read
 
 concurrency:
-  group: companion-live-qwen-${{ github.event.pull_request.number || github.ref }}
+  group: companion-live-qwen-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
