@@ -1937,6 +1937,19 @@ def prepare_handoff_draft(
             "label": "Allergy and reaction records",
             "count": 0,
         }
+    if payload.audience == "professional":
+        # Medication and allergy assertions must never leak through the broad
+        # generic assertion adapter. The dedicated medication adapter above
+        # includes only reviewed current reports; allergies remain unavailable.
+        records = [
+            item for item in records
+            if not (
+                item.get("source_table") == "care_assertions"
+                and item.get("source_type") != "caregiver_reviewed_medication_report"
+                and str((item.get("details") or {}).get("subject_type") or "").strip().lower()
+                in {"medication", "medications", "allergy", "allergies"}
+            )
+        ]
     statuses["community"] = {"status": "not_authorized", "reason": "community_source_not_enabled", "count": 0}
 
     # Resolve only explicitly linked evidence and keep author/reporter/uploader,
