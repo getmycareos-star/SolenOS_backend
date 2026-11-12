@@ -214,12 +214,6 @@ def test_shared_coordinator_returns_verified_readback_and_stage_statuses(monkeyp
     )
     db = _session({Person: person, CareEvent: event, Evidence: evidence})
     monkeypatch.setattr(execution, "reconcile_person_change_intelligence", Mock())
-    monkeypatch.setattr(
-        execution,
-        "build_lcr_context",
-        Mock(return_value={"missing_required_sources": []}),
-    )
-
     result = execution.execute_care_continuity_reconciliation(
         db,
         "person-1",
@@ -242,7 +236,7 @@ def test_shared_coordinator_returns_verified_readback_and_stage_statuses(monkeyp
         "assessment": "pending",
         "review": "required",
         "reconciliation": "staged_in_caller_transaction",
-        "longitudinal_retrieval": "available",
+        "longitudinal_retrieval": "not_verified",
     }
     db.commit.assert_not_called()
     db.rollback.assert_not_called()
