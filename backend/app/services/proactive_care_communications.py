@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.change_enums import SignificanceVerdict
-from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care import CareAssertion, CareEvent, Caregiver, Evidence
 from app.models.change import Change
 from app.models.notifications import CareNotification
-from app.models.uncertainty import OpenQuestion
+from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 
 
 def _has_same_person_source(db: Session, person_id: str, source_ids: list[str]) -> bool:
@@ -34,6 +34,36 @@ def _has_same_person_source(db: Session, person_id: str, source_ids: list[str]) 
         Evidence.id.in_(ids),
     ).first()
     return evidence is not None
+
+
+def _has_question_source(db: Session, person_id: str, contexts: list[dict]) -> bool:
+    for item in contexts:
+        if not isinstance(item, dict):
+            continue
+        source_id = item.get("source_id")
+        source_kind = item.get("source_kind")
+        if not isinstance(source_id, str) or not source_id.strip():
+            continue
+        if source_kind == "information_gap":
+            found = db.query(InformationGap.id).filter(
+                InformationGap.id == source_id,
+                InformationGap.person_id == person_id,
+            ).first()
+        elif source_kind == "contradiction":
+            found = db.query(Contradiction.id).filter(
+                Contradiction.id == source_id,
+                Contradiction.person_id == person_id,
+            ).first()
+        elif source_kind == "stale_or_unreviewed_assertion":
+            found = db.query(CareAssertion.id).filter(
+                CareAssertion.id == source_id,
+                CareAssertion.person_id == person_id,
+            ).first()
+        else:
+            found = None
+        if found is not None:
+            return True
+    return False
 
 
 def _create_notification(
@@ -132,11 +162,7 @@ def create_proactive_care_notifications(
     ).all()
     for question in questions:
         contexts = question.context if isinstance(question.context, list) else []
-        has_source_link = any(
-            isinstance(item, dict) and item.get("source_kind") and item.get("source_id")
-            for item in contexts
-        )
-        if not has_source_link:
+        if not question.necessity_rationale or not _has_question_source(db, person_id, contexts):
             continue
         for caregiver in caregivers:
             created += int(_create_notification(
