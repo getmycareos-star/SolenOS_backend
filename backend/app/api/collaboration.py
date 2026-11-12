@@ -1152,6 +1152,125 @@ def link_corrected_document_version(
     }
 
 
+@router.get("/upload/{evidence_id}/version-comparison")
+def compare_document_version(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    """Compare source-grounded candidate statements across an explicitly linked version pair."""
+    person_id, caregiver_id = _scope(request, db)
+    replacement = db.query(EvidenceModel).filter(
+        EvidenceModel.id == evidence_id,
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        EvidenceModel.type == "document",
+        EvidenceModel.evidence_status != "deleted_by_caregiver",
+    ).first()
+    if replacement is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    predecessor_id = replacement.parent_evidence_id
+    if not predecessor_id:
+        raise HTTPException(status_code=404, detail="This document has no linked earlier version")
+    predecessor = db.query(EvidenceModel).filter(
+        EvidenceModel.id == predecessor_id,
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        EvidenceModel.type == "document",
+        EvidenceModel.evidence_status != "deleted_by_caregiver",
+    ).first()
+    if predecessor is None:
+        raise HTTPException(status_code=409, detail="The earlier document version is no longer available")
+
+    def latest_candidates(source_id: str):
+        analyses = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.caregiver_id == caregiver_id,
+            CaptureAnalysis.source_evidence_id == source_id,
+        ).order_by(CaptureAnalysis.created_at.desc()).all()
+        for analysis in analyses:
+            metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+            if metadata.get("kind") != "document_extraction_v1":
+                continue
+            intelligence = metadata.get("document_intelligence")
+            if analysis.extraction_status != "available" or not isinstance(intelligence, dict):
+                return None
+            if intelligence.get("status") != "available":
+                return None
+            if intelligence.get("unprocessed_page_numbers") or intelligence.get("unreadable_page_numbers"):
+                return None
+            observations = intelligence.get("observations")
+            if not isinstance(observations, list):
+                return None
+            return [item for item in observations if isinstance(item, dict)]
+        return None
+
+    previous_items = latest_candidates(predecessor_id)
+    replacement_items = latest_candidates(evidence_id)
+    if previous_items is None or replacement_items is None:
+        return {
+            "predecessor_evidence_id": predecessor_id,
+            "replacement_evidence_id": evidence_id,
+            "comparison_status": "pending",
+            "reason": "Both documents need complete extraction and interpretation before their statements can be compared.",
+            "lcr_changed": False,
+        }
+
+    def key(item: dict) -> tuple[str, str]:
+        return (
+            str(item.get("field_type") or "observation").strip().casefold(),
+            str(item.get("subject") or "").strip().casefold(),
+        )
+
+    previous_by_key = {}
+    replacement_by_key = {}
+    for item in previous_items:
+        previous_by_key.setdefault(key(item), []).append(item)
+    for item in replacement_items:
+        replacement_by_key.setdefault(key(item), []).append(item)
+
+    added = []
+    removed = []
+    changed = []
+    for candidate_key in sorted(set(previous_by_key) | set(replacement_by_key)):
+        old_group = previous_by_key.get(candidate_key, [])
+        new_group = replacement_by_key.get(candidate_key, [])
+        old_values = {str(item.get("observation") or "").strip() for item in old_group}
+        new_values = {str(item.get("observation") or "").strip() for item in new_group}
+        if old_values == new_values:
+            continue
+        if old_values and new_values:
+            changed.append({
+                "field_type": candidate_key[0],
+                "subject": candidate_key[1],
+                "previous_statements": [
+                    {"statement": item.get("observation"), "page_number": item.get("page_number")}
+                    for item in old_group
+                ],
+                "replacement_statements": [
+                    {"statement": item.get("observation"), "page_number": item.get("page_number")}
+                    for item in new_group
+                ],
+                "review_status": "comparison_only_not_clinically_verified",
+            })
+        else:
+            target = added if new_values else removed
+            source_group = new_group if new_values else old_group
+            target.extend({
+                "field_type": item.get("field_type"),
+                "subject": item.get("subject"),
+                "statement": item.get("observation"),
+                "page_number": item.get("page_number"),
+            } for item in source_group)
+
+    return {
+        "predecessor_evidence_id": predecessor_id,
+        "replacement_evidence_id": evidence_id,
+        "comparison_status": "available",
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "lcr_changed": False,
+        "interpretation": "Differences are source-grounded document statements, not a determination that either version is clinically correct.",
+    }
+
+
 @router.delete("/upload/{evidence_id}")
 def delete_uploaded_document(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Remove a caregiver-owned document and its uncommitted derived data.
@@ -1186,6 +1305,20 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
             status_code=409,
             detail="This document has a corrected version linked to it. Remove or relink the version relationship first.",
         )
+    predecessor_id = evidence.parent_evidence_id
+    if predecessor_id:
+        predecessor = db.query(EvidenceModel).filter(
+            EvidenceModel.id == predecessor_id,
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        ).with_for_update().first()
+        if predecessor is not None:
+            predecessor_meta = _document_metadata(predecessor)
+            predecessor_version = predecessor_meta.get("document_version")
+            if isinstance(predecessor_version, dict) and predecessor_version.get("replacement_evidence_id") == evidence_id:
+                predecessor_meta.pop("document_version", None)
+                predecessor.extra_metadata = json.dumps(predecessor_meta, ensure_ascii=False)
+        evidence.parent_evidence_id = None
 
     now = datetime.now(timezone.utc)
     jobs = db.query(QwenBackgroundJob).filter(
@@ -2887,6 +3020,7 @@ async def create_qwen_background_job(
         rows = db.query(EvidenceModel.id).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+            EvidenceModel.evidence_status != "deleted_by_caregiver",
             EvidenceModel.id.in_(payload.evidence_ids),
         ).all()
         if len({str(row[0]) for row in rows}) != len(set(payload.evidence_ids)):
