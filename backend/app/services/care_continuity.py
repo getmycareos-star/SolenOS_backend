@@ -411,6 +411,7 @@ def next_best_questions(
                 (row for row in matching_rows if row.status in {"open", "unresolved"}),
                 None,
             )
+            existing_before = _open_question_state(existing) if existing is not None else None
             if existing is None:
                 automatically_closed = next(
                     (
@@ -422,6 +423,7 @@ def next_best_questions(
                 )
                 if automatically_closed is not None and _question_has_new_grounding(automatically_closed, clean):
                     existing = automatically_closed
+                    existing_before = _open_question_state(existing)
                     # Reopen only after a new persisted source/evidence arrives;
                     # a repeated assessment of unchanged information is not new.
                     existing.status = "open"
@@ -460,10 +462,15 @@ def next_best_questions(
                 )
                 db.add(question)
                 db.flush()
+                _record_open_question_revision(
+                    db, question, before_state=None, change_kind="created"
+                )
                 persisted_id = question.id
             else:
                 # Refresh an existing unanswered question with newly linked source records.
                 # Keep unresolved questions unresolved; never rewrite their status.
+                if existing_before is None:
+                    existing_before = _open_question_state(existing)
                 existing.evidence_ids = list(dict.fromkeys(
                     list(existing.evidence_ids or []) + list(clean["evidence_ids"] or [])
                 ))
@@ -487,6 +494,10 @@ def next_best_questions(
                 existing.priority = Priority(clean["priority"]) if _priority_weight(clean["priority"]) > _priority_weight(existing.priority) else existing.priority
                 existing.necessity = clean["necessity"]
                 existing.necessity_rationale = clean["necessity_rationale"]
+                if existing_before != _open_question_state(existing):
+                    _record_open_question_revision(
+                        db, existing, before_state=existing_before, change_kind="updated"
+                    )
                 persisted_id = existing.id
         clean["persisted_question_id"] = persisted_id
         output.append(clean)
