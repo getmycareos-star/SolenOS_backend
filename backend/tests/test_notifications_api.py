@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.notifications import CareNotification
+from app.models.privacy_delivery import NotificationReadReceipt
 
 
 engine = create_engine(
@@ -88,7 +89,19 @@ def test_notifications_feed_unread_count_and_read_are_scoped(monkeypatch):
                 category="care_update",
                 priority="normal",
             )
-            db.add(item)
+            resolved_item = CareNotification(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                title="Previously resolved care change",
+                body="This change was superseded by newer saved information.",
+                category="care_change",
+                priority="normal",
+                source_event_id="resolved-source",
+                status="resolved",
+                resolved_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                resolution_reason="source_superseded",
+            )
+            db.add_all([item, resolved_item])
             db.commit()
             db.refresh(item)
             item_id = item.id
@@ -97,9 +110,13 @@ def test_notifications_feed_unread_count_and_read_are_scoped(monkeypatch):
 
         feed = client.get("/api/v1/notifications?limit=100&offset=0", headers=first_headers)
         assert feed.status_code == 200, feed.text
-        assert len(feed.json()["items"]) == 1
-        assert feed.json()["items"][0]["id"] == item_id
-        assert feed.json()["items"][0]["is_read"] is False
+        assert len(feed.json()["items"]) == 2
+        active_item = next(row for row in feed.json()["items"] if row["id"] == item_id)
+        resolved_feed_item = next(row for row in feed.json()["items"] if row["category"] == "care_change")
+        assert active_item["is_read"] is False
+        assert active_item["status"] == "active"
+        assert resolved_feed_item["status"] == "resolved"
+        assert resolved_feed_item["resolution_reason"] == "source_superseded"
 
         unread = client.get("/api/v1/notifications/unread-count", headers=first_headers)
         assert unread.status_code == 200, unread.text
@@ -115,5 +132,13 @@ def test_notifications_feed_unread_count_and_read_are_scoped(monkeypatch):
         marked = client.patch(f"/api/v1/notifications/{item_id}/read", headers=first_headers, json={})
         assert marked.status_code == 200, marked.text
         assert marked.json()["is_read"] is True
+        db = TestSession()
+        try:
+            assert db.query(NotificationReadReceipt).filter_by(
+                notification_id=item_id,
+                reader_id=caregiver_id,
+            ).count() == 1
+        finally:
+            db.close()
     finally:
         teardown()
