@@ -76,36 +76,36 @@ def test_document_intelligence_defers_when_source_extraction_has_failed_pages(mo
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
-    session_data = create_record(client, "Incomplete document extraction caregiver")
-    source = (
-        "[Page 1 OCR]\nPatient walked 20 metres with a frame.\n\n"
-        "[Page 2 OCR]\n[Page not processed: OCR operation failed]"
-    )
-    evidence_id = save_original(session_data, source)
-    auth = {"Authorization": f"Bearer {session_data['access_token']}"}
+    try:
+        session_data = create_record(client, "Incomplete document extraction caregiver")
+        source = (
+            "[Page 1 OCR]\\nPatient walked 20 metres with a frame.\\n\\n"
+            "[Page 2 OCR]\\n[Page not processed: OCR operation failed]"
+        )
+        evidence_id = save_original(session_data, source)
+        auth = {"Authorization": f"Bearer {session_data['access_token']}"}
 
-    extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
-    assert extracted.status_code == 201, extracted.text
-    assert extracted.json()["unprocessed_page_numbers"] == [2]
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        assert extracted.json()["unprocessed_page_numbers"] == [2]
 
-    monkeypatch.setattr(
-        intelligence_module,
-        "extract_review_candidates",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("Qwen must not interpret a document with failed extraction pages")
-        ),
-    )
-    understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
-    assert understood.status_code == 201, understood.text
-    assert understood.json()["intelligence_status"] == "partial"
-    assert understood.json()["unprocessed_page_numbers"] == [2]
-    assert understood.json()["observations"] == []
-    assert any("interpretation is paused" in value for value in understood.json()["open_questions"])
-
-    client.close()
-    app.dependency_overrides.pop(get_db, None)
-    Base.metadata.drop_all(bind=engine)
-
+        monkeypatch.setattr(
+            intelligence_module,
+            "extract_review_candidates",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("Qwen must not interpret a document with failed extraction pages")
+            ),
+        )
+        understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert understood.status_code == 201, understood.text
+        assert understood.json()["intelligence_status"] == "partial"
+        assert understood.json()["unprocessed_page_numbers"] == [2]
+        assert understood.json()["observations"] == []
+        assert any("interpretation is paused" in value for value in understood.json()["open_questions"])
+    finally:
+        client.close()
+        app.dependency_overrides.pop(get_db, None)
+        Base.metadata.drop_all(bind=engine)
 
 def test_document_understanding_review_accept_reject_reload_and_cross_person(monkeypatch):
     Base.metadata.create_all(bind=engine)
