@@ -1106,6 +1106,134 @@ def main():
                 and lcr_matches[0].get("source_type") == "caregiver_report",
                 f"LCR did not reconcile the same authorized caregiver source: {lcr_matches}")
 
+        # Scenario 01: four natural-language reports across one day must become
+        # four durable, separately attributed sources in the same PostgreSQL LCR.
+        scenario_reports = [
+            "Mum slept poorly last night and seemed more unsettled this morning.",
+            "Mum barely touched her lunch today. She drank some water, though.",
+            "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose.",
+            "Mum was calmer this evening. She ate a little more at dinner and is now resting.",
+        ]
+        scenario_receipts = []
+        for index, report in enumerate(scenario_reports, start=1):
+            scenario_payload = {
+                "person_id": person_a,
+                "caregiver_id": caregiver_a,
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": f"postgres-scenario-01-report-{index:02d}",
+                "notes": report,
+            }
+            status, receipt = request(
+                "POST", "/api/v1/daily-care/entries", token=token_a, body=scenario_payload,
+            )
+            require(
+                status == 200 and receipt.get("success") is True
+                and receipt.get("id") and len(receipt.get("evidence_ids") or []) == 1,
+                f"Scenario 01 report {index} was not durably accepted: {status}: {receipt}",
+            )
+            scenario_receipts.append((scenario_payload, receipt))
+
+        scenario_event_ids = [receipt["id"] for _, receipt in scenario_receipts]
+        scenario_evidence_ids = [receipt["evidence_ids"][0] for _, receipt in scenario_receipts]
+        require(
+            len(set(scenario_event_ids)) == 4 and len(set(scenario_evidence_ids)) == 4,
+            "Scenario 01 reports must remain separate source events and evidence records",
+        )
+
+        with SessionLocal() as db:
+            scenario_events = [
+                db.query(CareEvent).filter_by(id=event_id, person_id=person_a).one()
+                for event_id in scenario_event_ids
+            ]
+            require(
+                [event.recorded_at for event in scenario_events]
+                == sorted(event.recorded_at for event in scenario_events),
+                "Scenario 01 source reports were not recorded in chronological order",
+            )
+            for index, ((scenario_payload, _receipt), event, evidence_id) in enumerate(
+                zip(scenario_receipts, scenario_events, scenario_evidence_ids), start=1,
+            ):
+                require(
+                    json.loads(event.description).get("notes") == scenario_payload["notes"]
+                    and event.created_by_caregiver_id == caregiver_a,
+                    f"Scenario 01 report {index} did not preserve exact wording and caregiver attribution",
+                )
+                source = db.execute(
+                    text("""
+                        SELECT person_id, reported_by_caregiver_id, source_text
+                        FROM evidence WHERE id = :evidence_id
+                    """),
+                    {"evidence_id": evidence_id},
+                ).mappings().one()
+                source_payload = json.loads(source["source_text"])
+                require(
+                    source["person_id"] == person_a
+                    and source["reported_by_caregiver_id"] == caregiver_a
+                    and source_payload["original_capture"]["notes"] == scenario_payload["notes"],
+                    f"Scenario 01 report {index} did not preserve its exact scoped source evidence",
+                )
+
+            medication_assertions = db.query(CareAssertion).filter_by(
+                person_id=person_a, subject_type="medication",
+            ).count()
+            require(
+                medication_assertions == 0,
+                "An uncertain medication report must not create a medication assertion",
+            )
+
+        status, scenario_history = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_a,
+        )
+        require(status == 200, f"Scenario 01 history retrieval failed: {status}: {scenario_history}")
+        require(
+            all(
+                sum(1 for row in scenario_history if row.get("id") == event_id) == 1
+                for event_id in scenario_event_ids
+            ),
+            "Scenario 01 source reports were not individually retrievable from care history",
+        )
+
+        status, scenario_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
+        )
+        require(status == 200, f"Scenario 01 LCR retrieval failed: {status}: {scenario_lcr}")
+        scenario_lcr_rows = [
+            row for row in scenario_lcr.get("items", [])
+            if row.get("id") in set(scenario_event_ids)
+        ]
+        require(
+            len(scenario_lcr_rows) == 4
+            and all(row.get("source_type") == "caregiver_report" for row in scenario_lcr_rows)
+            and all(row.get("epistemic_status") == "caregiver_reported" for row in scenario_lcr_rows),
+            "Scenario 01 reports did not reconcile into the existing LCR with caregiver provenance",
+        )
+
+        # Retrying the first report must return the same source IDs, not duplicate
+        # the event, evidence or extraction analysis.
+        first_scenario_payload, first_scenario_receipt = scenario_receipts[0]
+        status, replayed_scenario = request(
+            "POST", "/api/v1/daily-care/entries", token=token_a, body=first_scenario_payload,
+        )
+        require(
+            status == 200
+            and replayed_scenario.get("id") == first_scenario_receipt["id"]
+            and replayed_scenario.get("evidence_ids") == first_scenario_receipt["evidence_ids"]
+            and replayed_scenario.get("idempotent_replay") is True,
+            f"Scenario 01 retry did not return the original source IDs: {status}: {replayed_scenario}",
+        )
+
+        foreign_scenario_status, _ = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_b,
+        )
+        require(
+            foreign_scenario_status == 403,
+            f"Another caregiver session accessed Scenario 01 history: {foreign_scenario_status}",
+        )
+        print(
+            "PASS: Daily Care Scenario 01 four natural-language reports, exact PostgreSQL source "
+            "preservation, caregiver/person scoping, idempotent retry, History and LCR retrieval."
+        )
+
         # Exercise the caregiver review lifecycle against this real PostgreSQL
         # Daily Care event. Candidate generation is seeded as a persisted extraction
         # so this test does not depend on an external Qwen model being available.
