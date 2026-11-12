@@ -350,18 +350,30 @@ def list_responsibility_transfers(request: Request, db: Session = Depends(get_db
     if not bool(getattr(request.state, "caregiver_can_manage_members", False)):
         query = query.filter(CaregiverResponsibilityTransfer.to_caregiver_profile_id == profile.id)
     transfers = query.order_by(CaregiverResponsibilityTransfer.created_at.desc()).all()
-    return [{
-        "id": item.id,
-        "source_responsibility_id": item.source_responsibility_id,
-        "from_caregiver_profile_id": item.from_caregiver_profile_id,
-        "to_caregiver_profile_id": item.to_caregiver_profile_id,
-        "related_record_type": item.related_record_type,
-        "related_record_id": item.related_record_id,
-        "reason": item.reason,
-        "status": item.status,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
-        "accepted_at": item.accepted_at.isoformat() if item.accepted_at else None,
-    } for item in transfers]
+    result = []
+    for item in transfers:
+        source = db.query(CaregiverResponsibility).filter(
+            CaregiverResponsibility.id == item.source_responsibility_id,
+            CaregiverResponsibility.person_id == person_id,
+        ).first()
+        from_profile = db.query(CaregiverProfile).filter(CaregiverProfile.id == item.from_caregiver_profile_id).first()
+        to_profile = db.query(CaregiverProfile).filter(CaregiverProfile.id == item.to_caregiver_profile_id).first()
+        result.append({
+            "id": item.id,
+            "source_responsibility_id": item.source_responsibility_id,
+            "responsibility_type": source.responsibility_type if source else "Care responsibility",
+            "from_caregiver_profile_id": item.from_caregiver_profile_id,
+            "from_caregiver_name": from_profile.name if from_profile else "Previous caregiver",
+            "to_caregiver_profile_id": item.to_caregiver_profile_id,
+            "to_caregiver_name": to_profile.name if to_profile else "Caregiver",
+            "related_record_type": item.related_record_type,
+            "related_record_id": item.related_record_id,
+            "reason": item.reason,
+            "status": item.status,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "accepted_at": item.accepted_at.isoformat() if item.accepted_at else None,
+        })
+    return result
 
 
 @router.post("/responsibility-transfers/{transfer_id}/accept")
