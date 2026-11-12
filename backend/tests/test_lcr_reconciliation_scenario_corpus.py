@@ -20,14 +20,32 @@ FAMILY_COUNTS = {
     "medication_safety": 10,
 }
 
+# Distinct longitudinal domains and source-grounded values prevent the 100-case
+# corpus from being 100 copies of one sleep/medication story.
+OBSERVATION_VARIANTS = [
+    ("sleep", "daughter reports poor sleep", "daughter reports sleep improved", "sleep", "sleep improved"),
+    ("mobility", "daughter reports unsteady standing", "daughter reports steadier standing", "standing", "steadier standing"),
+    ("appetite", "daughter reports reduced appetite", "daughter reports appetite improved", "appetite", "appetite improved"),
+    ("pain", "daughter reports knee pain", "daughter reports knee pain eased", "knee pain", "knee pain eased"),
+    ("orientation", "daughter reports disorientation", "daughter reports orientation improved", "orientation", "orientation improved"),
+    ("hydration", "daughter reports drinking less than usual", "daughter reports fluid intake improved", "fluid intake", "fluid intake improved"),
+    ("agitation", "daughter reports increased agitation", "daughter reports agitation reduced", "agitation", "agitation reduced"),
+    ("toileting", "daughter reports nighttime toileting increased", "daughter reports nighttime toileting eased", "toileting", "toileting eased"),
+    ("communication", "daughter reports fewer clear responses", "daughter reports clearer responses", "responses", "clearer responses"),
+    ("participation", "daughter reports less participation in meals", "daughter reports better participation in meals", "participation", "better participation"),
+]
+
 
 def _make_scenario(case_number: int, family: str, variant: int) -> dict:
     case_id = f"lcr-{case_number:03d}"
     person_id = f"person-{case_number:03d}"
     evidence = [f"evidence-{case_number:03d}-{n:02d}" for n in range(1, 10)]
+    observation_topic, initial_claim, later_claim, assertion_name, later_value = OBSERVATION_VARIANTS[variant % len(OBSERVATION_VARIANTS)]
+    initial_value = initial_claim.removeprefix("daughter reports ").strip()
     events = [
         {"id": f"{case_id}-01", "day": 1, "arrival": 1, "kind": "observation",
-         "topic": "sleep", "claim": "poor sleep", "reporter": "daughter",
+         "topic": observation_topic, "claim": initial_claim, "assertion_name": assertion_name,
+         "assertion_value": initial_value, "reporter": "daughter",
          "evidence_id": evidence[0], "classification": "new_observation"},
         {"id": f"{case_id}-02", "day": 3, "arrival": 2, "kind": "document",
          "topic": "medication", "claim": "hospital document lists medication A",
@@ -50,10 +68,12 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
          "reporter": "daughter", "evidence_id": evidence[5],
          "corrects_event_id": f"{case_id}-01", "classification": "correction_supersedes_date"},
         {"id": f"{case_id}-07", "day": 14, "arrival": 7, "kind": "observation",
-         "topic": "sleep", "claim": "sleep improved", "reporter": "daughter",
+         "topic": observation_topic, "claim": later_claim, "assertion_name": assertion_name,
+         "assertion_value": later_value, "reporter": "daughter",
          "evidence_id": evidence[6], "classification": "new_observation"},
         {"id": f"{case_id}-08", "day": 18, "arrival": 8, "kind": "observation",
          "topic": "cognition", "claim": "another caregiver reports increased confusion",
+         "assertion_name": "confusion", "assertion_value": "increased confusion",
          "reporter": "son", "evidence_id": evidence[7],
          "classification": "new_observation"},
     ]
@@ -112,14 +132,15 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
         "incoming_events": events,
         "expected_final_state": {
             "assertions": [
-                {"topic": "sleep", "value": "improved", "status": "reported",
+                {"topic": observation_topic, "value": later_value, "status": "reported",
                  "source_event_id": f"{case_id}-07"},
                 {"topic": "cognition", "value": "increased_confusion", "status": "reported",
                  "source_event_id": f"{case_id}-08"},
             ],
             "medication_current_state": "unresolved_not_promoted",
             "historical_record_ids": event_ids,
-            "superseded_record_ids": [f"{case_id}-01"],
+            "corrected_record_ids": [f"{case_id}-01"],
+            "superseded_record_ids": [],
             "duplicate_groups": (
                 [[f"{case_id}-01", f"{case_id}-09"]]
                 if family == "duplicate_observations" else []
