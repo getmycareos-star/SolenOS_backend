@@ -32,12 +32,16 @@ def page_for_excerpt(source_text: str, excerpt: str) -> int | None:
     if not excerpt or excerpt not in source_text:
         return None
     matches: list[int] = []
-    markers = list(_PAGE_MARKER.finditer(source_text))
+    # OCR adapters and older persisted extracts may encode page breaks as
+    # literal backslash-n sequences. Normalize those for page attribution so
+    # repeated quotes are not incorrectly assigned to page 1.
+    page_text = source_text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    markers = list(_PAGE_MARKER.finditer(page_text))
     if not markers:
         return 1
     for index, marker in enumerate(markers):
-        end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
-        if excerpt in source_text[marker.end():end]:
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(page_text)
+        if excerpt in page_text[marker.end():end]:
             matches.append(int(marker.group(1)))
     return matches[0] if len(matches) == 1 else None
 
