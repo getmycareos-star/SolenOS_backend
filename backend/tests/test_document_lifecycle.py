@@ -497,3 +497,30 @@ def test_legacy_doc_is_preserved_but_reports_explicit_unsupported_extraction(cli
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert response.status_code == 415, response.text
     assert ".doc files are preserved" in response.json()["detail"]
+
+
+def test_snap_care_photo_upload_is_persisted_without_document_ocr(client):
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    image_bytes = _scanned_text_image()
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "care_photo",
+        },
+        files={"file": ("current-care-photo.png", image_bytes, "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+    with TestSessionLocal() as db:
+        evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+        assert evidence.type == "care_photo"
+        assert upload.content == image_bytes
+        assert upload.sha256
+    # Document OCR is intentionally not run against Snap care-photo evidence.
+    extraction = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert extraction.status_code == 404, extraction.text
