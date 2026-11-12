@@ -16,7 +16,7 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
-from app.models.collaboration import ConversationMessage
+from app.models.collaboration import ConversationMessage, ConversationSession
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
 app = main_module.app
