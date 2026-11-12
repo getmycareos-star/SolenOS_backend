@@ -19,6 +19,7 @@ from app.api.collaboration import _scope
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.notifications import CarePushSubscription
+from app.services.web_push_config import vapid_configuration_error
 
 router = APIRouter(tags=["notifications"])
 
@@ -57,13 +58,7 @@ class PushSubscriptionDelete(BaseModel):
 
 
 def _vapid_configuration_ready() -> bool:
-    settings = get_settings()
-    subject = settings.vapid_subject.strip()
-    return bool(
-        settings.vapid_public_key.strip()
-        and settings.vapid_private_key.strip()
-        and (subject.startswith("mailto:") or subject.startswith("https://"))
-    )
+    return vapid_configuration_error(get_settings()) is None
 
 
 def _cipher() -> Fernet:
