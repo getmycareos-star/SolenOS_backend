@@ -9,6 +9,7 @@ import app.api.v1 as api_v1_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
 
 pytestmark = pytest.mark.session_security
@@ -141,6 +142,12 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         record = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
         assert record.source_text
         assert record.source_event_id == body["id"]
+        assert record.execution_status["source_preservation"] == "verified"
+        assert record.execution_status["evidence"] == "verified"
+        assert record.execution_status["extraction"] == "available"
+        assert record.execution_status["review"] == "completed"
+        assert record.execution_status["reconciliation"] == "completed"
+        assert record.execution_status["longitudinal_retrieval"] in {"available", "unavailable"}
         assert record.candidates["observations"][0]["observation"] == "Mum slept badly last night."
         assert record.candidates["observations"][0]["corrected_observation"] == "Mum slept poorly last night."
         assert len(record.review_history) == 2
@@ -353,5 +360,60 @@ def test_daily_capture_cannot_promote_model_observation_not_supported_by_source_
         assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
         record = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
         assert record.candidates["observations"][0]["review_status"] == "pending_review"
+    finally:
+        db.close()
+
+
+def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stages(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Execution stage recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    quote = "Mum slept badly last night."
+    seen = []
+
+    def extract(source_text, *, source_event_id, source_evidence_id=None):
+        seen.append((source_text, source_event_id, source_evidence_id))
+        return {
+            "observations": [{
+                "subject": "sleep",
+                "observation": quote,
+                "source_quote": quote,
+                "review_status": "pending_review",
+            }],
+            "open_questions": [],
+            "possible_safety_flags": [],
+        }
+
+    monkeypatch.setattr(api_v1_module, "extract_review_candidates", extract)
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": f"Caregiver report: {quote}",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["qwen_analysis_id"]
+    assert body["execution_status"]["source_preservation"] == "verified"
+    assert body["execution_status"]["evidence"] == "verified"
+    assert body["execution_status"]["extraction"] == "available"
+    assert body["execution_status"]["assessment"] == "pending"
+    assert body["execution_status"]["review"] == "required"
+    assert body["execution_status"]["reconciliation"] == "completed"
+    assert body["execution_status"]["longitudinal_retrieval"] in {"available", "unavailable"}
+
+    db = TestSessionLocal()
+    try:
+        evidence = db.query(Evidence).filter_by(id=body["evidence_ids"][0]).one()
+        analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
+        assert seen == [(evidence.source_text, body["id"], evidence.id)]
+        assert analysis.source_text == evidence.source_text
+        assert analysis.execution_status == body["execution_status"]
     finally:
         db.close()
