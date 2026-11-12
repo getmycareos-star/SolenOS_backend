@@ -244,6 +244,10 @@ def test_real_upload_endpoint_feeds_document_extraction(client):
         assert job.workflow == "document_intake"
         assert job.status == "queued"
         assert __import__("json").loads(job.evidence_ids_json) == [evidence_id]
+        stored = db.query(Evidence).filter_by(id=evidence_id).one()
+        assert stored.person_id == session["person"]["id"]
+        assert stored.uploaded_by_caregiver_id == session["caregiver"]["id"]
+        assert stored.type == "document"
 
     queue_state = test_client.get("/api/v1/documents/intelligence", headers=auth)
     assert queue_state.status_code == 200, queue_state.text
