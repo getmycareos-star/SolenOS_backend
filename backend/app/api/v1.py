@@ -573,6 +573,20 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
 
     occurred_at = datetime.now(timezone.utc)
+    event_time_provenance = "server_recorded_at"
+    supplied_event_time = payload.get("occurred_at")
+    if supplied_event_time is not None:
+        if not isinstance(supplied_event_time, str) or not supplied_event_time.strip():
+            raise HTTPException(status_code=422, detail="occurred_at must be an ISO datetime with a timezone offset")
+        try:
+            parsed_event_time = datetime.fromisoformat(supplied_event_time.replace("Z", "+00:00"))
+            if parsed_event_time.tzinfo is None or parsed_event_time.utcoffset() is None:
+                raise ValueError("Timezone offset is required")
+            occurred_at = parsed_event_time.astimezone(timezone.utc)
+            event_time_provenance = "caregiver_reported_at"
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="occurred_at must be an ISO datetime with a timezone offset")
+
     # Keep the submitted structured fields intact in the event record. The
     # existing schema has no separate medication/vitals/scales tables yet.
     detail = {key: value for key, value in payload.items() if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}}
@@ -839,7 +853,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             source_type="caregiver_report",
             origin_channel=event_type,
             collection_method="caregiver_form",
-            time_provenance="server_recorded_at",
+            time_provenance=event_time_provenance,
             occurred_at=occurred_at,
             ingestion_key=(
                 f"daily-capture:{caregiver_id}:{capture_idempotency_key}"[:128]
@@ -858,7 +872,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         description=json.dumps(detail, ensure_ascii=False, default=str),
         evidence_ids=[evidence.id] if evidence is not None else [],
         created_by_caregiver_id=caregiver_id,
-        time_provenance="server_recorded_at",
+        time_provenance=event_time_provenance,
         tags=["daily_capture"],
     )
     db.add(event)
