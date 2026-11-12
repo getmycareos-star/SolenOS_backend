@@ -2917,6 +2917,139 @@ def test_source_correction_requires_review_for_direct_and_dependent_claims():
         teardown_db()
 
 
+def test_care_event_correction_reopens_direct_and_dependent_claim_assessments():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care import Correction
+        from app.models.care_continuity import (
+            CareAssertion,
+            EvidenceClaimAssessment,
+            EvidenceClaimDependency,
+        )
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="event-correction-person", name="Event Correction Person")
+        caregiver = Caregiver(
+            id="event-correction-caregiver",
+            name="Event Correction Caregiver",
+            email="event-correction@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        assessed_at = datetime.now(timezone.utc) - timedelta(days=2)
+        event = CareEvent(
+            id="event-correction-source",
+            person_id=person.id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=assessed_at - timedelta(days=1),
+            title="Caregiver observation",
+            description="Caregiver reported unsteadiness.",
+            created_by_caregiver_id=caregiver.id,
+        )
+        source_claim = CareAssertion(
+            id="event-correction-source-claim",
+            person_id=person.id,
+            subject_type="mobility",
+            subject_id="mobility-event-correction",
+            field="unsteadiness",
+            assertion_kind="time_bound_observation",
+            asserted_value="Caregiver reported unsteadiness.",
+            source_label="caregiver report",
+            source_text="Caregiver reported unsteadiness.",
+            source_event_id=event.id,
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+            recorded_at=assessed_at - timedelta(days=1),
+            updated_at=assessed_at - timedelta(hours=1),
+        )
+        dependent_claim = CareAssertion(
+            id="event-correction-dependent-claim",
+            person_id=person.id,
+            subject_type="mobility",
+            subject_id="mobility-event-correction",
+            field="monthly_unsteadiness_count",
+            assertion_kind="derived",
+            asserted_value="Three incidents this month",
+            source_label="derived from source claim",
+            source_text="Three incidents this month",
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+            recorded_at=assessed_at - timedelta(days=1),
+            updated_at=assessed_at - timedelta(hours=1),
+        )
+        source_assessment = EvidenceClaimAssessment(
+            person_id=person.id,
+            claim_id=source_claim.id,
+            claim_version=1,
+            status="supported",
+            rationale="Reviewed before the event correction.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[],
+            reviewed_by_caregiver_id=caregiver.id,
+            created_at=assessed_at,
+        )
+        dependent_assessment = EvidenceClaimAssessment(
+            person_id=person.id,
+            claim_id=dependent_claim.id,
+            claim_version=1,
+            status="supported",
+            rationale="Reviewed before the source correction.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[],
+            reviewed_by_caregiver_id=caregiver.id,
+            created_at=assessed_at,
+        )
+        dependency = EvidenceClaimDependency(
+            person_id=person.id,
+            claim_id=dependent_claim.id,
+            depends_on_claim_id=source_claim.id,
+            dependency_type="derived_from",
+            rationale="The derived count depends on the corrected event.",
+            created_by_caregiver_id=caregiver.id,
+        )
+        correction = Correction(
+            id="event-correction-record",
+            person_id=person.id,
+            target_type="care_event",
+            target_id=event.id,
+            original_text="Caregiver reported unsteadiness.",
+            corrected_text="Caregiver clarified the event was not unsteadiness.",
+            reason="The original event wording was inaccurate.",
+            caregiver_id=caregiver.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add_all([
+            person, caregiver, event, source_claim, dependent_claim,
+            source_assessment, dependent_assessment, dependency, correction,
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        direct = client.get(
+            f"/api/v1/care-continuity/claims/{source_claim.id}/assessment-impact"
+        )
+        assert direct.status_code == 200, direct.text
+        direct_body = direct.json()
+        assert direct_body["review_required"] is True
+        assert "source_event_corrected_after_assessment" in direct_body["reasons"]
+
+        dependent = client.get(
+            f"/api/v1/care-continuity/claims/{dependent_claim.id}/assessment-impact"
+        )
+        assert dependent.status_code == 200, dependent.text
+        dependent_body = dependent.json()
+        assert dependent_body["review_required"] is True
+        assert source_claim.id in dependent_body["changed_prerequisite_claim_ids"]
+        assert "prerequisite_claim_source_or_assessment_changed" in dependent_body["reasons"]
+    finally:
+        teardown_db()
+
+
 def test_normal_reconciliation_persists_only_actionable_source_linked_questions():
     setup_db()
     try:
