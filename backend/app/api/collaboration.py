@@ -641,11 +641,12 @@ async def upload_evidence(
     scan_rotation_degrees: str = Form("0"),
     scan_crop_json: str = Form("{}"),
     scan_text_prepared: str = Form("false"),
+    db: Session = Depends(get_db),
+    *,
     capture_method: str = Form("upload"),
     capture_timestamp: str = Form(""),
     capture_page_number: Optional[int] = Form(None),
     ingestion_key: str = Form(""),
-    db: Session = Depends(get_db),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
     if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
