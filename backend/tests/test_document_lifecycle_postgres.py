@@ -479,13 +479,17 @@ def test_postgres_exact_duplicate_documents_reuse_one_lcr_assertion():
     suffix = uuid.uuid4().hex
     person_id = f"doc-duplicate-person-{suffix}"
     caregiver_id = f"doc-duplicate-caregiver-{suffix}"
+    other_caregiver_id = f"doc-duplicate-other-caregiver-{suffix}"
     source_quote = "The follow-up clinic review is recommended."
     original_bytes = (source_quote + " " + suffix).encode("utf-8")
     try:
         with Session() as db:
             db.add(Person(id=person_id, name="Document duplicate fixture"))
             db.flush()
-            db.add(Caregiver(id=caregiver_id, name="Document duplicate caregiver", relationship="family", person_id=person_id))
+            db.add_all([
+                Caregiver(id=caregiver_id, name="Document duplicate caregiver", relationship="family", person_id=person_id),
+                Caregiver(id=other_caregiver_id, name="Second document duplicate caregiver", relationship="family", person_id=person_id),
+            ])
             db.commit()
 
         with Session() as db:
@@ -520,7 +524,7 @@ def test_postgres_exact_duplicate_documents_reuse_one_lcr_assertion():
             reused = _existing_assertion_for_exact_document_duplicate(
                 db,
                 person_id=person_id,
-                caregiver_id=caregiver_id,
+                caregiver_id=other_caregiver_id,
                 evidence_id=second["evidence_id"],
                 upload=second_upload,
                 field="appointment",
@@ -534,7 +538,7 @@ def test_postgres_exact_duplicate_documents_reuse_one_lcr_assertion():
                 _existing_assertion_for_exact_document_duplicate(
                     db,
                     person_id=person_id,
-                    caregiver_id=caregiver_id,
+                    caregiver_id=other_caregiver_id,
                     evidence_id=second["evidence_id"],
                     upload=second_upload,
                     field="appointment",
