@@ -266,6 +266,7 @@ def test_shared_coordinator_validates_appointment_workspace_revision_and_keeps_c
         db,
         "person-1",
         workflow="appointment_outcome_review",
+        source_caregiver_id="caregiver-1",
         source_appointment_workspace_id="workspace-1",
         source_appointment_workspace_revision_id="revision-1",
     )
@@ -418,6 +419,41 @@ def test_shared_coordinator_rejects_incomplete_handoff_revision_reference(monkey
             workflow="handoff_draft_approval",
             source_handoff_draft_id="draft-1",
             reconcile_lcr=False,
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_appointment_workspace_from_another_caregiver(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    workspace = SimpleNamespace(
+        id="workspace-1",
+        person_id="person-1",
+        created_by_caregiver_id="different-caregiver",
+    )
+    revision = SimpleNamespace(
+        id="revision-1",
+        record_id="workspace-1",
+        person_id="person-1",
+        changed_by_caregiver_id="caregiver-1",
+    )
+    db = _session({
+        Person: person,
+        AppointmentWorkspaceRecord: workspace,
+        AppointmentWorkspaceRevision: revision,
+    })
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="authenticated caregiver"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="appointment_outcome_review",
+            source_caregiver_id="caregiver-1",
+            source_appointment_workspace_id="workspace-1",
+            source_appointment_workspace_revision_id="revision-1",
         )
 
     reconciled.assert_not_called()
