@@ -227,7 +227,7 @@ def deliver_pending_web_pushes(db=None, now=None):
             session.commit()
 
         stale_pending = (
-            session.query(CarePushDelivery)
+            session.query(CarePushDelivery, CareNotification)
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
             .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
             .filter(
@@ -246,10 +246,21 @@ def deliver_pending_web_pushes(db=None, now=None):
             )
             .all()
         )
-        for delivery in stale_pending:
+        for delivery, notification in stale_pending:
             delivery.status = "cancelled"
-            delivery.last_error_code = "notification_no_longer_deliverable"
-            delivery.last_error_message = "The source is no longer active or this device is no longer subscribed."
+            if (
+                notification.category == "open_loop_due"
+                and notification.status == "active"
+                and (
+                    notification.read_at is not None
+                    or notification.priority not in {"high", "critical", "urgent", "emergency"}
+                )
+            ):
+                delivery.last_error_code = "notification_not_push_eligible"
+                delivery.last_error_message = "The follow-up is available in the in-app inbox without a push interruption."
+            else:
+                delivery.last_error_code = "notification_no_longer_deliverable"
+                delivery.last_error_message = "The source is no longer active or this device is no longer subscribed."
         if stale_pending:
             session.commit()
 
