@@ -2259,6 +2259,27 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
                     "Source: " + str(item.get("source_table") or "unknown") + "/" + str(item.get("source_id") or "unknown"),
                     "",
                 ])
+    medication_reports = [item for item in records if isinstance(item, dict) and item.get("source_type") == "caregiver_reviewed_medication_report"]
+    if medication_reports:
+        lines.extend(["", "CAREGIVER-REVIEWED CURRENT MEDICATION REPORTS"])
+        for item in medication_reports:
+            details = item.get("details") if isinstance(item.get("details"), dict) else {}
+            lines.append("Medication: " + str(details.get("reported_name") or "Name not recorded"))
+            if details.get("reported_dose"):
+                lines.append("Reported dose: " + str(details.get("reported_dose")))
+            lines.append("Information status: " + _caregiver_evidence_label(item.get("epistemic_status")))
+            lines.append("Review status: caregiver-reviewed report; not independently clinically verified")
+            lines.append("Recorded: " + str(item.get("recorded_at") or "Not recorded"))
+            lines.append("Source: care_assertions/" + str(item.get("source_id") or "unknown"))
+            lines.append("")
+    allergy_status = statuses.get("allergies") if isinstance(statuses, dict) else None
+    if isinstance(allergy_status, dict):
+        lines.extend([
+            "ALLERGY AND REACTION INFORMATION",
+            "Status: " + str(allergy_status.get("status") or "unavailable"),
+            "No verified allergy adapter is available. This does not mean the person has no allergies.",
+            "",
+        ])
     caregiver_notes = content.get("caregiver_notes") if isinstance(content.get("caregiver_notes"), list) else []
     if caregiver_notes:
         lines.extend(["CAREGIVER-AUTHORED NOTES (NOT INDEPENDENTLY VERIFIED)"])
