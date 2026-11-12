@@ -589,3 +589,46 @@ def test_invalid_scan_adjustment_metadata_is_rejected():
         _scan_adjusted_image(original, evidence)
     assert error.value.status_code == 422
     original.close()
+
+
+def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(client):
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    payload = b"Retry-safe care note with exact content."
+    form = {
+        "person_id": session["person"]["id"],
+        "caregiver_id": session["caregiver"]["id"],
+        "evidence_type": "document",
+        "capture_method": "upload",
+        "capture_timestamp": "2026-11-12T06:15:00+00:00",
+        "ingestion_key": "stable-upload-retry-001",
+    }
+    first = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data=form,
+        files={"file": ("care-note.txt", payload, "text/plain")},
+    )
+    assert first.status_code == 201, first.text
+    first_id = first.json()["evidence_id"]
+
+    replay = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data=form,
+        files={"file": ("care-note.txt", payload, "text/plain")},
+    )
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["evidence_id"] == first_id
+    assert replay.json()["idempotent_replay"] is True
+
+    changed = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data=form,
+        files={"file": ("care-note.txt", payload + b" changed", "text/plain")},
+    )
+    assert changed.status_code == 409, changed.text
+
+    with TestSessionLocal() as db:
+        assert db.query(Evidence).filter_by(person_id=session["person"]["id"]).count() == 1
