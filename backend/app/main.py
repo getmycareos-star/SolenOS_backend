@@ -353,6 +353,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             path = request.url.path
             allowed_document_prefixes = (
                 "/api/v1/documents",
+                "/api/v1/upload",
+                "/api/v1/evidence",
                 "/api/v1/appointment-workspaces",
                 "/api/documents",
                 "/api/v1/sessions/refresh",
