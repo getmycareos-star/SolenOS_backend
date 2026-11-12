@@ -1679,3 +1679,62 @@ def test_appointment_accept_replay_does_not_report_rejected_assertion_as_active_
     assert replay.json()["idempotent_replay"] is True
     assert replay.json()["written_to_lcr"] is False
     assert replay.json()["assertion_id"] is None
+
+
+def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_reopens(client):
+    from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
+
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    initial_payload = {
+        "follow_ups": [{
+            "action": "Confirm the laboratory result with the clinic",
+            "owner": "Clinic",
+            "due": "2026-11-15T09:00:00-05:00",
+            "status": "Open",
+        }],
+    }
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "preparation", "payload": initial_payload,
+        "change_reason": "Record expected result follow-up",
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    db = TestSessionLocal()
+    loop = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == session["person"]["id"],
+        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+        OpenLoopRecord.source_id.like(f"{record_id}:%"),
+    ).one()
+    loop_id = loop.id
+    assert loop.deadline_at is not None
+    assert loop.deadline_source == "explicit_user"
+    assert loop.owner_label == "Clinic"
+    db.close()
+
+    removed = test_client.patch(f"/api/v1/appointment-workspaces/{record_id}", headers=headers, json={
+        "expected_version": 1, "payload": {},
+        "change_reason": "Follow-up was removed from the revised appointment record",
+    })
+    assert removed.status_code == 200, removed.text
+    db = TestSessionLocal()
+    loop = db.query(OpenLoopRecord).filter_by(id=loop_id).one()
+    assert loop.status == "cancelled"
+    assert loop.closure_result == "cancelled_not_resolved"
+    assert "not marked completed" in loop.cancellation_reason
+    assert db.query(OpenLoopEvent).filter_by(loop_id=loop_id).count() == 2
+    db.close()
+
+    restored = test_client.patch(f"/api/v1/appointment-workspaces/{record_id}", headers=headers, json={
+        "expected_version": 2, "payload": initial_payload,
+        "change_reason": "The clinic follow-up is required again",
+    })
+    assert restored.status_code == 200, restored.text
+    db = TestSessionLocal()
+    loop = db.query(OpenLoopRecord).filter_by(id=loop_id).one()
+    assert loop.status == "open"
+    assert loop.closed_at is None
+    assert loop.cancellation_reason is None
+    assert db.query(OpenLoopEvent).filter_by(loop_id=loop_id).count() == 3
+    db.close()
