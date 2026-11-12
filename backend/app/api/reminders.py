@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.reminder import CareReminder
-from app.schemas.reminder import CareReminderComplete, CareReminderCreate, CareReminderRead
+from app.schemas.reminder import CareReminderComplete, CareReminderCreate, CareReminderRead, CareReminderSnooze
 
 router = APIRouter(tags=["care reminders"])
 
@@ -102,6 +102,42 @@ def complete_reminder(
         reminder.completed_by_caregiver_id = caregiver_id
     if payload.completion_note is not None:
         reminder.completion_note = payload.completion_note.strip() or None
+    db.commit()
+    db.refresh(reminder)
+    return reminder
+
+
+@router.patch("/reminders/{reminder_id}/snooze", response_model=CareReminderRead)
+def snooze_reminder(
+    reminder_id: str,
+    payload: CareReminderSnooze,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _session_scope(request, db)
+    reminder = (
+        db.query(CareReminder)
+        .filter(CareReminder.id == reminder_id, CareReminder.person_id == person_id)
+        .first()
+    )
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if reminder.status != "open":
+        raise HTTPException(status_code=409, detail="Only an open reminder can be snoozed")
+    if payload.snooze_until.tzinfo is None or payload.snooze_until.utcoffset() is None:
+        raise HTTPException(status_code=422, detail="snooze_until must include a timezone offset")
+    snooze_until = payload.snooze_until.astimezone(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if snooze_until <= now:
+        raise HTTPException(status_code=422, detail="Choose a future snooze time")
+    from datetime import timedelta
+    if snooze_until > now + timedelta(days=30):
+        raise HTTPException(status_code=422, detail="Snooze time cannot be more than 30 days away")
+    reminder.due_at = snooze_until
+    reminder.snoozed_at = now
+    reminder.snoozed_by_caregiver_id = caregiver_id
+    reminder.snooze_count = (reminder.snooze_count or 0) + 1
+    reminder.delivery_generation = (reminder.delivery_generation or 0) + 1
     db.commit()
     db.refresh(reminder)
     return reminder
