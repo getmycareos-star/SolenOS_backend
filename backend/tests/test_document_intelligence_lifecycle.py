@@ -588,7 +588,7 @@ def test_candidate_overflow_resumes_only_overflow_pages_without_duplicate_candid
         f"Patient reported observation {index}."
         for index in range(1, 62)
     ]
-    source = "[Page 1]\\n" + "\\n".join(observations)
+    source = "[Page 1]\n" + "\n".join(observations)
     processed_pages = []
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
