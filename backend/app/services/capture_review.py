@@ -99,11 +99,12 @@ def persist_source_grounded_daily_observations(
             EvidenceObservation.source_span_end == end,
             EvidenceObservation.source_passage == quote,
             EvidenceObservation.value_text == observation,
+            EvidenceObservation.subject_label == subject,
         ).first()
         if existing:
             continue
 
-        hedge = _HEDGE_REFERENCE.search(quote)
+        hedge = _HEDGE_REFERENCE.search(observation)
         time_reference = _TIME_REFERENCE.search(observation) or _TIME_REFERENCE.search(quote)
         context_parts = [
             "Source-grounded extraction from a caregiver report; not an independently verified clinical fact."
