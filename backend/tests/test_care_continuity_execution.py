@@ -98,7 +98,7 @@ def test_shared_coordinator_validates_companion_source_message_and_caregiver(mon
     conversation = SimpleNamespace(
         id="conversation-1",
         person_id="person-1",
-        source_caregiver_id="caregiver-1",
+        caregiver_id="caregiver-1",
     )
     message = SimpleNamespace(
         id="message-1",
@@ -277,6 +277,43 @@ def test_shared_coordinator_rejects_evidence_not_in_assertion_lineage(monkeypatc
             workflow="care_assertion_review",
             source_assertion_id="assertion-1",
             source_evidence_id="evidence-2",
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_assertion_companion_session_outside_reviewing_caregiver(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    assertion = SimpleNamespace(
+        id="assertion-1",
+        person_id="person-1",
+        evidence_ids=[],
+        source_event_id=None,
+        source_message_id="message-1",
+        source_conversation_id="conversation-1",
+    )
+    message = SimpleNamespace(
+        id="message-1",
+        session_id="conversation-1",
+        role="user",
+    )
+    db = _session({
+        Person: person,
+        CareAssertion: assertion,
+        ConversationSession: None,
+        ConversationMessage: message,
+    })
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="Companion message"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="care_assertion_review",
+            source_caregiver_id="caregiver-1",
+            source_assertion_id="assertion-1",
         )
 
     reconciled.assert_not_called()
