@@ -25,6 +25,7 @@ from app.models.notifications import CareNotification, CareNotificationPreferenc
 # Browser push is reserved for explicitly due reminders.
 PUSH_NOTIFICATION_CATEGORIES = frozenset({"reminder_due"})
 from app.models.reminder import CareReminder
+from app.services.web_push_config import vapid_configuration_error
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 30
@@ -181,12 +182,9 @@ def deliver_due_reminders(db=None, now=None):
 def deliver_pending_web_pushes(db=None, now=None):
     """Send privacy-preserving Web Push payloads and persist provider receipts/retries."""
     settings = get_settings()
-    subject = settings.vapid_subject.strip()
-    if (
-        not settings.vapid_public_key.strip()
-        or not settings.vapid_private_key.strip()
-        or not (subject.startswith("mailto:") or subject.startswith("https://"))
-    ):
+    configuration_error = vapid_configuration_error(settings)
+    if configuration_error is not None:
+        logger.error("Web Push is disabled: %s", configuration_error)
         return 0
     try:
         from pywebpush import WebPushException, webpush
