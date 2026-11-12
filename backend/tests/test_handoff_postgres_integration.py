@@ -119,10 +119,14 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     observation = "Caregiver reports that lunch was only partly eaten."
     daily_evidence_id = str(uuid.uuid4())
     document_id = str(uuid.uuid4())
+    shared_document_id = str(uuid.uuid4())
     event_id = str(uuid.uuid4())
     analysis_id = str(uuid.uuid4())
+    shared_analysis_id = str(uuid.uuid4())
     original_document = b"Clinic letter: follow-up appointment date is 12 December."
+    shared_original_document = b"Older family caregiver document: current mobility support instructions."
     document_sha = hashlib.sha256(original_document).hexdigest()
+    shared_document_sha = hashlib.sha256(shared_original_document).hexdigest()
     db = SessionLocal()
     try:
         db.add_all([
@@ -143,6 +147,15 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                 uploaded_by_caregiver_id=owner["caregiver"]["id"],
                 original_source_reference="clinic/letter-12",
             ),
+            Evidence(
+                id=shared_document_id,
+                person_id=owner["person"]["id"],
+                type="document",
+                source_text="Older family caregiver document; extraction stored separately.",
+                uploaded_by_caregiver_id=recipient_id,
+                original_source_reference="family/mobility-support",
+                uploaded_at=datetime.now(timezone.utc) - timedelta(days=45),
+            ),
             CareEvent(
                 id=event_id,
                 person_id=owner["person"]["id"],
@@ -157,35 +170,63 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
             ),
         ])
         db.flush()
-        db.add(EvidenceUpload(
-            evidence_id=document_id,
-            filename="clinic-letter.txt",
-            mime_type="text/plain",
-            content=original_document,
-            size_bytes=len(original_document),
-            sha256=document_sha,
-        ))
-        db.add(CaptureAnalysis(
-            id=analysis_id,
-            person_id=owner["person"]["id"],
-            caregiver_id=owner["caregiver"]["id"],
-            source_evidence_id=document_id,
-            source_text=original_document.decode("utf-8"),
-            extraction_status="available",
-            candidates={
-                "kind": "document_extraction_v1",
-                "binary_sha256": document_sha,
-                "extraction_method": "server_utf8_text",
-            },
-            review_history=[],
-        ))
+        db.add_all([
+            EvidenceUpload(
+                evidence_id=document_id,
+                filename="clinic-letter.txt",
+                mime_type="text/plain",
+                content=original_document,
+                size_bytes=len(original_document),
+                sha256=document_sha,
+            ),
+            EvidenceUpload(
+                evidence_id=shared_document_id,
+                filename="mobility-support.txt",
+                mime_type="text/plain",
+                content=shared_original_document,
+                size_bytes=len(shared_original_document),
+                sha256=shared_document_sha,
+                created_at=datetime.now(timezone.utc) - timedelta(days=45),
+            ),
+            CaptureAnalysis(
+                id=analysis_id,
+                person_id=owner["person"]["id"],
+                caregiver_id=owner["caregiver"]["id"],
+                source_evidence_id=document_id,
+                source_text=original_document.decode("utf-8"),
+                extraction_status="available",
+                candidates={
+                    "kind": "document_extraction_v1",
+                    "binary_sha256": document_sha,
+                    "extraction_method": "server_utf8_text",
+                },
+                review_history=[],
+            ),
+            CaptureAnalysis(
+                id=shared_analysis_id,
+                person_id=owner["person"]["id"],
+                caregiver_id=recipient_id,
+                source_evidence_id=shared_document_id,
+                source_text=shared_original_document.decode("utf-8"),
+                extraction_status="available",
+                candidates={
+                    "kind": "document_extraction_v1",
+                    "binary_sha256": shared_document_sha,
+                    "extraction_method": "server_utf8_text",
+                },
+                review_history=[],
+                created_at=datetime.now(timezone.utc) - timedelta(days=45),
+            ),
+        ])
         db.commit()
     finally:
         db.close()
 
     def grounded_qwen(records, purpose, audience):
-        daily = next(row for row in records if row["source_type"] == "daily_care_observation")
-        document = next(row for row in records if row["source_type"] == "document_extracted_text")
+        daily = next((row for row in records if row["source_type"] == "daily_care_observation"), None)
+        document = next((row for row in records if row["source_type"] == "document_extracted_text"), None)
+        if daily is None or document is None:
+            return {"status": "not_generated_no_fixture_sources", "provider": "ollama", "model": "qwen-postgres-integration-fixture", "sections": []}
         return {
             "status": "generated",
             "provider": "ollama",
@@ -237,6 +278,33 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert prepared.json()["source_references"]
     assert any(row["source_id"] == event_id for row in prepared.json()["source_references"])
     assert any(row["source_id"] == analysis_id for row in prepared.json()["source_references"])
+    assert any(row["source_id"] == shared_analysis_id for row in prepared.json()["source_references"])
+    assert any(row["source_id"] == shared_document_id for row in prepared.json()["source_references"])
+
+    # The reporting window changes period events, not older same-person context.
+    for window_days in (7, 14, 30):
+        period_result = client.post(
+            "/api/v1/handoff-drafts/prepare",
+            headers=owner_headers,
+            json={"purpose": "family_transition", "audience": "family", "window_days": window_days},
+        )
+        assert period_result.status_code == 200, period_result.text
+        period_refs = period_result.json()["source_references"]
+        assert any(row["source_id"] == shared_document_id for row in period_refs)
+        assert any(row["source_id"] == event_id for row in period_refs)
+
+    # An unrelated care recipient cannot retrieve the original person's documents.
+    unrelated_handoff = client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=outsider_headers,
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert unrelated_handoff.status_code == 200, unrelated_handoff.text
+    assert unrelated_handoff.json()["source_statuses"]["documents"]["status"] == "empty"
+    assert all(
+        row["source_id"] != shared_document_id
+        for row in unrelated_handoff.json()["source_references"]
+    )
 
     # The persisted identity and revision survive a new database session.
     db = SessionLocal()
