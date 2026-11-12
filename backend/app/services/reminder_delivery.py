@@ -2,6 +2,7 @@
 
 Quiet hours defer notification creation; they do not alter reminder due times.
 Provider acceptance is recorded separately from device presentation.
+"""
 import asyncio
 import json
 import logging
