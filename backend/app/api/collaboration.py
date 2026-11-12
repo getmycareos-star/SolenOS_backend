@@ -641,6 +641,9 @@ async def upload_evidence(
     scan_rotation_degrees: str = Form("0"),
     scan_crop_json: str = Form("{}"),
     scan_text_prepared: str = Form("false"),
+    capture_method: str = Form("upload"),
+    capture_timestamp: str = Form(""),
+    capture_page_number: Optional[int] = Form(None),
     db: Session = Depends(get_db),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
@@ -741,6 +744,21 @@ async def upload_evidence(
         raise HTTPException(status_code=422, detail="Scan crop leaves too little page area")
     text_prepared = (scan_text_prepared or "false").strip().lower() == "true"
 
+    capture_method = (capture_method or "upload").strip().lower()
+    if capture_method not in {"scan", "snap", "upload", "share", "text", "voice"}:
+        raise HTTPException(status_code=422, detail="Unsupported capture method")
+    if capture_page_number is not None and (capture_page_number < 1 or capture_page_number > 100):
+        raise HTTPException(status_code=422, detail="Capture page number must be between 1 and 100")
+    capture_timestamp_value = None
+    if capture_timestamp:
+        try:
+            parsed_capture_time = datetime.fromisoformat(capture_timestamp.replace("Z", "+00:00"))
+            if parsed_capture_time.tzinfo is None:
+                raise ValueError("timezone_required")
+            capture_timestamp_value = parsed_capture_time.astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Capture timestamp must be an ISO 8601 timestamp with a timezone") from exc
+
     evidence_type = evidence_type.strip().lower()
     if evidence_type not in {"document", "medication_photo", "care_photo"}:
         raise HTTPException(status_code=422, detail="Unsupported evidence type")
@@ -797,6 +815,11 @@ async def upload_evidence(
                 "text_extraction_available": False,
                 "text_extraction_status": "server_extraction_pending",
                 "client_supplied_document_text_ignored": client_text_submitted,
+            },
+            "capture": {
+                "method": capture_method,
+                "captured_at": capture_timestamp_value,
+                "page_number": capture_page_number,
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
