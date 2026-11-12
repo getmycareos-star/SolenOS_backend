@@ -209,7 +209,8 @@ def test_numeric_claim_is_not_supported_when_its_count_does_not_match_the_events
         [],
         [aggregate],
     )
-    assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+    assert provenance["claims"][0]["support_status"] == "aggregate_count_mismatch"
+    assert provenance["claims"][0]["aggregate_review"]["count"] == 1
     assert provenance["claims"][0]["source_references"] == []
 
 
@@ -228,7 +229,7 @@ def test_incomplete_aggregate_never_supports_a_numeric_claim():
         [aggregate],
     )
     assert aggregate["status"] == "incomplete_source_window"
-    assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+    assert provenance["claims"][0]["support_status"] == "aggregate_not_validated"
 
 
 def test_qwen_context_sources_are_tied_to_their_own_record_reference():
