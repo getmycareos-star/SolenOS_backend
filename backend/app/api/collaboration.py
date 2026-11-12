@@ -31,8 +31,6 @@ from app.models.care import CareEvent, Caregiver, Person
 from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import (
     CareAssertion,
-    EvidenceObservation,
-    EvidenceSourceRelationship,
     EvidenceFreshnessAssessment,
     EvidenceFreshnessPolicy,
     EvidenceSourceRelationship,
@@ -3059,7 +3057,7 @@ async def create_qwen_background_job(
         rows = db.query(EvidenceModel.id).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
-            EvidenceModel.evidence_status != "deleted_by_caregiver",
+            (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
             EvidenceModel.id.in_(payload.evidence_ids),
         ).all()
         if len({str(row[0]) for row in rows}) != len(set(payload.evidence_ids)):
@@ -3386,7 +3384,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     EvidenceModel.person_id == person_id,
                     EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
                     EvidenceModel.type == "document",
-                    EvidenceModel.evidence_status != "deleted_by_caregiver",
+                    (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
                 ).first()
                 if source_document is None:
                     continue
