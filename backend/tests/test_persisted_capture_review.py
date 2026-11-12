@@ -307,3 +307,51 @@ def test_capture_review_rejects_repeat_decisions_and_empty_corrections(monkeypat
         json={"candidate_index": 0, "decision": "reject"},
     )
     assert repeat.status_code == 409, repeat.text
+
+def test_daily_capture_cannot_promote_model_observation_not_supported_by_source_quote(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Source validation recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    source = "Caregiver report: Mum slept badly last night."
+    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+        "observations": [{
+            "subject": "sleep",
+            "observation": "Mum has severe dementia caused by poor sleep.",
+            "source_quote": "Mum slept badly last night.",
+            "review_status": "pending_review",
+        }],
+        "open_questions": [],
+        "possible_safety_flags": [],
+    })
+
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": source,
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    analysis_id = saved.json()["qwen_analysis_id"]
+
+    accepted = client.post(
+        f"/api/v1/capture/analyses/{analysis_id}/review",
+        headers=auth,
+        json={"candidate_index": 0, "decision": "accept"},
+    )
+    assert accepted.status_code == 409, accepted.text
+    assert "not supported by its preserved source passage" in accepted.json()["detail"]
+    assert accepted.json()["detail"].find("no LCR assertion") >= 0
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+        record = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+        assert record.candidates["observations"][0]["review_status"] == "pending_review"
+    finally:
+        db.close()
