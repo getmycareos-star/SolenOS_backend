@@ -964,13 +964,24 @@ async def upload_evidence(
         sha256=digest,
     ))
     persisted_evidence_id = str(evidence.id)
-    document_job = (
-        _ensure_document_intake_job(db, scoped_person_id, scoped_caregiver_id, persisted_evidence_id)
-        if evidence_type == "document" else None
-    )
-    document_job_id = str(document_job.id) if document_job else None
-    document_job_status = str(document_job.status) if document_job else ("queue_unavailable" if evidence_type == "document" else "not_applicable")
+    # Commit the immutable original before queueing work. If the worker queue
+    # cannot be written, the caregiver still keeps the uploaded bytes and can
+    # retry processing later; a queue failure must never roll back the source.
     db.commit()
+    document_job_id = None
+    document_job_status = "not_applicable"
+    if evidence_type == "document":
+        document_job_status = "queue_unavailable"
+        try:
+            document_job = _ensure_document_intake_job(
+                db, scoped_person_id, scoped_caregiver_id, persisted_evidence_id
+            )
+            db.commit()
+            document_job_id = str(document_job.id)
+            document_job_status = str(document_job.status)
+        except Exception:
+            db.rollback()
+            logger.exception("Document processing could not be queued for saved evidence %s", persisted_evidence_id)
     return {
         "evidence_id": persisted_evidence_id,
         "size_bytes": len(data),
