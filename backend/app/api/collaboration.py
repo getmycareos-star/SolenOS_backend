@@ -2151,6 +2151,8 @@ async def get_qwen_background_job(
         "source_handoff_ids": (output.output_metadata or {}).get("source_handoff_ids", []) if output else [],
         "source_notification_ids": (output.output_metadata or {}).get("source_notification_ids", []) if output else [],
         "source_freshness_assessment_ids": (output.output_metadata or {}).get("source_freshness_assessment_ids", []) if output else [],
+        "claim_provenance": (output.output_metadata or {}).get("claim_provenance", {}) if output else {},
+        "validated_aggregates": (output.output_metadata or {}).get("validated_aggregates", []) if output else [],
         "review_required": job.status == "completed",
         "persistence": "read_only_assistance",
         "created_at": job.created_at.isoformat() if job.created_at else None,
