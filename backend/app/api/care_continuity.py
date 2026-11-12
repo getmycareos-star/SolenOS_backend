@@ -4129,6 +4129,7 @@ def create_evidence_observation(
             source_evidence_id=evidence.id,
         )
         db.commit()
+        execution["stages"]["reconciliation"] = "committed"
         db.refresh(row)
     except IntegrityError as exc:
         db.rollback()
