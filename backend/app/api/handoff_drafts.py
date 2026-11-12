@@ -2329,11 +2329,30 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
     lines.extend(["", "SOURCE REGISTER"])
     for index, item in enumerate(records, 1):
         if isinstance(item, dict):
+            details = item.get("details") if isinstance(item.get("details"), dict) else {}
             lines.append(
-                f"{index}. {item.get('source_table', 'unknown')}/{item.get('source_id', 'unknown')}"
+                f"{index}. {details.get('source_label') or item.get('source_type') or item.get('source_table') or 'Care record'}"
                 f" | {_caregiver_evidence_label(item.get('epistemic_status'))}"
                 f" | recorded {item.get('recorded_at') or 'not recorded'}"
             )
+            author_label = details.get("original_author") or details.get("reported_by_label") or details.get("author_label")
+            if author_label:
+                lines.append("Author or reporter: " + str(author_label))
+            original_reference = details.get("original_source_reference") or details.get("document_reference") or details.get("filename")
+            if original_reference:
+                lines.append("Original source: " + str(original_reference))
+            page_references = details.get("page_references")
+            if isinstance(page_references, list) and page_references:
+                lines.append("Document pages: " + ", ".join(str(value) for value in page_references[:30]))
+            evidence_sources = item.get("evidence_sources") if isinstance(item.get("evidence_sources"), list) else []
+            for evidence_source in evidence_sources[:10]:
+                if not isinstance(evidence_source, dict):
+                    continue
+                source_author = evidence_source.get("original_author") or evidence_source.get("reported_by_label")
+                if source_author:
+                    lines.append("Evidence author or reporter: " + str(source_author))
+                if evidence_source.get("original_source_reference"):
+                    lines.append("Evidence source reference: " + str(evidence_source["original_source_reference"]))
     lines.extend([
         "",
         "This document contains the exact caregiver-approved saved revision.",
