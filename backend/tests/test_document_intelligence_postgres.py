@@ -673,6 +673,21 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 )
             db.rollback()
 
+        # The append-only trigger permits deletion only inside the transaction-
+        # local privacy-erasure boundary used after independent approval.
+        with Session() as db:
+            db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+            db.execute(
+                text("DELETE FROM document_review_events WHERE id = :event_id"),
+                {"event_id": event_id},
+            )
+            db.commit()
+        with Session() as db:
+            assert db.execute(
+                text("SELECT COUNT(*) FROM document_review_events WHERE id = :event_id"),
+                {"event_id": event_id},
+            ).scalar_one() == 0
+
         # Another server-issued session cannot read the analysis, history, or source file.
         assert client.get(
             f"/api/v1/documents/analyses/{analysis_id}", headers=other_auth
