@@ -54,7 +54,7 @@ def execute_care_continuity_reconciliation(
         [value for value in (source_evidence_ids or []) if isinstance(value, str) and value.strip()]
         + ([source_evidence_id] if source_evidence_id else [])
     ))
-    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id and not source_appointment_workspace_revision_id:
+    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id and not source_appointment_workspace_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
     if source_message_id and (not source_conversation_id or not source_caregiver_id):
         raise CareContinuityExecutionError(
@@ -105,28 +105,6 @@ def execute_care_continuity_reconciliation(
             raise CareContinuityExecutionError(
                 "The source evidence is not linked to the supplied source event"
             )
-
-    appointment_workspace = None
-    appointment_revision = None
-    if source_appointment_workspace_id:
-        appointment_workspace = db.query(AppointmentWorkspaceRecord).filter(
-            AppointmentWorkspaceRecord.id == source_appointment_workspace_id,
-            AppointmentWorkspaceRecord.person_id == person_id,
-        ).first()
-        if appointment_workspace is None:
-            raise CareContinuityExecutionError(
-                "The appointment workspace is missing or belongs to another care record"
-            )
-        if source_appointment_workspace_revision_id:
-            appointment_revision = db.query(AppointmentWorkspaceRevision).filter(
-                AppointmentWorkspaceRevision.id == source_appointment_workspace_revision_id,
-                AppointmentWorkspaceRevision.record_id == source_appointment_workspace_id,
-                AppointmentWorkspaceRevision.person_id == person_id,
-            ).first()
-            if appointment_revision is None:
-                raise CareContinuityExecutionError(
-                    "The appointment workspace source revision is missing or belongs to another care record"
-                )
 
     assertion = None
     if source_assertion_id:
