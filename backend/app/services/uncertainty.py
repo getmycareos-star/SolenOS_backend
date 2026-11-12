@@ -383,7 +383,8 @@ def persist_source_clarification_questions(
             if necessity == "necessary":
                 existing.necessity = "necessary"
                 existing.necessity_rationale = necessity_rationale
-                if _priority_weight(existing.priority) < _priority_weight(Priority.HIGH):
+                existing_priority = getattr(existing.priority, "value", existing.priority)
+                if existing_priority not in {"critical", "high"}:
                     existing.priority = Priority.HIGH
         persisted.append(existing)
     db.flush()
