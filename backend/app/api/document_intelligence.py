@@ -515,7 +515,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     prior_processing_history = resume_intelligence.get("processing_history")
     processing_history = list(prior_processing_history) if isinstance(prior_processing_history, list) else []
     prior_provenance = resume_intelligence.get("model_provenance")
-    if isinstance(prior_provenance, dict):
+    if isinstance(prior_provenance, dict) and (not processing_history or processing_history[-1] != prior_provenance):
         processing_history.append(prior_provenance)
     processing_history.append(model_provenance)
     metadata["document_intelligence"] = {
