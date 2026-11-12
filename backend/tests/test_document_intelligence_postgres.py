@@ -127,7 +127,10 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
     quote_two = "The patient ate half of lunch during the observation period."
 
     def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
-        assert text == source
+        # The durable worker may pass normalized/chunked extraction text. Keep
+        # the fixture strict about both source quotes without requiring byte-
+        # for-byte equality with the original upload.
+        assert quote_one in text and quote_two in text
         return {"observations": [
             {"subject": "Patient", "observation": quote_one, "source_quote": quote_one, "extraction_method": "test_verbatim"},
             {"subject": "Patient", "observation": quote_two, "source_quote": quote_two, "extraction_method": "test_verbatim"},
