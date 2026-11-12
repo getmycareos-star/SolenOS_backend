@@ -298,6 +298,15 @@ def test_web_push_provider_failure_is_never_recorded_as_accepted(monkeypatch):
             assert delivery.provider_accepted_at is None
             assert delivery.last_error_code == "provider_error"
             assert delivery.last_error_message == "Push provider rejected the request"
+            from app.models.notifications import DeliveryFailureEvent
+            failures = db.query(DeliveryFailureEvent).filter_by(
+                delivery_id=delivery.id,
+                delivery_type="web_push",
+            ).order_by(DeliveryFailureEvent.occurred_at.asc()).all()
+            assert len(failures) == 5
+            assert all(item.failure_code == "provider_error" for item in failures)
+            assert [item.retryable for item in failures] == [True, True, True, True, False]
+            assert all(item.resolved_at is None for item in failures)
         finally:
             db.close()
     finally:
