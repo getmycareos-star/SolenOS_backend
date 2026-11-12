@@ -23,6 +23,7 @@ from app.services.care_continuity import has_valid_caregiver_necessity
 
 OPEN_QUESTION_STATUSES = {"open", "unanswered", "pending", "unresolved"}
 OPEN_LOOP_DUE_WINDOW = timedelta(hours=24)
+OPEN_LOOP_OVERDUE_WINDOW = timedelta(hours=24)
 OPEN_LOOP_PUSH_WINDOW = timedelta(hours=6)
 OPEN_LOOP_DUE_STATUSES = {"open", "waiting", "pending_closure_verification"}
 OPEN_LOOP_DUE_TYPES = {"follow_up", "awaiting_response", "professional_input", "pending_action", "pending_decision"}
@@ -72,6 +73,8 @@ def open_loop_due_notification_state(
     timestamp = _as_utc(now or datetime.now(timezone.utc))
     if deadline > timestamp + OPEN_LOOP_DUE_WINDOW:
         return False, "superseded", "deadline_moved_out_of_window"
+    if deadline < timestamp - OPEN_LOOP_OVERDUE_WINDOW:
+        return False, "superseded", "deadline_too_old"
     return True, "active", None
 
 
@@ -86,6 +89,7 @@ def _create_open_loop_due_notifications(
         OpenLoopRecord.loop_type.in_(sorted(OPEN_LOOP_DUE_TYPES)),
         OpenLoopRecord.deadline_source.in_(sorted(OPEN_LOOP_DUE_SOURCES)),
         OpenLoopRecord.deadline_at.is_not(None),
+        OpenLoopRecord.deadline_at >= timestamp - OPEN_LOOP_OVERDUE_WINDOW,
         OpenLoopRecord.deadline_at <= timestamp + OPEN_LOOP_DUE_WINDOW,
     ).order_by(OpenLoopRecord.deadline_at.asc(), OpenLoopRecord.id.asc()).all()
     created = updated = 0
