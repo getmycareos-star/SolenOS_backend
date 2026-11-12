@@ -742,6 +742,7 @@ def _apply_capture_page_number(source_text: str, evidence: Evidence) -> str:
 def _merge_pdf_page_extraction(existing_text: str, retry_text: str, retry_pages: set[int]) -> str:
     """Replace only retried PDF page blocks, preserving every successful page verbatim."""
     page_pattern = re.compile(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]\n")
+
     def split_pages(value: str) -> tuple[str, dict[int, str]]:
         matches = list(page_pattern.finditer(value or ""))
         if not matches:
@@ -825,13 +826,21 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 db.commit()
                 db.refresh(row)
                 return _response(row)
-            is_pdf = (upload.mime_type or "").split(";", 1)[0].lower() == "application/pdf" or (upload.filename or "").lower().endswith(".pdf")
+            is_pdf = (
+                (upload.mime_type or "").split(";", 1)[0].lower() == "application/pdf"
+                or (upload.filename or "").lower().endswith(".pdf")
+            )
             if is_pdf:
-                retry_text, retry_method = _extract(upload, content, evidence, retry_page_numbers=retry_pages)
-                retry_text = _merge_pdf_page_extraction(row.source_text or "", retry_text, retry_pages)
+                retry_text, retry_method = _extract(
+                    upload, content, evidence, retry_page_numbers=retry_pages
+                )
+                retry_text = _apply_capture_page_number(retry_text, evidence)
+                retry_text = _merge_pdf_page_extraction(
+                    row.source_text or "", retry_text, retry_pages
+                )
             else:
                 retry_text, retry_method = _extract(upload, content, evidence)
-            retry_text = _apply_capture_page_number(retry_text, evidence)
+                retry_text = _apply_capture_page_number(retry_text, evidence)
             if retry_text.strip() != (row.source_text or "").strip() or retry_method != metadata.get("extraction_method"):
                 retry_status, retry_metadata = _extraction_metadata(upload, retry_text, retry_method)
                 attempt_count = int(metadata.get("extraction_attempt_count") or 1) + 1
