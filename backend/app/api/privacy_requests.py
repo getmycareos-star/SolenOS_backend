@@ -22,7 +22,7 @@ from app.core.database import Base, get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
-from app.models.care import Correction, Insight, Evidence, CareEvent
+from app.models.care import Correction, Insight, Evidence, CareEvent, Person
 from app.models.collaboration import EvidenceUpload, ConversationSession, ConversationMessage
 from app.models.privacy_export import PrivacyExportArtifact
 
