@@ -1055,6 +1055,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                     "topic": "medication",
                     "reports": [earlier, claim],
                     "why_conflicting": "The supplied medication records do not establish one current prescription.",
+                    "evidence_excerpt": claim,
                     "evidence_excerpts": [earlier, claim],
                 }]
             return result
