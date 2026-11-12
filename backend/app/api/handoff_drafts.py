@@ -2095,6 +2095,11 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
             lines.extend([
                 str(section.get("section") or "Care information"),
                 str(section.get("text") or ""),
+                "Information status: " + str(section.get("epistemic_status") or "not recorded"),
+                "Record status: " + str(section.get("record_status") or "not recorded"),
+                "Occurred: " + str(section.get("event_at") or "Not recorded"),
+                "Recorded: " + str(section.get("recorded_at") or "Not recorded"),
+                "Historical status: " + ("historical or stale" if section.get("stale_warning") else "not flagged stale"),
                 f"Source reference: {section.get('source_ref') or 'Not available'}",
                 "",
             ])
@@ -2116,6 +2121,15 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
                     "Source: " + str(item.get("source_table") or "unknown") + "/" + str(item.get("source_id") or "unknown"),
                     "",
                 ])
+    caregiver_notes = content.get("caregiver_notes") if isinstance(content.get("caregiver_notes"), list) else []
+    if caregiver_notes:
+        lines.extend(["CAREGIVER-AUTHORED NOTES (NOT INDEPENDENTLY VERIFIED)"])
+        for note in caregiver_notes:
+            if isinstance(note, dict):
+                lines.append(str(note.get("text") or ""))
+            elif isinstance(note, str):
+                lines.append(note)
+        lines.append("")
     lines.append("SOURCE AVAILABILITY AND LIMITATIONS")
     statuses = snapshot.get("source_statuses") if isinstance(snapshot.get("source_statuses"), dict) else {}
     for key, status in statuses.items():
