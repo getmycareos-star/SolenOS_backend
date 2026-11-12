@@ -57,6 +57,7 @@ from app.models.uncertainty import (
 from app.core.uncertainty_enums import GapLifecycleStatus
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.accounts import router as accounts_router
+from app.api.caregiver_access import router as caregiver_access_router
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.api.privacy_requests import router as privacy_requests_router
 from app.api.identity_security import router as identity_security_router
@@ -217,6 +218,7 @@ app.add_middleware(RequestBodySizeLimitMiddleware)
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
+app.include_router(caregiver_access_router, prefix="/api/v1")
 app.include_router(privacy_requests_router, prefix="/api/v1")
 app.include_router(identity_security_router, prefix="/api/v1")
 app.include_router(security_incidents_router, prefix="/api/v1")
@@ -262,6 +264,7 @@ PUBLIC_V1_ENDPOINTS = {
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
     ("/api/v1/accounts/login", "POST"),
+    ("/api/v1/caregiver-access/invitations/accept", "POST"),
     ("/api/v1/accounts/recover", "POST"),
     ("/api/v1/identity/recovery-requests", "POST"),
 }
