@@ -91,6 +91,30 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
         assert body["written_to_lcr"] is False
         assert body["persistence"] == "conversation_only"
 
+        # A legacy pending proposal must not leak back into the conversation
+        # response when an idempotent retry replays the saved assistant turn.
+        db = TestingSessionLocal()
+        try:
+            user_message = db.query(ConversationMessage).filter_by(
+                session_id=body["session_id"], role="user", content=source
+            ).one()
+            db.add(AIOutputLCRProposal(
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                proposal_type="companion_care_observation",
+                proposed_change_json={"field": "sleep_pattern", "value": "worse"},
+                source_event_ids_json=[],
+                source_evidence_ids_json=[],
+                rationale="Legacy proposal created before the conversation-only boundary.",
+                uncertainty_json={},
+                source_conversation_id=body["session_id"],
+                source_message_id=user_message.id,
+                status="pending_authorization",
+            ))
+            db.commit()
+        finally:
+            db.close()
+
         replay = client.post("/api/v1/conversation/message", headers=headers, json=payload)
         assert replay.status_code == 200, replay.text
         assert replay.json()["idempotent_replay"] is True
@@ -99,7 +123,7 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
         db = TestingSessionLocal()
         try:
             assert db.query(ConversationMessage).filter_by(session_id=body["session_id"], role="user", content=source).count() == 1
-            assert db.query(AIOutputLCRProposal).filter_by(person_id=first["person"]["id"]).count() == 0
+            assert db.query(AIOutputLCRProposal).filter_by(person_id=first["person"]["id"]).count() == 1
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
         finally:
             db.close()
