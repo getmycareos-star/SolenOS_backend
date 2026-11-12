@@ -1276,6 +1276,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 "recorded_at": _iso(row.recorded_at),
                 "created_by_caregiver_id": row.created_by_caregiver_id,
             } for row in document_assertions]
+            observation_snapshot = _evidence_observation_snapshot(db, person_id, [str(document.id)])
             upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == document.id).first()
             if upload is None:
                 missing_originals += 1
@@ -1307,7 +1308,9 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             if extraction and effective_extraction_status == "available":
                 extracted_text = (extraction.source_text or "").strip()
                 if extracted_text:
-                    extraction_fingerprint = _fingerprint(_document_extraction_fingerprint_payload(extraction, upload.sha256, assertion_snapshot))
+                    extraction_fingerprint = _fingerprint(_document_extraction_fingerprint_payload(
+                        extraction, upload.sha256, assertion_snapshot, observation_snapshot,
+                    ))
                     output.append({
                         "source_type": "document_extracted_text",
                         "source_table": "capture_analyses",
@@ -1334,6 +1337,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                             "caregiver_review_status": "caregiver_reviewed_assertions_exist" if accepted_assertions else "not_reviewed",
                             "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
                             "assertion_references": assertion_references,
+                            "source_observation_history": observation_snapshot,
                             "review_history_count": len(extraction.review_history or []),
                             "revision_status": "extraction_record_id_is_revision_reference",
                         },
@@ -1354,7 +1358,9 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                         "stale_warning": _is_stale(document.occurred_at, datetime.now(timezone.utc)),
                     })
             # Preserve the original upload as its own source node even when extraction is absent.
-            upload_fingerprint = _fingerprint(_document_upload_fingerprint_payload(document, upload, assertion_snapshot))
+            upload_fingerprint = _fingerprint(_document_upload_fingerprint_payload(
+                document, upload, assertion_snapshot, observation_snapshot,
+            ))
             output.append({
                 "source_type": "uploaded_document",
                 "source_table": "evidence_uploads",
@@ -1375,6 +1381,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                     "caregiver_review_status": "caregiver_reviewed_assertions_exist" if accepted_assertions else "not_reviewed",
                     "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
                     "assertion_references": assertion_references,
+                    "source_observation_history": observation_snapshot,
                     "source_revision": None,
                     "revision_status": "revision_not_exposed_by_source",
                 },
