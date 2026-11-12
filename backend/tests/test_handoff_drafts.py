@@ -1428,6 +1428,22 @@ def test_caregiver_approved_professional_export_returns_pdf_and_requires_approva
     blocked = test_client.get(f"/api/v1/handoff-drafts/{draft_id}/export.pdf", headers=headers)
     assert blocked.status_code == 409
 
+    edited = test_client.put(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers=headers,
+        json={"content": {
+            "template_sections": prepared.json()["template_sections"],
+            "sections": prepared.json()["sections"],
+            "generation": prepared.json()["generation"],
+            "caregiver_notes": ["Caregiver note: this is my report, not an independently verified fact."],
+        }},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["revision_number"] == 2
+    saved = test_client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=headers)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["caregiver_notes"][0]["attribution"] == "caregiver_authored_unverified"
+
     approved = test_client.post(
         f"/api/v1/handoff-drafts/{draft_id}/approve-export",
         headers=headers,
