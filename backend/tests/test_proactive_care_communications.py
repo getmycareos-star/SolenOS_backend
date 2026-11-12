@@ -39,6 +39,7 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
             type="daily_care",
             source_text="A dated caregiver report describing a change in the evening routine.",
             uploaded_by_caregiver_id=caregiver_one.id,
+            occurred_at=datetime(2026, 10, 6, tzinfo=timezone.utc),
         )
         other_evidence = Evidence(
             id="notify-other-evidence",
@@ -54,10 +55,12 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
             Change(
                 id="notify-meaningful-change",
                 person_id=person.id,
-                subject_type="person",
-                subject_id=person.id,
+                subject_type="sleep",
+                subject_id="sleep-pattern",
                 change_type=ChangeType.EMERGENCE,
                 change_direction=ChangeDirection.INCREASING,
+                comparison_window_start=datetime(2026, 10, 1, tzinfo=timezone.utc),
+                comparison_window_end=datetime(2026, 10, 7, tzinfo=timezone.utc),
                 evidence_ids=[evidence.id],
                 significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
                 attention_candidate=True,
@@ -157,6 +160,13 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         }
         assert all(item.priority == "normal" for item in notifications)
         assert all(item.status == "active" for item in notifications)
+        care_change_notification = next(item for item in notifications if item.category == "care_change")
+        care_attention_notification = next(item for item in notifications if item.category == "care_attention")
+        assert "possible change in sleep" in care_change_notification.body
+        assert "2026-10-01 to 2026-10-07" in care_change_notification.body
+        assert "Daily Care entry (2026-10-06)" in care_change_notification.body
+        assert "Daily Care entry (2026-10-06)" in care_attention_notification.body
+        assert "If you're not sure, you can say so" in care_attention_notification.body
         assert db.query(CareNotification).filter(CareNotification.person_id == other_person.id).count() == 0
         assert db.query(CareNotification).filter(
             CareNotification.source_event_id == "notify-invalid-necessity-question"

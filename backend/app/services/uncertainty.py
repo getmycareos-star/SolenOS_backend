@@ -31,6 +31,107 @@ from app.core.uncertainty_enums import (
 )
 
 
+_QUESTION_FILLER_TOKENS = {
+    "a", "an", "and", "are", "about", "be", "been", "being", "can", "could",
+    "did", "do", "does", "for", "from", "had", "has", "have", "he", "her",
+    "hers", "him", "his", "how", "if", "in", "into", "is", "it", "its",
+    "me", "of", "on", "or", "our", "please", "she", "should", "tell", "that",
+    "the", "their", "them", "they", "this", "to", "take", "us", "was", "we", "were",
+    "what", "when", "where", "which", "who", "why", "will", "would", "you",
+    "your", "know", "confirm", "taking", "taken",
+}
+_QUESTION_SYNONYMS = {
+    "meds": "medication",
+    "medicine": "medication",
+    "medicines": "medication",
+    "dosage": "dose",
+    "now": "current",
+    "currently": "current",
+    "presently": "current",
+    "different": "changed",
+    "change": "changed",
+    "changes": "changed",
+    "changing": "changed",
+    "sleeping": "sleep",
+    "slept": "sleep",
+    "taking": "take",
+    "taken": "take",
+    "followed": "follow",
+    "following": "follow",
+}
+
+
+def _question_duplicate_key(value: str) -> str:
+    """Build a conservative, deterministic question-intent key.
+
+    Generic question framing and a small synonym set are normalized, while
+    temporal words, dates, negation and meaningful qualifiers remain. This
+    catches obvious rephrasings without collapsing questions about different
+    dates or circumstances. It is not a semantic model.
+    """
+    normalized = " ".join((value or "").casefold().split())
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    canonical = []
+    for token in tokens:
+        if token in _QUESTION_FILLER_TOKENS:
+            continue
+        mapped = _QUESTION_SYNONYMS.get(token, token)
+        if mapped in _QUESTION_FILLER_TOKENS:
+            continue
+        canonical.append(mapped)
+    if len(canonical) < 2:
+        return normalized
+    return " ".join(sorted(set(canonical)))
+
+
+def _explicit_source_dependency_quote(source_text: str) -> str | None:
+    """Return a short source excerpt only when it states a confirmation prerequisite."""
+    normalized = " ".join((source_text or "").split())
+    patterns = (
+        r"\b(?:must|needs? to|has to|should)\s+(?:be\s+)?(?:confirmed|verified|checked)\b.{0,100}\b(?:before|prior to|until)\b.{0,80}",
+        r"\b(?:confirm|verify|check)\b.{0,120}\b(?:before|prior to|until)\b.{0,80}",
+        r"\b(?:do not|don't|must not|should not)\s+(?:give|administer|start|stop|change|use)\b.{0,120}\b(?:until|unless)\b.{0,80}",
+        r"\b(?:requires?|needs?)\s+confirmation\b.{0,100}\b(?:before|prior to|until)\b.{0,80}",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return normalized[max(0, match.start() - 50):min(len(normalized), match.end() + 50)][:240]
+    return None
+
+
+_QUESTION_TIME_QUALIFIERS = {
+    "current", "last", "next", "this", "today", "tomorrow", "yesterday",
+    "before", "after", "since", "until", "week", "month", "day", "night",
+    "morning", "afternoon", "evening", "monday", "tuesday", "wednesday",
+    "thursday", "friday", "saturday", "sunday", "january", "february",
+    "march", "april", "may", "june", "july", "august", "september",
+    "october", "november", "december",
+}
+
+
+def _source_dependency_matches_question(question_text: str, source_quote: str) -> bool:
+    question_tokens = set(_question_duplicate_key(question_text).split())
+    source_tokens = set(_question_duplicate_key(source_quote).split())
+    if not question_tokens or not source_tokens:
+        return False
+    # Never promote a question about a different time period or date than the
+    # explicit prerequisite recorded in the source.
+    temporal_tokens = question_tokens.intersection(_QUESTION_TIME_QUALIFIERS)
+    if not temporal_tokens.issubset(source_tokens):
+        return False
+    return len(question_tokens.intersection(source_tokens)) >= 2
+
+
+def _explicit_dependency_for_question(source_texts: list[str], question_text: str) -> str | None:
+    for source_text in source_texts:
+        quote = _explicit_source_dependency_quote(source_text)
+        if quote and _source_dependency_matches_question(question_text, quote):
+            return quote
+    return None
+
+
+
 def _has_decision_dependency(context) -> bool:
     """Only a structured, explicit current-decision dependency can justify a request."""
     for item in context or []:
@@ -168,6 +269,24 @@ def persist_source_clarification_questions(
     else:
         raise ValueError("Unsupported clarification source type.")
 
+    # Source text is used only to verify an explicit prerequisite stated by
+    # the saved source. Model-generated question wording alone never promotes
+    # a question to caregiver work.
+    source_texts = []
+    if source_record_type == "care_event":
+        source_texts.extend([
+            str(source_row.title or ""),
+            str(source_row.description or ""),
+        ])
+    else:
+        source_texts.append(str(source_row.source_text or ""))
+    if linked_ids:
+        linked_evidence_rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(linked_ids),
+        ).all()
+        source_texts.extend(str(row.source_text or "") for row in linked_evidence_rows)
+
     existing_rows = db.query(OpenQuestionModel).filter(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.subject_type == "person",
@@ -175,7 +294,7 @@ def persist_source_clarification_questions(
         OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
     existing_by_text = {
-        " ".join((row.question or "").casefold().split()): row
+        _question_duplicate_key(row.question or ""): row
         for row in existing_rows
     }
     persisted: List[OpenQuestionModel] = []
@@ -184,8 +303,8 @@ def persist_source_clarification_questions(
         if not isinstance(value, str):
             continue
         question_text = " ".join(value.strip().split())[:300]
-        normalized = question_text.casefold()
-        if len(question_text) < 5 or normalized in seen:
+        duplicate_key = _question_duplicate_key(question_text)
+        if len(question_text) < 5 or duplicate_key in seen:
             continue
         # Operational extraction warnings belong in the document review panel,
         # not in the caregiver's list of questions.
@@ -198,11 +317,20 @@ def persist_source_clarification_questions(
             )
         ):
             continue
-        seen.add(normalized)
+        seen.add(duplicate_key)
         # Do not retain a candidate as an open question when an accepted,
         # source-backed current-state LCR assertion already covers its field.
         if _question_is_answered_by_current_lcr(db, person_id, question_text):
             continue
+        dependency_quote = (
+            _explicit_dependency_for_question(source_texts, question_text)
+            if linked_ids else None
+        )
+        necessity = "necessary" if dependency_quote else "not_assessed"
+        necessity_rationale = (
+            "The saved source explicitly says this detail must be confirmed before a next step."
+            if dependency_quote else None
+        )
         source_context = {
             "source_kind": source_kind,
             "source_id": source_record_id,
@@ -210,7 +338,15 @@ def persist_source_clarification_questions(
             "reason": "Suggested while reviewing saved care information. Please check the wording before relying on it.",
             "grounding_status": "source_record_linked; question wording not independently verified",
         }
-        existing = existing_by_text.get(normalized)
+        if dependency_quote:
+            source_context["necessity_assessment"] = {
+                "necessity": "necessary",
+                "necessity_rationale": necessity_rationale,
+                "decision_dependency": f"The saved source states: {dependency_quote}",
+                "source_quote": dependency_quote,
+                "assessment_method": "deterministic_explicit_source_prerequisite_v1",
+            }
+        existing = existing_by_text.get(duplicate_key)
         if existing is None:
             existing = OpenQuestionModel(
                 person_id=person_id,
@@ -218,26 +354,41 @@ def persist_source_clarification_questions(
                 subject_type="person",
                 subject_id=person_id,
                 status="open",
-                priority=Priority.INFORMATIONAL,
+                priority=Priority.HIGH if necessity == "necessary" else Priority.INFORMATIONAL,
+                necessity=necessity,
+                necessity_rationale=necessity_rationale,
                 evidence_ids=linked_ids or None,
                 context=[source_context],
                 created_by_caregiver_id=caregiver_id,
             )
             db.add(existing)
             db.flush()
-            existing_by_text[normalized] = existing
+            existing_by_text[duplicate_key] = existing
         else:
             existing.evidence_ids = list(dict.fromkeys(
                 list(existing.evidence_ids or []) + linked_ids
             )) or None
             contexts = list(existing.context or [])
             context_key = (source_kind, source_record_id)
-            if not any(
-                (item.get("source_kind"), item.get("source_id")) == context_key
-                for item in contexts if isinstance(item, dict)
-            ):
+            matching_context = next(
+                (
+                    item for item in contexts
+                    if isinstance(item, dict)
+                    and (item.get("source_kind"), item.get("source_id")) == context_key
+                ),
+                None,
+            )
+            if matching_context is None:
                 contexts.append(source_context)
-                existing.context = contexts
+            elif necessity == "necessary":
+                matching_context["necessity_assessment"] = source_context["necessity_assessment"]
+            existing.context = contexts
+            if necessity == "necessary":
+                existing.necessity = "necessary"
+                existing.necessity_rationale = necessity_rationale
+                existing_priority = getattr(existing.priority, "value", existing.priority)
+                if existing_priority not in {"critical", "high"}:
+                    existing.priority = Priority.HIGH
         persisted.append(existing)
     db.flush()
     return persisted

@@ -23,6 +23,73 @@ from app.services.care_continuity import has_valid_caregiver_necessity
 OPEN_QUESTION_STATUSES = {"open", "unanswered", "pending", "unresolved"}
 
 
+def _display_date(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.date().isoformat()
+
+
+def _evidence_source_summary(db: Session, person_id: str, evidence_ids: list[str] | None) -> str:
+    valid_ids = _valid_evidence_ids(db, person_id, evidence_ids)
+    if not valid_ids:
+        return ""
+    rows = db.query(Evidence).filter(
+        Evidence.person_id == person_id,
+        Evidence.id.in_(valid_ids),
+    ).all()
+    labels = []
+    for row in rows:
+        kind = (row.type or row.source_type or "care record").strip().casefold()
+        label = {
+            "daily_care": "Daily Care entry",
+            "care_event": "Daily Care entry",
+            "document": "document",
+            "appointment": "appointment record",
+            "handoff": "care handoff",
+        }.get(kind, kind.replace("_", " ") or "care record")
+        source_date = _display_date(row.occurred_at or row.uploaded_at)
+        labels.append(f"{label} ({source_date})" if source_date else label)
+    labels = list(dict.fromkeys(labels))
+    if len(labels) > 3:
+        return ", ".join(labels[:3]) + f", and {len(labels) - 3} more saved sources"
+    return ", ".join(labels)
+
+
+def _care_change_message(db: Session, person_id: str, change: Change, evidence_ids: list[str]) -> str:
+    subject = (change.subject_type or "").replace("_", " ").strip()
+    if not subject or subject.casefold() in {"person", "care"}:
+        subject = "care information"
+    start = _display_date(change.comparison_window_start)
+    end = _display_date(change.comparison_window_end)
+    period = f" from {start} to {end}" if start and end else (
+        f" on {start or end}" if start or end else ""
+    )
+    sources = _evidence_source_summary(db, person_id, evidence_ids)
+    source_sentence = f" Supporting records: {sources}." if sources else ""
+    return (
+        f"The saved care record shows a possible change in {subject}{period}."
+        f"{source_sentence} Review the entries in your Living Care Record. "
+        "This is an observation from saved records, not a diagnosis."
+    )
+
+
+def _necessary_question_message(db: Session, person_id: str, question: OpenQuestion) -> str:
+    sources = _evidence_source_summary(db, person_id, question.evidence_ids)
+    source_sentence = f" Supporting records: {sources}." if sources else ""
+    has_conflict = any(
+        isinstance(item, dict) and item.get("source_kind") == "contradiction"
+        for item in (question.context or [])
+    )
+    conflict_sentence = (
+        " The reports remain separate; SolenOS has not selected one as correct."
+        if has_conflict else ""
+    )
+    return (
+        f"{question.question}{source_sentence} If you're not sure, you can say so."
+        f"{conflict_sentence}"
+    )
+
+
 def _valid_evidence_ids(db: Session, person_id: str, values: list[str] | None) -> list[str]:
     candidates = list(dict.fromkeys(
         str(value).strip() for value in (values or [])
@@ -188,11 +255,7 @@ def create_proactive_care_notifications(
                 person_id=person_id,
                 caregiver_id=caregiver.id,
                 title="A care change may be worth reviewing",
-                body=(
-                    "The saved care history contains a meaningful change candidate. "
-                    "Review its supporting dates and sources in the Living Care Record. "
-                    "This is a record-based observation, not a diagnosis."
-                ),
+                body=_care_change_message(db, person_id, change, evidence_ids),
                 category="care_change",
                 priority="normal",
                 source_event_id=change.id,
@@ -225,7 +288,7 @@ def create_proactive_care_notifications(
                 person_id=person_id,
                 caregiver_id=caregiver.id,
                 title="A care detail needs your input",
-                body=question.question,
+                body=_necessary_question_message(db, person_id, question),
                 category="care_attention",
                 priority="normal",
                 source_event_id=question.id,

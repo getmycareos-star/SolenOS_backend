@@ -72,7 +72,11 @@ def pending(client, session):
 
 def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypatch):
     source = "Her sleep has been worse since last Friday."
-    client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}]})
+
+    def extraction_must_not_run(*args, **kwargs):
+        raise AssertionError("Companion must not invoke care-update extraction")
+
+    client = setup_client(monkeypatch, extraction_must_not_run)
     captured = []
 
     def fake_chat(base, model, messages, options=None):
@@ -101,8 +105,35 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
             assert db.query(ConversationMessage).filter_by(session_id=body["session_id"], role="user", content=source).count() == 1
             assert db.query(AIOutputLCRProposal).filter_by(person_id=first["person"]["id"]).count() == 0
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
+            source_message = db.query(ConversationMessage).filter_by(
+                session_id=body["session_id"], role="user", content=source,
+            ).one()
+            # A pre-boundary proposal must not leak into an idempotent replay.
+            # Its dedicated review route remains intact for legacy records.
+            db.add(AIOutputLCRProposal(
+                id="legacy-companion-proposal",
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                proposal_type="companion_care_observation",
+                proposed_change_json={"field": "sleep", "value": "worse"},
+                source_event_ids_json=[],
+                source_evidence_ids_json=[],
+                uncertainty_json={},
+                source_conversation_id=body["session_id"],
+                source_message_id=source_message.id,
+                candidate_index=0,
+                proposal_version=1,
+                status="pending_authorization",
+            ))
+            db.commit()
         finally:
             db.close()
+
+        legacy_replay = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert legacy_replay.status_code == 200, legacy_replay.text
+        assert legacy_replay.json()["idempotent_replay"] is True
+        assert legacy_replay.json()["care_update_candidates"] == []
+        assert len(pending(client, first)) == 1
 
         second = create_session(client, "Caregiver two")
         second_headers = {"Authorization": "Bearer " + second["access_token"]}
