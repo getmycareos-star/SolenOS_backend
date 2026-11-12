@@ -182,6 +182,21 @@ def test_create_information_gap():
             person_id="person-1", necessity="necessary"
         ).one()
         assert "finding6-producer-evidence" in necessary_question.evidence_ids
+        assert necessary_question.status == "open"
+
+        # Updating the structured necessity assessment must suppress the
+        # linked request immediately, without marking it answered.
+        from app.services.uncertainty import UncertaintyEngine
+        engine = UncertaintyEngine(db, person_id="person-1")
+        updated_gap = engine.update_information_gap(
+            grounded.json()["id"],
+            InformationGapUpdate(context=[]),
+        )
+        assert updated_gap is not None
+        db.refresh(necessary_question)
+        assert necessary_question.status == "closed"
+        assert necessary_question.closed_reason.startswith("automatically_suppressed")
+        assert necessary_question.answered_at is None
         db.close()
     finally:
         teardown_db()
