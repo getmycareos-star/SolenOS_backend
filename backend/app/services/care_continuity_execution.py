@@ -15,6 +15,7 @@ from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
+from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
 from app.services.change_intelligence_reconciliation import (
     reconcile_person_change_intelligence,
 )
@@ -40,6 +41,9 @@ def execute_care_continuity_reconciliation(
     source_assertion_id: str | None = None,
     source_appointment_workspace_id: str | None = None,
     source_appointment_workspace_revision_id: str | None = None,
+    source_handoff_draft_id: str | None = None,
+    source_handoff_draft_revision_number: int | None = None,
+    reconcile_lcr: bool = True,
     reference_time: datetime | None = None,
 ) -> dict[str, Any]:
     """Validate persisted lineage and stage the shared LCR reconciliation.
@@ -59,7 +63,7 @@ def execute_care_continuity_reconciliation(
         [value for value in (source_evidence_ids or []) if isinstance(value, str) and value.strip()]
         + ([source_evidence_id] if source_evidence_id else [])
     ))
-    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id and not source_appointment_workspace_id:
+    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id and not source_appointment_workspace_id and not source_handoff_draft_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
     if source_message_id and (not source_conversation_id or not source_caregiver_id):
         raise CareContinuityExecutionError(
@@ -151,6 +155,29 @@ def execute_care_continuity_reconciliation(
                 "The appointment workspace revision is missing or belongs to another care record"
             )
 
+    handoff_draft = None
+    handoff_revision = None
+    if bool(source_handoff_draft_id) != bool(source_handoff_draft_revision_number):
+        raise CareContinuityExecutionError(
+            "A handoff draft and its persisted revision must be supplied together"
+        )
+    if source_handoff_draft_id and source_handoff_draft_revision_number:
+        handoff_draft = db.query(HandoffDraft).filter(
+            HandoffDraft.id == source_handoff_draft_id,
+            HandoffDraft.person_id == person_id,
+            HandoffDraft.caregiver_id == source_caregiver_id,
+        ).first()
+        handoff_revision = db.query(HandoffDraftRevision).filter(
+            HandoffDraftRevision.draft_id == source_handoff_draft_id,
+            HandoffDraftRevision.person_id == person_id,
+            HandoffDraftRevision.caregiver_id == source_caregiver_id,
+            HandoffDraftRevision.revision_number == source_handoff_draft_revision_number,
+        ).first()
+        if handoff_draft is None or handoff_revision is None:
+            raise CareContinuityExecutionError(
+                "The handoff draft revision is missing or belongs to another care record or caregiver"
+            )
+
     correction = None
     if correction_id:
         correction = db.query(Correction).filter(
@@ -191,8 +218,9 @@ def execute_care_continuity_reconciliation(
     # Make pending assertions/review decisions visible to reconciliation in
     # this same unit of work. The caller retains commit/rollback ownership.
     db.flush()
-    reconcile_person_change_intelligence(db, person_id, reference_time)
-    db.flush()
+    if reconcile_lcr:
+        reconcile_person_change_intelligence(db, person_id, reference_time)
+        db.flush()
 
     return {
         "contract_version": "1.0",
@@ -209,13 +237,17 @@ def execute_care_continuity_reconciliation(
         "source_assertion_id": source_assertion_id,
         "source_appointment_workspace_id": source_appointment_workspace_id,
         "source_appointment_workspace_revision_id": source_appointment_workspace_revision_id,
+        "source_handoff_draft_id": source_handoff_draft_id,
+        "source_handoff_draft_revision_number": source_handoff_draft_revision_number,
         "stages": {
             "source_preservation": "verified",
             "evidence": "verified" if evidence_rows else "not_applicable",
             "source_message": "verified" if message is not None else "not_applicable",
             "appointment_workspace_source": "verified" if appointment_workspace is not None else "not_applicable",
             "appointment_workspace_revision": "verified" if appointment_revision is not None else "not_applicable",
-            "reconciliation": "staged_in_caller_transaction",
+            "handoff_draft": "verified" if handoff_draft is not None else "not_applicable",
+            "handoff_draft_revision": "verified" if handoff_revision is not None else "not_applicable",
+            "reconciliation": "staged_in_caller_transaction" if reconcile_lcr else "not_applicable_read_only_output",
             "longitudinal_retrieval": "not_verified",
         },
         "transaction_owner": "caller",
