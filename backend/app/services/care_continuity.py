@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import json
 
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
@@ -54,7 +55,18 @@ def _record_open_question_revision(
     actor: str = "solenos_reconciliation",
     changed_by_caregiver_id: Optional[str] = None,
 ) -> None:
-    """Append an immutable care-state revision for every automated question transition."""
+    """Append an immutable care-state revision for every automated question transition.
+
+    Serialize revision-number allocation per target on PostgreSQL. A read-max-then-
+    insert without a lock races under concurrent answer/reconciliation requests and
+    violates the unique target/revision constraint.
+    """
+    if db.get_bind().dialect.name == "postgresql":
+        lock_key = f"care-state-revision:open_questions:{question.person_id}:{question.id}"
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": lock_key},
+        )
     latest = db.query(CareStateRevision.revision_number).filter(
         CareStateRevision.person_id == question.person_id,
         CareStateRevision.target_type == "open_questions",
