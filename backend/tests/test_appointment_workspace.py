@@ -1711,6 +1711,7 @@ def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_re
     loop_id = loop.id
     assert loop.deadline_at is not None
     assert loop.deadline_source == "explicit_user"
+    assert loop.deadline_timezone == "UTC-05:00"
     assert loop.owner_label == "Clinic"
     assert loop.owner_role == "professional"
     assert loop.evidence[0]["reported_owner_role"] == "professional"
