@@ -350,14 +350,18 @@ def test_quiet_hours_defer_due_reminder_then_release_it_without_changing_due_tim
         # 02:00 in New York: the notification is deferred until quiet hours end.
         assert deliver_due_reminders(db=db, now=datetime(2026, 1, 15, 7, 0, tzinfo=timezone.utc)) == 0
         db.refresh(reminder)
-        assert reminder.due_at == original_due
-        assert reminder.notification_deferred_until == datetime(2026, 1, 15, 13, 0, tzinfo=timezone.utc)
+        stored_due = reminder.due_at.replace(tzinfo=timezone.utc) if reminder.due_at.tzinfo is None else reminder.due_at
+        deferred = reminder.notification_deferred_until
+        deferred = deferred.replace(tzinfo=timezone.utc) if deferred and deferred.tzinfo is None else deferred
+        assert stored_due == original_due
+        assert deferred == datetime(2026, 1, 15, 13, 0, tzinfo=timezone.utc)
         assert db.query(CareNotification).filter(CareNotification.source_event_id == reminder.id).count() == 0
 
         # 10:00 in New York: delivery resumes, without changing the care reminder due time.
         assert deliver_due_reminders(db=db, now=datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)) == 1
         db.refresh(reminder)
-        assert reminder.due_at == original_due
+        stored_due = reminder.due_at.replace(tzinfo=timezone.utc) if reminder.due_at.tzinfo is None else reminder.due_at
+        assert stored_due == original_due
         assert db.query(CareNotification).filter(CareNotification.source_event_id == reminder.id).count() == 1
     finally:
         db.close()
