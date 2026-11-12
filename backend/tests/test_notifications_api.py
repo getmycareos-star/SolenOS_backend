@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +9,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.notifications import CareNotification
 from app.models.change import Change
+from app.models.care import CareEvent, Evidence
 from app.models.uncertainty import OpenQuestion
 from app.core.change_enums import ChangeDirection, ChangeType, SignificanceVerdict
 
@@ -130,6 +133,26 @@ def test_proactive_notification_lifecycle_tracks_its_authoritative_source(monkey
         caregiver_id = first["caregiver"]["id"]
         db = TestSession()
         try:
+            source_event = CareEvent(
+                id="notification-lifecycle-source-event",
+                person_id=person_id,
+                event_type="daily_care",
+                status="recorded",
+                occurred_at=datetime.now(timezone.utc),
+                title="Saved care entry",
+                description="Source event for the meaningful change.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+            )
+            source_evidence = Evidence(
+                id="notification-lifecycle-source-evidence",
+                person_id=person_id,
+                type="caregiver_report",
+                source_text="Source evidence for the necessary question.",
+                uploaded_by_caregiver_id=caregiver_id,
+            )
+            db.add_all([source_event, source_evidence])
+            db.flush()
             change = Change(
                 id="notification-lifecycle-change",
                 person_id=person_id,
@@ -137,7 +160,7 @@ def test_proactive_notification_lifecycle_tracks_its_authoritative_source(monkey
                 subject_id=person_id,
                 change_type=ChangeType.EMERGENCE,
                 change_direction=ChangeDirection.INCREASING,
-                evidence_ids=["source-event"],
+                evidence_ids=[source_event.id],
                 significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
                 attention_candidate=True,
                 is_active=True,
@@ -151,7 +174,7 @@ def test_proactive_notification_lifecycle_tracks_its_authoritative_source(monkey
                 necessity="necessary",
                 necessity_rationale="A current handoff depends on this detail.",
                 status="open",
-                evidence_ids=["source-evidence"],
+                evidence_ids=[source_evidence.id],
             )
             db.add_all([change, question])
             db.flush()
