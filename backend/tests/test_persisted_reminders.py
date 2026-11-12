@@ -1,6 +1,10 @@
+import base64
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,6 +15,15 @@ from app.core.database import Base, SessionLocal as DefaultSessionLocal, get_db
 from app.main import app
 
 pytestmark = pytest.mark.session_security
+
+
+def _valid_vapid_settings(secret_key: str):
+    private = ec.generate_private_key(ec.SECP256R1())
+    public = private.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    pem = private.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()).decode('ascii')
+    public_key = base64.urlsafe_b64encode(public).rstrip(b'=').decode('ascii')
+    return SimpleNamespace(vapid_public_key=public_key, vapid_private_key=pem,
+                           vapid_subject='mailto:support@solenosai.net', secret_key=secret_key)
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -229,11 +242,8 @@ def test_web_push_registration_is_encrypted_scoped_and_revocable(monkeypatch):
     import app.api.push_notifications as push_api
     from app.models.notifications import CarePushSubscription
 
-    monkeypatch.setattr(
-        push_api,
-        "get_settings",
-        lambda: SimpleNamespace(vapid_public_key="BPublicVapidKey", secret_key="test-secret-key"),
-    )
+    settings = _valid_vapid_settings("test-secret-key")
+    monkeypatch.setattr(push_api, "get_settings", lambda: settings)
     client = TestClient(app)
     first = create_session(client, "Push owner")
     second = create_session(client, "Different push owner")
@@ -247,7 +257,7 @@ def test_web_push_registration_is_encrypted_scoped_and_revocable(monkeypatch):
 
     public_key = client.get("/api/v1/notifications/push/public-key", headers=first_headers)
     assert public_key.status_code == 200
-    assert public_key.json()["public_key"] == "BPublicVapidKey"
+    assert public_key.json()["public_key"] == settings.vapid_public_key
 
     registered = client.post(
         "/api/v1/notifications/push/subscriptions",
@@ -292,12 +302,7 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
     import app.services.reminder_delivery as delivery_service
     from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
 
-    settings = SimpleNamespace(
-        vapid_public_key="public-vapid-key",
-        vapid_private_key="-----BEGIN PRIVATE KEY-----\\nprivate\\n-----END PRIVATE KEY-----",
-        vapid_subject="mailto:support@solenosai.net",
-        secret_key="stable-test-secret",
-    )
+    settings = _valid_vapid_settings("stable-test-secret")
     monkeypatch.setattr(push_api, "get_settings", lambda: settings)
     monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
     sent_payloads = []
