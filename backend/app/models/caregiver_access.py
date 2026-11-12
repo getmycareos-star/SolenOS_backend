@@ -27,3 +27,24 @@ class CaregiverAccessGrant(Base):
     granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class CaregiverInvitation(Base):
+    """One-time, recipient-bound invitation pre-authorised by a record manager."""
+    __tablename__ = "caregiver_invitations"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_caregiver_invitations_token_hash"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    email_normalized = Column(String(320), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False)
+    invited_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
+    role = Column(String(32), nullable=False, default="family")
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
