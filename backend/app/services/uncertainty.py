@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 import uuid
 from typing import List, Optional
@@ -78,7 +78,7 @@ def _question_is_answered_by_current_lcr(
                 continue
             observed_at = assertion.observed_at
             observed_at = observed_at.replace(tzinfo=timezone.utc) if observed_at.tzinfo is None else observed_at.astimezone(timezone.utc)
-            if now > observed_at + __import__("datetime").timedelta(days=assertion.review_after_days):
+            if now > observed_at + timedelta(days=assertion.review_after_days):
                 continue
         field_tokens = {
             token for token in re.findall(r"[a-z0-9]+", (assertion.field or "").replace("_", " ").casefold())
