@@ -962,6 +962,10 @@ def test_document_processing_status_does_not_leak_across_anonymous_sessions(clie
     })
     assert second.status_code == 201, second.text
     second_auth = {"Authorization": f"Bearer {second.json()['access_token']}"}
+    cross_record_retry = test_client.post(
+        f"/api/v1/documents/{evidence_id}/queue", headers=second_auth, json={}
+    )
+    assert cross_record_retry.status_code == 404
     status = test_client.get("/api/v1/documents/intelligence", headers=second_auth)
     assert status.status_code == 200, status.text
     assert all(item["evidence_id"] != evidence_id for item in status.json()["processing_jobs"])
