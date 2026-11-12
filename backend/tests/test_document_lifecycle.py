@@ -710,6 +710,7 @@ def test_outlook_msg_is_preserved_but_reports_explicit_unsupported_extraction(cl
 
 def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatch):
     import hashlib
+    import json
     import app.api.document_lifecycle as lifecycle
 
     test_client, session = client

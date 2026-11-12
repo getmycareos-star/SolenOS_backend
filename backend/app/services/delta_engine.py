@@ -1055,7 +1055,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                                     CareEvent.id != source_event_id,
                                     CareEvent.event_type == incoming_event.event_type,
                                     CareEvent.created_by_caregiver_id == created_by_caregiver_id,
-                                ).order_by(CareEvent.created_at.asc()).all()
+                                ).order_by(CareEvent.recorded_at.asc()).all()
 
                                 def _normalized_event_text(value):
                                     return " ".join(str(value or "").casefold().split())

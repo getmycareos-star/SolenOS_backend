@@ -221,35 +221,32 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
         with Session() as db:
             understood = analyze_saved_document(evidence_id, _request(person_id, caregiver_id), db)
             assert understood["analysis_id"] == analysis_id
-            assert understood["review_required"] is True
+            assert understood["review_required"] is False
+            assert understood["review_available"] is True
             assert understood["written_to_lcr"] is False
             assert len(understood["observations"]) == 2
 
-        # Extraction questions must be durable, linked to the saved document,
-        # and visible through the same OpenQuestion store used by the LCR.
-        with Session() as db:
-            clarification = db.query(OpenQuestion).filter_by(
-                person_id=person_id,
-                status="open",
-                question="Was this usual for the person?",
-            ).one()
-            assert clarification.evidence_ids == [evidence_id]
-            assert clarification.created_by_caregiver_id == caregiver_id
-            assert clarification.context[0]["source_kind"] == "document_extraction"
-            assert clarification.context[0]["source_record_refs"] == [
-                {"record_type": "evidence", "record_id": evidence_id}
-            ]
-
-        # Replaying document understanding must not create a duplicate question.
-        with Session() as db:
-            replayed = analyze_saved_document(evidence_id, _request(person_id, caregiver_id), db)
-            assert replayed["analysis_id"] == analysis_id
+        # Preserve model-generated questions with the document analysis, but
+        # do not turn them into active caregiver tasks by default.
+        assert understood["open_questions"] == ["Was this usual for the person?"]
         with Session() as db:
             assert db.query(OpenQuestion).filter_by(
                 person_id=person_id,
                 status="open",
                 question="Was this usual for the person?",
-            ).count() == 1
+            ).count() == 0
+
+        # Replaying document understanding must not create duplicate work.
+        with Session() as db:
+            replayed = analyze_saved_document(evidence_id, _request(person_id, caregiver_id), db)
+            assert replayed["analysis_id"] == analysis_id
+            assert replayed["open_questions"] == ["Was this usual for the person?"]
+        with Session() as db:
+            assert db.query(OpenQuestion).filter_by(
+                person_id=person_id,
+                status="open",
+                question="Was this usual for the person?",
+            ).count() == 0
 
         # Persisted extraction reads and reviews must use hashes, not rerun expensive OCR.
         def unexpected_ocr(*args, **kwargs):
@@ -741,7 +738,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 reviewer_id="independent-erasure-reviewer",
                 db=db,
             )
-            assert deletion_result["request_status"] == "fulfilled"
+            assert deletion_result["status"] == "fulfilled"
 
         with Session() as db:
             assert db.query(Evidence).filter_by(id=evidence_id).count() == 0
