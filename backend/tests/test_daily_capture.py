@@ -1969,3 +1969,73 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
         assert all(row["epistemic_status"] == "uncertain" for row in item["derived_observations"])
     finally:
         teardown_db()
+
+
+def test_uncertain_medication_change_report_never_overwrites_reviewed_medication_record(monkeypatch):
+    from app.api import v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+
+        created = client.post(
+            "/api/v1/care-continuity/medications",
+            headers=headers,
+            json={"name": "Metformin", "dose": "500 mg", "note": "Existing reviewed record"},
+        )
+        assert created.status_code == 201, created.text
+        medication_id = created.json()["medication_id"]
+        reviewed = client.post(
+            f"/api/v1/care-continuity/medications/{medication_id}/review",
+            headers=headers,
+            json={},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["record_status"] == "caregiver_reviewed_current_report"
+
+        original_report = "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose."
+        monkeypatch.setattr(
+            api_v1,
+            "extract_review_candidates",
+            lambda source_text, **kwargs: {"observations": [], "open_questions": []},
+        )
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "uncertain-medication-change-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["success"] is True
+
+        current = client.get("/api/v1/care-continuity/medications", headers=headers)
+        assert current.status_code == 200, current.text
+        assert current.json()["count"] == 1
+        assert current.json()["medications"][0]["medication_id"] == medication_id
+        assert current.json()["medications"][0]["name"] == "Metformin"
+        assert current.json()["medications"][0]["dose"] == "500 mg"
+        assert current.json()["pending_review"] == []
+
+        db = TestingSessionLocal()
+        try:
+            assertions = db.query(CareAssertion).filter_by(
+                person_id="person-daily-test",
+                subject_type="medication",
+                subject_id=medication_id,
+            ).all()
+            assert len(assertions) == 3
+            assert {row.field for row in assertions} == {
+                "medication_name", "dose", "medication_status"
+            }
+            assert all(row.assertion_status == "accepted" for row in assertions)
+        finally:
+            db.close()
+    finally:
+        teardown_db()
