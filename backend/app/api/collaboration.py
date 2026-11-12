@@ -1159,9 +1159,14 @@ def list_document_processing_status(
             OpenQuestion.intended_answerer_role == "professional",
             OpenQuestion.status == "open",
         ).all()
+        candidate_question_ids = {
+            str(item.get("professional_confirmation_question_id"))
+            for item in observations
+            if isinstance(item, dict) and item.get("professional_confirmation_question_id")
+        }
         linked_medication_questions = [
             question for question in medication_questions
-            if evidence.id in (question.evidence_ids or [])
+            if evidence.id in (question.evidence_ids or []) or str(question.id) in candidate_question_ids
         ]
         medication_conflict = medication_conflict_from_document or bool(linked_medication_questions)
         medication_confirmation_question_ids = [str(question.id) for question in linked_medication_questions]
