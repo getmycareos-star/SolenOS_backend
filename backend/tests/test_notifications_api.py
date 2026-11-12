@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -98,7 +100,7 @@ def test_notifications_feed_unread_count_and_read_are_scoped(monkeypatch):
                 priority="normal",
                 source_event_id="resolved-source",
                 status="resolved",
-                resolved_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                resolved_at=datetime.now(timezone.utc),
                 resolution_reason="source_superseded",
             )
             db.add_all([item, resolved_item])
