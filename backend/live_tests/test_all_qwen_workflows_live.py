@@ -76,7 +76,21 @@ def test_enabled_workflow_contract_is_complete():
 
 
 @pytest.mark.parametrize("workflow", ENABLED_WORKFLOWS)
-def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_output(workflow):
+def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_output(workflow, monkeypatch):
+    # Test-only capture: if a real-model draft is rejected, expose the synthetic
+    # draft and repair output in the CI assertion so the failing validator rule
+    # can be diagnosed. Nothing is added to production logs or caregiver data.
+    from app.api import collaboration as collaboration_api
+
+    original_qwen_chat = collaboration_api.qwen_chat
+    generated_drafts = []
+
+    def capture_qwen_chat(*args, **kwargs):
+        draft = original_qwen_chat(*args, **kwargs)
+        generated_drafts.append(str(draft)[:2000])
+        return draft
+
+    monkeypatch.setattr(collaboration_api, "qwen_chat", capture_qwen_chat)
     with TestClient(app) as client:
         session = _new_session(client)
         event_id, _ = _record_fixture(client, session)
@@ -95,7 +109,8 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
         )
         assert response.status_code == 200, (
             f"Real Qwen inference failed for {workflow}: "
-            f"HTTP {response.status_code} {response.text}"
+            f"HTTP {response.status_code} {response.text}; "
+            f"synthetic Qwen drafts/repair outputs={generated_drafts!r}"
         )
         data = response.json()
         assert data.get("workflow") == workflow, data
