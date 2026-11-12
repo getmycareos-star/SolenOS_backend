@@ -119,7 +119,7 @@ REVIEW_CRITERIA = {
 def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Append a versioned, evidence-linked review without overwriting source evidence."""
     person_id, caregiver_id = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("evidence_review_records"):
+    if not inspect(db.connection()).has_table("evidence_review_records"):
         raise HTTPException(status_code=503, detail="Evidence review storage is not available until schema migration completes")
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
@@ -220,7 +220,7 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
 @router.get("/evidence/{evidence_id}/reviews")
 def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("evidence_review_records"):
+    if not inspect(db.connection()).has_table("evidence_review_records"):
         raise HTTPException(status_code=503, detail="Evidence review storage is not available until schema migration completes")
     evidence = db.query(Evidence.id).filter(
         Evidence.id == evidence_id,
@@ -672,7 +672,7 @@ def get_claim_assessment_impact(
             for item in target_assessment_links
             if isinstance(item, dict) and item.get("evidence_id")
         )
-        if not target_evidence_ids or not inspect(db.get_bind()).has_table("evidence_observations"):
+        if not target_evidence_ids or not inspect(db.connection()).has_table("evidence_observations"):
             return []
         rows = db.query(EvidenceObservation).filter(
             EvidenceObservation.person_id == person_id,
@@ -1349,7 +1349,7 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
     def latest_caregiver_review(assertion: CareAssertion) -> datetime | None:
         if assertion.assertion_status not in {"accepted", "caregiver_reviewed"}:
             return None
-        if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+        if not inspect(db.connection()).has_table("care_assertion_revisions"):
             return None
         revisions = _table(db, "care_assertion_revisions")
         return db.execute(
@@ -1581,7 +1581,7 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
     ).order_by(CareAssertion.recorded_at.asc(), CareAssertion.id.asc()).all()
     if not rows:
         raise HTTPException(status_code=404, detail="Medication report not found or incomplete in this care record")
-    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+    if not inspect(db.connection()).has_table("care_assertion_revisions"):
         raise HTTPException(
             status_code=503,
             detail="Medication review history is unavailable until the care-record revision migration is applied",
@@ -1922,7 +1922,7 @@ def current_care_projection(
 
     # Attach the latest persisted evidence reviews without treating absence of a
     # review as a positive quality or freshness result.
-    review_schema_available = inspect(db.get_bind()).has_table("evidence_review_records")
+    review_schema_available = inspect(db.connection()).has_table("evidence_review_records")
     referenced_evidence_ids = sorted({
         str(evidence_id)
         for item in ordered
@@ -1983,7 +1983,7 @@ def current_care_projection(
 def create_observation_coverage(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Persist an explicit observation-coverage interval under the authenticated person's identity."""
     person_id, caregiver_id = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("observation_coverage"):
+    if not inspect(db.connection()).has_table("observation_coverage"):
         raise HTTPException(status_code=503, detail="Observation coverage storage is not available until schema migration completes")
 
     allowed = {"subject_type", "window_start", "window_end", "coverage_status", "source_evidence_ids", "rationale"}
@@ -2045,7 +2045,7 @@ def list_observation_coverage(
 ):
     """List only the authenticated person's recorded observation-coverage intervals."""
     person_id, _ = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("observation_coverage"):
+    if not inspect(db.connection()).has_table("observation_coverage"):
         raise HTTPException(status_code=503, detail="Observation coverage storage is not available until schema migration completes")
     query = db.query(ObservationCoverage).filter(ObservationCoverage.person_id == person_id)
     if subject_type:
@@ -2082,7 +2082,7 @@ def get_observation_coverage_assessment(
 ):
     """Assess recorded coverage; never infer that no event occurred during an unobserved interval."""
     person_id, _ = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("observation_coverage"):
+    if not inspect(db.connection()).has_table("observation_coverage"):
         raise HTTPException(status_code=503, detail="Observation coverage storage is not available until schema migration completes")
     try:
         result = assess_observation_coverage(db, person_id, subject_type, window_start, window_end)
@@ -2438,7 +2438,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             attention_items.append(summary_item)
     # Observation coverage is distinct from event evidence: an unobserved interval
     # must never be represented as evidence that an event did not occur.
-    coverage_table_available = inspect(db.get_bind()).has_table("observation_coverage")
+    coverage_table_available = inspect(db.connection()).has_table("observation_coverage")
     coverage_rows = []
     coverage_count = 0
     if coverage_table_available:
@@ -2800,7 +2800,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
 def get_situation_understanding(request: Request, db: Session = Depends(get_db)):
     """Return the latest persisted assessment for the session-scoped person."""
     person_id, _ = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+    if not inspect(db.connection()).has_table("care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
     row = db.execute(
@@ -2849,7 +2849,7 @@ def situation_understanding_history(
 ):
     """Return immutable, person-scoped assessment snapshots newest first."""
     person_id, _ = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+    if not inspect(db.connection()).has_table("care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
     rows = db.execute(
@@ -2880,7 +2880,7 @@ def get_situation_understanding_snapshot(
 ):
     """Read one immutable snapshot only when it belongs to the session-scoped person."""
     person_id, _ = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+    if not inspect(db.connection()).has_table("care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
     row = db.execute(
@@ -2908,7 +2908,7 @@ def get_situation_understanding_snapshot(
 def reassess_situation_understanding(request: Request, db: Session = Depends(get_db)):
     """Persist an evidence-derived snapshot; repeated identical assessments are deduplicated."""
     person_id, caregiver_id = _scoped_identity(request, db)
-    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+    if not inspect(db.connection()).has_table("care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
     assessment = _build_situation_understanding_assessment(db, person_id)
@@ -3161,7 +3161,7 @@ def list_record_revisions(request: Request, limit: int = 50, db: Session = Depen
         ("care_situation_revisions", "situation_id"),
         ("care_evidence_revisions", "evidence_id"),
     )
-    inspector = inspect(db.get_bind())
+    inspector = inspect(db.connection())
     collected = []
     for table_name, target_column in revision_specs:
         if not inspector.has_table(table_name):
@@ -3219,7 +3219,7 @@ def create_record_version(payload: dict, request: Request, db: Session = Depends
         "caregiver_contexts", "caregiver_perspectives", "caregiver_observations",
     )
     tables_payload = {}
-    inspector = inspect(db.get_bind())
+    inspector = inspect(db.connection())
     for table_name in snapshot_tables:
         if not inspector.has_table(table_name):
             continue
@@ -3331,7 +3331,7 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
             assertions.c.id == assertion_id,
             assertions.c.person_id == person_id,
         ).values(**values))
-        if inspect(db.get_bind()).has_table("care_assertion_revisions"):
+        if inspect(db.connection()).has_table("care_assertion_revisions"):
             revisions = _table(db, "care_assertion_revisions")
             latest = db.execute(select(func.max(revisions.c.revision_number)).where(
                 revisions.c.person_id == person_id,
@@ -3679,7 +3679,7 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
     ).all()
     evidence_by_id = {str(row.id): row for row in evidence_rows}
     latest_reliability_reviews: dict[str, EvidenceReviewRecord] = {}
-    if inspect(db.get_bind()).has_table("evidence_review_records") and evidence_ids:
+    if inspect(db.connection()).has_table("evidence_review_records") and evidence_ids:
         review_rows = db.query(EvidenceReviewRecord).filter(
             EvidenceReviewRecord.person_id == person_id,
             EvidenceReviewRecord.evidence_id.in_(evidence_ids),
@@ -4199,7 +4199,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             # Assertions are inputs to change detection and must be reconciled
             # before this write transaction is committed.
             reconcile_person_change_intelligence(db, person_id)
-        if resource == "living-records" and inspect(db.get_bind()).has_table("care_record_status_history"):
+        if resource == "living-records" and inspect(db.connection()).has_table("care_record_status_history"):
             status_history = _table(db, "care_record_status_history")
             db.execute(insert(status_history).values(
                 id=str(uuid.uuid4()), person_id=person_id, care_record_id=row["id"],
