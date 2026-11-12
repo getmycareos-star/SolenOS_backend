@@ -912,7 +912,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             extraction_status=qwen_status,
             candidates=qwen_candidates if qwen_status == "available" else None,
             execution_status=execution_status,
-            commit=False,
+            commit=True,
         )
         analysis_id = analysis.id
         analysis_persisted = True
@@ -936,9 +936,15 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         # This value is written in the same transaction as reconciliation.
         # If commit fails, neither the status nor the derived changes persist.
         execution_status["reconciliation"] = "completed"
-        if analysis_persisted:
-            analysis.execution_status = execution_status
-            db.add(analysis)
+        if analysis_persisted and analysis_id:
+            persisted_analysis = db.query(CaptureAnalysisModel).filter(
+                CaptureAnalysisModel.id == analysis_id,
+                CaptureAnalysisModel.person_id == person_id,
+                CaptureAnalysisModel.caregiver_id == caregiver_id,
+            ).first()
+            if persisted_analysis is not None:
+                persisted_analysis.execution_status = dict(execution_status)
+                db.add(persisted_analysis)
         db.commit()
         execution["stages"]["reconciliation"] = "completed"
         change_intelligence_status = "available"
@@ -960,23 +966,23 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         # Preserve the failed stage receipt separately so the caregiver's entry
         # is not lost or misreported as a completed workflow.
         try:
-            analysis = persist_capture_analysis(
-                db,
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                source_event_id=event.id,
-                source_evidence_id=evidence.id if evidence is not None else None,
-                source_text=source_text,
-                extraction_status=qwen_status,
-                candidates=qwen_candidates if qwen_status == "available" else None,
-                execution_status=execution_status,
-                commit=True,
+            failed_analysis = (
+                db.query(CaptureAnalysisModel)
+                .filter(
+                    CaptureAnalysisModel.id == analysis_id,
+                    CaptureAnalysisModel.person_id == person_id,
+                    CaptureAnalysisModel.caregiver_id == caregiver_id,
+                )
+                .first()
+                if analysis_id else None
             )
-            analysis_id = analysis.id
+            if failed_analysis is not None:
+                failed_analysis.execution_status = dict(execution_status)
+                db.add(failed_analysis)
+                db.commit()
         except Exception:
             db.rollback()
             logger.exception("Could not persist failed execution status for event %s", event.id)
-            analysis_id = None
 
     return {
         "success": True,
