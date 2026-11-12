@@ -4,6 +4,11 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import zipfile
+import xml.etree.ElementTree as ET
+from email import policy
+from email.parser import BytesParser
+from html.parser import HTMLParser
 from datetime import datetime, timezone
 
 import pypdfium2 as pdfium
@@ -69,6 +74,119 @@ def _ocr_image(image: Image.Image) -> str:
         ) from exc
     except pytesseract.TesseractError as exc:
         raise HTTPException(status_code=422, detail="OCR could not read this document image") from exc
+
+
+class _HTMLText(HTMLParser):
+    """Minimal HTML-to-text converter for email bodies; scripts/styles are discarded."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"script", "style", "head"}:
+            self.hidden += 1
+        elif tag.lower() in {"p", "div", "br", "li", "tr"} and not self.hidden:
+            self.parts.append("\\n")
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"script", "style", "head"} and self.hidden:
+            self.hidden -= 1
+        elif tag.lower() in {"p", "div", "li", "tr"} and not self.hidden:
+            self.parts.append("\\n")
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.parts.append(data)
+
+    def text(self):
+        return re.sub(r"\\n{3,}", "\\n\\n", "".join(self.parts)).strip()
+
+
+def _extract_docx(content: bytes) -> str:
+    """Read only the main WordprocessingML document with bounded ZIP expansion."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            info = archive.getinfo("word/document.xml")
+            if info.file_size > 8 * 1024 * 1024 or info.compress_size == 0:
+                raise HTTPException(status_code=413, detail="Word document content exceeds extraction limits")
+            if info.file_size / max(info.compress_size, 1) > 100:
+                raise HTTPException(status_code=413, detail="Word document compression ratio exceeds safety limits")
+            xml = archive.read(info)
+        root = ET.fromstring(xml)
+    except HTTPException:
+        raise
+    except (KeyError, zipfile.BadZipFile, ET.ParseError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="The saved Word document could not be read") from exc
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    paragraphs = []
+    for paragraph in root.findall(".//w:p", ns):
+        value = "".join(node.text or "" for node in paragraph.findall(".//w:t", ns))
+        if value.strip():
+            paragraphs.append(value)
+    return "\\n".join(paragraphs).strip()
+
+
+def _extract_rtf(content: bytes) -> str:
+    """Conservatively decode common RTF text controls without executing embedded objects."""
+    try:
+        source = content.decode("latin-1")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="The saved RTF document could not be decoded") from exc
+    output = []
+    stack = []
+    skip = False
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "{":
+            stack.append(skip)
+            index += 1
+            continue
+        if char == "}":
+            skip = stack.pop() if stack else False
+            index += 1
+            continue
+        if char == "\\\\":
+            if index + 1 >= len(source):
+                break
+            nxt = source[index + 1]
+            if nxt in "{}\\\\":
+                if not skip:
+                    output.append(nxt)
+                index += 2
+                continue
+            if nxt == "'":
+                token = source[index + 2:index + 4]
+                try:
+                    if not skip and len(token) == 2:
+                        output.append(bytes([int(token, 16)]).decode("cp1252"))
+                except (ValueError, UnicodeDecodeError):
+                    pass
+                index += 4
+                continue
+            match = re.match(r"\\\\([a-zA-Z]+)(-?\\d+)? ?", source[index:])
+            if match:
+                word, number = match.group(1), match.group(2)
+                if word in {"fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "header", "footer"}:
+                    skip = True
+                elif not skip and word in {"par", "line"}:
+                    output.append("\\n")
+                elif not skip and word == "tab":
+                    output.append("\\t")
+                elif not skip and word == "u" and number:
+                    try:
+                        output.append(chr(int(number) % 65536))
+                    except ValueError:
+                        pass
+                index += len(match.group(0))
+                continue
+            index += 2
+            continue
+        if not skip and char not in "\\r\\n":
+            output.append(char)
+        index += 1
+    return re.sub(r"[ \\t]+", " ", "".join(output)).strip()
 
 
 def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str, str]:
@@ -173,6 +291,46 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str,
                 detail="No readable text was found in the image. The original document remains preserved.",
             )
         return f"[Image OCR]\n[Page 1 OCR]\n{extracted}"[:MAX_EXTRACTED_CHARS], "server_tesseract_ocr_image"
+
+    if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or filename.endswith(".docx"):
+        extracted = _extract_docx(content)
+        if not extracted:
+            raise HTTPException(status_code=422, detail="No readable text was found in the Word document")
+        return extracted[:MAX_EXTRACTED_CHARS], "server_docx_xml"
+
+    if mime in {"application/rtf", "text/rtf"} or filename.endswith(".rtf"):
+        extracted = _extract_rtf(content)
+        if not extracted:
+            raise HTTPException(status_code=422, detail="No readable text was found in the RTF document")
+        return extracted[:MAX_EXTRACTED_CHARS], "server_rtf_text"
+
+    if mime == "message/rfc822" or filename.endswith(".eml"):
+        try:
+            message = BytesParser(policy=policy.default).parsebytes(content)
+            body = message.get_body(preferencelist=("plain",))
+            if body is not None:
+                extracted = body.get_content()
+            else:
+                html_body = message.get_body(preferencelist=("html",))
+                parser = _HTMLText()
+                if html_body is not None:
+                    parser.feed(html_body.get_content())
+                extracted = parser.text()
+            headers = "\\n".join(
+                f"{name}: {message.get(name)}" for name in ("From", "To", "Date", "Subject") if message.get(name)
+            )
+            extracted = (headers + "\\n\\n" + str(extracted or "")).strip()
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="The saved email could not be read") from exc
+        if not extracted:
+            raise HTTPException(status_code=422, detail="The email contains no readable message body")
+        return extracted[:MAX_EXTRACTED_CHARS], "server_email_text"
+
+    if mime == "application/msword" or filename.endswith(".doc"):
+        raise HTTPException(
+            status_code=415,
+            detail="Legacy .doc files are preserved, but extraction is unavailable on this server. Save as .docx or PDF and upload again.",
+        )
 
     if mime.startswith("text/") or mime in {"application/json", "application/xml", "application/yaml"} or filename.endswith(
         (".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log")
