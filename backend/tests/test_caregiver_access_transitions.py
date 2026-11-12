@@ -240,6 +240,18 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
     james = accepted_invite.json()
     james_headers = {"Authorization": f"Bearer {james['access_token']}"}
 
+    existing_loop = client.post(
+        "/api/v1/open-loops",
+        headers=owner_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Confirm Margaret's clinic appointment",
+            "description": "Contact the clinic and obtain independent confirmation.",
+        },
+    )
+    assert existing_loop.status_code == 201, existing_loop.text
+    existing_loop_id = existing_loop.json()["id"]
+
     responsibility = client.post(
         "/api/v1/caregiver-responsibilities",
         headers=owner_headers,
@@ -264,7 +276,7 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
             "source_responsibility_id": source_id,
             "to_caregiver_profile_id": james["caregiver_profile_id"],
             "related_record_type": "open_loop",
-            "related_record_id": "existing-clinic-follow-up",
+            "related_record_id": existing_loop_id,
             "reason": "James accepted day-to-day clinic coordination.",
         },
     )
@@ -272,6 +284,13 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
     transfer_id = transfer.json()["id"]
 
     # The original owner remains assigned until James explicitly accepts.
+    inherited_loops = client.get("/api/v1/open-loops", headers=james_headers)
+    assert inherited_loops.status_code == 200, inherited_loops.text
+    inherited_item = next(item for item in inherited_loops.json()["items"] if item["id"] == existing_loop_id)
+    assert inherited_item["assigned_caregiver_id"] == james["caregiver_id"]
+    assert inherited_item["caregiver_id"] == primary["caregiver"]["id"]
+    assert len([item for item in inherited_loops.json()["items"] if item["title"] == "Confirm Margaret's clinic appointment"]) == 1
+
     db = TestSessionLocal()
     try:
         original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
@@ -286,7 +305,7 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
     )
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["accepted"] is True
-    assert accepted.json()["related_record_id"] == "existing-clinic-follow-up"
+    assert accepted.json()["related_record_id"] == existing_loop_id
 
     db = TestSessionLocal()
     try:
@@ -299,7 +318,7 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
         assert replacement.caregiver_id == james["caregiver_profile_id"]
         assert replacement.acceptance_status.value == "explicit"
         assert persisted_transfer.status == "accepted"
-        assert persisted_transfer.related_record_id == "existing-clinic-follow-up"
+        assert persisted_transfer.related_record_id == existing_loop_id
         active_followups = [
             item for item in db.query(CaregiverResponsibility).filter_by(
                 person_id=primary["person"]["id"],
