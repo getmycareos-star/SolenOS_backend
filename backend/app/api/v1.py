@@ -860,6 +860,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             source_evidence_id=evidence.id if evidence is not None else None,
         )
         db.commit()
+        execution["stages"]["reconciliation"] = "committed"
     except Exception:
         db.rollback()
         change_intelligence_status = "unavailable"
