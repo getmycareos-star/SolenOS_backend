@@ -1667,8 +1667,17 @@ def prepare_handoff_draft(
                     if "superseded_by_assessment_id" in table.c:
                         active = and_(active, table.c.superseded_by_assessment_id.is_(None))
                     query = query.where(or_(active, in_window))
+                elif spec.get("include_unresolved_outside_window") and "resolution_status" in table.c:
+                    unresolved = or_(
+                        table.c.resolution_status.is_(None),
+                        table.c.resolution_status.notin_(("resolved", "completed", "closed", "dismissed")),
+                    )
+                    query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_unresolved_outside_window") and "status" in table.c:
-                    unresolved = table.c.status.notin_(("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed"))
+                    unresolved = or_(
+                        table.c.status.is_(None),
+                        table.c.status.notin_(("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed")),
+                    )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_upcoming_outside_window") and "scheduled_at" in table.c:
                     query = query.where(or_(in_window, table.c.scheduled_at >= now))
