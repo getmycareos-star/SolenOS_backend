@@ -4,15 +4,22 @@ Quiet hours defer notification creation; they do not alter the reminder due time
 This worker does not claim to send Web Push or native device notifications.
 """
 import asyncio
+import json
 import logging
-from datetime import datetime, time, timezone
+import uuid
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import case, cast, exists, literal, String
 from sqlalchemy.exc import IntegrityError
 
+from cryptography.fernet import Fernet
+import base64
+import hashlib
+
+from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models.notifications import CareNotification, CareNotificationPreference
+from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
 from app.models.reminder import CareReminder
 
 logger = logging.getLogger(__name__)
@@ -100,11 +107,132 @@ def deliver_due_reminders(db=None, now=None):
             session.close()
 
 
+def deliver_pending_web_pushes(db=None, now=None):
+    """Send privacy-preserving Web Push payloads and persist provider receipts/retries."""
+    settings = get_settings()
+    if not settings.vapid_public_key.strip() or not settings.vapid_private_key.strip():
+        return 0
+    try:
+        from pywebpush import WebPushException, webpush
+    except ImportError:
+        logger.error("Web Push is configured but pywebpush is not installed")
+        return 0
+
+    owns_session = db is None
+    session = db or SessionLocal()
+    current = now or datetime.now(timezone.utc)
+    accepted = 0
+    secret = settings.secret_key or "local-development-only-not-for-production"
+    cipher_key = base64.urlsafe_b64encode(
+        hashlib.sha256((secret + ":solenos-web-push-subscriptions:v1").encode("utf-8")).digest()
+    )
+    cipher = Fernet(cipher_key)
+    try:
+        # Only notify a device about events created after that device was linked.
+        subscriptions = session.query(CarePushSubscription).filter(
+            CarePushSubscription.revoked_at.is_(None)
+        ).all()
+        for subscription in subscriptions:
+            notifications = session.query(CareNotification).filter(
+                CareNotification.person_id == subscription.person_id,
+                CareNotification.caregiver_id == subscription.caregiver_id,
+                CareNotification.created_at >= subscription.created_at,
+            ).all()
+            for notification in notifications:
+                existing = session.query(CarePushDelivery.id).filter(
+                    CarePushDelivery.notification_id == notification.id,
+                    CarePushDelivery.subscription_id == subscription.id,
+                ).first()
+                if existing is None:
+                    session.add(CarePushDelivery(
+                        id=str(uuid.uuid4()),
+                        notification_id=notification.id,
+                        subscription_id=subscription.id,
+                        status="pending",
+                        attempt_count=0,
+                        next_attempt_at=current,
+                    ))
+                    try:
+                        session.commit()
+                    except IntegrityError:
+                        session.rollback()
+
+        due = (
+            session.query(CarePushDelivery, CareNotification, CarePushSubscription)
+            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
+            .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
+            .filter(
+                CarePushDelivery.status == "pending",
+                CarePushDelivery.next_attempt_at <= current,
+                CarePushDelivery.attempt_count < 5,
+                CarePushSubscription.revoked_at.is_(None),
+            )
+            .order_by(CarePushDelivery.next_attempt_at.asc())
+            .limit(100)
+            .all()
+        )
+        retry_delays = (60, 300, 1800, 7200, 21600)
+        for delivery, notification, subscription in due:
+            delivery.attempt_count += 1
+            delivery.last_attempt_at = current
+            try:
+                serialized = cipher.decrypt(
+                    subscription.encrypted_subscription.encode("ascii")
+                ).decode("utf-8")
+                subscription_info = json.loads(serialized)
+                # Never put care details on a lock screen. The caregiver opens
+                # SolenOS to inspect the authenticated notification feed.
+                payload = json.dumps({
+                    "title": "SolenOS",
+                    "body": "You have a care update. Open SolenOS to review it.",
+                    "url": "/workspace",
+                    "notification_id": notification.id,
+                })
+                webpush(
+                    subscription_info=subscription_info,
+                    data=payload,
+                    vapid_private_key=settings.vapid_private_key.replace("\\n", "\n"),
+                    vapid_claims={"sub": settings.vapid_subject},
+                    ttl=60 * 60,
+                )
+                delivery.status = "accepted"
+                delivery.provider_accepted_at = current
+                delivery.last_error_code = None
+                delivery.last_error_message = None
+                accepted += 1
+                session.commit()
+            except WebPushException as exc:
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                delivery.last_error_code = f"http_{status_code}" if status_code else "provider_error"
+                delivery.last_error_message = "Push provider rejected the request"
+                if status_code in (404, 410):
+                    subscription.revoked_at = current
+                    delivery.status = "expired"
+                elif delivery.attempt_count >= 5:
+                    delivery.status = "failed"
+                else:
+                    delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
+                session.commit()
+            except Exception as exc:
+                delivery.last_error_code = type(exc).__name__[:64]
+                delivery.last_error_message = "Push delivery could not be completed"
+                if delivery.attempt_count >= 5:
+                    delivery.status = "failed"
+                else:
+                    delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
+                session.commit()
+        return accepted
+    finally:
+        if owns_session:
+            session.close()
+
+
 async def reminder_delivery_loop():
     """Poll persisted reminders so due notifications recover after process restarts."""
     while True:
         try:
             await asyncio.to_thread(deliver_due_reminders)
+            await asyncio.to_thread(deliver_pending_web_pushes)
         except asyncio.CancelledError:
             raise
         except Exception:
