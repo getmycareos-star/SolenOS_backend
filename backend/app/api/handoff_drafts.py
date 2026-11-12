@@ -2066,11 +2066,11 @@ class CaregiverExportApprovalRequest(BaseModel):
 
 
 def _pdf_escape(value: str) -> str:
-    return value.replace("\\\\", "\\\\\\\\").replace("(", "\\\\(").replace(")", "\\\\)")
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> bytes:
-    """Build a dependency-free, printable PDF from the exact approved revision."""
+    """Build a dependency-free PDF from the exact caregiver-approved revision."""
     content = revision.content if isinstance(revision.content, dict) else {}
     snapshot = revision.source_snapshot if isinstance(revision.source_snapshot, dict) else {}
     records = snapshot.get("source_records") if isinstance(snapshot.get("source_records"), list) else []
@@ -2078,11 +2078,11 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
         "SOLENOS CARE SUMMARY",
         "Prepared by caregiver for sharing outside SolenOS",
         f"Purpose: {draft.purpose.replace('_', ' ')}",
-        f"Prepared: {draft.updated_at.isoformat() if draft.updated_at else 'Not recorded'}",
-        f"Review: Approved by caregiver on {draft.approved_at.isoformat() if draft.approved_at else 'Not recorded'}",
+        f"Prepared: {draft.created_at.isoformat() if draft.created_at else 'Not recorded'}",
+        f"Approved: {draft.approved_at.isoformat() if draft.approved_at else 'Not recorded'}",
         "",
-        "IMPORTANT: This summary reflects saved records and caregiver reports. It is not a clinical assessment.",
-        "Information marked reported, uncertain, historical, or missing has not been independently verified.",
+        "IMPORTANT: This summary reflects saved care records and caregiver reports. It is not a clinical assessment.",
+        "Reported, uncertain, historical, and missing information has not been independently verified.",
         "",
     ]
     generation = content.get("generation") if isinstance(content.get("generation"), dict) else {}
@@ -2092,10 +2092,12 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
         for section in generated_sections:
             if not isinstance(section, dict):
                 continue
-            lines.append(str(section.get("section") or "Care information"))
-            lines.append(str(section.get("text") or ""))
-            lines.append(f"Source reference: {section.get('source_ref') or 'Not available'}")
-            lines.append("")
+            lines.extend([
+                str(section.get("section") or "Care information"),
+                str(section.get("text") or ""),
+                f"Source reference: {section.get('source_ref') or 'Not available'}",
+                "",
+            ])
     else:
         lines.append("SAVED CARE INFORMATION")
         for section in content.get("sections", []) if isinstance(content.get("sections"), list) else []:
@@ -2105,43 +2107,36 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
             for item in section.get("items", []) if isinstance(section.get("items"), list) else []:
                 if not isinstance(item, dict):
                     continue
-                lines.append(str(item.get("text") or ""))
-                lines.append(
-                    "Status: " + str(item.get("epistemic_status") or "not recorded")
-                    + " | Record: " + str(item.get("record_status") or "not recorded")
-                )
-                lines.append(
-                    "Occurred: " + str(item.get("event_at") or "Not recorded")
-                    + " | Recorded: " + str(item.get("recorded_at") or "Not recorded")
-                )
-                lines.append(
-                    "Source: " + str(item.get("source_table") or "unknown")
-                    + "/" + str(item.get("source_id") or "unknown")
-                )
-                lines.append("")
-    lines.extend(["SOURCE AVAILABILITY AND LIMITATIONS"])
+                lines.extend([
+                    str(item.get("text") or ""),
+                    "Information status: " + str(item.get("epistemic_status") or "not recorded"),
+                    "Record status: " + str(item.get("record_status") or "not recorded"),
+                    "Occurred: " + str(item.get("event_at") or "Not recorded"),
+                    "Recorded: " + str(item.get("recorded_at") or "Not recorded"),
+                    "Source: " + str(item.get("source_table") or "unknown") + "/" + str(item.get("source_id") or "unknown"),
+                    "",
+                ])
+    lines.append("SOURCE AVAILABILITY AND LIMITATIONS")
     statuses = snapshot.get("source_statuses") if isinstance(snapshot.get("source_statuses"), dict) else {}
     for key, status in statuses.items():
         if isinstance(status, dict):
             lines.append(f"{key}: {status.get('status', 'unknown')} ({status.get('count', 0)} records)")
-    lines.append("")
-    lines.append("SOURCE REGISTER")
+    lines.extend(["", "SOURCE REGISTER"])
     for index, item in enumerate(records, 1):
-        if not isinstance(item, dict):
-            continue
-        lines.append(
-            f"{index}. {item.get('source_table', 'unknown')}/{item.get('source_id', 'unknown')}"
-            f" | {item.get('epistemic_status', 'not recorded')}"
-            f" | recorded {item.get('recorded_at') or 'not recorded'}"
-        )
+        if isinstance(item, dict):
+            lines.append(
+                f"{index}. {item.get('source_table', 'unknown')}/{item.get('source_id', 'unknown')}"
+                f" | {item.get('epistemic_status', 'not recorded')}"
+                f" | recorded {item.get('recorded_at') or 'not recorded'}"
+            )
     lines.extend([
         "",
-        "This document was exported from the caregiver-approved saved revision.",
-        "The caregiver remains responsible for checking accuracy and deciding whom to share it with.",
+        "This document contains the exact caregiver-approved saved revision.",
+        "The caregiver is responsible for checking accuracy and deciding whom to share it with.",
     ])
     wrapped = []
     for line in lines:
-        value = str(line).replace("\\r", " ").replace("\\n", " ")
+        value = str(line).replace("\r", " ").replace("\n", " ")
         while len(value) > 92:
             wrapped.append(value[:92])
             value = value[92:]
@@ -2156,30 +2151,32 @@ def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> b
         page_ids.append(page_id)
         commands = ["BT", "/F1 9 Tf", "48 790 Td", "12 TL"]
         for line in page_lines:
-            commands.append(f"({_pdf_escape(line.encode('latin-1', 'replace').decode('latin-1'))}) Tj")
+            safe_line = line.encode("latin-1", "replace").decode("latin-1")
+            commands.append(f"({_pdf_escape(safe_line)}) Tj")
             commands.append("T*")
         commands.append("ET")
-        stream = "\\n".join(commands).encode("latin-1")
-        objects.append((page_id, f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {stream_id} 0 R >>".encode()))
-        objects.append((stream_id, b"<< /Length " + str(len(stream)).encode() + b" >>\\nstream\\n" + stream + b"\\nendstream"))
+        stream = "\n".join(commands).encode("latin-1")
+        page = f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {stream_id} 0 R >>"
+        objects.append((page_id, page.encode("ascii")))
+        objects.append((stream_id, b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream"))
     objects.insert(0, (1, b"<< /Type /Catalog /Pages 2 0 R >>"))
     kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
-    objects.insert(1, (2, f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode()))
+    objects.insert(1, (2, f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode("ascii")))
     objects.append((font_id, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"))
-    output = bytearray(b"%PDF-1.4\\n%\\xe2\\xe3\\xcf\\xd3\\n")
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = [0]
     for object_id, body in sorted(objects):
         offsets.append(len(output))
-        output.extend(f"{object_id} 0 obj\\n".encode())
+        output.extend(f"{object_id} 0 obj\n".encode("ascii"))
         output.extend(body)
-        output.extend(b"\\nendobj\\n")
+        output.extend(b"\nendobj\n")
     xref_offset = len(output)
-    output.extend(f"xref\\n0 {len(objects) + 1}\\n".encode())
-    output.extend(b"0000000000 65535 f \\n")
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
     for offset in offsets[1:]:
-        output.extend(f"{offset:010d} 00000 n \\n".encode())
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
     output.extend(
-        f"trailer\\n<< /Size {len(objects) + 1} /Root 1 0 R >>\\nstartxref\\n{xref_offset}\\n%%EOF".encode()
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF".encode("ascii")
     )
     return bytes(output)
 
