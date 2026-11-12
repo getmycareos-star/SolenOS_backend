@@ -1800,6 +1800,7 @@ def test_claim_assessment_impact_requires_review_when_unassessed():
         assert body["claim_id"] == claim.id
         assert body["status"] == "not_assessed"
         assert body["review_required"] is True
+        assert body["changed_observation_ids"] == []
         assert "no_persisted_claim_assessment" in body["reasons"]
         assert "not a claim-truth judgment" in body["interpretation_limit"]
 
