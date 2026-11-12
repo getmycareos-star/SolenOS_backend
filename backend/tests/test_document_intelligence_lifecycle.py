@@ -660,7 +660,7 @@ def test_document_understanding_retry_processes_only_remaining_pages(monkeypatch
     processed_pages = []
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
-        page_number = int(page_text.split("]", 1)[0].split()[-1])
+        page_number = int(page_text.rsplit(" ", 1)[-1].rstrip("."))
         processed_pages.append(page_number)
         quote = page_text.split("\n", 1)[1].strip()
         return {
