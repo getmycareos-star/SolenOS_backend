@@ -1532,9 +1532,17 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
         CareAssertion.subject_id == subject_id,
         CareAssertion.assertion_kind == "current_state",
     ).order_by(CareAssertion.recorded_at.asc(), CareAssertion.id.asc()).all()
-    fields = {str(row.field).strip().lower(): row for row in rows}
-    name_claim = fields.get("medication_name") or fields.get("name")
-    status_claim = fields.get("medication_status") or fields.get("status")
+    fields: dict[str, list[CareAssertion]] = {}
+    for row in rows:
+        fields.setdefault(str(row.field).strip().lower(), []).append(row)
+    name_claims = fields.get("medication_name") or fields.get("name") or []
+    status_claims = fields.get("medication_status") or fields.get("status") or []
+    name_values = {" ".join(str(row.asserted_value or "").casefold().split()) for row in name_claims if row.assertion_status not in {"rejected", "superseded", "retracted"}}
+    status_values = {" ".join(str(row.asserted_value or "").casefold().split()) for row in status_claims if row.assertion_status not in {"rejected", "superseded", "retracted"}}
+    if len(name_values) > 1 or len(status_values) > 1:
+        raise HTTPException(status_code=409, detail="Conflicting medication reports must be resolved before review")
+    name_claim = name_claims[0] if name_claims else None
+    status_claim = status_claims[0] if status_claims else None
     if not name_claim or not status_claim:
         raise HTTPException(status_code=404, detail="Medication report not found or incomplete in this care record")
     if str(status_claim.asserted_value).strip().casefold() != "active":
