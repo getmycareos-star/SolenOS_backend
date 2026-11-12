@@ -137,7 +137,7 @@ def _unreadable_page_numbers(source_text: str) -> list[int]:
     return [
         int(match.group(1))
         for match in re.finditer(
-            r"(?m)^\\[Page\\s+(\\d+)\\s+OCR\\]\\n\\[No readable text detected on this page\\]",
+            r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[No readable text detected on this page\]",
             source_text or "",
         )
     ]
@@ -712,10 +712,10 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     capture_page_number = capture.get("page_number")
     if capture.get("method") == "scan" and isinstance(capture_page_number, int) and not isinstance(capture_page_number, bool):
         source_text = source_text.replace("[Page 1 OCR]", f"[Page {capture_page_number} OCR]", 1)
-    total_pages = len(re.findall(r"(?m)^\\[Page\\s+\\d+", source_text)) or 1
+    total_pages = len(re.findall(r"(?m)^\[Page\s+\d+, source_text)) or 1
     unreadable_pages = _unreadable_page_numbers(source_text)
     unprocessed_pages = [
-        int(value) for value in re.findall(r"(?m)^\\[Page\\s+(\\d+)\\s+OCR\\]\\n\\[Page not processed:", source_text)
+        int(value) for value in re.findall(r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed:, source_text)
     ]
     processed_pages = sorted(set(range(1, total_pages + 1)) - set(unprocessed_pages))
     extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
