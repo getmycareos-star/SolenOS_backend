@@ -204,6 +204,16 @@ def _response(analysis: CaptureAnalysis) -> dict:
     unreadable_pages = _unreadable_page_numbers(source_text)
     processed_pages = [number for number in range(1, page_count + 1) if number not in unprocessed_pages]
     all_observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
+    extraction_complete = (
+        analysis.extraction_status == "available"
+        and not _unprocessed_page_numbers(source_text)
+        and not _unreadable_page_numbers(source_text)
+    )
+    if not extraction_complete:
+        # Never expose previously generated candidates for a document whose
+        # current persisted extraction is incomplete. Review writes are also
+        # blocked independently in review_document_candidate.
+        all_observations = []
     visible_indexes = intelligence.get("visible_candidate_indexes")
     if not isinstance(visible_indexes, list):
         visible_indexes = list(range(min(MAX_DOCUMENT_CANDIDATE_BATCH, len(all_observations))))
@@ -248,7 +258,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
         "open_questions": intelligence.get("open_questions", []),
-        "review_required": any(
+        "interpretation_blocked": not extraction_complete,
+        "review_required": extraction_complete and any(
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in all_observations
         ),
