@@ -966,6 +966,13 @@ def fulfil_approved_deletion(
             detail="This care record has multiple linked caregivers; mixed-caregiver deletion requires a separate scope assessment.",
         )
 
+    # Capture evidence primary keys before generic FK cleanup can null or otherwise
+    # alter a nullable person_id. Erasure is verified by immutable row identity,
+    # not only by a mutable ownership column.
+    evidence_ids_to_erase = db.query(Evidence.id).filter(
+        Evidence.person_id == person_id
+    ).scalars().all()
+
     bind = db.get_bind()
     inspector = sa_inspect(bind)
     if inspector.has_table("legal_holds"):
@@ -1124,33 +1131,19 @@ def fulfil_approved_deletion(
             elif table.name in direct_predicates:
                 db.execute(table.delete().where(direct_predicates[table.name]))
 
-        # Explicitly erase evidence payloads before the person identity. The
-        # generic metadata closure is a defence-in-depth sweep, but evidence is
-        # a primary care-record table and must never survive as an orphan when a
-        # schema has nullable or differently configured foreign-key behaviour.
-        if inspector.has_table("evidence_uploads") and inspector.has_table("evidence"):
-            db.execute(
-                text("""
-                    DELETE FROM evidence_uploads
-                    WHERE evidence_id IN (
-                        SELECT id FROM evidence WHERE person_id = :person_id
-                    )
-                """),
-                {"person_id": person_id},
-            )
-        if inspector.has_table("evidence"):
-            # Use the ORM column type for the primary scoped delete. Raw SQL
-            # string binds can fail to match UUID-backed person_id columns on
-            # some dialects, leaving an orphan while the request is fulfilled.
-            db.query(Evidence).filter(Evidence.person_id == person_id).delete(
-                synchronize_session=False
-            )
-            db.execute(
-                text("DELETE FROM evidence WHERE person_id = :person_id"),
-                {"person_id": person_id},
-            )
-            remaining_evidence = db.query(Evidence).filter(
-                Evidence.person_id == person_id
+        # Explicitly erase evidence payloads by the primary keys captured before
+        # the generic FK cleanup. A nullable person_id may be cleared during that
+        # pass, so re-querying only by person_id can falsely report successful
+        # erasure while the evidence row itself survives.
+        if evidence_ids_to_erase:
+            db.query(EvidenceUpload).filter(
+                EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
+            ).delete(synchronize_session=False)
+            db.query(Evidence).filter(
+                Evidence.id.in_(evidence_ids_to_erase)
+            ).delete(synchronize_session=False)
+            remaining_evidence = db.query(Evidence.id).filter(
+                Evidence.id.in_(evidence_ids_to_erase)
             ).count()
             if int(remaining_evidence):
                 raise HTTPException(
