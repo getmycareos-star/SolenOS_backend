@@ -979,3 +979,102 @@ def test_document_processing_status_does_not_leak_across_anonymous_sessions(clie
     assert status.status_code == 200, status.text
     assert all(item["evidence_id"] != evidence_id for item in status.json()["processing_jobs"])
     assert all(item["source_evidence_id"] != evidence_id for item in status.json()["items"])
+
+
+def test_scanned_pdf_processes_more_than_25_pages(client, monkeypatch):
+    from pypdf import PdfWriter
+    import app.api.document_lifecycle as lifecycle
+
+    test_client, session = client
+    writer = PdfWriter()
+    for _ in range(30):
+        writer.add_blank_page(width=612, height=792)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    evidence_id = persist_document(session, buffer.getvalue(), "30-page-scan.pdf", "application/pdf")
+    calls = []
+    monkeypatch.setattr(lifecycle, "_ocr_image", lambda image: calls.append(1) or "Patient walked 20 metres")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 201, response.text
+    assert len(calls) == 30
+    retrieved = test_client.get(f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth)
+    assert retrieved.status_code == 200, retrieved.text
+    assert "[Page 30 OCR]" in retrieved.json()["extracted_text"]
+    assert retrieved.json()["page_count"] == 30
+
+
+def test_scanned_pdf_preserves_readable_pages_when_one_page_ocr_fails(client, monkeypatch):
+    from pypdf import PdfWriter
+    import app.api.document_lifecycle as lifecycle
+
+    test_client, session = client
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=612, height=792)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    evidence_id = persist_document(session, buffer.getvalue(), "partial-scan.pdf", "application/pdf")
+    calls = {"count": 0}
+
+    def ocr_one_page_at_a_time(_image):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("synthetic page OCR failure")
+        return "Patient walked 20 metres"
+
+    monkeypatch.setattr(lifecycle, "_ocr_image", ocr_one_page_at_a_time)
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_status"] == "partial"
+    assert response.json()["unreadable_page_numbers"] == [2]
+    retrieved = test_client.get(f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth)
+    assert retrieved.status_code == 200, retrieved.text
+    extracted = retrieved.json()["extracted_text"]
+    assert "[Page 1 OCR]" in extracted and "Patient walked 20 metres" in extracted
+    assert "[Page 2 OCR]" in extracted and "[No readable text detected on this page]" in extracted
+    assert "[Page 3 OCR]" in extracted and "Patient walked 20 metres" in extracted
+
+
+def test_upload_and_extract_bmp_and_tiff_document_scans(client):
+    """Formats supported by Pillow/Tesseract extraction must pass upload signature checks."""
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    source = Image.open(io.BytesIO(_scanned_text_image())).convert("RGB")
+
+    for extension, image_format, mime_type in (
+        ("bmp", "BMP", "image/bmp"),
+        ("tiff", "TIFF", "image/tiff"),
+    ):
+        buffer = io.BytesIO()
+        source.save(buffer, format=image_format)
+        original = buffer.getvalue()
+        uploaded = test_client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": session["person"]["id"],
+                "caregiver_id": session["caregiver"]["id"],
+                "evidence_type": "document",
+                "capture_method": "upload",
+                "capture_timestamp": "2026-11-12T06:00:00Z",
+            },
+            files={"file": (f"care-scan.{extension}", original, mime_type)},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        with TestSessionLocal() as db:
+            saved = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+            assert saved.content == original
+            assert saved.sha256 == hashlib.sha256(original).hexdigest()
+
+        extracted = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        assert extracted.json()["extraction_method"] == "server_tesseract_ocr_image"
+
+    source.close()
