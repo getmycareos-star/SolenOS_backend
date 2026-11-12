@@ -135,6 +135,39 @@ def execute_care_continuity_reconciliation(
                 "The source assertion is missing or belongs to another care record"
             )
 
+        # An assertion is only as trustworthy as its own persisted lineage.
+        # Validate every evidence reference carried by the assertion, even
+        # when the caller did not separately supply source_evidence_ids.
+        assertion_evidence_ids = list(dict.fromkeys(
+            value for value in (assertion.evidence_ids or [])
+            if isinstance(value, str) and value.strip()
+        ))
+        for evidence_id in assertion_evidence_ids:
+            linked_evidence = db.query(Evidence).filter(
+                Evidence.id == evidence_id,
+                Evidence.person_id == person_id,
+            ).first()
+            if linked_evidence is None:
+                raise CareContinuityExecutionError(
+                    "The source assertion references evidence missing from or outside this care record"
+                )
+
+        if evidence_ids and not set(evidence_ids).issubset(set(assertion_evidence_ids)):
+            raise CareContinuityExecutionError(
+                "The supplied evidence is not part of the source assertion's persisted lineage"
+            )
+        if assertion.source_event_id and event_ids and assertion.source_event_id not in event_ids:
+            raise CareContinuityExecutionError(
+                "The source assertion does not belong to the supplied source event"
+            )
+        if source_message_id and (
+            str(assertion.source_message_id or "") != str(source_message_id)
+            or str(assertion.source_conversation_id or "") != str(source_conversation_id)
+        ):
+            raise CareContinuityExecutionError(
+                "The source assertion does not belong to the supplied Companion message"
+            )
+
     appointment_workspace = None
     appointment_revision = None
     if bool(source_appointment_workspace_id) != bool(source_appointment_workspace_revision_id):
