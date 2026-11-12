@@ -179,6 +179,7 @@ class CorrectionCreate(CorrectionBase):
 class Correction(CorrectionBase):
     id: str
     created_at: datetime
+    care_continuity_execution: Optional[dict[str, Any]] = None
 
     class Config:
         from_attributes = True
