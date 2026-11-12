@@ -96,6 +96,7 @@ SOURCES = {
         "event_time_fields": ("effective_from", "effective_to"),
         "recorded_time_fields": ("created_at", "updated_at"),
         "detail_fields": ("subject_type", "subject_id", "event_id", "context_key", "matching_candidate_ids", "source_assertion_ids", "resolution_status", "resolved_at", "resolved_by_caregiver_id"),
+        "include_unresolved_outside_window": True,
     },
     "contradiction_resolution_events": {
         "label": "Conflict resolution history",
@@ -150,6 +151,7 @@ SOURCES = {
         "time_fields": ("created_at", "updated_at"),
         "active_open_questions_only": True,
         "necessary_questions_only": True,
+        "include_unresolved_outside_window": True,
         "validate_necessity": True,
     },
     "information_gaps": {
@@ -160,6 +162,7 @@ SOURCES = {
         "time_fields": ("created_at", "updated_at"),
         "recorded_time_fields": ("created_at", "updated_at"),
         "detail_fields": ("priority", "status"),
+        "include_unresolved_outside_window": True,
     },
     "uncertainty_assessments": {
         "label": "Uncertainty assessments",
@@ -171,6 +174,7 @@ SOURCES = {
         "recorded_time_fields": ("assessed_at",),
         "detail_fields": ("subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "confidence", "evidence_ids"),
         "active_assessments_only": True,
+        "include_active_outside_window": True,
     },
     "care_timeline_entries": {
         "label": "Care timeline",
@@ -211,6 +215,7 @@ SOURCES = {
         "event_time_fields": ("scheduled_at",),
         "recorded_time_fields": ("created_at", "updated_at"),
         "detail_fields": ("scheduled_at_timezone", "provider", "healthcare_org", "location", "status", "preparation_notes", "medication_questions", "travel_notes", "time_provenance", "location_provenance"),
+        "include_upcoming_outside_window": True,
     },
     "actions": {
         "label": "Recorded care actions",
@@ -222,7 +227,6 @@ SOURCES = {
         "recorded_time_fields": ("created_at", "updated_at"),
         "due_time_fields": ("deadline",),
         "detail_fields": ("source_authority", "actor_label", "subject_label", "action_type", "modality", "condition_text", "trigger_text", "deadline", "status", "source_evidence_id"),
-        "require_caregiver_owned_evidence": True,
     },
     "evidence_freshness_assessments": {
         "label": "Evidence freshness assessments",
@@ -233,7 +237,6 @@ SOURCES = {
         "event_time_fields": ("source_time",),
         "recorded_time_fields": ("assessed_at",),
         "detail_fields": ("evidence_id", "policy_id", "policy_version", "freshness_status", "source_time_kind", "age_days", "assessed_by_caregiver_id"),
-        "require_caregiver_owned_evidence": True,
         "evidence_link_column": "evidence_id",
     },
     "evidence_freshness_policies": {
@@ -1252,7 +1255,6 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
     try:
         documents = db.query(Evidence).filter(
             Evidence.person_id == person_id,
-            Evidence.uploaded_by_caregiver_id == caregiver_id,
             Evidence.type == "document",
         ).order_by(Evidence.uploaded_at.desc()).limit(MAX_ROWS_PER_SOURCE).all()
         if not documents:
@@ -1295,7 +1297,6 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 return {"status": "failed", "reason": "original_document_integrity_check_failed", "label": "Uploaded documents and extracted text", "count": 0}, []
             extraction = db.query(CaptureAnalysis).filter(
                 CaptureAnalysis.person_id == person_id,
-                CaptureAnalysis.caregiver_id == caregiver_id,
                 CaptureAnalysis.source_evidence_id == document.id,
             ).order_by(CaptureAnalysis.created_at.desc()).first()
             extraction_details = extraction.candidates if extraction and isinstance(extraction.candidates, dict) else {}
@@ -1651,7 +1652,6 @@ def prepare_handoff_draft(
                 evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
                 query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
                     evidence_table.c.person_id == person_id,
-                    evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
                 )
             timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
             if timestamp_columns:
@@ -1664,6 +1664,16 @@ def prepare_handoff_draft(
                 )
                 if spec.get("include_active_outside_window") and "superseded_by_fact_id" in table.c:
                     query = query.where(or_(table.c.superseded_by_fact_id.is_(None), in_window))
+                elif spec.get("include_active_outside_window") and "is_active" in table.c:
+                    active = table.c.is_active.is_(True)
+                    if "superseded_by_assessment_id" in table.c:
+                        active = and_(active, table.c.superseded_by_assessment_id.is_(None))
+                    query = query.where(or_(active, in_window))
+                elif spec.get("include_unresolved_outside_window") and "status" in table.c:
+                    unresolved = table.c.status.notin_(("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed"))
+                    query = query.where(or_(unresolved, in_window))
+                elif spec.get("include_upcoming_outside_window") and "scheduled_at" in table.c:
+                    query = query.where(or_(in_window, table.c.scheduled_at >= now))
                 else:
                     query = query.where(in_window)
                 query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
