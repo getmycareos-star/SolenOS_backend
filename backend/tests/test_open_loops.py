@@ -552,9 +552,9 @@ def test_system_reassessment_audits_deadlines_without_infering_completion():
 
     current = client.get(f"/api/v1/open-loops/{overdue['id']}", headers=headers)
     assert current.status_code == 200, current.text
-    assert current.json()["status"] == "open"
-    assert current.json()["priority"] == "high"
-    assert current.json()["closure_result"] is None
+    assert current.json()["loop"]["status"] == "open"
+    assert current.json()["loop"]["priority"] == "high"
+    assert current.json()["loop"]["closure_result"] is None
 
     history = client.get(f"/api/v1/open-loops/{overdue['id']}/history", headers=headers)
     assert history.status_code == 200, history.text
