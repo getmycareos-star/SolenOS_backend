@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.caregiver_account import CaregiverAccount
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.caregiver_intelligence import CaregiverProfile
 from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent, AccountRecoveryEvent, RecoveryCodeSet
 
@@ -103,9 +104,6 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
     email = _validate_email(payload.email)
     if db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first():
         raise HTTPException(status_code=409, detail="An account already uses this email address.")
-    existing = db.query(CaregiverAccount).filter(CaregiverAccount.person_id == person_id).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="This care record already has an account.")
     account = CaregiverAccount(
         email_normalized=email,
         password_hash=_hash_password(payload.password),
@@ -184,6 +182,15 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
         db.add(AccountSecurityEvent(account_id=account.id if account else None, caregiver_id=account.caregiver_id if account else None, event_type="login_failed"))
         db.commit()
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == account.person_id,
+        CaregiverAccessGrant.caregiver_id == account.caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="This caregiver has not been authorised to access that care record.")
+
     try:
         caregiver_profile = ensure_caregiver_profile_for_session(
             db,
