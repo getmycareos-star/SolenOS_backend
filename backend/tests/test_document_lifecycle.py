@@ -736,14 +736,14 @@ def test_legacy_doc_extraction_uses_local_bounded_antiword(monkeypatch):
         seen["timeout"] = kwargs["timeout"]
         with open(command[-1], "rb") as source:
             seen["input"] = source.read()
-        return SimpleNamespace(returncode=0, stdout=b"Discharge summary\\nMobility: walking frame", stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=b"Discharge summary\nMobility: walking frame", stderr=b"")
 
     monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)
-    result = lifecycle._extract_legacy_doc(b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-doc")
+    result = lifecycle._extract_legacy_doc(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-doc")
     assert "Mobility: walking frame" in result
     assert seen["command"][:2] == ["/usr/bin/antiword", "-w"]
     assert seen["timeout"] == 15
-    assert seen["input"].startswith(b"\\xd0\\xcf\\x11\\xe0")
+    assert seen["input"].startswith(b"\xd0\xcf\x11\xe0")
 
 
 def test_legacy_doc_extraction_fails_clearly_when_antiword_missing(monkeypatch):
