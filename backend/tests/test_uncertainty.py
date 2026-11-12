@@ -187,6 +187,81 @@ def test_create_information_gap():
         teardown_db()
 
 
+def test_next_question_projection_excludes_internal_gaps_and_unassessed_questions():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-f6-projection", name="Projection Person")
+        caregiver = Caregiver(
+            id="caregiver-f6-projection",
+            name="Projection Caregiver",
+            email="projection@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="evidence-f6-projection",
+            person_id=person.id,
+            type="document",
+            source_text="Current discharge instruction used for the handoff.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        db.add_all([person, caregiver, evidence])
+        db.flush()
+        db.add_all([
+            InformationGap(
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="preferred_pharmacy",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.NOT_DOCUMENTED,
+                priority=Priority.INFORMATIONAL,
+                lifecycle_status=GapLifecycleStatus.OPEN,
+                description="Preferred pharmacy has not been recorded.",
+            ),
+            OpenQuestion(
+                person_id=person.id,
+                question="Which discharge instruction applies to the current handoff?",
+                subject_type="person",
+                subject_id=person.id,
+                status="open",
+                necessity="necessary",
+                necessity_rationale="The handoff decision depends on the active instruction.",
+                priority=Priority.HIGH,
+                evidence_ids=[evidence.id],
+                context=[{
+                    "decision_dependency": "The handoff cannot identify the active instruction without clarification."
+                }],
+            ),
+            OpenQuestion(
+                person_id=person.id,
+                question="What is the preferred pharmacy?",
+                subject_type="person",
+                subject_id=person.id,
+                status="open",
+                necessity="not_assessed",
+                priority=Priority.INFORMATIONAL,
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        response = client.post(f"/api/v1/care-continuity/next-questions/{person.id}")
+        assert response.status_code == 200, response.text
+        questions = response.json()
+        assert [item["question"] for item in questions] == [
+            "Which discharge instruction applies to the current handoff?"
+        ]
+    finally:
+        teardown_db()
+
+
 def test_unknown_vs_false():
     setup_db()
     try:
