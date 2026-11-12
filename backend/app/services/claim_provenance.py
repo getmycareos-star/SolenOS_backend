@@ -245,21 +245,34 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
     """
     historical_statuses = {"corrected", "superseded", "withdrawn", "rejected", "retracted", "expired", "deleted", "archived"}
     claims = []
-    aggregates = [item for item in (validated_aggregates or []) if item.get("status") == "validated"]
+    aggregates = list(validated_aggregates or [])
     for index, statement in enumerate(split_response_claims(reply)):
         normalized_claim = _normalise(statement)
         matches = []
         current_matches = 0
         aggregate_match = None
+        aggregate_review = None
         statement_number = _claim_number(statement)
-        for aggregate in aggregates:
-            topic = str(aggregate.get("topic") or "")
+        for candidate in aggregates:
+            topic = str(candidate.get("topic") or "")
             topic_terms = _EVENT_TOPIC_TERMS.get(topic, ())
             mentions_topic = any(term in normalized_claim for term in topic_terms)
             mentions_incident = bool(re.search(r"\b(?:incident|incidents|event|events|occasion|occasions|episode|episodes)\b", normalized_claim))
-            if statement_number is not None and mentions_topic and mentions_incident and statement_number == aggregate.get("count"):
-                aggregate_match = aggregate
-                break
+            if statement_number is None or not mentions_topic or not mentions_incident:
+                continue
+            if candidate.get("status") != "validated":
+                aggregate_review = candidate
+            elif statement_number == candidate.get("count"):
+                aggregate_match = candidate
+            else:
+                aggregate_review = {
+                    "status": "count_mismatch",
+                    "topic": topic,
+                    "window_label": candidate.get("window_label"),
+                    "count": candidate.get("count"),
+                    "interpretation_limit": "The number in this statement does not match the distinct dated care-event records found in the requested time window.",
+                }
+            break
         if normalized_claim:
             for source in source_records:
                 source_text = str(source.get("source_text") or "")
