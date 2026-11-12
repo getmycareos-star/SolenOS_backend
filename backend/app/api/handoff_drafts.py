@@ -892,7 +892,6 @@ def approve_handoff_draft(
         source_handoff_draft_revision_number=draft.revision_number,
         reconcile_lcr=False,
     )
-    draft.care_continuity_execution = execution
     db.add(draft)
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
@@ -914,6 +913,7 @@ def approve_handoff_draft(
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="The handoff approval could not be saved with its source validation") from exc
+    draft.care_continuity_execution = execution
     return _draft_response(draft)
 
 
