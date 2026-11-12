@@ -2901,6 +2901,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"Validated event count for {aggregate['topic']} during {aggregate['window_label']}: "
                 f"{aggregate['count']} distinct dated care-event records. "
                 "The count excludes repeated records sharing the same source evidence or identical event details at the same time. "
+                "Describe this as incidents recorded in the care record, not as independently confirmed clinical fact. "
                 "It is a count of saved reports, not independent clinical corroboration."
             )
         else:
