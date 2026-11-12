@@ -19,7 +19,7 @@ import hashlib
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription, DeliveryFailureEvent
+from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription, DeliveryFailureEvent, NotificationDeliveryAttempt
 
 # Care changes and clarification requests stay in the authenticated inbox.
 # Browser push is reserved for explicitly due reminders.
@@ -203,6 +203,29 @@ def _record_delivery_failure(session, delivery, notification, subscription, curr
         occurred_at=current,
         retryable=bool(retryable),
         record_metadata={"notification_id": notification.id, "attempt_number": delivery.attempt_count},
+    ))
+
+
+
+def _record_delivery_attempt(session, delivery, notification, subscription, current, result, failure_code=None):
+    """Append a provider-attempt receipt without mutating earlier attempt history."""
+    session.add(NotificationDeliveryAttempt(
+        id=str(uuid.uuid4()),
+        actor_id=notification.caregiver_id,
+        subject_id=notification.person_id,
+        person_id=notification.person_id,
+        caregiver_id=notification.caregiver_id,
+        notification_id=notification.id,
+        attempt_number=delivery.attempt_count,
+        channel="web_push",
+        attempted_at=current,
+        result=result,
+        failure_code=str(failure_code)[:120] if failure_code else None,
+        record_metadata={
+            "delivery_id": delivery.id,
+            "subscription_id": subscription.id,
+            "provider_accepted": result == "provider_accepted",
+        },
     ))
 
 
@@ -426,6 +449,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 delivery.last_error_code = None
                 delivery.last_error_message = None
                 _resolve_delivery_failures(session, delivery, current)
+                _record_delivery_attempt(session, delivery, notification, subscription, current, "provider_accepted")
                 accepted += 1
                 session.commit()
             except InvalidToken:
@@ -439,6 +463,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                     session, delivery, notification, subscription, current,
                     delivery.last_error_code, "Browser subscription could not be decrypted; re-registration is required", False,
                 )
+                _record_delivery_attempt(session, delivery, notification, subscription, current, "subscription_invalid", delivery.last_error_code)
                 session.commit()
             except WebPushException as exc:
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
@@ -457,6 +482,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                     delivery.last_error_code, delivery.last_error_message,
                     delivery.status == "retry_scheduled",
                 )
+                _record_delivery_attempt(session, delivery, notification, subscription, current, delivery.status, delivery.last_error_code)
                 session.commit()
             except Exception as exc:
                 delivery.last_error_code = type(exc).__name__[:64]
@@ -471,6 +497,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                     delivery.last_error_code, delivery.last_error_message,
                     delivery.status == "retry_scheduled",
                 )
+                _record_delivery_attempt(session, delivery, notification, subscription, current, delivery.status, delivery.last_error_code)
                 session.commit()
         return accepted
     finally:
