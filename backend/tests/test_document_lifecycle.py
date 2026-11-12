@@ -1189,3 +1189,27 @@ def test_jpeg_png_bmp_and_tiff_images_use_server_ocr(monkeypatch):
 
         assert method == "server_tesseract_ocr_image"
         assert "Follow-up appointment on November 20." in extracted
+
+def test_image_ocr_resource_limit_is_blocked_not_marked_unreadable(monkeypatch):
+    from PIL import Image
+    from fastapi import HTTPException
+    from app.api import document_lifecycle
+
+    output = io.BytesIO()
+    Image.new("RGB", (32, 32), "white").save(output, format="PNG")
+
+    def blocked_ocr(_image):
+        raise HTTPException(status_code=413, detail="OCR page limit exceeded")
+
+    monkeypatch.setattr(document_lifecycle, "_ocr_image", blocked_ocr)
+
+    class Upload:
+        mime_type = "image/png"
+        filename = "scan.png"
+
+    extracted, method = document_lifecycle._extract(Upload(), output.getvalue())
+    assert method == "server_tesseract_ocr_image"
+    assert document_lifecycle._unprocessed_page_numbers(extracted) == [1]
+    assert document_lifecycle._retryable_page_numbers(extracted) == []
+    assert document_lifecycle._blocked_page_numbers(extracted) == [1]
+    assert document_lifecycle._unreadable_page_numbers(extracted) == []
