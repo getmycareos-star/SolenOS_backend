@@ -31,6 +31,19 @@ from app.core.uncertainty_enums import (
 )
 
 
+def _has_decision_dependency(context) -> bool:
+    """Only a structured, explicit current-decision dependency can justify a request."""
+    for item in context or []:
+        if not isinstance(item, dict):
+            continue
+        direct = item.get("decision_dependency")
+        nested = item.get("necessity_assessment")
+        nested_value = nested.get("decision_dependency") if isinstance(nested, dict) else None
+        if any(isinstance(value, str) and value.strip() for value in (direct, nested_value)):
+            return True
+    return False
+
+
 def persist_source_clarification_questions(
     db: Session,
     *,
@@ -383,6 +396,8 @@ class UncertaintyEngine:
             payload["necessity_rationale"] = necessity_rationale or None
         if necessity in {"necessary", "optional"} and not necessity_rationale:
             raise ValueError("A necessity assessment requires a recorded rationale.")
+        if necessity == "necessary" and not _has_decision_dependency(payload.get("context")):
+            raise ValueError("A necessary caregiver question must identify the current care decision that depends on the answer.")
         question_text = (payload.get("question") or "").strip()
         if not question_text:
             raise ValueError("A clarification question must contain non-empty text.")
@@ -454,6 +469,9 @@ class UncertaintyEngine:
             isinstance(new_necessity_rationale, str) and new_necessity_rationale.strip()
         ):
             raise ValueError("A necessity assessment requires a recorded rationale.")
+        context_for_necessity = update_data.get("context", db_question.context)
+        if new_necessity == "necessary" and not _has_decision_dependency(context_for_necessity):
+            raise ValueError("A necessary caregiver question must identify the current care decision that depends on the answer.")
         if new_necessity == "necessary":
             linked_evidence = update_data.get("evidence_ids", db_question.evidence_ids) or []
             if not linked_evidence and not db_question.claim_id:
