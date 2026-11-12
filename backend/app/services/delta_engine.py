@@ -600,6 +600,9 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 "previous": item.get("previous"),
                 "current": item.get("current"),
                 "certainty": item.get("certainty", "uncertain"),
+                "evidence_supported": item.get("evidence_supported", False),
+                "claim_supported": item.get("claim_supported"),
+                "source_record_refs": list(item.get("source_record_refs") or []),
                 "comparison_basis": item.get("comparison_basis"),
                 "baseline_assertion_ids": list(item.get("existing_assertions") or []),
                 "baseline_values": list(item.get("prior_state_candidates") or ([item.get("previous")] if item.get("previous") is not None else [])),
@@ -795,16 +798,95 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 for row in source_evidence_rows
             ]
 
+            delta_claims = []
+            for domain in ("medications", "conditions", "symptoms", "tests", "follow_ups", "clinical_gaps"):
+                for finding_index, item in enumerate(result.get(domain, [])):
+                    excerpt = str(item.get("evidence_excerpt") or "").strip()
+                    references = _match_source_references(
+                        excerpt,
+                        new_content=content,
+                        source_event_id=source_event_id,
+                        active_state=active_state,
+                        prior_events=prior_events,
+                        evidence_rows=source_evidence_rows,
+                    )
+                    item["source_record_refs"] = references
+                    item["source_reference_status"] = "matched" if references else "not_matched"
+                    if not references:
+                        item["evidence_supported"] = False
+                        item["provenance_warning"] = (
+                            "This finding has no source record that matches its quoted passage. "
+                            "It must not be treated as supported."
+                        )
+                        if domain in {"medications", "conditions", "symptoms"}:
+                            item["claim_supported"] = False
+                            item["certainty"] = "uncertain"
+                    claim_text = " — ".join(
+                        str(value).strip()
+                        for value in (
+                            item.get("name") or item.get("action") or item.get("question") or item.get("description"),
+                            item.get("current"),
+                            item.get("status"),
+                        )
+                        if value is not None and str(value).strip()
+                    )
+                    claim_supported = bool(item.get("evidence_supported")) and (
+                        item.get("claim_supported") is not False
+                    ) and bool(references)
+                    delta_claims.append({
+                        "claim_id": f"{domain}-{finding_index + 1}",
+                        "claim_type": domain,
+                        "text": claim_text or excerpt,
+                        "support_status": "matched_source_and_state" if claim_supported else "not_matched_to_source",
+                        "validation_basis": "exact_source_excerpt_and_deterministic_state_checks" if claim_supported else "source_reference_or_state_check_failed",
+                        "source_references": references,
+                    })
+
+            for contradiction_index, item in enumerate(result.get("contradictions", [])):
+                excerpts = item.get("evidence_excerpts") or []
+                references = []
+                every_excerpt_linked = bool(excerpts)
+                for excerpt in excerpts:
+                    excerpt_refs = _match_source_references(
+                        str(excerpt),
+                        new_content=content,
+                        source_event_id=source_event_id,
+                        active_state=active_state,
+                        prior_events=prior_events,
+                        evidence_rows=source_evidence_rows,
+                    )
+                    if not excerpt_refs:
+                        every_excerpt_linked = False
+                    references.extend(excerpt_refs)
+                unique_refs = {
+                    (ref["record_type"], ref["record_id"]): ref for ref in references
+                }
+                item["source_record_refs"] = list(unique_refs.values())
+                item["source_reference_status"] = "matched" if every_excerpt_linked and unique_refs else "not_matched"
+                if not every_excerpt_linked or not unique_refs:
+                    item["evidence_supported"] = False
+                    item["provenance_warning"] = "Every side of this disagreement must link to its own saved source. One or more source links could not be verified."
+                delta_claims.append({
+                    "claim_id": f"contradictions-{contradiction_index + 1}",
+                    "claim_type": "contradiction",
+                    "text": str(item.get("topic") or item.get("why_conflicting") or "Conflicting care reports"),
+                    "support_status": "matched_competing_sources" if item.get("evidence_supported") and item.get("source_reference_status") == "matched" else "not_matched_to_all_sources",
+                    "validation_basis": "each_competing_excerpt_matched_to_its_source",
+                    "source_references": item["source_record_refs"],
+                })
+
+            result["claim_provenance"] = {
+                "version": "delta-claim-provenance-v1",
+                "coverage": "all_findings_linked" if delta_claims and all(
+                    item["support_status"] in {"matched_source_and_state", "matched_competing_sources"}
+                    for item in delta_claims
+                ) else "some_findings_unmatched" if delta_claims else "no_findings",
+                "claims": delta_claims,
+                "interpretation_limit": "A matched excerpt identifies its source. Deterministic state checks do not establish clinical truth, independent corroboration, or causation.",
+            }
+
             def loop_provenance(item: dict[str, Any]) -> tuple[list[str], list[dict[str, str]]]:
-                excerpt = str(item.get("evidence_excerpt") or "").strip()
-                references = _match_source_references(
-                    excerpt,
-                    new_content=content,
-                    source_event_id=source_event_id,
-                    active_state=active_state,
-                    prior_events=prior_events,
-                    evidence_rows=source_evidence_rows,
-                )
+                references = list(item.get("source_record_refs") or [])
                 linked_evidence_ids = list(dict.fromkeys(
                     ref["record_id"] for ref in references if ref["record_type"] == "evidence"
                 ))
