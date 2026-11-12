@@ -71,11 +71,14 @@ def _question_duplicate_key(value: str) -> str:
     """
     normalized = " ".join((value or "").casefold().split())
     tokens = re.findall(r"[a-z0-9]+", normalized)
-    canonical = [
-        _QUESTION_SYNONYMS.get(token, token)
-        for token in tokens
-        if token not in _QUESTION_FILLER_TOKENS
-    ]
+    canonical = []
+    for token in tokens:
+        if token in _QUESTION_FILLER_TOKENS:
+            continue
+        mapped = _QUESTION_SYNONYMS.get(token, token)
+        if mapped in _QUESTION_FILLER_TOKENS:
+            continue
+        canonical.append(mapped)
     if len(canonical) < 2:
         return normalized
     return " ".join(sorted(set(canonical)))
