@@ -3876,6 +3876,49 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
             CareStateRevision.target_type == "open_questions",
             CareStateRevision.target_id == necessary.id,
         ).count() >= 2
+
+        # A caregiver's explicit decline is not silently undone by the next
+        # reconciliation. Only genuinely new persisted evidence can create a
+        # fresh request, linked back to the prior terminal question.
+        necessary.status = "declined"
+        necessary.closed_at = datetime.now(timezone.utc)
+        necessary.closed_reason = "caregiver_declined"
+        db.flush()
+        prior_count = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.question == necessary.question,
+        ).count()
+        next_best_questions(db, person.id, persist=True, commit=False)
+        db.flush()
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.question == necessary.question,
+        ).count() == prior_count
+
+        later_evidence = Evidence(
+            id="finding6-discharge-evidence-later",
+            person_id=person.id,
+            type="document",
+            source_text="A later revised discharge instruction changes the handoff context.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        db.add(later_evidence)
+        necessary_gap.evidence_ids = list(necessary_gap.evidence_ids or []) + [later_evidence.id]
+        db.flush()
+        next_best_questions(db, person.id, persist=True, commit=False)
+        db.flush()
+        related_questions = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.question == necessary.question,
+        ).order_by(OpenQuestion.asked_at.asc()).all()
+        assert len(related_questions) == prior_count + 1
+        assert any(
+            context.get("prior_terminal_question_id") == necessary.id
+            and context.get("reassessment_trigger") == "new_persisted_source_or_evidence_after_prior_answer_or_decline"
+            for context in (related_questions[-1].context or [])
+            if isinstance(context, dict)
+        )
         db.close()
     finally:
         teardown_db()
