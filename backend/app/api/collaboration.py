@@ -970,6 +970,8 @@ async def upload_evidence(
                 "processing_status": document_job_status,
                 "duplicate_detected": bool(prior_meta.get("duplicate_detected")),
                 "duplicate_of_evidence_id": prior_meta.get("duplicate_of_evidence_id"),
+                "possible_version_of_evidence_id": prior_meta.get("possible_version_of_evidence_id"),
+                "possible_version_suggestion_reason": prior_meta.get("possible_version_suggestion_reason"),
                 "source_integrity": {
                     "binary_sha256_computed_at_ingest": True,
                     "original_binary_persisted": True,
@@ -1241,6 +1243,7 @@ def list_document_processing_status(
             "accepted_follow_up_ids": accepted_follow_up_ids,
             "duplicate_detected": bool(evidence_metadata.get("duplicate_detected")) if isinstance(evidence_metadata, dict) else False,
             "duplicate_of_evidence_id": evidence_metadata.get("duplicate_of_evidence_id") if isinstance(evidence_metadata, dict) else None,
+            "possible_version_of_evidence_id": evidence_metadata.get("possible_version_of_evidence_id") if isinstance(evidence_metadata, dict) else None,
         })
     return {"items": items, "count": len(items)}
 
