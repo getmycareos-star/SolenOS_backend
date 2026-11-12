@@ -672,6 +672,42 @@ def _response(analysis: CaptureAnalysis) -> dict:
     }
 
 
+def _apply_capture_page_number(source_text: str, evidence: Evidence) -> str:
+    try:
+        capture_metadata = evidence.extra_metadata if isinstance(evidence.extra_metadata, dict) else json.loads(evidence.extra_metadata or "{}")
+    except (TypeError, ValueError):
+        capture_metadata = {}
+    capture_metadata = capture_metadata if isinstance(capture_metadata, dict) else {}
+    capture = capture_metadata.get("capture") if isinstance(capture_metadata.get("capture"), dict) else {}
+    page_number = capture.get("page_number")
+    if capture.get("method") == "scan" and isinstance(page_number, int) and not isinstance(page_number, bool):
+        return source_text.replace("[Page 1 OCR]", f"[Page {page_number} OCR]", 1)
+    return source_text
+
+
+def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) -> tuple[str, dict]:
+    total_pages = len(re.findall(r"(?m)^\[Page\s+\d+", source_text)) or 1
+    unreadable_pages = _unreadable_page_numbers(source_text)
+    unprocessed_pages = _unprocessed_page_numbers(source_text)
+    processed_pages = sorted(set(range(1, total_pages + 1)) - set(unprocessed_pages))
+    extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
+    return extraction_status, {
+        "kind": "document_extraction_v1",
+        "filename": upload.filename,
+        "mime_type": upload.mime_type,
+        "binary_sha256": upload.sha256,
+        "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
+        "extraction_method": method,
+        **classify_document(upload.filename or "", source_text),
+        "page_count": total_pages,
+        "processed_page_numbers": processed_pages,
+        "unreadable_page_numbers": unreadable_pages,
+        "unprocessed_page_numbers": unprocessed_pages,
+        "observations": [],
+        "open_questions": [],
+    }
+
+
 @router.post("/{evidence_id}/extract", status_code=201)
 def extract_saved_document(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Extract from the persisted original bytes and bind the result to its evidence ID."""
@@ -698,27 +734,57 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     ).order_by(CaptureAnalysis.created_at.desc()).all()
     for row in existing:
         metadata = row.candidates if isinstance(row.candidates, dict) else {}
-        if metadata.get("kind") == "document_extraction_v1":
-            _verify_persisted_extraction(row, upload, db, content)
+        if metadata.get("kind") != "document_extraction_v1":
+            continue
+        _verify_persisted_extraction(row, upload, db, content)
+        if row.extraction_status == "partial":
+            # Retry OCR from the immutable original. If nothing improves, retain
+            # the same analysis ID; never create another evidence upload.
+            retry_text, retry_method = _extract(upload, content, evidence)
+            retry_text = _apply_capture_page_number(retry_text, evidence)
+            if retry_text.strip() != (row.source_text or "").strip() or retry_method != metadata.get("extraction_method"):
+                retry_status, retry_metadata = _extraction_metadata(upload, retry_text, retry_method)
+                attempt_count = int(metadata.get("extraction_attempt_count") or 1) + 1
+                retry_metadata["extraction_attempt_count"] = attempt_count
+                retry_metadata["last_extraction_attempt_at"] = datetime.now(timezone.utc).isoformat()
+                has_intelligence = isinstance(metadata.get("document_intelligence"), dict)
+                has_review_history = bool(row.review_history)
+                if has_intelligence or has_review_history:
+                    retry_metadata["retry_of_analysis_id"] = row.id
+                    replacement = CaptureAnalysis(
+                        person_id=person_id,
+                        caregiver_id=caregiver_id,
+                        source_event_id=None,
+                        source_evidence_id=evidence_id,
+                        source_text=retry_text,
+                        extraction_status=retry_status,
+                        candidates=retry_metadata,
+                        review_history=[],
+                    )
+                    db.add(replacement)
+                    db.flush()
+                    metadata["superseded_by_analysis_id"] = replacement.id
+                    row.candidates = metadata
+                    db.commit()
+                    db.refresh(replacement)
+                    return _response(replacement)
+                row.source_text = retry_text
+                row.extraction_status = retry_status
+                metadata.update(retry_metadata)
+                row.candidates = metadata
+                db.commit()
+                db.refresh(row)
+                return _response(row)
             db.commit()
             db.refresh(row)
             return _response(row)
+        db.commit()
+        db.refresh(row)
+        return _response(row)
 
     source_text, method = _extract(upload, content, evidence)
-    try:
-        capture_metadata = evidence.extra_metadata if isinstance(evidence.extra_metadata, dict) else json.loads(evidence.extra_metadata or "{}")
-    except (TypeError, ValueError):
-        capture_metadata = {}
-    capture_metadata = capture_metadata if isinstance(capture_metadata, dict) else {}
-    capture = capture_metadata.get("capture") if isinstance(capture_metadata.get("capture"), dict) else {}
-    capture_page_number = capture.get("page_number")
-    if capture.get("method") == "scan" and isinstance(capture_page_number, int) and not isinstance(capture_page_number, bool):
-        source_text = source_text.replace("[Page 1 OCR]", f"[Page {capture_page_number} OCR]", 1)
-    total_pages = len(re.findall(r"(?m)^\[Page\s+\d+", source_text)) or 1
-    unreadable_pages = _unreadable_page_numbers(source_text)
-    unprocessed_pages = _unprocessed_page_numbers(source_text)
-    processed_pages = sorted(set(range(1, total_pages + 1)) - set(unprocessed_pages))
-    extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
+    source_text = _apply_capture_page_number(source_text, evidence)
+    extraction_status, extraction_metadata = _extraction_metadata(upload, source_text, method)
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
@@ -726,18 +792,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         source_evidence_id=evidence_id,
         source_text=source_text,
         extraction_status=extraction_status,
-        candidates={
-            "kind": "document_extraction_v1",
-            "filename": upload.filename,
-            "mime_type": upload.mime_type,
-            "binary_sha256": upload.sha256,
-            "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
-            "extraction_method": method,
-            **classify_document(upload.filename or "", source_text),
-            "page_count": total_pages,
-            "observations": [],
-            "open_questions": [],
-        },
+        candidates=extraction_metadata,
         review_history=[],
     )
     db.add(analysis)
