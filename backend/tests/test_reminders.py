@@ -664,6 +664,7 @@ def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
     finally:
         db.close()
 
+    reminder_id = reminder.id
     changed = client.put(
         "/api/v1/notifications/preferences",
         headers=headers,
@@ -672,12 +673,12 @@ def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
     assert changed.status_code == 200, changed.text
     db = TestSessionLocal()
     try:
-        db.refresh(reminder)
-        assert reminder.notification_deferred_until is None
+        stored = db.query(CareReminder).filter_by(id=reminder_id).one()
+        assert stored.notification_deferred_until is None
         # 02:00 in Tokyo is outside the configured 09:00-18:00 quiet window.
         assert deliver_due_reminders(db=db, now=now) == 1
         assert db.query(CareNotification).filter(
-            CareNotification.source_event_id == reminder.id,
+            CareNotification.source_event_id == reminder_id,
             CareNotification.category == "reminder_due",
         ).count() == 1
     finally:
