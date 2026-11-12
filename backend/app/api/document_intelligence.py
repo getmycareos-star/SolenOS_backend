@@ -444,7 +444,7 @@ def _persist_medication_document_conflict_question(
         question=(
             f"The hospital document appears to list {subject} as changed or discontinued, "
             f"while the current care record lists it as active. What is the current prescribing instruction? "
-            "Please confirm with the prescribing professional or pharmacist before administering. "
+            "Please confirm with the prescribing clinician or pharmacist before administering. "
             "SolenOS has not advised stopping, restarting, or changing this medicine."
         ),
         subject_type="medication",
