@@ -1489,6 +1489,8 @@ def test_structured_observation_requires_exact_source_and_preserves_correction_h
         second = correction.json()
         assert second["supersedes_observation_id"] == first["id"]
         assert second["correction_rationale"] == "Caregiver corrected the count."
+        assert second["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
+        assert "Related care summaries were refreshed" in second["reassessment_notice"]
 
         db = TestingSessionLocal()
         original = db.query(EvidenceObservation).filter(EvidenceObservation.id == first["id"]).one()
@@ -2720,5 +2722,160 @@ def test_answer_without_upload_saves_the_caregiver_report_as_source_evidence():
             assert evidence.source_text == f"Answer: {answer_text}\n\nProvided by: {answer_source}"
         finally:
             db.close()
+    finally:
+        teardown_db()
+
+def test_source_correction_requires_review_for_direct_and_dependent_claims():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care_continuity import (
+            CareAssertion,
+            EvidenceClaimAssessment,
+            EvidenceClaimDependency,
+            EvidenceObservation,
+        )
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="impact-correction-person", name="Correction Person")
+        caregiver = Caregiver(
+            id="impact-correction-caregiver",
+            name="Correction Caregiver",
+            email="impact-correction@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="impact-correction-evidence",
+            person_id=person.id,
+            type="document",
+            source_text="She felt unsteady near the kitchen.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        source_claim = CareAssertion(
+            id="impact-correction-source-claim",
+            person_id=person.id,
+            subject_type="mobility",
+            subject_id="mobility-1",
+            field="unsteadiness",
+            assertion_kind="report",
+            asserted_value="She felt unsteady near the kitchen.",
+            source_label="caregiver report",
+            source_text="She felt unsteady near the kitchen.",
+            evidence_ids=[evidence.id],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        dependent_claim = CareAssertion(
+            id="impact-correction-dependent-claim",
+            person_id=person.id,
+            subject_type="mobility",
+            subject_id="mobility-1",
+            field="monthly_unsteadiness_count",
+            assertion_kind="derived",
+            asserted_value="Three incidents this month",
+            source_label="derived from source claim",
+            source_text="Three incidents this month",
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        assessed_at = datetime.now(timezone.utc) - timedelta(days=2)
+        source_assessment = EvidenceClaimAssessment(
+            person_id=person.id,
+            claim_id=source_claim.id,
+            claim_version=1,
+            status="supported",
+            rationale="Earlier review before the source correction.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[{
+                "evidence_id": evidence.id,
+                "relationship": "supports",
+                "source_passage": "She felt unsteady near the kitchen.",
+            }],
+            reviewed_by_caregiver_id=caregiver.id,
+            created_at=assessed_at,
+        )
+        dependent_assessment = EvidenceClaimAssessment(
+            person_id=person.id,
+            claim_id=dependent_claim.id,
+            claim_version=1,
+            status="supported",
+            rationale="Earlier dependent review.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[],
+            reviewed_by_caregiver_id=caregiver.id,
+            created_at=assessed_at,
+        )
+        original_observation = EvidenceObservation(
+            id="impact-correction-observation-original",
+            person_id=person.id,
+            evidence_id=evidence.id,
+            observation_kind="caregiver_report",
+            epistemic_status="reported",
+            subject_label="person receiving care",
+            attribute="unsteadiness",
+            value_text="unsteady",
+            source_passage="She felt unsteady near the kitchen.",
+            source_span_start=0,
+            source_span_end=len("She felt unsteady near the kitchen."),
+            extraction_method="human_entered",
+            extraction_version="test-v1",
+            created_by_caregiver_id=caregiver.id,
+            recorded_at=assessed_at - timedelta(days=1),
+        )
+        corrected_observation = EvidenceObservation(
+            id="impact-correction-observation-corrected",
+            person_id=person.id,
+            evidence_id=evidence.id,
+            supersedes_observation_id=original_observation.id,
+            correction_rationale="The caregiver corrected the original interpretation.",
+            observation_kind="caregiver_report",
+            epistemic_status="reported",
+            subject_label="person receiving care",
+            attribute="unsteadiness",
+            value_text="steady",
+            source_passage="She felt unsteady near the kitchen.",
+            source_span_start=0,
+            source_span_end=len("She felt unsteady near the kitchen."),
+            extraction_method="human_entered",
+            extraction_version="test-v1",
+            created_by_caregiver_id=caregiver.id,
+            recorded_at=datetime.now(timezone.utc),
+        )
+        dependency = EvidenceClaimDependency(
+            person_id=person.id,
+            claim_id=dependent_claim.id,
+            depends_on_claim_id=source_claim.id,
+            dependency_type="derived_from",
+            rationale="The monthly count depends on the source observation.",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([
+            person, caregiver, evidence, source_claim, dependent_claim,
+            source_assessment, dependent_assessment,
+            original_observation, corrected_observation, dependency,
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        direct = client.get(
+            f"/api/v1/care-continuity/claims/{source_claim.id}/assessment-impact"
+        )
+        assert direct.status_code == 200, direct.text
+        direct_body = direct.json()
+        assert direct_body["review_required"] is True
+        assert "source_observation_added_or_corrected_after_assessment" in direct_body["reasons"]
+        assert "impact-correction-observation-corrected" in direct_body["changed_observation_ids"]
+
+        dependent = client.get(
+            f"/api/v1/care-continuity/claims/{dependent_claim.id}/assessment-impact"
+        )
+        assert dependent.status_code == 200, dependent.text
+        dependent_body = dependent.json()
+        assert dependent_body["review_required"] is True
+        assert "impact-correction-source-claim" in dependent_body["changed_prerequisite_claim_ids"]
+        assert "prerequisite_claim_source_or_assessment_changed" in dependent_body["reasons"]
     finally:
         teardown_db()
