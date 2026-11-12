@@ -1012,6 +1012,7 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
     managed_sources = {
         "information_gap", "contradiction", "stale_or_unreviewed_assertion",
         "daily_capture_extraction", "document_extraction", "registered_action",
+        "appointment_workspace_follow_up",
     }
 
     for question in questions:
