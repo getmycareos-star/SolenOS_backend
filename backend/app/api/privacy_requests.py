@@ -1066,10 +1066,36 @@ def fulfil_approved_deletion(
                     text(f'DELETE FROM "{safe_name}" WHERE person_id = :person_id'),
                     {"person_id": person_id},
                 )
-            elif "caregiver_id" in raw_columns:
+                continue
+            if "caregiver_id" in raw_columns:
                 db.execute(
                     text(f'DELETE FROM "{safe_name}" WHERE caregiver_id = :caregiver_id'),
                     {"caregiver_id": caregiver_id},
+                )
+                continue
+
+            # Migration-created dependent tables may have no person_id or
+            # caregiver_id column of their own. Delete rows linked directly to
+            # either root identity through declared foreign keys, including
+            # composite-primary-key tables (which do not need ORM PK closure).
+            for foreign_key in inspector.get_foreign_keys(raw_table_name):
+                referred_table = foreign_key.get("referred_table")
+                constrained = foreign_key.get("constrained_columns") or []
+                referred = foreign_key.get("referred_columns") or []
+                if referred_table not in {"persons", "caregivers"} or len(constrained) != 1 or len(referred) != 1:
+                    continue
+                child_column = str(constrained[0]).replace('"', '""')
+                parent_column = str(referred[0]).replace('"', '""')
+                if referred_table == "persons":
+                    bind_name, bind_value = "person_id", person_id
+                else:
+                    bind_name, bind_value = "caregiver_id", caregiver_id
+                db.execute(
+                    text(
+                        f'DELETE FROM "{safe_name}" WHERE "{child_column}" IN '
+                        f'(SELECT "{parent_column}" FROM "{referred_table}" WHERE id = :{bind_name})'
+                    ),
+                    {bind_name: bind_value},
                 )
 
         # Redact any earlier requests for the same care record, retaining only
