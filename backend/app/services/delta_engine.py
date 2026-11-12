@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
-from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
+from app.models.uncertainty import Contradiction, InformationGap, UncertaintyAssessment
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
@@ -1150,77 +1150,85 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         review_after_days=30 if domain != "symptoms" else None,
                     ), commit=False)
 
-            def add_open_loop(
+            def add_internal_gap_candidate(
                 subject_type: str,
                 subject_id: str,
                 field: str,
                 description: str,
-                question_text: str,
                 priority: Priority,
                 linked_evidence_ids: list[str],
                 source_record_refs: list[dict[str, str]],
                 evidence_excerpt: str,
             ) -> None:
-                if not source_record_refs:
+                # Delta output is a review-only interpretation. It may enrich
+                # the internal LCR, but it cannot independently create a
+                # caregiver question or decide that human attention is needed.
+                if not source_record_refs or not linked_evidence_ids:
                     return
-                if linked_evidence_ids:
-                    gap = db.query(InformationGap).filter(
-                        InformationGap.person_id == person_id,
-                        InformationGap.subject_type == subject_type,
-                        InformationGap.subject_id == subject_id,
-                        InformationGap.field == field,
-                        InformationGap.lifecycle_status.in_([GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED, GapLifecycleStatus.PARTIALLY_RESOLVED]),
-                    ).first()
-                    if gap is None:
-                        db.add(InformationGap(
-                            person_id=person_id, subject_type=subject_type, subject_id=subject_id,
-                            field=field, epistemic_state=EpistemicState.UNKNOWN, gap_reason=GapReason.ABSENT,
-                            priority=priority, lifecycle_status=GapLifecycleStatus.OPEN,
-                            description=description, evidence_ids=linked_evidence_ids,
-                        ))
-                question = db.query(OpenQuestion).filter(
-                    OpenQuestion.person_id == person_id, OpenQuestion.subject_type == subject_type,
-                    OpenQuestion.subject_id == subject_id, OpenQuestion.question == question_text,
-                    OpenQuestion.status == "open",
+                gap = db.query(InformationGap).filter(
+                    InformationGap.person_id == person_id,
+                    InformationGap.subject_type == subject_type,
+                    InformationGap.subject_id == subject_id,
+                    InformationGap.field == field,
+                    InformationGap.lifecycle_status.in_([GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED, GapLifecycleStatus.PARTIALLY_RESOLVED]),
                 ).first()
-                if question is None:
-                    db.add(OpenQuestion(
-                        person_id=person_id, question=question_text, subject_type=subject_type,
-                        subject_id=subject_id, status="open", priority=priority, evidence_ids=linked_evidence_ids,
-                        context=[{
-                            "source": source,
-                            "source_event_id": source_event_id,
-                            "source_record_refs": source_record_refs,
-                            "evidence_excerpt": evidence_excerpt,
-                            "grounding_status": "exact_source_excerpt_verified; semantic_entailment_not_automatically_verified",
-                        }],
+                source_context = {
+                    "candidate_source": "delta_engine",
+                    "source": source,
+                    "source_event_id": source_event_id,
+                    "source_record_refs": source_record_refs,
+                    "evidence_excerpt": evidence_excerpt,
+                    "grounding_status": "source_excerpt_linked; semantic_entailment_not_automatically_verified",
+                    "necessity": "not_assessed",
+                    "caregiver_attention_required": False,
+                }
+                if gap is None:
+                    db.add(InformationGap(
+                        person_id=person_id, subject_type=subject_type, subject_id=subject_id,
+                        field=field, epistemic_state=EpistemicState.UNKNOWN, gap_reason=GapReason.ABSENT,
+                        priority=priority, lifecycle_status=GapLifecycleStatus.OPEN,
+                        description=description, evidence_ids=linked_evidence_ids,
+                        context=[source_context],
+                    ))
+                else:
+                    contexts = list(gap.context or [])
+                    if source_context not in contexts:
+                        contexts.append(source_context)
+                        gap.context = contexts
+                    gap.evidence_ids = list(dict.fromkeys(
+                        list(gap.evidence_ids or []) + linked_evidence_ids
                     ))
 
             for item in result["tests"]:
                 linked_evidence_ids, source_refs = loop_provenance(item)
                 if item.get("evidence_supported") and source_refs and item.get("result_present") is False:
                     name = str(item.get("name") or "ordered test").strip()
-                    add_open_loop("test", name, "result_missing",
+                    add_internal_gap_candidate(
+                        "test", name, "result_missing",
                         f"{name} is referenced but no result is present in the supplied record.",
-                        f"Has the result for {name} been received and reviewed?", Priority.HIGH,
-                        linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""))
+                        Priority.HIGH, linked_evidence_ids, source_refs,
+                        str(item.get("evidence_excerpt") or ""),
+                    )
             for item in result["follow_ups"]:
                 status = str(item.get("status") or "unknown").casefold()
                 linked_evidence_ids, source_refs = loop_provenance(item)
                 if item.get("evidence_supported") and source_refs and status not in {"completed", "done", "cancelled", "canceled"}:
                     action = str(item.get("action") or "follow-up action").strip()
-                    add_open_loop("follow_up", action, "follow_up_status",
+                    add_internal_gap_candidate(
+                        "follow_up", action, "follow_up_status",
                         f"Follow-up is reported as {status}; completion is not established.",
-                        f"Has this follow-up been completed: {action}?", Priority.MEDIUM,
-                        linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""))
+                        Priority.MEDIUM, linked_evidence_ids, source_refs,
+                        str(item.get("evidence_excerpt") or ""),
+                    )
             for item in result["clinical_gaps"]:
                 linked_evidence_ids, source_refs = loop_provenance(item)
                 if item.get("evidence_supported") and source_refs:
                     gap = str(item.get("gap") or "missing care information").strip()
-                    question_text = str(item.get("next_question") or f"What is known about {gap}?").strip()
-                    add_open_loop("care_gap", gap, "missing_information",
-                        str(item.get("why_it_matters") or gap), question_text, Priority.MEDIUM,
-                        linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""))
+                    add_internal_gap_candidate(
+                        "care_gap", gap, "missing_information",
+                        str(item.get("why_it_matters") or gap), Priority.MEDIUM,
+                        linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""),
+                    )
 
             # Only evidence supplied with this incoming event may support a
             # newly promoted assertion. Older evidence remains available to
