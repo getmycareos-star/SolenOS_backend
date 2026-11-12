@@ -96,6 +96,7 @@ class Evidence(EvidenceBase):
     uploaded_by_caregiver_id: str
     source_text_sha256: Optional[str] = None
     ingested_at: datetime
+    care_continuity_execution: Optional[dict[str, Any]] = None
 
     class Config:
         from_attributes = True
