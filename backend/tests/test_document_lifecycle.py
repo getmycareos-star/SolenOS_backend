@@ -283,10 +283,11 @@ def test_partial_extraction_retries_saved_original_without_duplicate_upload(clie
     writer.write(output)
     original = output.getvalue()
     evidence_id = persist_document(session, original, "recoverable-two-page-scan.pdf", "application/pdf")
-    state = {"attempt": 1, "page": 0}
+    state = {"attempt": 1, "page": 0, "calls": []}
 
     def page_ocr(_image):
         state["page"] += 1
+        state["calls"].append((state["attempt"], state["page"]))
         if state["attempt"] == 1 and state["page"] == 2:
             raise HTTPException(status_code=422, detail="Temporary page OCR failure")
         return f"Recovered page {state['page']}"
@@ -301,13 +302,14 @@ def test_partial_extraction_retries_saved_original_without_duplicate_upload(clie
     analysis_id = first.json()["analysis_id"]
 
     state["attempt"] = 2
-    state["page"] = 0
+    state["page"] = 1
     second = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert second.status_code == 201, second.text
     assert second.json()["analysis_id"] == analysis_id
     assert second.json()["extraction_status"] == "available"
     assert second.json()["unreadable_page_numbers"] == []
     assert second.json()["processed_page_numbers"] == [1, 2]
+    assert state["calls"] == [(1, 1), (1, 2), (2, 2)], "retry must reprocess only the failed page"
 
     retrieved = test_client.get(f"/api/v1/documents/analyses/{analysis_id}", headers=auth)
     assert retrieved.status_code == 200, retrieved.text
