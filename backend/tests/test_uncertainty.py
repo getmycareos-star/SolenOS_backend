@@ -3829,6 +3829,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
     try:
         from app.core.database import get_db
         from app.services.uncertainty import persist_source_clarification_questions
+        from app.models.care_continuity import CareStateRevision
         app.dependency_overrides[get_db] = override_get_db
 
         db = TestingSessionLocal()
@@ -3897,6 +3898,12 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             {"record_type": "care_event", "record_id": event.id} in row.context[0]["source_record_refs"]
             for row in first
         )
+        # Creation of source-linked questions is itself audited, including
+        # review-only questions that are not yet caregiver work.
+        assert db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person.id,
+            CareStateRevision.target_type == "open_questions",
+        ).count() == 2
 
         second = persist_source_clarification_questions(
             db,
@@ -3910,6 +3917,12 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         )
         db.commit()
         assert {row.id for row in second} == {row.id for row in first}
+        # An idempotent replay with no changed evidence or source links does
+        # not append another lifecycle revision.
+        assert db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person.id,
+            CareStateRevision.target_type == "open_questions",
+        ).count() == 2
 
         # A second authorized caregiver can review a document uploaded by the
         # first caregiver without rewriting the original uploader attribution.
@@ -3930,6 +3943,10 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             {"record_type": "evidence", "record_id": evidence.id}
         ]
         assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 3
+        assert db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person.id,
+            CareStateRevision.target_type == "open_questions",
+        ).count() == 3
     finally:
         teardown_db()
 
