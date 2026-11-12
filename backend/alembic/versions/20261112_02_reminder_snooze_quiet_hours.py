@@ -1,14 +1,14 @@
 """Add reminder snooze state and real caregiver quiet-hours schedule.
 
-Revision ID: 20261112_02_reminder_snooze_quiet_hours
+Revision ID: 20261112_03_snooze_quiet
 Revises: 20261112_01_care_execution_status
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261112_02_reminder_snooze_quiet_hours"
-down_revision = "20261112_01_care_execution_status"
+revision = "20261112_03_snooze_quiet"
+down_revision = "20261112_02_privacy_erasure"
 branch_labels = None
 depends_on = None
 
