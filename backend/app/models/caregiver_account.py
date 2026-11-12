@@ -15,7 +15,6 @@ class CaregiverAccount(Base):
     __tablename__ = "caregiver_accounts"
     __table_args__ = (
         UniqueConstraint("email_normalized", name="uq_caregiver_accounts_email_normalized"),
-        UniqueConstraint("person_id", name="uq_caregiver_accounts_person_id"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
