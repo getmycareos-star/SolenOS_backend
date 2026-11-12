@@ -406,7 +406,7 @@ def next_best_questions(
                 OpenQuestion.subject_type == clean["subject_type"],
                 OpenQuestion.subject_id == clean["subject_id"],
                 OpenQuestion.question == clean["question"],
-            ).order_by(OpenQuestion.asked_at.desc()).limit(50).all()
+            ).order_by(OpenQuestion.asked_at.desc()).limit(50).with_for_update().all()
             existing = next(
                 (row for row in matching_rows if row.status in {"open", "unresolved"}),
                 None,
@@ -526,7 +526,7 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
     questions = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == person_id,
         OpenQuestion.status.in_(["open", "unresolved", "closed"]),
-    ).order_by(OpenQuestion.asked_at.asc(), OpenQuestion.id.asc()).all()
+    ).order_by(OpenQuestion.asked_at.asc(), OpenQuestion.id.asc()).with_for_update().all()
 
     now = datetime.now(timezone.utc)
     counts = {"kept": 0, "suppressed": 0, "superseded": 0, "reopened": 0, "untouched": 0}
