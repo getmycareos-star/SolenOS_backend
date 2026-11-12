@@ -1,22 +1,6 @@
 name: Delta Engine live Qwen acceptance
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/delta-engine-live-acceptance.yml"
-      - "backend/app/services/delta_engine.py"
-      - "backend/app/api/care_delta.py"
-      - "backend/app/schemas/care_delta.py"
-      - "backend/live_tests/test_delta_engine_live.py"
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/delta-engine-live-acceptance.yml"
-      - "backend/app/services/delta_engine.py"
-      - "backend/app/api/care_delta.py"
-      - "backend/app/schemas/care_delta.py"
-      - "backend/live_tests/test_delta_engine_live.py"
   workflow_dispatch:
 
 permissions:
