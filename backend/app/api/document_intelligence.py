@@ -20,7 +20,15 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.document_lifecycle import _verify_persisted_extraction, _ocr_quality_by_page
+from app.api.document_lifecycle import (
+    _verify_persisted_extraction,
+    _ocr_quality_by_page,
+    _page_count,
+    _unprocessed_page_numbers,
+    _retryable_page_numbers,
+    _blocked_page_numbers,
+    _unreadable_page_numbers,
+)
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
@@ -38,6 +46,7 @@ router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
 MAX_DOCUMENT_QWEN_PAGES = 25
 MAX_DOCUMENT_QWEN_CHUNKS = 60
+MAX_DOCUMENT_CANDIDATE_BATCH = 60
 
 
 class CandidateReview(BaseModel):
@@ -107,7 +116,8 @@ def _document_assertion_field(candidate: dict) -> str:
     field_type = str(candidate.get("field_type") or "observation")
     if field_type not in {"medication", "allergy", "diagnosis", "appointment", "care_event", "observation"}:
         field_type = "observation"
-    return f"document_{field_type}_statement"
+    # Canonical care fields allow document evidence to reconcile against existing LCR assertions.
+    return field_type
 
 
 def _document_asserted_value(candidate: dict, subject: str, observation: str) -> str:
@@ -165,35 +175,65 @@ def _intelligence(analysis: CaptureAnalysis) -> dict:
 def _response(analysis: CaptureAnalysis) -> dict:
     metadata = _metadata(analysis)
     intelligence = _intelligence(analysis)
-    observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
+    source_text = analysis.source_text or ""
+    page_count = _page_count(source_text)
+    unprocessed_pages = _unprocessed_page_numbers(source_text)
+    retryable_pages = _retryable_page_numbers(source_text)
+    blocked_pages = _blocked_page_numbers(source_text)
+    unreadable_pages = _unreadable_page_numbers(source_text)
+    processed_pages = [number for number in range(1, page_count + 1) if number not in unprocessed_pages]
+    all_observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
+    visible_indexes = intelligence.get("visible_candidate_indexes")
+    if not isinstance(visible_indexes, list):
+        visible_indexes = list(range(min(MAX_DOCUMENT_CANDIDATE_BATCH, len(all_observations))))
+    visible_indexes = [
+        index for index in visible_indexes
+        if isinstance(index, int) and 0 <= index < len(all_observations)
+    ]
+    observations = [
+        {**all_observations[index], "candidate_index": index}
+        for index in visible_indexes
+        if isinstance(all_observations[index], dict)
+    ]
+    next_candidate_offset = intelligence.get("next_candidate_offset")
+    if not isinstance(next_candidate_offset, int) or next_candidate_offset < 0:
+        next_candidate_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(all_observations))
+    has_more_candidates = next_candidate_offset < len(all_observations)
     return {
         "analysis_id": str(analysis.id),
         "source_evidence_id": str(analysis.source_evidence_id),
         "document_name": metadata.get("filename") or "Uploaded document",
         "document_type": metadata.get("document_type") or "general_care_document",
-        "page_count": metadata.get("page_count"),
+        "page_count": metadata.get("page_count") or page_count,
         "extraction_status": analysis.extraction_status,
         "intelligence_status": intelligence.get("status") or "not_run",
         "processed_page_count": intelligence.get("processed_page_count"),
-        "total_page_count": intelligence.get("total_page_count") or metadata.get("page_count"),
+        "total_page_count": intelligence.get("total_page_count") or metadata.get("page_count") or page_count,
         "processed_page_numbers": intelligence.get("processed_page_numbers", []),
         "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers", []),
-        "unreadable_page_numbers": intelligence.get("unreadable_page_numbers", []),
+        "extraction_processed_page_count": len(processed_pages),
+        "extraction_processed_page_numbers": processed_pages,
+        "extraction_unprocessed_page_numbers": unprocessed_pages,
+        "retryable_page_numbers": retryable_pages,
+        "blocked_page_numbers": blocked_pages,
+        "unreadable_page_numbers": unreadable_pages,
         "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "model_provenance": intelligence.get("model_provenance"),
         "processing_history": intelligence.get("processing_history", []),
-        "candidate_overflow": bool(intelligence.get("candidate_overflow")),
+        "candidate_overflow": has_more_candidates,
+        "has_more_candidates": has_more_candidates,
+        "remaining_candidate_count": max(0, len(all_observations) - next_candidate_offset),
         "extraction_method": metadata.get("extraction_method"),
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
         "open_questions": intelligence.get("open_questions", []),
         "review_required": any(
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
-            for item in observations
+            for item in all_observations
         ),
         "written_to_lcr": any(
             isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
-            for item in observations
+            for item in all_observations
         ),
     }
 
@@ -353,7 +393,14 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     resume_intelligence = {}
     if existing:
         pending_pages = existing.get("unprocessed_page_numbers")
-        if existing.get("status") == "partial" and isinstance(pending_pages, list) and pending_pages:
+        stored_observations = existing.get("observations") if isinstance(existing.get("observations"), list) else []
+        next_candidate_offset = existing.get("next_candidate_offset")
+        if not isinstance(next_candidate_offset, int) or next_candidate_offset < 0:
+            next_candidate_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(stored_observations))
+        has_more_candidates = next_candidate_offset < len(stored_observations)
+        if existing.get("status") == "partial" and (
+            (isinstance(pending_pages, list) and pending_pages) or has_more_candidates
+        ):
             resume_intelligence = existing
         else:
             try:
@@ -371,6 +418,38 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             except Exception:
                 db.rollback()
                 logger.exception("Could not backfill saved document clarification questions for evidence %s", evidence.id)
+            return _response(analysis)
+
+    # If page extraction is complete, reveal the next bounded candidate group
+    # only after the caregiver has made a final decision on the current group.
+    if resume_intelligence and not (resume_intelligence.get("unprocessed_page_numbers") or []):
+        stored = resume_intelligence.get("observations") if isinstance(resume_intelligence.get("observations"), list) else []
+        visible = resume_intelligence.get("visible_candidate_indexes")
+        if not isinstance(visible, list):
+            visible = list(range(min(MAX_DOCUMENT_CANDIDATE_BATCH, len(stored))))
+        visible = [index for index in visible if isinstance(index, int) and 0 <= index < len(stored)]
+        batch_final = all(
+            stored[index].get("review_status") in {"accepted_by_caregiver", "rejected_by_caregiver"}
+            for index in visible
+            if isinstance(stored[index], dict)
+        )
+        next_offset = resume_intelligence.get("next_candidate_offset")
+        if not isinstance(next_offset, int) or next_offset < 0:
+            next_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(stored))
+        if next_offset < len(stored) and batch_final:
+            updated = copy.deepcopy(metadata)
+            intelligence = updated["document_intelligence"]
+            end = min(next_offset + MAX_DOCUMENT_CANDIDATE_BATCH, len(stored))
+            intelligence["visible_candidate_indexes"] = list(range(next_offset, end))
+            intelligence["next_candidate_offset"] = end
+            intelligence["candidate_overflow"] = end < len(stored)
+            intelligence["status"] = "partial" if intelligence["candidate_overflow"] or intelligence.get("unreadable_page_numbers") else "available"
+            analysis.candidates = updated
+            db.add(analysis)
+            db.commit()
+            db.refresh(analysis)
+            return _response(analysis)
+        if next_offset < len(stored):
             return _response(analysis)
 
     source_text = (analysis.source_text or "").strip()
@@ -437,8 +516,6 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     if isinstance(value, str) and value.strip()
                 )
     prior_observations = copy.deepcopy(resume_intelligence.get("observations") or [])
-    candidate_overflow = bool(resume_intelligence.get("candidate_overflow")) or len(prior_observations) + len(raw_observations) > 60
-    raw_observations = raw_observations[:max(0, 60 - len(prior_observations))]
     grounded = prior_observations
     seen_quotes = {
         item.get("source_quote")
@@ -523,6 +600,18 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     if isinstance(prior_provenance, dict) and (not processing_history or processing_history[-1] != prior_provenance):
         processing_history.append(prior_provenance)
     processing_history.append(model_provenance)
+    previous_visible_indexes = resume_intelligence.get("visible_candidate_indexes")
+    if isinstance(previous_visible_indexes, list):
+        visible_candidate_indexes = [
+            index for index in previous_visible_indexes
+            if isinstance(index, int) and 0 <= index < len(grounded)
+        ]
+    else:
+        visible_candidate_indexes = list(range(min(MAX_DOCUMENT_CANDIDATE_BATCH, len(grounded))))
+    next_candidate_offset = resume_intelligence.get("next_candidate_offset")
+    if not isinstance(next_candidate_offset, int) or next_candidate_offset < 0:
+        next_candidate_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(grounded))
+    candidate_overflow = next_candidate_offset < len(grounded)
     metadata["document_intelligence"] = {
         "version": 1,
         "model_provenance": model_provenance,
@@ -552,7 +641,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 if unreadable_pages else []
             ),
             *(
-                ["The candidate review limit was reached; additional extracted candidates were not included and require a follow-up extraction."]
+                ["More source-backed statements are available after this group is reviewed."]
                 if candidate_overflow else []
             ),
         ])),
@@ -565,6 +654,8 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         "next_page_window_start": next_page_window_start,
         "next_chunk_offset": next_chunk_offset_to_store,
         "candidate_overflow": candidate_overflow,
+        "visible_candidate_indexes": visible_candidate_indexes,
+        "next_candidate_offset": next_candidate_offset,
         "status": "partial" if (unprocessed_pages or unreadable_pages or candidate_overflow) else "available",
         "model_authority": "review_only",
         "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
