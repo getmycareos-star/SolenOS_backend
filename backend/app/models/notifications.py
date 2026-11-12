@@ -85,3 +85,28 @@ class CarePushDelivery(Base):
     provider_accepted_at = Column(DateTime(timezone=True), nullable=True)
     last_error_code = Column(String(64), nullable=True)
     last_error_message = Column(Text, nullable=True)
+
+
+class DeliveryFailureEvent(Base):
+    """Durable, redacted record of one failed delivery attempt."""
+    __tablename__ = "delivery_failure_events"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    actor_id = Column(String(255), nullable=True, index=True)
+    subject_id = Column(String(255), nullable=True, index=True)
+    person_id = Column(String(255), nullable=True, index=True)
+    caregiver_id = Column(String(255), nullable=True, index=True)
+    delivery_type = Column(Text, nullable=False)
+    delivery_id = Column(String(255), nullable=False, index=True)
+    recipient_id = Column(String(255), nullable=True, index=True)
+    failure_code = Column(Text, nullable=False)
+    failure_detail_redacted = Column(Text, nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    retryable = Column(Boolean, nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    request_id = Column(String(255), nullable=True, index=True)
+    correlation_id = Column(String(255), nullable=True, index=True)
+    policy_version = Column(String(100), nullable=True)
+    record_metadata = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
