@@ -10,7 +10,6 @@ from app.core.database import get_db
 from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
-from app.services.uncertainty import persist_source_clarification_questions
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.lcr_context import build_lcr_context
@@ -676,22 +675,21 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     "pending_review", "corrected_pending_approval", "corrected_by_caregiver",
                 }
             ]
-            if existing_analysis and existing_analysis.extraction_status == "available" and isinstance(existing_analysis.candidates, dict):
-                try:
-                    persist_source_clarification_questions(
-                        db,
-                        person_id=person_id,
-                        caregiver_id=caregiver_id,
-                        source_kind="daily_capture_extraction",
-                        source_record_type="care_event",
-                        source_record_id=existing_event.id,
-                        evidence_ids=linked_evidence_ids,
-                        questions=existing_analysis.candidates.get("open_questions") or [],
-                    )
-                    db.commit()
-                except Exception:
-                    db.rollback()
-                    logger.exception("Could not backfill saved Daily Care clarification questions for event %s", existing_event.id)
+            replay_execution_status = dict(existing_analysis.execution_status or {}) if existing_analysis and existing_analysis.execution_status else {
+                "source_preservation": "verified",
+                "evidence": "verified" if linked_evidence_ids else "not_applicable",
+                "extraction": "available" if existing_analysis and existing_analysis.extraction_status == "available" else "failed",
+                "assessment": "pending",
+                "review": "available" if reviewable_candidates else "not_required",
+                "reconciliation": "pending",
+                "longitudinal_retrieval": "not_verified",
+            }
+            replay_execution_status["review"] = "available" if reviewable_candidates else (
+                "completed" if existing_analysis and existing_analysis.review_history else "not_required"
+            )
+            # AI-generated questions remain attached to the saved analysis.
+            # They are not promoted into the caregiver's active clarification queue
+            # without evidence that a consequential decision depends on the answer.
             return {
                 "success": True,
                 "id": existing_event.id,
@@ -702,27 +700,13 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 "qwen_extraction_status": existing_analysis.extraction_status if existing_analysis else "unavailable",
                 "qwen_candidates": existing_analysis.candidates if existing_analysis else None,
                 "qwen_analysis_id": existing_analysis.id if existing_analysis else None,
-                "qwen_review_required": bool(
+                "qwen_review_required": False,
+                "qwen_review_available": bool(
                     existing_analysis
                     and existing_analysis.extraction_status == "available"
                     and reviewable_candidates
                 ),
-                "execution_status": (
-                    existing_analysis.execution_status
-                    if existing_analysis and existing_analysis.execution_status
-                    else {
-                        "source_preservation": "verified",
-                        "evidence": "verified" if linked_evidence_ids else "not_applicable",
-                        "extraction": (
-                            "available" if existing_analysis and existing_analysis.extraction_status == "available"
-                            else "failed"
-                        ),
-                        "assessment": "pending",
-                        "review": "required" if reviewable_candidates else "not_required",
-                        "reconciliation": "pending",
-                        "longitudinal_retrieval": "not_verified",
-                    }
-                ),
+                "execution_status": replay_execution_status,
                 "qwen_written_to_lcr": False,
             }
         detail["capture_request_fingerprint"] = capture_request_fingerprint
@@ -923,7 +907,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     stage_statuses = {
         "extraction": "available" if qwen_status == "available" else "failed",
         "assessment": "pending" if qwen_status == "available" else "failed",
-        "review": "required" if observations else "not_required",
+        "review": "available" if observations else "not_required",
     }
     execution_status = {
         "source_preservation": "verified",
@@ -957,20 +941,9 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     execution = None
     change_intelligence_status = "unavailable"
     try:
-        if qwen_status == "available" and isinstance(qwen_candidates, dict):
-            persist_source_clarification_questions(
-                db,
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                source_kind="daily_capture_extraction",
-                source_record_type="care_event",
-                source_record_id=event.id,
-                evidence_ids=[evidence.id] if evidence is not None else [],
-                questions=qwen_candidates.get("open_questions") or [],
-            )
-            # Persist source-linked questions independently of later Delta/
-            # change-intelligence work; a reconciliation failure must not erase them.
-            db.commit()
+        # Keep model-generated open questions with the source-linked analysis.
+        # Do not create caregiver clarification work until a consequential decision
+        # actually depends on an answer; the model does not classify that dependency.
         execution = execute_care_continuity_reconciliation(
             db,
             person_id,
@@ -1071,7 +1044,17 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
         "qwen_analysis_id": analysis_id,
-        "qwen_review_required": execution_status["review"] == "required",
+        "qwen_review_required": False,
+        "qwen_review_available": bool(
+            qwen_status == "available"
+            and any(
+                isinstance(item, dict)
+                and item.get("review_status", "pending_review") in {
+                    "pending_review", "corrected_pending_approval", "corrected_by_caregiver",
+                }
+                for item in observations
+            )
+        ),
         "qwen_written_to_lcr": False,
     }
 
