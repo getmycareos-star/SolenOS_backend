@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.models.care import CareEvent, Evidence, Person
+from app.models.collaboration import ConversationMessage, ConversationSession
 from app.services import care_continuity_execution as execution
 
 
@@ -87,3 +88,63 @@ def test_shared_coordinator_rejects_unlinked_event_and_evidence(monkeypatch):
         )
 
     reconciled.assert_not_called()
+
+
+def test_shared_coordinator_validates_companion_source_message_and_caregiver(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    conversation = SimpleNamespace(
+        id="conversation-1",
+        person_id="person-1",
+        caregiver_id="caregiver-1",
+    )
+    message = SimpleNamespace(
+        id="message-1",
+        session_id="conversation-1",
+        role="user",
+    )
+    db = _session({
+        Person: person,
+        ConversationSession: conversation,
+        ConversationMessage: message,
+    })
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    result = execution.execute_care_continuity_reconciliation(
+        db,
+        "person-1",
+        workflow="companion_care_update_review",
+        caregiver_id="caregiver-1",
+        source_message_id="message-1",
+        source_conversation_id="conversation-1",
+    )
+
+    assert result["stages"]["source_message"] == "verified"
+    assert result["stages"]["evidence"] == "not_applicable"
+    reconciled.assert_called_once_with(db, "person-1", None)
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_companion_message_from_another_caregiver(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    conversation = SimpleNamespace(
+        id="conversation-1",
+        person_id="person-1",
+        caregiver_id="different-caregiver",
+    )
+    db = _session({Person: person, ConversationSession: None, ConversationMessage: None})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="conversation"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="companion_care_update_review",
+            caregiver_id="caregiver-1",
+            source_message_id="message-1",
+            source_conversation_id="conversation-1",
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
