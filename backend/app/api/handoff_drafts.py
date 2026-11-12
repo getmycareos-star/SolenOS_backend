@@ -870,8 +870,29 @@ def save_handoff_draft_revision(
     serialized = json.dumps(edited_content, ensure_ascii=False, separators=(",", ":"), default=str)
     if len(serialized) > 40000:
         raise HTTPException(status_code=413, detail="Draft content exceeds the supported size")
-    if not _validate_draft_quotes(edited_content, draft.source_snapshot or {}):
-        raise HTTPException(status_code=422, detail="Draft contains unsupported text or source references; only exact retrieved quotations can be saved as grounded content")
+    if draft.generation_status == "generated":
+        valid_content = _validate_draft_quotes(edited_content, draft.source_snapshot or {})
+    else:
+        notes = edited_content.get("caregiver_notes", [])
+        current_sections = (draft.structured_content or {}).get("sections", [])
+        generation = edited_content.get("generation")
+        generated_sections = generation.get("sections", []) if isinstance(generation, dict) else []
+        valid_content = (
+            edited_content.get("sections", []) == current_sections
+            and not generated_sections
+            and isinstance(notes, list)
+            and len(notes) <= 20
+            and all(
+                isinstance(note, dict)
+                and note.get("attribution") == "caregiver_authored_unverified"
+                and isinstance(note.get("text"), str)
+                and bool(note["text"].strip())
+                and len(note["text"]) <= 2000
+                for note in notes
+            )
+        )
+    if not valid_content:
+        raise HTTPException(status_code=422, detail="Draft edits must preserve sourced records exactly; caregiver notes are labelled as unverified reports")
     content_hash = _draft_content_hash(edited_content)
     if content_hash == _draft_content_hash(draft.structured_content or {}):
         return _draft_response(draft)
