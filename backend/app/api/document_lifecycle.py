@@ -16,7 +16,7 @@ from email.parser import BytesParser
 from html.parser import HTMLParser
 from datetime import datetime, timezone
 
-import extract_msg
+from aspose.email_foss.msg import MapiMessage
 import pypdfium2 as pdfium
 import pytesseract
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -616,38 +616,37 @@ def _extract(
         return _bounded_extraction(extracted, "server_email_text")
 
     if mime == "application/vnd.ms-outlook" or filename.endswith(".msg"):
-        message = None
-        body = ""
-        extracted = ""
+        temp_path = None
         try:
-            # extract-msg accepts the original bytes directly. Delay attachment
-            # parsing: this stage extracts the message body and headers only.
-            message = extract_msg.Message(content, delayAttachments=True)
-            body = str(message.body or "").strip()
-            if not body:
-                html_body = message.htmlBody
-                if html_body:
+            # Parse a bounded temporary copy of the already-verified original.
+            # The uploaded original remains the immutable evidence source.
+            with tempfile.NamedTemporaryFile(suffix=".msg", delete=False) as temporary:
+                temporary.write(content)
+                temp_path = temporary.name
+            with MapiMessage.from_file(temp_path, strict=False) as message:
+                email_message = message.to_email_message()
+                plain_part = email_message.get_body(preferencelist=("plain",))
+                if plain_part is not None:
+                    body = str(plain_part.get_content() or "").strip()
+                else:
+                    html_part = email_message.get_body(preferencelist=("html",))
                     parser = _HTMLText()
-                    parser.feed(html_body.decode("utf-8", errors="replace"))
+                    if html_part is not None:
+                        parser.feed(str(html_part.get_content() or ""))
                     body = parser.text()
-            header_values = (
-                ("From", message.sender),
-                ("To", message.to),
-                ("Cc", message.cc),
-                ("Date", message.date),
-                ("Subject", message.subject),
-            )
-            headers = "\n".join(
-                f"{name}: {value}" for name, value in header_values if value
-            )
-            extracted = (headers + "\n\n" + body).strip()
+                headers = "\\n".join(
+                    f"{name}: {email_message.get(name)}"
+                    for name in ("From", "To", "Cc", "Date", "Subject", "Message-ID")
+                    if email_message.get(name)
+                )
+                extracted = (headers + "\\n\\n" + body).strip()
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved Outlook message could not be read") from exc
         finally:
-            if message is not None:
+            if temp_path:
                 try:
-                    message.close()
-                except Exception:
+                    os.unlink(temp_path)
+                except OSError:
                     pass
         if not extracted:
             raise HTTPException(status_code=422, detail="The Outlook message contains no readable content")
