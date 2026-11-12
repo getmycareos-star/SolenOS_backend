@@ -385,6 +385,7 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
             # processing job. It remains completed so the deletion receipt is
             # retained after the source bytes and derived extraction are erased.
             assert all(job.status == "completed" for job in lifecycle_jobs)
+            from app.models.qwen_background_job import QwenJobEvent
             assert db.query(QwenJobEvent).filter(
                 QwenJobEvent.job_id.in_([job.id for job in lifecycle_jobs]),
                 QwenJobEvent.event_type == "document_deleted",
