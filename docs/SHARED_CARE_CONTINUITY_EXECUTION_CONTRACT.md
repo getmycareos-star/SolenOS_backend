@@ -17,7 +17,7 @@ The shared lifecycle is:
 5. Epistemic classification applied to each observation or candidate.
 6. Claims and observations assessed against their actual source spans and evidence.
 7. Uncertainty, conflicts, missing information, and clarification questions identified.
-8. Required caregiver review presented and durably recorded.
+8. Optional suggestions are available without blocking completion; explicit caregiver authorization is required only for consequential changes.
 9. Accepted changes reconciled into the longitudinal care state.
 10. A new, versioned care-state assessment is persisted.
 11. Longitudinal retrieval reconstructs the state from persisted records, with source lineage and uncertainty.
@@ -77,7 +77,7 @@ Every workflow execution must return or expose a durable, person-scoped executio
 - `evidence_persisted`
 - `extraction_pending`, `extraction_available`, `extraction_failed`, or `not_applicable`
 - `assessment_pending`, `assessment_available`, or `assessment_failed`
-- `review_required`, `review_completed`, or `review_not_required`
+- `review_available` (optional caregiver inspection), `review_required` (a consequential decision is blocked pending authorization), `review_completed`, or `review_not_required`
 - `reconciliation_pending`, `reconciliation_completed`, or `reconciliation_failed`
 - `retrieval_available` or `retrieval_unavailable`
 
