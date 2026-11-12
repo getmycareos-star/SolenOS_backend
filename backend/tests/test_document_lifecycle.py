@@ -1113,4 +1113,4 @@ def test_outlook_msg_extracts_headers_and_body_from_a_real_msg_round_trip(tmp_pa
     assert method == "server_outlook_msg"
     assert "Subject: Appointment confirmation" in extracted
     assert "Appointment confirmed for Tuesday." in extracted
-\n
+
