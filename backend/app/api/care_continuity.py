@@ -1519,6 +1519,9 @@ def create_medication_record(payload: dict[str, Any], request: Request, db: Sess
         "epistemic_state": "reported",
         "source_label": "Caregiver report",
         "source_text": source_text,
+        # The reflected Core insert does not apply ORM-side list defaults.
+        # Persist an explicit empty evidence list for caregiver-authored reports.
+        "evidence_ids": [],
         "review_after_days": review_days,
     }
     assertions = []
