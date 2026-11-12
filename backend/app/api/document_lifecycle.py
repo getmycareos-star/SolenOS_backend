@@ -777,6 +777,9 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 row.source_text = retry_text
                 row.extraction_status = retry_status
                 metadata.update(retry_metadata)
+                metadata["source_text_sha256"] = hashlib.sha256(
+                    (row.source_text or "").strip().encode("utf-8")
+                ).hexdigest()
                 row.candidates = metadata
                 db.commit()
                 db.refresh(row)
