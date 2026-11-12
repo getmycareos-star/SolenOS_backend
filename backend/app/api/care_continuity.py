@@ -31,6 +31,7 @@ from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from pydantic import ValidationError
 from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, EvidenceObservation
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
@@ -185,12 +186,20 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
     )
     try:
         db.add(row)
+        execution = execute_care_continuity_reconciliation(
+            db,
+            person_id,
+            workflow="evidence_source_review",
+            caregiver_id=caregiver_id,
+            source_evidence_id=evidence.id,
+        )
         db.commit()
+        execution["stages"]["reconciliation"] = "committed"
         db.refresh(row)
     except Exception as exc:
         db.rollback()
-        logger.exception("Evidence review could not be persisted")
-        raise HTTPException(status_code=503, detail="Evidence review could not be persisted") from exc
+        logger.exception("Evidence review and care reassessment could not be persisted")
+        raise HTTPException(status_code=503, detail="Evidence review could not be saved with its care-record reassessment") from exc
     return {
         "id": row.id,
         "evidence_id": row.evidence_id,
@@ -203,6 +212,7 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
         "source_attribution": json.loads(row.source_attribution_snapshot),
         "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id,
         "created_at": row.created_at,
+        "care_continuity_execution": execution,
     }
 
 
@@ -2877,28 +2887,32 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
                 changed_by_caregiver_id=caregiver_id,
                 changed_at=datetime.now(timezone.utc),
             ))
-        if not defer_document_review_commit:
-            db.commit()
+        if defer_document_review_commit:
+            updated = db.execute(select(assertions).where(
+                assertions.c.id == assertion_id,
+                assertions.c.person_id == person_id,
+            )).mappings().one()
+            response = _jsonable(dict(updated))
+            response["change_intelligence_status"] = "deferred"
+            return response
+
+        execution = execute_care_continuity_reconciliation(
+            db,
+            person_id,
+            workflow="care_assertion_review",
+            caregiver_id=caregiver_id,
+            source_assertion_id=assertion_id,
+            source_evidence_ids=previous.get("evidence_ids") or [],
+        )
+        db.commit()
+        execution["stages"]["reconciliation"] = "committed"
         updated = db.execute(select(assertions).where(
             assertions.c.id == assertion_id,
             assertions.c.person_id == person_id,
         )).mappings().one()
         response = _jsonable(dict(updated))
-        if defer_document_review_commit:
-            response["change_intelligence_status"] = "deferred"
-            return response
-        change_intelligence_status = "available"
-        try:
-            reconcile_person_change_intelligence(db, person_id)
-            db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception(
-                "Change intelligence reconciliation failed after assertion review %s",
-                assertion_id,
-            )
-            change_intelligence_status = "unavailable"
-        response["change_intelligence_status"] = change_intelligence_status
+        response["change_intelligence_status"] = "available"
+        response["care_continuity_execution"] = execution
         return response
     except HTTPException:
         db.rollback()
