@@ -214,7 +214,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CareNotificationPreference.caregiver_id == notification.caregiver_id,
             ).first()
             release_at = quiet_hours_release_at(preference, current)
-            if release_at is not None and notification.priority not in {"emergency", "critical"}:
+            if release_at is not None and notification.priority not in {"emergency", "critical", "urgent"}:
                 delivery.next_attempt_at = release_at
                 session.commit()
                 continue
