@@ -26,6 +26,7 @@ from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisi
 from app.services.lcr_context import build_lcr_context
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
+from app.models.privacy_delivery import AuditLogEvent
 from app.models.change import Situation as SituationModel
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
@@ -4199,6 +4200,31 @@ def create_evidence_observation(
             source_evidence_id=evidence.id,
         )
         affected_claims = _claims_affected_by_source_evidence(db, person_id, str(evidence.id))
+        db.add(AuditLogEvent(
+            id=str(uuid.uuid4()),
+            actor_id=caregiver_id,
+            subject_id=person_id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            action="evidence_observation.correct" if superseded_observation is not None else "evidence_observation.create",
+            target_type="evidence_observation",
+            target_id=str(row.id),
+            occurred_at=datetime.now(timezone.utc),
+            outcome="success",
+            request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+            policy_version="evidence-provenance-v1",
+            record_metadata={
+                "source_evidence_id": str(evidence.id),
+                "supersedes_observation_id": str(row.supersedes_observation_id) if row.supersedes_observation_id else None,
+                "directly_affected_claim_ids": affected_claims["directly_affected_claim_ids"],
+                "dependent_claim_ids": affected_claims["dependent_claim_ids"],
+                "affected_record_views": [
+                    "living_care_record", "change_and_pattern_summaries",
+                    "open_questions", "claim_assessments",
+                ],
+                "reconciliation_workflow": execution.get("workflow"),
+            },
+        ))
         db.commit()
         execution["stages"]["reconciliation"] = "committed"
         db.refresh(row)
