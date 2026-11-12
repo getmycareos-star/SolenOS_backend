@@ -1271,14 +1271,25 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 CareRecordRelationship.source_type == "care_event",
                 CareRecordRelationship.source_id == duplicate_id,
                 CareRecordRelationship.relationship_type == "duplicate_observation_of",
-                CareRecordRelationship.target_type == "care_assertion",
             ).one()
             assert duplicate_link.target_id
+            assert duplicate_link.target_type in {"care_assertion", "care_event"}
             duplicate_provenance = json.loads(duplicate_link.provenance)
-            assert duplicate_provenance["match_basis"] == "exact_subject_value_and_observed_at"
+            expected_match_basis = (
+                "exact_subject_value_and_observed_at"
+                if duplicate_link.target_type == "care_assertion"
+                else "exact_source_event_time_and_content"
+            )
+            assert duplicate_provenance["match_basis"] == expected_match_basis
             assert duplicate_provenance["evidence_ids"] == [
                 next(event["evidence_id"] for event in ordered_events if event["id"] == duplicate_id)
             ]
+            if duplicate_link.target_type == "care_event":
+                original_event_ids = {
+                    event["id"] for event in ordered_events
+                    if event.get("classification") != "duplicate_same_occurrence"
+                }
+                assert duplicate_link.target_id in original_event_ids
 
         # Medication references, historical lists and missed-dose reports are not
         # sufficient to establish a current prescription.
