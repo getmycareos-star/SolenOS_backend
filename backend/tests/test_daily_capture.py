@@ -1522,7 +1522,7 @@ def test_medication_authoring_and_review_are_person_scoped():
             name="Other Caregiver",
             email="medication-other@example.invalid",
             relationship="Family",
-            person_id=foreign_person.id,
+            person_id=foreign_person_id,
         )
         db.add_all([foreign_person, foreign_caregiver])
         db.commit()
@@ -1566,8 +1566,9 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
             name="Foreign Caregiver",
             email="medication-foreign@example.invalid",
             relationship="Family",
-            person_id=foreign_person.id,
+            person_id=foreign_person_id,
         )
+        foreign_person_id = foreign_person.id
         db.add_all([foreign_person, foreign_caregiver])
         db.commit()
         db.close()
@@ -1602,8 +1603,8 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
             claim("med-conflict", "medication_status", "active"),
             claim("med-inferred", "medication_name", "Inferred medicine", epistemic_state="inferred"),
             claim("med-inferred", "medication_status", "active", epistemic_state="inferred"),
-            claim("med-foreign", "medication_name", "Private medicine", person_id=foreign_person.id),
-            claim("med-foreign", "medication_status", "active", person_id=foreign_person.id),
+            claim("med-foreign", "medication_name", "Private medicine", person_id=foreign_person_id),
+            claim("med-foreign", "medication_status", "active", person_id=foreign_person_id),
         ])
         db.commit()
         db.close()

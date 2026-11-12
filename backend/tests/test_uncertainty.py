@@ -2963,7 +2963,6 @@ def test_care_event_correction_reopens_direct_and_dependent_claim_assessments():
             assertion_status="reported",
             created_by_caregiver_id=caregiver.id,
             recorded_at=assessed_at - timedelta(days=1),
-            updated_at=assessed_at - timedelta(hours=1),
         )
         dependent_claim = CareAssertion(
             id="event-correction-dependent-claim",
@@ -2979,7 +2978,6 @@ def test_care_event_correction_reopens_direct_and_dependent_claim_assessments():
             assertion_status="reported",
             created_by_caregiver_id=caregiver.id,
             recorded_at=assessed_at - timedelta(days=1),
-            updated_at=assessed_at - timedelta(hours=1),
         )
         source_assessment = EvidenceClaimAssessment(
             person_id=person.id,

@@ -719,7 +719,19 @@ def get_claim_assessment_impact(
         ).all()
         return any(_is_after(row[0], baseline) for row in correction_times)
 
-    if _is_after(claim.updated_at or claim.recorded_at, latest.created_at):
+    def _claim_changed_after(claim_row, baseline):
+        if claim_row is None or baseline is None:
+            return False
+        if _is_after(claim_row.recorded_at, baseline):
+            return True
+        revision_times = db.query(CareStateRevision.changed_at).filter(
+            CareStateRevision.person_id == person_id,
+            CareStateRevision.target_type == "care_assertions",
+            CareStateRevision.target_id == str(claim_row.id),
+        ).all()
+        return any(_is_after(item[0], baseline) for item in revision_times)
+
+    if _claim_changed_after(claim, latest.created_at):
         reasons.append("claim_assertion_changed_after_assessment")
     if claim.assertion_status in {"superseded", "rejected"}:
         reasons.append("claim_is_no_longer_current")
@@ -773,8 +785,8 @@ def get_claim_assessment_impact(
             prerequisite_assertion_changed = bool(
                 prerequisite_claim
                 and (
-                    _is_after(
-                        prerequisite_claim.updated_at or prerequisite_claim.recorded_at,
+                    _claim_changed_after(
+                        prerequisite_claim,
                         dependent_assessment.created_at if dependent_assessment else None,
                     )
                     or prerequisite_claim.assertion_status in {"superseded", "rejected"}
