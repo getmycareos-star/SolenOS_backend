@@ -14,6 +14,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationSession, ConversationMessage
 from app.models.uncertainty import OpenQuestion, InformationGap, Contradiction
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
+from app.schemas.uncertainty import InformationGapUpdate
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
