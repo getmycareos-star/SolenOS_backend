@@ -173,6 +173,7 @@ from app.models.care_continuity import CareAssertion
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
+from app.models.uncertainty import OpenQuestion
 from app.api.collaboration import (
     upload_evidence,
     delete_uploaded_document,
@@ -185,6 +186,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
 from app.api.document_intelligence import _existing_assertion_for_exact_document_duplicate
 from app.api.document_intelligence import _persist_document_follow_up
+from app.api.document_intelligence import _persist_medication_document_conflict_question
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgresql+psycopg://"):
@@ -649,5 +651,111 @@ def test_postgres_document_status_reports_queued_upload_without_claiming_process
             assert item["written_to_lcr"] is False
             assert item["review_required"] is False
             assert item["document_name"] == "hospital-discharge.txt"
+    finally:
+        engine.dispose()
+
+
+def test_postgres_document_medication_conflict_creates_professional_question_without_changing_medication():
+    """A source-grounded discontinuation candidate creates a question, not a medication change."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-med-conflict-person-{suffix}"
+    caregiver_id = f"doc-med-conflict-caregiver-{suffix}"
+    medication_id = f"medication-{suffix}"
+    quote = "Aspirin was discontinued at hospital discharge."
+    raw = (quote + " " + suffix).encode("utf-8")
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Medication conflict fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Medication conflict caregiver", relationship="family", person_id=person_id))
+            db.add(CareAssertion(
+                person_id=person_id,
+                subject_type="medication",
+                subject_id=medication_id,
+                field="name",
+                assertion_kind="current_state",
+                asserted_value="Aspirin",
+                source_label="Previously reviewed medication record",
+                source_text="Caregiver-reviewed medication name.",
+                evidence_ids=[],
+                assertion_status="accepted",
+                epistemic_state="reported",
+                review_after_days=30,
+                created_by_caregiver_id=caregiver_id,
+            ))
+            active_status = CareAssertion(
+                person_id=person_id,
+                subject_type="medication",
+                subject_id=medication_id,
+                field="medication_status",
+                assertion_kind="current_state",
+                asserted_value="active",
+                source_label="Previously reviewed medication record",
+                source_text="Caregiver-reviewed active medication status.",
+                evidence_ids=[],
+                assertion_status="accepted",
+                epistemic_state="reported",
+                review_after_days=30,
+                created_by_caregiver_id=caregiver_id,
+            )
+            db.add(active_status)
+            db.commit()
+            active_status_id = active_status.id
+
+        with Session() as db:
+            uploaded = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge-summary.txt", raw)
+            duplicate = _upload_document_for_lifecycle(db, person_id, caregiver_id, "discharge-summary-copy.txt", raw)
+            first_upload = db.query(EvidenceUpload).filter_by(evidence_id=uploaded["evidence_id"]).one()
+            duplicate_upload = db.query(EvidenceUpload).filter_by(evidence_id=duplicate["evidence_id"]).one()
+            candidate = {"field_type": "medication", "page_number": 4}
+            active_medication = {
+                "medication_id": medication_id,
+                "name": "Aspirin",
+                "dose": "81 mg",
+                "evidence_ids": [],
+                "review_after_days": 30,
+            }
+            first_question_id = _persist_medication_document_conflict_question(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=uploaded["evidence_id"],
+                analysis_id="analysis-" + suffix,
+                upload=first_upload,
+                candidate=candidate,
+                active_medication=active_medication,
+            )
+            duplicate_question_id = _persist_medication_document_conflict_question(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=duplicate["evidence_id"],
+                analysis_id="analysis-copy-" + suffix,
+                upload=duplicate_upload,
+                candidate=candidate,
+                active_medication=active_medication,
+            )
+            assert first_question_id == duplicate_question_id
+            db.commit()
+
+        with Session() as db:
+            question = db.query(OpenQuestion).filter_by(id=first_question_id, person_id=person_id).one()
+            assert question.subject_type == "medication"
+            assert question.subject_id == medication_id
+            assert question.claim_id == active_status_id
+            assert question.intended_answerer_role == "professional"
+            assert question.necessity == "necessary"
+            assert question.status == "open"
+            assert question.priority.value == "high"
+            assert uploaded["evidence_id"] in question.evidence_ids
+            assert "prescribing professional or pharmacist" in question.question
+            assert "has not advised stopping" in question.question
+            assert db.query(CareAssertion).filter_by(
+                person_id=person_id,
+                subject_id=medication_id,
+                field="medication_status",
+            ).count() == 1
     finally:
         engine.dispose()
