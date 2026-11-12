@@ -1039,6 +1039,63 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                                 ),
                                 None,
                             )
+                        if duplicate_assertion is None:
+                            # A later correction may remove the original assertion
+                            # while preserving its source event. Do not promote an exact
+                            # duplicate of that event into a second independent fact.
+                            incoming_event = db.query(CareEvent).filter(
+                                CareEvent.id == source_event_id,
+                                CareEvent.person_id == person_id,
+                            ).first()
+                            duplicate_source_event = None
+                            if incoming_event is not None:
+                                prior_events = db.query(CareEvent).filter(
+                                    CareEvent.person_id == person_id,
+                                    CareEvent.id != source_event_id,
+                                    CareEvent.event_type == incoming_event.event_type,
+                                    CareEvent.created_by_caregiver_id == created_by_caregiver_id,
+                                ).order_by(CareEvent.created_at.asc()).all()
+
+                                def _normalized_event_text(value):
+                                    return " ".join(str(value or "").casefold().split())
+
+                                duplicate_source_event = next(
+                                    (
+                                        candidate for candidate in prior_events
+                                        if _same_occurrence_instant(candidate.occurred_at, event_date)
+                                        and _normalized_event_text(candidate.title) == _normalized_event_text(incoming_event.title)
+                                        and _normalized_event_text(candidate.description) == _normalized_event_text(incoming_event.description)
+                                    ),
+                                    None,
+                                )
+                            if duplicate_source_event is not None:
+                                existing_event_link = db.query(CareRecordRelationship.id).filter(
+                                    CareRecordRelationship.person_id == person_id,
+                                    CareRecordRelationship.source_type == "care_event",
+                                    CareRecordRelationship.source_id == source_event_id,
+                                    CareRecordRelationship.relationship_type == "duplicate_observation_of",
+                                    CareRecordRelationship.target_type == "care_event",
+                                    CareRecordRelationship.target_id == duplicate_source_event.id,
+                                ).first()
+                                if existing_event_link is None:
+                                    db.add(CareRecordRelationship(
+                                        person_id=person_id,
+                                        source_type="care_event",
+                                        source_id=source_event_id,
+                                        relationship_type="duplicate_observation_of",
+                                        target_type="care_event",
+                                        target_id=duplicate_source_event.id,
+                                        provenance=json.dumps({
+                                            "match_basis": "exact_source_event_time_and_content",
+                                            "evidence_ids": finding_evidence_ids,
+                                            "original_source_event_id": duplicate_source_event.id,
+                                        }),
+                                        created_by_caregiver_id=created_by_caregiver_id,
+                                    ))
+                                item["duplicate_observation"] = True
+                                item["duplicate_of_event_id"] = duplicate_source_event.id
+                                continue
+
                         if duplicate_assertion is not None:
                             existing_duplicate_link = db.query(CareRecordRelationship.id).filter(
                                 CareRecordRelationship.person_id == person_id,
