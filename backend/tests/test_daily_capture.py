@@ -1218,3 +1218,45 @@ def test_quick_checkin_accepts_three_overall_impressions_without_domain_assessme
             assert response.json()["event_type"] == "quick_daily_checkin"
     finally:
         teardown_db()
+
+
+def test_daily_capture_preserves_explicit_event_time_and_server_recorded_time_separately():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "notes": "Caregiver is recording an event from earlier.",
+                "occurred_at": "2026-11-11T18:45:00+01:00",
+                "capture_idempotency_key": "explicit-event-time-001",
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert receipt["success"] is True
+
+        db = TestingSessionLocal()
+        try:
+            event = db.query(CareEvent).filter_by(id=receipt["id"]).one()
+            evidence = db.query(Evidence).filter_by(id=receipt["evidence_ids"][0]).one()
+            expected_utc = datetime(2026, 11, 11, 17, 45, tzinfo=timezone.utc)
+            event_time = event.occurred_at
+            evidence_time = evidence.occurred_at
+            if event_time.tzinfo is None:
+                event_time = event_time.replace(tzinfo=timezone.utc)
+            if evidence_time.tzinfo is None:
+                evidence_time = evidence_time.replace(tzinfo=timezone.utc)
+            assert event_time == expected_utc
+            assert evidence_time == expected_utc
+            assert event.time_provenance == "caregiver_reported_at"
+            assert evidence.time_provenance == "caregiver_reported_at"
+            assert event.recorded_at is not None
+        finally:
+            db.close()
+    finally:
+        teardown_db()
