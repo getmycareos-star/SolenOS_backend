@@ -1347,7 +1347,7 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
     pending_records: list[dict[str, Any]] = []
 
     def latest_caregiver_review(assertion: CareAssertion) -> datetime | None:
-        if assertion.assertion_status != "accepted":
+        if assertion.assertion_status not in {"accepted", "caregiver_reviewed"}:
             return None
         if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
             return None
