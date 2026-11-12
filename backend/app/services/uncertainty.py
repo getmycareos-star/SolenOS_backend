@@ -469,7 +469,6 @@ class UncertaintyEngine:
             return None
 
         manual_revision_objects = self.db.info.setdefault("manual_care_state_revision_objects", set())
-        manual_revision_objects.add(id(db_question))
         from app.services.care_continuity import _open_question_state, _record_open_question_revision
         before_state = _open_question_state(db_question)
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
@@ -645,6 +644,7 @@ class UncertaintyEngine:
 
         try:
             if before_state != _open_question_state(db_question):
+                manual_revision_objects.add(id(db_question))
                 _record_open_question_revision(
                     self.db, db_question, before_state=before_state, change_kind="updated",
                     actor="caregiver_question_update",
