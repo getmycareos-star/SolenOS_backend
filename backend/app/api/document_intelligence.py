@@ -183,6 +183,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "model_provenance": intelligence.get("model_provenance"),
         "processing_history": intelligence.get("processing_history", []),
         "candidate_overflow": bool(intelligence.get("candidate_overflow")),
+        "candidate_overflow_page_numbers": intelligence.get("candidate_overflow_page_numbers", []),
         "extraction_method": metadata.get("extraction_method"),
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
