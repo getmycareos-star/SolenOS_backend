@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.api.collaboration import _scope
 from app.core.database import get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
+from app.models.care import CareEvent, Evidence
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
 from app.schemas.care_continuity import CareAssertionCreate
@@ -49,6 +51,141 @@ def _proposal_json(proposal: AIOutputLCRProposal) -> dict:
         "candidate_index": proposal.candidate_index,
         "proposal_version": proposal.proposal_version,
         "created_at": proposal.created_at.isoformat() if proposal.created_at else None,
+    }
+
+
+@router.post("/qwen/{proposal_id}/review")
+def review_qwen_assistance_proposal(
+    proposal_id: str,
+    payload: CompanionCareUpdateReview,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Caregiver explicitly accepts or rejects a source-validated Qwen summary."""
+    person_id, caregiver_id = _scope(request, db)
+    decision = (payload.decision or "").strip().lower()
+    if decision not in {"accept", "reject"}:
+        raise HTTPException(status_code=422, detail="Decision must be accept or reject")
+    proposal = db.query(AIOutputLCRProposal).filter(
+        AIOutputLCRProposal.id == proposal_id,
+        AIOutputLCRProposal.person_id == person_id,
+        AIOutputLCRProposal.caregiver_id == caregiver_id,
+        AIOutputLCRProposal.proposal_type == "qwen_assistance_summary",
+    ).with_for_update().first()
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Care suggestion not found")
+
+    prior = db.query(AIOutputLCRDecision).filter(
+        AIOutputLCRDecision.proposal_id == proposal.id,
+        AIOutputLCRDecision.person_id == person_id,
+    ).order_by(AIOutputLCRDecision.created_at.asc()).all()
+    terminal = "accepted" if decision == "accept" else "rejected"
+    if proposal.status != "pending_authorization":
+        if proposal.status == terminal and prior:
+            assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
+            return {
+                "proposal_id": proposal.id,
+                "status": proposal.status,
+                "decision": decision,
+                "assertion_id": assertion.id if assertion else None,
+                "written_to_lcr": bool(assertion),
+                "idempotent_replay": True,
+            }
+        raise HTTPException(status_code=409, detail="This care suggestion already has a review decision")
+
+    output = db.query(QwenModelOutput).filter(
+        QwenModelOutput.id == proposal.output_id,
+        QwenModelOutput.job_id == proposal.job_id,
+        QwenModelOutput.person_id == person_id,
+        QwenModelOutput.caregiver_id == caregiver_id,
+    ).with_for_update().first()
+    job = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.id == proposal.job_id,
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.status == "completed",
+    ).first()
+    if output is None or job is None or output.written_to_lcr:
+        raise HTTPException(status_code=409, detail="The original care suggestion is no longer available")
+    change = dict(proposal.proposed_change_json or {})
+    if change.get("asserted_value") != output.output_text or change.get("information_status") != "ai_generated_interpretation_pending_caregiver_review":
+        raise HTTPException(status_code=409, detail="The saved suggestion no longer matches its review proposal")
+
+    event_ids = list(dict.fromkeys(str(value) for value in (proposal.source_event_ids_json or [])))
+    evidence_ids = list(dict.fromkeys(str(value) for value in (proposal.source_evidence_ids_json or [])))
+    event_rows = db.query(CareEvent.id).filter(
+        CareEvent.person_id == person_id, CareEvent.id.in_(event_ids or ["__none__"])
+    ).all()
+    evidence_rows = db.query(Evidence.id).filter(
+        Evidence.person_id == person_id, Evidence.id.in_(evidence_ids or ["__none__"])
+    ).all()
+    if {str(row[0]) for row in event_rows} != set(event_ids) or {str(row[0]) for row in evidence_rows} != set(evidence_ids):
+        raise HTTPException(status_code=409, detail="One or more original care sources are no longer available")
+
+    now = datetime.now(timezone.utc)
+    assertion_id = None
+    if decision == "reject":
+        proposal.status = "rejected"
+        output.review_status = "rejected"
+        rationale = "Caregiver declined the Qwen-generated interpretation; no Living Care Record assertion was created."
+    else:
+        accepted_text = (change.get("asserted_value") or "").strip()
+        if not accepted_text:
+            raise HTTPException(status_code=409, detail="The care suggestion is empty")
+        assertion = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="care_record_summary",
+                assertion_kind="ai_assisted_summary",
+                epistemic_state="inferred",
+                asserted_value=accepted_text,
+                source_event_id=event_ids[0] if len(event_ids) == 1 else None,
+                source_label="Caregiver-approved Qwen summary",
+                source_text=(
+                    "AI-generated interpretation approved by the caregiver. "
+                    "This is not independent clinical verification.\n"
+                    f"Source event IDs: {', '.join(event_ids)}\n"
+                    f"Source evidence IDs: {', '.join(evidence_ids)}\n"
+                    f"Generated summary: {accepted_text}"
+                )[:12000],
+                evidence_ids=evidence_ids,
+                created_by_caregiver_id=caregiver_id,
+                updated_by_caregiver_id=caregiver_id,
+                source_proposal_id=proposal.id,
+            ),
+            commit=False,
+        )
+        assertion.assertion_status = "caregiver_reviewed"
+        assertion_id = assertion.id
+        proposal.status = "accepted"
+        output.review_status = "accepted"
+        output.written_to_lcr = True
+        rationale = "Caregiver explicitly approved this AI-generated interpretation. It remains classified as inferred, not verified."
+
+    db.add(AIOutputLCRDecision(
+        id=str(uuid.uuid4()),
+        proposal_id=proposal.id,
+        person_id=person_id,
+        reviewer_caregiver_id=caregiver_id,
+        decision=terminal,
+        rationale=rationale,
+        resulting_lcr_revision_id=assertion_id,
+        created_at=now,
+    ))
+    db.add(proposal)
+    db.add(output)
+    db.commit()
+    return {
+        "proposal_id": proposal.id,
+        "status": proposal.status,
+        "decision": decision,
+        "assertion_id": assertion_id,
+        "written_to_lcr": decision == "accept",
+        "epistemic_state": "inferred" if decision == "accept" else None,
+        "idempotent_replay": False,
     }
 
 
