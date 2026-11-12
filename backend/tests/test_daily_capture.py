@@ -15,6 +15,7 @@ from app.models.care_continuity import EvidenceObservation
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
+from app.models.uncertainty import OpenQuestion
 from app.services.learning import LearningEngine
 
 engine = create_engine(
@@ -1878,6 +1879,7 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         db = TestingSessionLocal()
         try:
             assert db.query(EvidenceObservation).filter_by(evidence_id=receipt["evidence_ids"][0]).count() == 2
+            assert db.query(OpenQuestion).filter_by(person_id="person-daily-test", status="open").count() == 0
         finally:
             db.close()
     finally:
