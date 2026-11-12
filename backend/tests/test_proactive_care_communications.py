@@ -145,7 +145,7 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         due_soon = now + timedelta(hours=4)
         due_later = now + timedelta(hours=18)
 
-        def open_loop(loop_id, caregiver_id, deadline, deadline_source="explicit_user", status="open", loop_type="follow_up"):
+        def open_loop(loop_id, caregiver_id, deadline, deadline_source="explicit_user", status="open", loop_type="follow_up", outcome_status="outcome_unknown"):
             return OpenLoopRecord(
                 id=loop_id,
                 person_id=person.id,
@@ -154,7 +154,7 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
                 title=f"Follow-up {loop_id}",
                 description=f"Recorded follow-up {loop_id}",
                 status=status,
-                outcome_status="outcome_unknown",
+                outcome_status=outcome_status,
                 owner_role="unassigned",
                 source_type="appointment_workspace_follow_up",
                 source_id=f"workspace:{loop_id}",
@@ -187,9 +187,22 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         stale_overdue_loop = open_loop(
             "notify-stale-overdue-loop", caregiver_one.id, now - timedelta(hours=48),
         )
+        reported_loop = open_loop(
+            "notify-reported-loop", caregiver_one.id, now + timedelta(hours=2),
+            outcome_status="outcome_reported",
+        )
+        verified_loop = open_loop(
+            "notify-verified-loop", caregiver_one.id, now + timedelta(hours=2),
+            outcome_status="outcome_verified",
+        )
+        closure_verification_loop = open_loop(
+            "notify-closure-verification-loop", caregiver_one.id, now + timedelta(hours=2),
+            status="pending_closure_verification", outcome_status="outcome_reported",
+        )
         db.add_all([
             due_loop, later_loop, outside_window_loop,
             policy_deadline_loop, deferred_loop, stale_overdue_loop,
+            reported_loop, verified_loop, closure_verification_loop,
         ])
         db.flush()
 
@@ -233,6 +246,14 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         assert db.query(CareNotification).filter(
             CareNotification.source_event_id.like("notify-stale-overdue-loop|%")
         ).count() == 0
+        for suppressed_loop_id in (
+            "notify-reported-loop",
+            "notify-verified-loop",
+            "notify-closure-verification-loop",
+        ):
+            assert db.query(CareNotification).filter(
+                CareNotification.source_event_id.like(f"{suppressed_loop_id}|%")
+            ).count() == 0
         assert db.query(CareNotification).filter(CareNotification.person_id == other_person.id).count() == 0
         assert db.query(CareNotification).filter(
             CareNotification.source_event_id == "notify-invalid-necessity-question"

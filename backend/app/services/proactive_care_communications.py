@@ -25,7 +25,8 @@ OPEN_QUESTION_STATUSES = {"open", "unanswered", "pending", "unresolved"}
 OPEN_LOOP_DUE_WINDOW = timedelta(hours=24)
 OPEN_LOOP_OVERDUE_WINDOW = timedelta(hours=24)
 OPEN_LOOP_PUSH_WINDOW = timedelta(hours=6)
-OPEN_LOOP_DUE_STATUSES = {"open", "waiting", "pending_closure_verification"}
+OPEN_LOOP_DUE_STATUSES = {"open", "waiting"}
+OPEN_LOOP_DUE_OUTCOME_STATUSES = {"outcome_unknown"}
 OPEN_LOOP_DUE_TYPES = {"follow_up", "awaiting_response", "professional_input", "pending_action", "pending_decision"}
 OPEN_LOOP_DUE_SOURCES = {"explicit_user", "recorded_commitment"}
 
@@ -65,6 +66,7 @@ def open_loop_due_notification_state(
         loop.status not in OPEN_LOOP_DUE_STATUSES
         or loop.loop_type not in OPEN_LOOP_DUE_TYPES
         or loop.deadline_source not in OPEN_LOOP_DUE_SOURCES
+        or loop.outcome_status not in OPEN_LOOP_DUE_OUTCOME_STATUSES
         or deadline is None
     ):
         return False, "resolved", "source_no_longer_time_sensitive"
@@ -88,6 +90,7 @@ def _create_open_loop_due_notifications(
         OpenLoopRecord.status.in_(sorted(OPEN_LOOP_DUE_STATUSES)),
         OpenLoopRecord.loop_type.in_(sorted(OPEN_LOOP_DUE_TYPES)),
         OpenLoopRecord.deadline_source.in_(sorted(OPEN_LOOP_DUE_SOURCES)),
+        OpenLoopRecord.outcome_status.in_(sorted(OPEN_LOOP_DUE_OUTCOME_STATUSES)),
         OpenLoopRecord.deadline_at.is_not(None),
         OpenLoopRecord.deadline_at >= timestamp - OPEN_LOOP_OVERDUE_WINDOW,
         OpenLoopRecord.deadline_at <= timestamp + OPEN_LOOP_DUE_WINDOW,
