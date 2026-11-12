@@ -4554,22 +4554,9 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
+    # Companion is conversational only. Care facts are captured through Daily Care
+    # or the explicit document/evidence workflows, never extracted from every chat turn.
     care_update_candidates = []
-    if not emergency and not _is_casual_greeting(user_text):
-        # FastAPI sends the validated conversation response before this background
-        # task performs the separate care-update inference. Casual greetings and
-        # emergency responses never create care-review jobs. The original user and
-        # assistant messages are already committed and cannot be rolled back by it.
-        background_tasks.add_task(
-            process_companion_care_update_message,
-            db.get_bind(),
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            conversation_id=session.id,
-            message_id=str(user_row.id),
-            source_text=user_text,
-            anonymous_session_id=_resolve_anonymous_session_id(request, db, person_id, caregiver_id),
-        )
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
