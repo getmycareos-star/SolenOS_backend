@@ -123,6 +123,12 @@ def test_real_tesseract_ocr_extracts_uploaded_scanned_image(client):
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert response.status_code == 201, response.text
     assert response.json()["extraction_method"] == "server_tesseract_ocr_image"
+    quality = response.json()["ocr_quality_by_page"]
+    assert len(quality) == 1
+    assert quality[0]["page_number"] == 1
+    assert quality[0]["method"] == "tesseract_word_confidence_heuristic"
+    assert quality[0]["is_probability"] is False
+    assert 0 <= quality[0]["mean_token_confidence"] <= 100
     retrieved = test_client.get(
         f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
     )
@@ -211,6 +217,10 @@ def test_real_tesseract_ocr_extracts_scanned_pdf_with_page_provenance(client):
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert response.status_code == 201, response.text
     assert response.json()["extraction_method"] == "server_tesseract_ocr_pdf"
+    quality = response.json()["ocr_quality_by_page"]
+    assert len(quality) == 1
+    assert quality[0]["page_number"] == 1
+    assert quality[0]["is_probability"] is False
     retrieved = test_client.get(
         f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
     )
