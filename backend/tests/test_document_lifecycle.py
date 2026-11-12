@@ -922,6 +922,11 @@ def test_document_processing_status_does_not_leak_across_anonymous_sessions(clie
     assert uploaded.status_code == 201, uploaded.text
     evidence_id = uploaded.json()["evidence_id"]
     original_job_id = uploaded.json()["document_processing_job_id"]
+    with TestSessionLocal() as db:
+        stored = db.query(Evidence).filter_by(id=evidence_id).one()
+        assert stored.person_id == first["person"]["id"]
+        assert stored.uploaded_by_caregiver_id == first["caregiver"]["id"]
+        assert stored.type == "document"
 
     queued = test_client.post(f"/api/v1/documents/{evidence_id}/queue", headers=first_auth, json={})
     assert queued.status_code == 202, queued.text
