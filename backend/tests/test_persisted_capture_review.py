@@ -173,7 +173,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         assert record.execution_status["evidence"] == "verified"
         assert record.execution_status["extraction"] == "available"
         assert record.execution_status["review"] == "completed"
-        assert record.execution_status["reconciliation"] == "completed"
+        assert record.execution_status["reconciliation"] == "committed"
         assert record.execution_status["longitudinal_retrieval"] in {"available", "unavailable"}
         assert record.candidates["observations"][0]["observation"] == "Mum slept badly last night."
         assert record.candidates["observations"][0]["corrected_observation"] == "Mum slept poorly last night."
