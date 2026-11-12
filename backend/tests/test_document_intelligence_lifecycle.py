@@ -579,3 +579,85 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+def test_document_candidate_overflow_is_preserved_and_revealed_in_review_batches(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    source = "\\n\\n".join(
+        f"[Page {page}]\\nPatient record for page {page}."
+        for page in range(1, 7)
+    )
+    processed_pages = []
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        page_number = int(re.search(r"page (\\d+)", page_text).group(1))
+        processed_pages.append(page_number)
+        observations = []
+        for item_number in range(1, 13):
+            quote = f"Patient record for page {page_number}. Observation {item_number}."
+            observations.append({
+                "subject": "Patient record",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            })
+        return {"observations": observations, "open_questions": []}
+
+    import re
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Candidate batch caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+
+        first = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert first.status_code == 201, first.text
+        first_payload = first.json()
+        assert len(first_payload["observations"]) == 60
+        assert [item["candidate_index"] for item in first_payload["observations"]] == list(range(60))
+        assert first_payload["has_more_candidates"] is True
+        assert first_payload["remaining_candidate_count"] == 12
+        assert first_payload["intelligence_status"] == "partial"
+        assert processed_pages == list(range(1, 7))
+
+        blocked = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert blocked.status_code == 201, blocked.text
+        assert [item["candidate_index"] for item in blocked.json()["observations"]] == list(range(60))
+        assert processed_pages == list(range(1, 7)), "review paging must not repeat successful model extraction"
+
+        db = Session()
+        try:
+            analysis = db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).one()
+            metadata = dict(analysis.candidates)
+            intelligence = dict(metadata["document_intelligence"])
+            observations = list(intelligence["observations"])
+            for index in range(60):
+                observations[index] = {**observations[index], "review_status": "rejected_by_caregiver"}
+            intelligence["observations"] = observations
+            metadata["document_intelligence"] = intelligence
+            analysis.candidates = metadata
+            db.commit()
+        finally:
+            db.close()
+
+        next_batch = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert next_batch.status_code == 201, next_batch.text
+        next_payload = next_batch.json()
+        assert len(next_payload["observations"]) == 12
+        assert [item["candidate_index"] for item in next_payload["observations"]] == list(range(60, 72))
+        assert next_payload["has_more_candidates"] is False
+        assert next_payload["remaining_candidate_count"] == 0
+        assert next_payload["intelligence_status"] == "available"
+        assert processed_pages == list(range(1, 7))
+
+        repeated = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert [item["candidate_index"] for item in repeated.json()["observations"]] == list(range(60, 72))
+        assert processed_pages == list(range(1, 7))
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
