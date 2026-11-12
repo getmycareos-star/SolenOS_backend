@@ -1398,3 +1398,41 @@ def test_approved_evidence_source_correction_preserves_immutable_original(monkey
         assert correction.corrected_text == "The caregiver said the appointment was Tuesday."
     finally:
         db.close()
+
+
+
+def test_export_manifest_discloses_unscoped_orm_registered_tables():
+    import io
+    import zipfile
+    from sqlalchemy import Column, String, Table
+    from app.api.privacy_requests import _build_caregiver_export
+
+    table = Table(
+        "privacy_export_orm_unscoped_probe",
+        Base.metadata,
+        Column("id", String, primary_key=True),
+        Column("payload", String),
+    )
+    table.create(bind=engine)
+    db = TestSessionLocal()
+    try:
+        db.execute(table.insert().values(
+            id="unscoped-orm-row",
+            payload="must not be silently omitted",
+        ))
+        db.commit()
+
+        archive_bytes, manifest = _build_caregiver_export(
+            db,
+            person_id="privacy-export-test-person",
+            caregiver_id="privacy-export-test-caregiver",
+        )
+
+        unexported = {item["table"] for item in manifest["unexported_tables"]}
+        assert "privacy_export_orm_unscoped_probe" in unexported
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            assert "records/privacy_export_orm_unscoped_probe.json" not in archive.namelist()
+    finally:
+        db.close()
+        table.drop(bind=engine, checkfirst=True)
+        Base.metadata.remove(table)
