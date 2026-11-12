@@ -345,6 +345,116 @@ def _persist_document_follow_up(
     return str(loop.id)
 
 
+def _persist_medication_document_conflict_question(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    evidence_id: str,
+    analysis_id: str,
+    upload: EvidenceUpload,
+    candidate: dict,
+    active_medication: dict,
+) -> str | None:
+    """Record a professional clarification when source text conflicts with a current LCR medication."""
+    if candidate.get("field_type") != "medication":
+        return None
+    subject = str(candidate.get("subject") or "").strip()
+    quote = str(candidate.get("source_quote") or "").strip()
+    observation = str(candidate.get("observation") or "").strip()
+    if not subject or not quote:
+        return None
+    change_language = re.search(
+        r"\b(discontinued|discontinue|stopped|stop|held|hold|suspend|dose changed|new dose|dose increased|dose decreased|dose reduced)\b",
+        (quote + " " + observation).casefold(),
+    )
+    if not change_language:
+        return None
+    normalize = lambda value: re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+    if normalize(subject) != normalize(active_medication.get("name")):
+        return None
+    medication_id = str(active_medication.get("medication_id") or "")
+    if not medication_id:
+        return None
+    active_status_claim = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.subject_id == medication_id,
+        CareAssertion.subject_type.in_(("medication", "medications")),
+        CareAssertion.field.in_(("status", "medication_status")),
+        CareAssertion.assertion_kind == "current_state",
+        CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
+    ).order_by(CareAssertion.recorded_at.desc(), CareAssertion.id.desc()).all()
+    active_status_claim = next(
+        (
+            row for row in active_status_claim
+            if str(row.asserted_value or "").strip().casefold() == "active"
+            and row.epistemic_state in {"reported", "observed", "verified"}
+        ),
+        None,
+    )
+    if active_status_claim is None:
+        return None
+
+    existing_questions = db.query(OpenQuestion).filter(
+        OpenQuestion.person_id == person_id,
+        OpenQuestion.subject_type == "medication",
+        OpenQuestion.subject_id == medication_id,
+        OpenQuestion.intended_answerer_role == "professional",
+        OpenQuestion.status == "open",
+    ).all()
+    for question in existing_questions:
+        context_items = question.context if isinstance(question.context, list) else []
+        if any(
+            isinstance(item, dict) and item.get("source_sha256") == upload.sha256
+            for item in context_items
+        ):
+            return str(question.id)
+
+    evidence_ids = list(dict.fromkeys([
+        evidence_id,
+        *(str(value) for value in (active_medication.get("evidence_ids") or [])),
+        *(str(value) for value in (active_status_claim.evidence_ids or [])),
+    ]))
+    context = [{
+        "source_kind": "document_candidate",
+        "analysis_id": analysis_id,
+        "document_evidence_id": evidence_id,
+        "source_sha256": upload.sha256,
+        "page_number": candidate.get("page_number"),
+        "candidate_subject": subject,
+        "candidate_observation": observation,
+        "source_quote": quote,
+        "existing_medication_assertion_id": active_status_claim.id,
+        "existing_medication_name": active_medication.get("name"),
+        "existing_medication_dose": active_medication.get("dose"),
+        "interpretation": "unconfirmed_document_candidate_against_current_lcr_medication",
+    }]
+    question = OpenQuestion(
+        person_id=person_id,
+        question=(
+            f"The hospital document appears to list {subject} as changed or discontinued, "
+            f"while the current care record lists it as active. What is the current prescribing instruction? "
+            "Please confirm with the prescribing professional or pharmacist before administering. "
+            "SolenOS has not advised stopping, restarting, or changing this medicine."
+        ),
+        subject_type="medication",
+        subject_id=medication_id,
+        claim_id=active_status_claim.id,
+        intended_answerer_role="professional",
+        intended_answerer_label="Prescribing professional or pharmacist",
+        necessity="necessary",
+        necessity_rationale="A source-grounded hospital document candidate conflicts with a current, caregiver-reviewed medication record. The current instruction requires professional confirmation before any medication decision.",
+        status="open",
+        priority=Priority.HIGH,
+        evidence_ids=evidence_ids,
+        context=context,
+        created_by_caregiver_id=caregiver_id,
+    )
+    db.add(question)
+    db.flush()
+    return str(question.id)
+
+
 def _analysis_for_evidence(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
