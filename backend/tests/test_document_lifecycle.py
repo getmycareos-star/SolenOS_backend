@@ -362,6 +362,11 @@ def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_te
     )
     assert uploaded.status_code == 201, uploaded.text
     evidence_id = uploaded.json()["evidence_id"]
+    with TestSessionLocal() as db:
+        stored = db.query(Evidence).filter_by(id=evidence_id).one()
+        assert stored.person_id == session["person"]["id"]
+        assert stored.uploaded_by_caregiver_id == session["caregiver"]["id"]
+        assert stored.type == "document"
 
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert response.status_code == 422, response.text
