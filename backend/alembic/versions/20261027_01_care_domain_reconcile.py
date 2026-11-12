@@ -108,8 +108,20 @@ def upgrade():
         for index in table.indexes:
             # Legacy tables may intentionally have a reduced schema. Never try
             # to create an index that references a column absent from that table.
-            if set(index.columns.keys()).issubset(actual_columns):
-                index.create(bind=bind, checkfirst=True)
+            if not set(index.columns.keys()).issubset(actual_columns):
+                continue
+            # The legacy care_notifications table may predate the status
+            # column. Its active-source partial index references status in
+            # the predicate even though status is not an indexed key column.
+            # Skip it here; the dedicated notification-lifecycle migration
+            # adds status first and creates the index after schema repair.
+            if (
+                table.name == "care_notifications"
+                and index.name == "uq_care_notifications_active_source"
+                and "status" not in actual_columns
+            ):
+                continue
+            index.create(bind=bind, checkfirst=True)
 
 
 def downgrade():
