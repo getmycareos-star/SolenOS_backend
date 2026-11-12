@@ -558,16 +558,18 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         }
         assert threads["persisted-appetite-thread"]["linked_evidence_ids"] == [second_evidence_id]
         mobility_questions = threads["persisted-mobility-thread"]["openQuestions"]
-        assert "Has the unsteadiness also happened indoors?" in mobility_questions
-        assert any(
-            question.startswith("Two different reports conflict about walking_stability.")
-            for question in mobility_questions
-        )
+        # These fixture questions have no evidence-backed necessity assessment;
+        # preserve the conflict and source records without making them caregiver tasks.
+        assert mobility_questions == []
         assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
         assert threads["persisted-mobility-thread"]["conflicts"][0]["resolution_status"] == "unresolved"
         assert threads["persisted-appetite-thread"]["openQuestions"] == []
         assert "Does the unrelated second mobility concern still need review?" not in threads["persisted-mobility-thread"]["openQuestions"]
-        assert "Does the unrelated second mobility concern still need review?" in body["return_continuity"]["important_unresolved"]
+        assert "Does the unrelated second mobility concern still need review?" not in body["return_continuity"]["important_unresolved"]
+        assert any(
+            item.startswith("Conflicting reports: Daughter reports unsteadiness")
+            for item in body["return_continuity"]["important_unresolved"]
+        )
         assert threads["persisted-mobility-thread"]["relatedSituations"][0]["id"] == "persisted-appetite-thread"
         assert threads["persisted-appetite-thread"]["relatedSituations"][0]["id"] == "persisted-mobility-thread"
         assert set(threads["persisted-mobility-thread"]["linked_evidence_ids"]).isdisjoint(
