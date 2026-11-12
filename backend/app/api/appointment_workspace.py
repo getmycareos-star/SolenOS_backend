@@ -150,17 +150,25 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         idempotency_request_sha256=request_fingerprint if payload.idempotency_key else None,
     )
     db.add(row)
-    db.add(AppointmentWorkspaceRevision(
+    revision = AppointmentWorkspaceRevision(
         id=str(uuid.uuid4()), record_id=row.id, person_id=person_id,
         revision_number=1, payload=payload.payload,
         change_reason=payload.change_reason, changed_by_caregiver_id=caregiver_id,
         idempotency_key=payload.idempotency_key,
         idempotency_request_sha256=request_fingerprint if payload.idempotency_key else None,
-    ))
+    )
+    db.add(revision)
     try:
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
             workspace_id=row.id, payload=payload.payload,
+        )
+        db.flush()
+        execute_care_continuity_reconciliation(
+            db, person_id, workflow="appointment_workspace_saved",
+            source_caregiver_id=caregiver_id,
+            source_appointment_workspace_id=row.id,
+            source_appointment_workspace_revision_id=revision.id,
         )
         db.commit()
         db.refresh(row)
@@ -1145,17 +1153,25 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
     row.version_number = next_version
     row.updated_by_caregiver_id = caregiver_id
     row.last_revision_reason = payload.change_reason
-    db.add(AppointmentWorkspaceRevision(
+    revision = AppointmentWorkspaceRevision(
         id=str(uuid.uuid4()), record_id=row.id, person_id=person_id,
         revision_number=next_version, payload=payload.payload,
         change_reason=payload.change_reason, changed_by_caregiver_id=caregiver_id,
         idempotency_key=payload.idempotency_key,
         idempotency_request_sha256=update_fingerprint if payload.idempotency_key else None,
-    ))
+    )
+    db.add(revision)
     try:
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
             workspace_id=row.id, payload=payload.payload,
+        )
+        db.flush()
+        execute_care_continuity_reconciliation(
+            db, person_id, workflow="appointment_workspace_saved",
+            source_caregiver_id=caregiver_id,
+            source_appointment_workspace_id=row.id,
+            source_appointment_workspace_revision_id=revision.id,
         )
         db.commit()
         db.refresh(row)
