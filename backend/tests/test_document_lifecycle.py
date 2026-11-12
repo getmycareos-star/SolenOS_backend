@@ -1159,3 +1159,33 @@ def test_oversized_pdf_page_is_blocked_and_not_retried_as_a_transient_failure(cl
     original_download = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
     assert original_download.status_code == 200
     assert original_download.content == original
+
+def test_jpeg_png_bmp_and_tiff_images_use_server_ocr(monkeypatch):
+    from PIL import Image
+    from app.api import document_lifecycle
+
+    monkeypatch.setattr(
+        document_lifecycle,
+        "_ocr_image",
+        lambda image: "Follow-up appointment on November 20.",
+    )
+    formats = [
+        ("JPEG", "image/jpeg", "scan.jpg"),
+        ("PNG", "image/png", "scan.png"),
+        ("BMP", "image/bmp", "scan.bmp"),
+        ("TIFF", "image/tiff", "scan.tiff"),
+    ]
+    for image_format, mime_type, filename in formats:
+        output = io.BytesIO()
+        Image.new("RGB", (32, 32), "white").save(output, format=image_format)
+
+        class Upload:
+            pass
+
+        upload = Upload()
+        upload.mime_type = mime_type
+        upload.filename = filename
+        extracted, method = document_lifecycle._extract(upload, output.getvalue())
+
+        assert method == "server_image_ocr"
+        assert "Follow-up appointment on November 20." in extracted
