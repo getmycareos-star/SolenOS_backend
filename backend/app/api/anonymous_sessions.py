@@ -152,6 +152,21 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
     expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
     session.token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     session.expires_at = expires_at
+    refreshed_at = datetime.now(timezone.utc)
+    db.add(AuditLogEvent(
+        actor_id=session.caregiver_id,
+        subject_id=session.person_id,
+        person_id=session.person_id,
+        caregiver_id=session.caregiver_id,
+        action="anonymous_session.refreshed",
+        target_type="anonymous_session",
+        target_id=session.id,
+        occurred_at=refreshed_at,
+        outcome="success",
+        request_id=str(uuid.uuid4()),
+        policy_version="anonymous-session-lifecycle-v1",
+        record_metadata={"expires_at": expires_at.isoformat(), "token_rotated": True},
+    ))
     db.commit()
     return {
         "session_id": session.id,
@@ -190,6 +205,8 @@ def revoke_anonymous_session(request: Request, db: Session = Depends(get_db)):
         target_id=session.id,
         occurred_at=revoked_at,
         outcome="success",
+        request_id=str(uuid.uuid4()),
+        policy_version="anonymous-session-lifecycle-v1",
         record_metadata={"reason": "self_service_revocation"},
     ))
     db.commit()
