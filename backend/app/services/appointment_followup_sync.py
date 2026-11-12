@@ -10,6 +10,8 @@ from fastapi import HTTPException
 
 from sqlalchemy.orm import Session
 
+from app.models.care import Evidence
+
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 
 SOURCE_TYPE = "appointment_workspace_follow_up"
@@ -102,11 +104,59 @@ def sync_appointment_followups(
         due_at = _aware_due(due_text)
         source_status = item.get("status") if isinstance(item.get("status"), str) else "not_recorded"
         reported_complete = source_status.strip().casefold() in {"completed", "complete", "done"}
+        needs_clarification = source_status.strip().casefold() in {"needs_clarification", "blocked"}
+        clarification_question = item.get("clarification_question", item.get("question"))
+        necessity_rationale = item.get("necessity_rationale")
+        decision_dependency = item.get("decision_dependency")
+        raw_evidence_ids = item.get("evidence_ids") or []
+        if isinstance(raw_evidence_ids, str):
+            raw_evidence_ids = [raw_evidence_ids]
+        if not isinstance(raw_evidence_ids, list):
+            raw_evidence_ids = []
+        clarification_evidence_ids = list(dict.fromkeys(
+            value.strip() for value in raw_evidence_ids
+            if isinstance(value, str) and value.strip()
+        ))
+        if needs_clarification:
+            if not (
+                isinstance(clarification_question, str)
+                and clarification_question.strip().endswith("?")
+                and isinstance(necessity_rationale, str) and necessity_rationale.strip()
+                and isinstance(decision_dependency, str) and decision_dependency.strip()
+                and clarification_evidence_ids
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="A blocked appointment follow-up needs a specific question, reason, decision dependency, and same-record evidence IDs",
+                )
+        if clarification_evidence_ids:
+            found_evidence_ids = {
+                str(row[0]) for row in db.query(Evidence.id).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(clarification_evidence_ids),
+                ).all()
+            }
+            if found_evidence_ids != set(clarification_evidence_ids):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Appointment follow-up evidence must belong to this care record",
+                )
         evidence = [{
             "record_type": "appointment_workspace", "record_id": workspace_id,
             "source_type": SOURCE_TYPE, "reported_owner": owner_label,
             "reported_owner_role": owner_role,
             "reported_due": due_text, "reported_status": source_status,
+            "evidence_ids": clarification_evidence_ids,
+            "clarification_assessment": ({
+                "question": clarification_question.strip(),
+                "necessity_rationale": necessity_rationale.strip(),
+                "decision_dependency": decision_dependency.strip(),
+                "intended_answerer_role": (
+                    item.get("intended_answerer_role").strip()
+                    if isinstance(item.get("intended_answerer_role"), str) and item.get("intended_answerer_role").strip()
+                    else "not_known"
+                ),
+            } if needs_clarification else None),
             "epistemic_status": "caregiver_reported",
             "interpretation_limit": "A reported follow-up is not proof that the action was completed or that the reported owner accepted responsibility.",
         }]
@@ -125,7 +175,7 @@ def sync_appointment_followups(
         if loop is None:
             loop = OpenLoopRecord(
                 person_id=person_id, caregiver_id=caregiver_id, loop_type="follow_up",
-                title=title, description=title, status="open",
+                title=title, description=title, status="blocked" if needs_clarification else "open",
                 outcome_status="outcome_reported" if reported_complete else "outcome_unknown",
                 outcome_evidence=evidence if reported_complete else [],
                 verification_rule=(
@@ -167,6 +217,10 @@ def sync_appointment_followups(
             loop.closure_evidence = []
         loop.title = title
         loop.description = title
+        if needs_clarification:
+            loop.status = "blocked"
+        elif loop.status == "blocked":
+            loop.status = "open"
         loop.owner_role = owner_role
         loop.owner_label = owner_label
         loop.deadline_at = due_at
