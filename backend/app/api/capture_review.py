@@ -239,6 +239,7 @@ def review_capture_candidate(
                 db,
                 person_id,
                 workflow="daily_capture_review",
+                source_caregiver_id=caregiver_id,
                 source_event_id=analysis.source_event_id,
                 source_evidence_id=analysis.source_evidence_id,
                 stage_statuses={

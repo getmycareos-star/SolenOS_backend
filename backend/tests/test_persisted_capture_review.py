@@ -121,6 +121,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert accepted_body["written_to_lcr"] is True
     assert accepted_body["assertion_id"]
     assert accepted_body["candidate"]["review_status"] == "accepted_by_caregiver"
+    assert accepted_body["care_continuity_execution"]["source_caregiver_id"] == session["caregiver"]["id"]
 
     repeated = client.post(
         f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
