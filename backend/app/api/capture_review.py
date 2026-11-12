@@ -13,6 +13,7 @@ from app.schemas.capture_review import CaptureCandidateReview
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.lcr_context import build_lcr_context
 
 router = APIRouter(tags=["capture review"])
 
@@ -207,6 +208,27 @@ def review_capture_candidate(
     })
     analysis.candidates = candidates_payload
     analysis.review_history = history
+    remaining_reviewable = [
+        item for item in observations
+        if isinstance(item, dict)
+        and item.get("review_status", "pending_review") in reviewable_statuses
+    ]
+    if analysis.execution_status is None:
+        analysis.execution_status = {
+            "source_preservation": "verified",
+            "evidence": "verified" if analysis.source_evidence_id else "not_applicable",
+            "source_message": "not_applicable",
+            "extraction": "available",
+            "assessment": "pending",
+            "review": "required",
+            "reconciliation": "not_attempted",
+            "longitudinal_retrieval": "not_verified",
+        }
+    else:
+        analysis.execution_status = dict(analysis.execution_status)
+    analysis.execution_status["review"] = (
+        "required" if remaining_reviewable else "completed"
+    )
     db.add(analysis)
 
     change_intelligence_status = "not_required"
@@ -219,7 +241,17 @@ def review_capture_candidate(
                 workflow="daily_capture_review",
                 source_event_id=analysis.source_event_id,
                 source_evidence_id=analysis.source_evidence_id,
+                stage_statuses={
+                    "extraction": "available",
+                    "assessment": "pending",
+                    "review": "required" if remaining_reviewable else "completed",
+                },
             )
+            execution["stages"]["review"] = (
+                "required" if remaining_reviewable else "completed"
+            )
+            execution["stages"]["reconciliation"] = "completed"
+            analysis.execution_status = dict(execution["stages"])
             change_intelligence_status = "available"
         except Exception as exc:
             db.rollback()
@@ -234,6 +266,24 @@ def review_capture_candidate(
     db.commit()
     if execution is not None:
         execution["stages"]["reconciliation"] = "committed"
+        try:
+            projection = build_lcr_context(
+                db,
+                person_id,
+                caregiver_id=caregiver_id,
+                limit_per_source=1,
+            )
+            retrieval_status = (
+                "available"
+                if not projection.get("missing_required_sources")
+                else "unavailable"
+            )
+        except Exception:
+            retrieval_status = "unavailable"
+        execution["stages"]["longitudinal_retrieval"] = retrieval_status
+        analysis.execution_status = dict(execution["stages"])
+        db.add(analysis)
+        db.commit()
     db.refresh(analysis)
 
     return {
