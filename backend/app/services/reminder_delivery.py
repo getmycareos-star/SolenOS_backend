@@ -191,6 +191,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CareNotification.person_id == subscription.person_id,
                 CareNotification.caregiver_id == subscription.caregiver_id,
                 CareNotification.created_at >= subscription.created_at,
+                CareNotification.status == "active",
             ).all()
             for notification in notifications:
                 existing = session.query(CarePushDelivery.id).filter(
@@ -217,6 +218,7 @@ def deliver_pending_web_pushes(db=None, now=None):
             .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
             .filter(
                 CarePushDelivery.status == "pending",
+                CareNotification.status == "active",
                 CarePushDelivery.next_attempt_at <= current,
                 CarePushDelivery.attempt_count < 5,
                 CarePushSubscription.revoked_at.is_(None),
