@@ -170,14 +170,6 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
             ),
         ])
         db.flush()
-        db.add(EvidenceUpload(
-            evidence_id=document_id,
-            filename="clinic-letter.txt",
-            mime_type="text/plain",
-            content=original_document,
-            size_bytes=len(original_document),
-            sha256=document_sha,
-        ))
         db.add_all([
             EvidenceUpload(
                 evidence_id=document_id,
