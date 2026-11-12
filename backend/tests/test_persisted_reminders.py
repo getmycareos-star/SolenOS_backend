@@ -232,7 +232,7 @@ def test_web_push_registration_is_encrypted_scoped_and_revocable(monkeypatch):
     second = create_session(client, "Different push owner")
     first_headers = {"Authorization": f"Bearer {first['access_token']}"}
     second_headers = {"Authorization": f"Bearer {second['access_token']}"}
-    endpoint = "https://push.example.test/subscription/unique-endpoint"
+    endpoint = "https://fcm.googleapis.com/fcm/send/unique-endpoint"
     payload = {
         "endpoint": endpoint,
         "keys": {"p256dh": "test-public-key-material", "auth": "test-auth-secret"},
@@ -311,7 +311,7 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
     client = TestClient(app)
     session = create_session(client, "Push delivery owner")
     headers = {"Authorization": f"Bearer {session['access_token']}"}
-    endpoint = "https://push.example.test/subscription/delivery"
+    endpoint = "https://fcm.googleapis.com/fcm/send/delivery"
     registered = client.post(
         "/api/v1/notifications/push/subscriptions",
         headers=headers,
