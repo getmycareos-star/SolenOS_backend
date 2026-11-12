@@ -11,7 +11,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import EvidenceObservation
+from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
@@ -1908,7 +1908,7 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
                     },
                     {
                         "subject": "Mum",
-                        "observation": "nothing unusual that I noticed",
+                        "observation": "Nothing unusual that I noticed",
                         "source_quote": original_report,
                         "review_status": "pending_review",
                         "source_event_id": source_event_id,
@@ -1947,10 +1947,10 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
             assert json.loads(evidence.source_text)["original_capture"]["notes"] == original_report
             assert len(observations) == 2
             by_value = {row.value_text: row for row in observations}
-            assert set(by_value) == {"seems okay today", "nothing unusual that I noticed"}
+            assert set(by_value) == {"seems okay today", "Nothing unusual that I noticed"}
             assert all(row.epistemic_status == "uncertain" for row in observations)
             assert by_value["seems okay today"].hedge_marker == "seems"
-            assert by_value["nothing unusual that I noticed"].hedge_marker == "nothing unusual"
+            assert by_value["Nothing unusual that I noticed"].hedge_marker == "Nothing unusual"
             assert all(row.evidence_id == evidence.id for row in observations)
             assert all(row.created_by_caregiver_id == "caregiver-daily-test" for row in observations)
             assert all("not independently verified" in row.context for row in observations)
@@ -1964,7 +1964,7 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
         assert item["epistemic_status"] == "caregiver_reported"
         assert {row["value_text"] for row in item["derived_observations"]} == {
             "seems okay today",
-            "nothing unusual that I noticed",
+            "Nothing unusual that I noticed",
         }
         assert all(row["epistemic_status"] == "uncertain" for row in item["derived_observations"])
     finally:
