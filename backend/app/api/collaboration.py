@@ -1165,7 +1165,7 @@ def list_document_processing_status(
         retryable_pages = [
             int(match.group(1))
             for match in re.finditer(
-                r"(?m)^\\[Page\\s+(\\d+)\\s+OCR\\]\\n\\[Page not processed: (?:OCR engine error|OCR processing error)\\]",
+                r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed: (?:OCR engine error|OCR processing error)\]",
                 analysis.source_text or "",
             )
             if int(match.group(1)) not in set(retry_exhausted_pages)
