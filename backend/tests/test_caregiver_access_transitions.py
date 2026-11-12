@@ -441,3 +441,61 @@ def test_primary_caregiver_authority_moves_only_after_recipient_acceptance():
         headers=sarah_headers,
     )
     assert sarah_can_still_read.status_code == 200
+
+
+def test_paperwork_only_scope_restricts_existing_sessions_without_erasing_history():
+    client = TestClient(app)
+    sarah = create_primary(client)
+    sarah_headers = {"Authorization": f"Bearer {sarah['access_token']}"}
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=sarah_headers,
+        json={"email": "james@example.com"},
+    ).json()
+    james = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation["invitation_token"],
+            "email": "james@example.com",
+            "password": "a-long-test-password-123",
+            "name": "James",
+        },
+    ).json()
+    james_headers = {"Authorization": f"Bearer {james['access_token']}"}
+    primary_transfer = client.post(
+        "/api/v1/caregiver-access/primary-transfers",
+        headers=sarah_headers,
+        json={"to_caregiver_id": james["caregiver_id"]},
+    ).json()
+    accepted = client.post(
+        f"/api/v1/caregiver-access/primary-transfers/{primary_transfer['id']}/accept",
+        headers=james_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    narrowed = client.patch(
+        f"/api/v1/caregiver-access/members/{sarah['caregiver']['id']}/access-scope",
+        headers=james_headers,
+        json={"access_scope": "documents_only"},
+    )
+    assert narrowed.status_code == 200, narrowed.text
+
+    # Existing bearer sessions observe the new scope on the next request.
+    care_record_denied = client.get(
+        "/api/v1/care-continuity/current-care",
+        headers=sarah_headers,
+    )
+    assert care_record_denied.status_code == 403
+
+    paperwork_allowed = client.get(
+        "/api/v1/documents/intelligence",
+        headers=sarah_headers,
+    )
+    assert paperwork_allowed.status_code == 200, paperwork_allowed.text
+
+    # James retains full record access; Sarah's historical identity is not deleted.
+    full_access = client.get(
+        "/api/v1/care-continuity/current-care",
+        headers=james_headers,
+    )
+    assert full_access.status_code == 200, full_access.text
