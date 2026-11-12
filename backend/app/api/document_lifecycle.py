@@ -67,10 +67,42 @@ def _verified_content(upload: EvidenceUpload) -> bytes:
 
 
 def _ocr_image(image: Image.Image) -> str:
-    """Run the installed local Tesseract engine; never silently fall back to a fake result."""
+    """Run local Tesseract OCR and retain its per-word confidence as a heuristic."""
+    normalized = None
     try:
         normalized = ImageOps.exif_transpose(image).convert("RGB")
-        return pytesseract.image_to_string(normalized, lang="eng", config="--psm 6 -c preserve_interword_spaces=1").strip()
+        data = pytesseract.image_to_data(
+            normalized,
+            lang="eng",
+            config="--psm 6 -c preserve_interword_spaces=1",
+            output_type=pytesseract.Output.DICT,
+        )
+        line_words: dict[tuple[int, int, int], list[str]] = {}
+        confidences = []
+        for index, word in enumerate(data.get("text", [])):
+            word = str(word or "").strip()
+            if not word:
+                continue
+            key = (
+                int(data["block_num"][index]),
+                int(data["par_num"][index]),
+                int(data["line_num"][index]),
+            )
+            line_words.setdefault(key, []).append(word)
+            try:
+                confidence = float(data["conf"][index])
+                if confidence >= 0:
+                    confidences.append(confidence)
+            except (TypeError, ValueError, IndexError):
+                continue
+        image.info["solenos_ocr_quality"] = {
+            "mean_token_confidence": round(sum(confidences) / len(confidences)) if confidences else None,
+            "low_confidence_token_count": sum(1 for value in confidences if value < 50),
+            "token_count": len(confidences),
+            "method": "tesseract_word_confidence_heuristic",
+            "is_probability": False,
+        }
+        return "\n".join(" ".join(words) for words in line_words.values()).strip()
     except pytesseract.TesseractNotFoundError as exc:
         raise HTTPException(
             status_code=503,
@@ -78,6 +110,23 @@ def _ocr_image(image: Image.Image) -> str:
         ) from exc
     except pytesseract.TesseractError as exc:
         raise HTTPException(status_code=422, detail="OCR could not read this document image") from exc
+    finally:
+        if normalized is not None:
+            normalized.close()
+
+
+def _ocr_quality_marker(image: Image.Image) -> str | None:
+    quality = image.info.get("solenos_ocr_quality")
+    if not isinstance(quality, dict) or not quality.get("token_count"):
+        return None
+    mean = quality.get("mean_token_confidence")
+    low = quality.get("low_confidence_token_count")
+    count = quality.get("token_count")
+    return (
+        f"[OCR quality: mean_token_confidence={mean}; "
+        f"low_confidence_tokens={low}; token_count={count}; "
+        "metric=tesseract_engine_heuristic_not_probability]"
+    )
 
 
 class _HTMLText(HTMLParser):
@@ -389,7 +438,9 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                     ocr_text = _ocr_image(image)
                     if ocr_text:
                         combined_text = "\n".join(value for value in (native_text.strip(), ocr_text) if value)
-                        page_texts.append(f"[Page {index + 1} OCR]\n{combined_text}")
+                        quality_marker = _ocr_quality_marker(image)
+                        page_content = "\n".join(value for value in (quality_marker, combined_text) if value)
+                        page_texts.append(f"[Page {index + 1} OCR]\n{page_content}")
                     else:
                         page_texts.append(f"[Page {index + 1} OCR]\n[No readable text detected on this page]")
                 except HTTPException as exc:
@@ -432,6 +483,7 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 adjusted, used_scan_adjustments = _scan_adjusted_image(image, evidence)
                 try:
                     extracted = _ocr_image(adjusted)
+                    quality_marker = _ocr_quality_marker(adjusted)
                 finally:
                     if used_scan_adjustments:
                         adjusted.close()
@@ -444,7 +496,8 @@ def _extract(upload: EvidenceUpload, content: bytes | None = None, evidence: Evi
                 status_code=422,
                 detail="No readable text was found in the image. The original document remains preserved.",
             )
-        return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{extracted}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
+        page_content = "\n".join(value for value in (quality_marker, extracted) if value)
+        return _bounded_extraction(f"[Image OCR]\n[Page 1 OCR]\n{page_content}", "server_tesseract_ocr_image_scan_adjusted" if used_scan_adjustments else "server_tesseract_ocr_image")
 
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or filename.endswith(".docx"):
         extracted = _extract_docx(content)
@@ -551,6 +604,29 @@ def _verify_persisted_extraction(
     return content
 
 
+def _ocr_quality_by_page(source_text: str) -> list[dict]:
+    results = []
+    page_markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)", source_text or ""))
+    for index, page in enumerate(page_markers):
+        end = page_markers[index + 1].start() if index + 1 < len(page_markers) else len(source_text)
+        section = source_text[page.end():end]
+        match = re.search(
+            r"\[OCR quality: mean_token_confidence=(\d+|None); low_confidence_tokens=(\d+); token_count=(\d+); metric=tesseract_engine_heuristic_not_probability\]",
+            section,
+        )
+        if match:
+            results.append({
+                "page_number": int(page.group(1)),
+                "mean_token_confidence": int(match.group(1)) if match.group(1) != "None" else None,
+                "low_confidence_token_count": int(match.group(2)),
+                "token_count": int(match.group(3)),
+                "method": "tesseract_word_confidence_heuristic",
+                "is_probability": False,
+                "handwriting_warning": "Handwriting may be misread even when the OCR engine reports high confidence.",
+            })
+    return results
+
+
 def _unreadable_page_numbers(source_text: str) -> list[int]:
     markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)", source_text or ""))
     unreadable = []
@@ -574,6 +650,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extraction_method": details.get("extraction_method"),
         "page_count": details.get("page_count") or 1,
         "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
+        "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "source_text_sha256": hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest(),
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
