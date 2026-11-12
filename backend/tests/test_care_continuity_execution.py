@@ -159,7 +159,7 @@ def test_shared_coordinator_validates_correction_and_reassesses_in_caller_transa
     correction = SimpleNamespace(
         id="correction-1",
         person_id="person-1",
-        source_caregiver_id="caregiver-1",
+        caregiver_id="caregiver-1",
     )
     db = _session({Person: person, Correction: correction})
     reconciled = Mock()
