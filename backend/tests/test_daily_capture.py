@@ -1448,3 +1448,73 @@ def test_daily_capture_preserves_explicit_event_time_and_server_recorded_time_se
             db.close()
     finally:
         teardown_db()
+
+
+def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assertions():
+    from app.models.care_continuity import CareAssertion
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        db = TestingSessionLocal()
+        foreign_person = Person(id="person-medication-foreign", name="Foreign Person")
+        foreign_caregiver = Caregiver(
+            id="caregiver-medication-foreign",
+            name="Foreign Caregiver",
+            email="medication-foreign@example.invalid",
+            relationship="Family",
+            person_id=foreign_person.id,
+        )
+        db.add_all([foreign_person, foreign_caregiver])
+        db.commit()
+        db.close()
+
+        def claim(subject_id, field, value, *, person_id="person-daily-test", status="accepted", age_days=2):
+            return CareAssertion(
+                person_id=person_id,
+                subject_type="medication",
+                subject_id=subject_id,
+                field=field,
+                assertion_kind="current_state",
+                asserted_value=value,
+                source_label="Caregiver report",
+                source_text="Recorded by caregiver",
+                assertion_status=status,
+                epistemic_state="reported",
+                review_after_days=30,
+                recorded_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+            )
+
+        db = TestingSessionLocal()
+        db.add_all([
+            claim("med-valid", "medication_name", "Metformin"),
+            claim("med-valid", "medication_status", "active"),
+            claim("med-valid", "dose", "500 mg"),
+            claim("med-expired", "medication_name", "Old medicine", age_days=45),
+            claim("med-expired", "medication_status", "active", age_days=45),
+            claim("med-unreviewed", "medication_name", "Reported only", status="reported"),
+            claim("med-unreviewed", "medication_status", "active", status="reported"),
+            claim("med-conflict", "medication_name", "Aspirin"),
+            claim("med-conflict", "medication_name", "Warfarin"),
+            claim("med-conflict", "medication_status", "active"),
+            claim("med-foreign", "medication_name", "Private medicine", person_id=foreign_person.id),
+            claim("med-foreign", "medication_status", "active", person_id=foreign_person.id),
+        ])
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        response = client.get("/api/v1/care-continuity/medications", headers=headers)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["source"] == "care_assertions"
+        assert payload["history_events_promoted"] is False
+        assert payload["count"] == 1
+        assert payload["medications"][0]["medication_id"] == "med-valid"
+        assert payload["medications"][0]["name"] == "Metformin"
+        assert payload["medications"][0]["dose"] == "500 mg"
+        assert payload["medications"][0]["record_status"] == "caregiver_reviewed_current_report"
+        assert "not independent clinical verification" in payload["medications"][0]["interpretation_limit"]
+    finally:
+        teardown_db()
