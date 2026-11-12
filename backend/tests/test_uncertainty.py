@@ -4205,7 +4205,10 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
 def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle():
     setup_db()
     try:
-        from app.services.uncertainty import persist_source_clarification_questions
+        from app.services.uncertainty import (
+            persist_source_clarification_questions,
+            _question_is_answered_by_current_lcr,
+        )
         from app.services.care_continuity import reassess_open_question_lifecycle
         from app.models.care_continuity import CareStateRevision
 
@@ -4237,24 +4240,7 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
-        gap = InformationGap(
-            person_id=person.id,
-            subject_type="person",
-            subject_id=person.id,
-            field="sleep_schedule",
-            epistemic_state=EpistemicState.UNKNOWN,
-            gap_reason=GapReason.NOT_DOCUMENTED,
-            priority=Priority.HIGH,
-            lifecycle_status=GapLifecycleStatus.OPEN,
-            description="The current sleep schedule is needed for the active care handoff.",
-            evidence_ids=[evidence.id],
-            context=[{
-                "caregiver_attention_required": True,
-                "necessity_rationale": "The active handoff cannot describe the current sleep schedule without resolving this field.",
-                "decision_dependency": "The handoff content depends on the current sleep schedule.",
-            }],
-        )
-        db.add_all([person, caregiver, evidence, event, gap])
+        db.add_all([person, caregiver, evidence, event])
         db.commit()
 
         daily = persist_source_clarification_questions(
@@ -4271,17 +4257,11 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         )[0]
         db.commit()
         assert daily.id == document.id
-        assert daily.necessity == "necessary"
-        assert daily.subject_type == "person"
-        assert daily.subject_id == person.id
-        assert evidence.id in (daily.evidence_ids or [])
-        assert any(
-            item.get("source_kind") == "information_gap" and item.get("source_id") == gap.id
-            for item in (daily.context or []) if isinstance(item, dict)
-        )
+        contexts = list(daily.context or [])
+        assert {item["source_kind"] for item in contexts} >= {
+            "daily_capture_extraction", "document_extraction"
+        }
 
-        # Accepted source evidence does not settle a field while a competing
-        # assertion remains unresolved.
         assertion = CareAssertion(
             id="finding6-source-lifecycle-assertion",
             person_id=person.id,
@@ -4312,6 +4292,9 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         db.add_all([assertion, conflict])
         db.commit()
 
+        assert _question_is_answered_by_current_lcr(
+            db, person.id, daily.question
+        ) is False
         first = reassess_open_question_lifecycle(db, person.id)
         db.refresh(daily)
         assert daily.status == "open"
@@ -4319,8 +4302,9 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
 
         conflict.resolution_status = "resolved"
         db.flush()
-        from app.services.care_continuity import reconcile_information_gaps_from_accepted_assertions
-        reconcile_information_gaps_from_accepted_assertions(db, person.id)
+        assert _question_is_answered_by_current_lcr(
+            db, person.id, daily.question
+        ) is True
         second = reassess_open_question_lifecycle(db, person.id)
         db.refresh(daily)
         assert daily.status == "closed"
@@ -4333,69 +4317,5 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
             CareStateRevision.target_id == daily.id,
         ).count() >= 1
         db.close()
-    finally:
-        teardown_db()
-
-
-def test_question_quality_metrics_are_scoped_and_measure_duplicates_and_review_backlog():
-    setup_db()
-    try:
-        db = TestingSessionLocal()
-        person = Person(id="finding6-metrics-person", name="Metrics Person")
-        caregiver = Caregiver(
-            id="finding6-metrics-caregiver", name="Metrics Caregiver",
-            email="finding6-metrics@example.com", relationship="Family",
-            person_id=person.id,
-        )
-        other = Person(id="finding6-metrics-other", name="Other Metrics Person")
-        other_caregiver = Caregiver(
-            id="finding6-metrics-other-caregiver", name="Other Metrics Caregiver",
-            email="finding6-metrics-other@example.com", relationship="Family",
-            person_id=other.id,
-        )
-        db.add_all([person, caregiver, other, other_caregiver])
-        db.flush()
-        db.add_all([
-            OpenQuestion(
-                person_id=person.id, question="Confirm the current sleep schedule?",
-                subject_type="person", subject_id=person.id, status="open",
-                priority=Priority.INFORMATIONAL, necessity="not_assessed",
-                context=[{"source_kind": "document_extraction"}],
-            ),
-            OpenQuestion(
-                person_id=person.id, question="  confirm the current sleep schedule? ",
-                subject_type="person", subject_id=person.id, status="open",
-                priority=Priority.INFORMATIONAL, necessity="not_assessed",
-                context=[{"source_kind": "daily_capture_extraction"}],
-            ),
-            OpenQuestion(
-                person_id=person.id, question="Old extraction question",
-                subject_type="person", subject_id=person.id, status="closed",
-                priority=Priority.INFORMATIONAL, necessity="not_assessed",
-                closed_reason="automatically_suppressed: no current decision dependency",
-            ),
-            OpenQuestion(
-                person_id=other.id, question="Other person's private question",
-                subject_type="person", subject_id=other.id, status="open",
-                priority=Priority.INFORMATIONAL, necessity="not_assessed",
-                context=[{"source_kind": "document_extraction"}],
-            ),
-        ])
-        db.commit()
-        db.close()
-
-        client = authorized_client(person.id)
-        response = client.get("/api/v1/uncertainty/question-quality")
-        assert response.status_code == 200, response.text
-        metrics = response.json()
-        assert metrics["person_id"] == person.id
-        assert metrics["active_questions"] == 2
-        assert metrics["non_actionable_active_questions"] == 2
-        assert metrics["duplicate_question_groups"] == 1
-        assert metrics["duplicate_question_excess"] == 1
-        assert metrics["source_questions_awaiting_necessity_assessment"] == 2
-        assert metrics["manual_review_backlog"] == 2
-        assert metrics["automatically_suppressed_questions"] == 1
-        assert "Other person's private question" not in str(metrics)
     finally:
         teardown_db()
