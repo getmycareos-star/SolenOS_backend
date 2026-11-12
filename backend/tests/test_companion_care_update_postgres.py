@@ -18,7 +18,7 @@ from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage
-from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
 care_updates = importlib.import_module("app.services.companion_care_updates")
@@ -303,6 +303,18 @@ def test_postgres_qwen_assistance_summary_requires_explicit_caregiver_approval()
                 written_to_lcr=False,
             )
             db.add(output)
+            db.flush()
+            db.add(QwenSafetyEvaluation(
+                output_id=output.id,
+                job_id=job.id,
+                person_id=session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+                risk_class="unassessed",
+                decision="review_required",
+                human_review_required=True,
+                violations_json=[],
+                policy_references_json=[],
+            ))
             db.commit()
             job_id = job.id
 
