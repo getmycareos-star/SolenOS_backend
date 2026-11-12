@@ -604,7 +604,8 @@ def test_web_push_public_key_is_not_advertised_when_private_key_is_missing(monke
         ),
     )
     response = client.get("/api/v1/notifications/push/public-key", headers=headers)
-    assert response.status_code == 503, response.text
+    assert response.status_code == 200, response.text
+    assert response.json() == {"available": False, "public_key": None, "reason": "not_configured"}
 
 
 def test_web_push_public_key_requires_valid_vapid_subject(monkeypatch):
@@ -624,7 +625,8 @@ def test_web_push_public_key_requires_valid_vapid_subject(monkeypatch):
         ),
     )
     response = client.get("/api/v1/notifications/push/public-key", headers=headers)
-    assert response.status_code == 503, response.text
+    assert response.status_code == 200, response.text
+    assert response.json() == {"available": False, "public_key": None, "reason": "not_configured"}
 
 
 def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
