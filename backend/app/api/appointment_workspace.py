@@ -5,6 +5,7 @@ canonical LCR facts. It never promotes a note to a verified clinical fact.
 """
 import hashlib
 import json
+import logging
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -28,6 +29,8 @@ from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, Appoin
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/appointment-workspaces", tags=["appointment-workspace"])
 
