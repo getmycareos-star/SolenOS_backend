@@ -3798,6 +3798,21 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
         trend_assessment = _trend_evidence_assessment(
             user_text, [*event_context, *assertion_context, *evidence_context, *shared_lcr_lines]
         )
+        validated_aggregates = _requested_event_aggregates(db, person_id, caregiver_id, user_text)
+        aggregate_context_lines = []
+        for aggregate in validated_aggregates:
+            if aggregate.get("status") == "validated":
+                aggregate_context_lines.append(
+                    f"Verified record count for {aggregate['topic']} during {aggregate['window_label']}: "
+                    f"{aggregate['count']} distinct dated care-event records. Describe these as incidents recorded in the care record, "
+                    "not as independently confirmed clinical facts. Repeated or shared-origin records were excluded."
+                )
+            else:
+                aggregate_context_lines.append(
+                    f"No current total can be stated for {aggregate.get('topic')}: "
+                    f"{aggregate.get('interpretation_limit', 'The requested count could not be validated.')}"
+                )
+        source_context.extend(aggregate_context_lines)
         system_prompt = (
             "You are SolenOS AI Companion for family caregivers. Answer the caregiver's current question directly "
             "in plain natural language. Do not use canned replies or fixed response maps. Use only relevant authorized "
@@ -3833,7 +3848,7 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
 
         model_context_lines = [
             *event_context, *assertion_context, *appointment_context, *evidence_context,
-            *freshness_context[:1], *shared_lcr_lines[:6],
+            *freshness_context[:1], *shared_lcr_lines[:6], *aggregate_context_lines,
         ]
         if source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",
@@ -4292,7 +4307,6 @@ async def companion_message(payload: CompanionCreate, request: Request, backgrou
                 "record_status": assertion.assertion_status,
                 "related_evidence_ids": list(assertion.evidence_ids or []),
             })
-    validated_aggregates = _requested_event_aggregates(db, person_id, caregiver_id, user_text)
     claim_provenance = build_claim_provenance(reply, claim_source_records, validated_aggregates)
 
     response_metadata = {
