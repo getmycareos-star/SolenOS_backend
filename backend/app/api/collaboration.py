@@ -4832,6 +4832,10 @@ def update_care_notification_preferences(
             reminders_enabled=True,
         )
         db.add(preference)
+    effective_start = payload.quiet_hours_start or preference.quiet_hours_start
+    effective_end = payload.quiet_hours_end or preference.quiet_hours_end
+    if effective_start == effective_end:
+        raise HTTPException(status_code=422, detail="Quiet-hours start and end must be different")
     if payload.quiet_hours_enabled is not None:
         preference.quiet_hours_enabled = payload.quiet_hours_enabled
     if payload.reminders_enabled is not None:
