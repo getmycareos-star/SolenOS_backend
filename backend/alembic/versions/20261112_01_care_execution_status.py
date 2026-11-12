@@ -1,13 +1,13 @@
 """Persist Daily Care execution stages on capture analysis.
 
-Revision ID: 20261112_01_care_execution_status
+Revision ID: 20261112_01_care_exec
 Revises: 20261111_03_assertion_epistemic_state
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261112_01_care_execution_status"
+revision = "20261112_01_care_exec"
 down_revision = "20261111_03_assertion_epistemic_state"
 branch_labels = None
 depends_on = None
