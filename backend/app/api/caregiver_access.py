@@ -13,6 +13,7 @@ from app.models.caregiver_account import CaregiverAccount
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer, CaregiverPrimaryTransfer
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
+from app.models.privacy_delivery import AuditLogEvent
 from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.api.accounts import _hash_password, _validate_email
@@ -31,6 +32,23 @@ class InvitationAccept(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=12, max_length=256)
     name: str = Field(min_length=1, max_length=120)
+
+
+def _audit_event(actor_id: str | None, person_id: str, action: str, target_type: str, target_id: str, metadata: dict | None = None):
+    return AuditLogEvent(
+        actor_id=actor_id or "unknown_actor",
+        subject_id=person_id,
+        person_id=person_id,
+        caregiver_id=actor_id,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        occurred_at=datetime.now(timezone.utc),
+        outcome="success",
+        request_id=secrets.token_hex(16),
+        policy_version="caregiver-access-v1",
+        record_metadata=metadata or {},
+    )
 
 
 def _actor_scope(request: Request) -> tuple[str, str]:
@@ -98,6 +116,8 @@ def create_invitation(payload: InvitationCreate, request: Request, db: Session =
         expires_at=datetime.now(timezone.utc) + timedelta(days=payload.expires_in_days),
     )
     db.add(invitation)
+    db.flush()
+    db.add(_audit_event(actor_id, person_id, "caregiver.invitation.created", "caregiver_invitation", invitation.id, {"recipient_email": email, "expires_at": invitation.expires_at.isoformat()}))
     db.commit()
     db.refresh(invitation)
     # The caller must deliver this secret through a trusted channel. SolenOS
@@ -160,6 +180,8 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
         person_id=invitation.person_id,
         caregiver_id=caregiver.id,
     )
+    db.add(account)
+    db.flush()  # Assign the account primary key before linking the new session.
     grant = CaregiverAccessGrant(
         person_id=invitation.person_id,
         caregiver_id=caregiver.id,
@@ -181,7 +203,8 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
     invitation.status = "accepted"
     invitation.accepted_at = now
     invitation.accepted_caregiver_id = caregiver.id
-    db.add_all([account, grant, session])
+    db.add_all([grant, session])
+    db.add(_audit_event(caregiver.id, invitation.person_id, "caregiver.invitation.accepted", "caregiver_invitation", invitation.id, {"caregiver_id": caregiver.id, "role": invitation.role}))
     db.commit()
     return {
         "accepted": True,
@@ -209,6 +232,7 @@ def revoke_invitation(invitation_id: str, request: Request, db: Session = Depend
         raise HTTPException(status_code=404, detail="Pending invitation not found.")
     invitation.status = "revoked"
     invitation.revoked_at = datetime.now(timezone.utc)
+    db.add(_audit_event(_actor_id, person_id, "caregiver.invitation.revoked", "caregiver_invitation", invitation.id))
     db.commit()
     return {"revoked": True, "invitation_id": invitation.id}
 
@@ -233,6 +257,7 @@ def revoke_member_access(caregiver_id: str, request: Request, db: Session = Depe
         AnonymousSession.caregiver_id == caregiver_id,
         AnonymousSession.revoked_at.is_(None),
     ).update({AnonymousSession.revoked_at: now}, synchronize_session=False)
+    db.add(_audit_event(actor_id, person_id, "caregiver.access.revoked", "caregiver_access_grant", grant.id, {"caregiver_id": caregiver_id, "sessions_revoked": True}))
     db.commit()
     return {"revoked": True, "caregiver_id": caregiver_id, "sessions_revoked": True}
 
@@ -327,6 +352,8 @@ def create_responsibility_transfer(
         status="pending",
     )
     db.add(transfer)
+    db.flush()
+    db.add(_audit_event(actor_id, person_id, "caregiver.responsibility_transfer.requested", "caregiver_responsibility_transfer", transfer.id, {"to_caregiver_profile_id": target.id, "responsibility_id": source.id}))
     db.commit()
     db.refresh(transfer)
     return {
@@ -458,6 +485,7 @@ def accept_responsibility_transfer(transfer_id: str, request: Request, db: Sessi
     transfer.accepted_at = now
     transfer.accepted_by_caregiver_id = session_caregiver_id
     db.add(replacement)
+    db.add(_audit_event(session_caregiver_id, person_id, "caregiver.responsibility_transfer.accepted", "caregiver_responsibility_transfer", transfer.id, {"new_responsibility_id": replacement.id, "previous_responsibility_id": source.id}))
     db.commit()
     db.refresh(replacement)
     return {
@@ -483,6 +511,7 @@ def reject_responsibility_transfer(transfer_id: str, request: Request, db: Sessi
     if transfer is None:
         raise HTTPException(status_code=404, detail="Pending responsibility transfer not found.")
     transfer.status = "rejected"
+    db.add(_audit_event(_session_caregiver_id, person_id, "caregiver.responsibility_transfer.rejected", "caregiver_responsibility_transfer", transfer.id))
     db.commit()
     return {"rejected": True, "transfer_id": transfer.id}
 
@@ -526,6 +555,8 @@ def create_primary_transfer(payload: PrimaryTransferCreate, request: Request, db
         status="pending",
     )
     db.add(transfer)
+    db.flush()
+    db.add(_audit_event(actor_id, person_id, "caregiver.primary_transfer.requested", "caregiver_primary_transfer", transfer.id, {"to_caregiver_id": transfer.to_caregiver_id}))
     db.commit()
     db.refresh(transfer)
     return {"id": transfer.id, "status": transfer.status, "from_caregiver_id": transfer.from_caregiver_id,
@@ -588,6 +619,7 @@ def accept_primary_transfer(transfer_id: str, request: Request, db: Session = De
     transfer.status = "accepted"
     transfer.accepted_at = now
     transfer.accepted_by_caregiver_id = session_caregiver_id
+    db.add(_audit_event(session_caregiver_id, person_id, "caregiver.primary_transfer.accepted", "caregiver_primary_transfer", transfer.id, {"previous_primary_caregiver_id": transfer.from_caregiver_id}))
     db.commit()
     return {"accepted": True, "transfer_id": transfer.id, "new_primary_caregiver_id": session_caregiver_id,
             "previous_primary_caregiver_id": transfer.from_caregiver_id,
@@ -606,5 +638,6 @@ def reject_primary_transfer(transfer_id: str, request: Request, db: Session = De
     if transfer is None:
         raise HTTPException(status_code=404, detail="Pending primary caregiver transfer not found.")
     transfer.status = "rejected"
+    db.add(_audit_event(session_caregiver_id, person_id, "caregiver.primary_transfer.rejected", "caregiver_primary_transfer", transfer.id))
     db.commit()
     return {"rejected": True, "transfer_id": transfer.id}
