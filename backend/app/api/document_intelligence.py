@@ -460,9 +460,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     if not isinstance(item, dict):
                         continue
                     quote = item.get("source_quote")
-                    if not isinstance(quote, str) or not quote.strip():
+                    subject = item.get("subject")
+                    observation = item.get("observation")
+                    if not all(isinstance(value, str) and value.strip() for value in (quote, subject, observation)):
                         continue
                     if quote not in source_text or quote in seen_quotes or quote in new_seen_quotes:
+                        continue
+                    if observation.strip() not in quote or subject.strip().casefold() not in quote.casefold():
                         continue
                     if len(raw_observations) >= MAX_DOCUMENT_CANDIDATES_PER_RUN:
                         candidate_overflow_pages.add(page_number)
