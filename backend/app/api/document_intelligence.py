@@ -337,13 +337,14 @@ def list_document_intelligence(
         evidence_id = str(analysis.source_evidence_id or "")
         if not evidence_id or evidence_id in seen_evidence_ids:
             continue
-        evidence = db.query(Evidence.id).filter(
+        evidence = db.query(Evidence).filter(
             Evidence.id == analysis.source_evidence_id,
             Evidence.person_id == person_id,
             Evidence.uploaded_by_caregiver_id == caregiver_id,
             Evidence.type == "document",
+            (Evidence.evidence_status.is_(None)) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).first()
-        if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
+        if evidence is None:
             continue
         seen_evidence_ids.add(evidence_id)
         items.append(_response(analysis))
