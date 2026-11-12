@@ -911,7 +911,7 @@ def test_export_download_is_not_available_to_another_caregiver(monkeypatch):
 def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_receipt(monkeypatch):
     from datetime import datetime, timezone
     from app.models.care import CareEvent, Evidence, Person, Caregiver
-    from app.models.collaboration import EvidenceUpload
+    from app.models.collaboration import CommunityPost, CommunityReaction, EvidenceUpload
     from app.models.privacy_delivery import AuditLogEvent
 
     monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "g" * 40)
@@ -951,7 +951,30 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver_id,
         )
-        db.add_all([upload, event])
+        post = CommunityPost(
+            id="deletion-community-post",
+            caregiver_id=caregiver_id,
+            content="Caregiver-authored content to erase",
+        )
+        db.add(post)
+        db.flush()
+        reaction = CommunityReaction(
+            id="deletion-community-reaction",
+            post_id=post.id,
+            caregiver_id=caregiver_id,
+            reaction_type="support",
+        )
+        from sqlalchemy import text
+        db.execute(text(
+            "CREATE TABLE IF NOT EXISTS privacy_deletion_legacy_probe "
+            "(id VARCHAR PRIMARY KEY, person_id VARCHAR, caregiver_id VARCHAR, payload TEXT)"
+        ))
+        db.execute(text("DELETE FROM privacy_deletion_legacy_probe"))
+        db.execute(text(
+            "INSERT INTO privacy_deletion_legacy_probe (id, person_id, caregiver_id, payload) "
+            "VALUES ('legacy-delete-row', :person_id, :caregiver_id, 'private legacy data')"
+        ), {"person_id": person_id, "caregiver_id": caregiver_id})
+        db.add_all([upload, event, reaction])
         db.commit()
         evidence_id = evidence.id
         event_id = event.id
@@ -1015,6 +1038,13 @@ def test_approved_deletion_removes_single_caregiver_record_and_keeps_redacted_re
         assert db.query(Evidence).filter(Evidence.id == evidence_id).count() == 0
         assert db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).count() == 0
         assert db.query(CareEvent).filter(CareEvent.id == event_id).count() == 0
+        assert db.query(CommunityPost).filter(CommunityPost.id == "deletion-community-post").count() == 0
+        assert db.query(CommunityReaction).filter(CommunityReaction.id == "deletion-community-reaction").count() == 0
+        legacy_remaining = db.execute(text(
+            "SELECT COUNT(*) FROM privacy_deletion_legacy_probe WHERE id = 'legacy-delete-row'"
+        )).scalar_one()
+        assert legacy_remaining == 0
+        db.execute(text("DROP TABLE IF EXISTS privacy_deletion_legacy_probe"))
         receipt = db.query(DataSubjectRequest).filter(DataSubjectRequest.id == request_id).one()
         assert receipt.request_status == "fulfilled"
         assert receipt.person_id is None
