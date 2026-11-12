@@ -1610,6 +1610,22 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
     assert medication_list.json()["medications"] == []
     assert medication_list.json()["pending_review"] == []
 
+    situation_response = client.post(
+        "/api/v1/care-continuity/situation-understanding/reassess",
+        headers=headers,
+    )
+    assert situation_response.status_code == 200, situation_response.text
+    assessment = situation_response.json()["assessment"]
+    medication_conflicts = [
+        item for item in assessment["uncertainties_and_conflicts"]
+        if item["source"] == "conflicts"
+        and item.get("subject_type") == "medication"
+        and item.get("field") == "medication_status"
+    ]
+    assert len(medication_conflicts) == 1
+    assert medication_conflicts[0]["status"] == "unresolved"
+    assert medication_conflicts[0]["evidence_ids"] == [saved_ids[1]]
+
         claims = verify_db.query(CareAssertion).filter(
             CareAssertion.person_id == person.id,
             CareAssertion.subject_id == medication_id,
