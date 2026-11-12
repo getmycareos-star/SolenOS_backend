@@ -4164,3 +4164,111 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         db.close()
     finally:
         teardown_db()
+
+
+def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle():
+    setup_db()
+    try:
+        from app.services.uncertainty import persist_source_clarification_questions
+        from app.services.care_continuity import reassess_open_question_lifecycle
+        from app.models.care_continuity import CareStateRevision
+
+        db = TestingSessionLocal()
+        person = Person(id="finding6-source-lifecycle-person", name="Source Lifecycle Person")
+        caregiver = Caregiver(
+            id="finding6-source-lifecycle-caregiver",
+            name="Source Lifecycle Caregiver",
+            email="finding6-source-lifecycle@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="finding6-source-lifecycle-evidence",
+            person_id=person.id,
+            type="note",
+            source_text="The usual sleep schedule is documented in this care record.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        )
+        event = CareEvent(
+            id="finding6-source-lifecycle-event",
+            person_id=person.id,
+            event_type="daily_care",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Daily capture",
+            description="The usual sleep schedule is documented.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, event])
+        db.commit()
+
+        daily = persist_source_clarification_questions(
+            db, person_id=person.id, caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction", source_record_type="care_event",
+            source_record_id=event.id, evidence_ids=[evidence.id],
+            questions=["What is the sleep schedule?"],
+        )[0]
+        document = persist_source_clarification_questions(
+            db, person_id=person.id, caregiver_id=caregiver.id,
+            source_kind="document_extraction", source_record_type="evidence",
+            source_record_id=evidence.id, evidence_ids=[evidence.id],
+            questions=["What is the sleep schedule?"],
+        )[0]
+        db.commit()
+        assert daily.id == document.id
+
+        # Accepted source evidence does not settle a field while a competing
+        # assertion remains unresolved.
+        assertion = CareAssertion(
+            id="finding6-source-lifecycle-assertion",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="sleep_schedule",
+            assertion_kind="current_state",
+            asserted_value="Usually sleeps from 9 PM to 6 AM",
+            source_label="caregiver report",
+            source_text="The usual sleep schedule is documented.",
+            evidence_ids=[evidence.id],
+            assertion_status="accepted",
+            epistemic_state="reported",
+            observed_at=datetime.now(timezone.utc),
+            review_after_days=30,
+        )
+        conflict = Contradiction(
+            id="finding6-source-lifecycle-conflict",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="sleep_schedule",
+            description="A competing report remains unresolved.",
+            evidence_ids=[evidence.id],
+            source_assertion_ids=[assertion.id],
+            resolution_status="unresolved",
+        )
+        db.add_all([assertion, conflict])
+        db.commit()
+
+        first = reassess_open_question_lifecycle(db, person.id)
+        db.refresh(daily)
+        assert daily.status == "open"
+        assert first["superseded"] == 0
+
+        conflict.resolution_status = "resolved"
+        db.flush()
+        second = reassess_open_question_lifecycle(db, person.id)
+        db.refresh(daily)
+        assert daily.status == "closed"
+        assert daily.closed_reason.startswith("automatically_superseded")
+        assert daily.answered_at is None
+        assert second["superseded"] == 1
+        assert db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person.id,
+            CareStateRevision.target_type == "open_questions",
+            CareStateRevision.target_id == daily.id,
+        ).count() >= 1
+        db.close()
+    finally:
+        teardown_db()
