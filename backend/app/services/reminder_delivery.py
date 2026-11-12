@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import case, cast, exists, literal, String
+from sqlalchemy import case, cast, exists, literal, or_, String
 from sqlalchemy.exc import IntegrityError
 
 from cryptography.fernet import Fernet
@@ -51,6 +51,35 @@ def is_quiet_hours(preference, now):
     return current >= start or current < end
 
 
+def quiet_hours_release_at(preference, now):
+    """Return the next local quiet-hours end as UTC, or None when not quiet."""
+    if preference is None or not preference.quiet_hours_enabled:
+        return None
+    try:
+        zone = ZoneInfo(preference.timezone_name or "UTC")
+        local_now = now.astimezone(zone)
+        start = time.fromisoformat(preference.quiet_hours_start or "21:00")
+        end = time.fromisoformat(preference.quiet_hours_end or "08:00")
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        # Fail closed for malformed stored settings, but retry in one hour so
+        # an invalid preference cannot permanently starve the worker.
+        return now + timedelta(hours=1)
+    current = local_now.timetz().replace(tzinfo=None)
+    if start == end:
+        release_date = local_now.date() + timedelta(days=1)
+        release_local = datetime.combine(release_date, end, tzinfo=zone)
+        return release_local.astimezone(timezone.utc)
+    if start < end:
+        quiet = start <= current < end
+        release_date = local_now.date()
+    else:
+        quiet = current >= start or current < end
+        release_date = local_now.date() + (timedelta(days=1) if current >= start else timedelta())
+    if not quiet:
+        return None
+    return datetime.combine(release_date, end, tzinfo=zone).astimezone(timezone.utc)
+
+
 def deliver_due_reminders(db=None, now=None):
     """Create each due reminder notification once per due-time generation."""
     owns_session = db is None
@@ -67,6 +96,10 @@ def deliver_due_reminders(db=None, now=None):
             .filter(
                 CareReminder.status == "open",
                 CareReminder.due_at <= current,
+                or_(
+                    CareReminder.notification_deferred_until.is_(None),
+                    CareReminder.notification_deferred_until <= current,
+                ),
                 ~exists().where(CareNotification.id == generated_id),
             )
             .order_by(CareReminder.due_at.asc(), CareReminder.created_at.asc())
@@ -84,7 +117,10 @@ def deliver_due_reminders(db=None, now=None):
             )
             if preference is not None and not preference.reminders_enabled:
                 continue
-            if is_quiet_hours(preference, current):
+            release_at = quiet_hours_release_at(preference, current)
+            if release_at is not None:
+                reminder.notification_deferred_until = release_at
+                session.commit()
                 continue
             session.add(CareNotification(
                 id=_notification_id(reminder),
