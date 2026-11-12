@@ -752,7 +752,7 @@ def test_postgres_document_medication_conflict_creates_professional_question_wit
             assert uploaded["evidence_id"] in question.evidence_ids
             assert question.context[0]["source_sha256"] == first_upload.sha256
             assert question.context[0]["existing_medication_review_after_days"] == 30
-            assert "prescribing professional or pharmacist" in question.question
+            assert "prescribing clinician or pharmacist" in question.question
             assert "has not advised stopping" in question.question
             assert db.query(CareAssertion).filter_by(
                 person_id=person_id,
