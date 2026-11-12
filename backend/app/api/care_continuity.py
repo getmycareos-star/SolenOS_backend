@@ -1572,17 +1572,19 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
     person_id, caregiver_id = _scoped_identity(request, db)
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to review a medication record")
-    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
-        raise HTTPException(
-            status_code=503,
-            detail="Medication review history is unavailable until the care-record revision migration is applied",
-        )
     rows = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         CareAssertion.subject_type == "medication",
         CareAssertion.subject_id == subject_id,
         CareAssertion.assertion_kind == "current_state",
     ).order_by(CareAssertion.recorded_at.asc(), CareAssertion.id.asc()).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Medication report not found or incomplete in this care record")
+    if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+        raise HTTPException(
+            status_code=503,
+            detail="Medication review history is unavailable until the care-record revision migration is applied",
+        )
     fields: dict[str, list[CareAssertion]] = {}
     for row in rows:
         fields.setdefault(str(row.field).strip().lower(), []).append(row)
