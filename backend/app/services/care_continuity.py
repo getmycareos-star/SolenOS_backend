@@ -94,6 +94,9 @@ def _record_open_question_revision(
     insert without a lock races under concurrent answer/reconciliation requests and
     violates the unique target/revision constraint.
     """
+    # Mark before any query: SQLAlchemy autoflush can otherwise invoke the
+    # generic revision listener while allocating this explicit revision.
+    db.info.setdefault("manual_care_state_revision_objects", set()).add(id(question))
     if db.get_bind().dialect.name == "postgresql":
         lock_key = f"care-state-revision:open_questions:{question.person_id}:{question.id}"
         db.execute(
@@ -111,7 +114,6 @@ def _record_open_question_revision(
     # The ORM revision listener also tracks open_questions. Mark this object
     # before the flush so this explicit, actor-attributed revision is the only
     # revision for the transition.
-    db.info.setdefault("manual_care_state_revision_objects", set()).add(id(question))
     db.add(CareStateRevision(
         id=str(uuid.uuid4()),
         person_id=question.person_id,
