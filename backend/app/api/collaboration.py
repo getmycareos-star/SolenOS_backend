@@ -92,6 +92,16 @@ def _document_metadata(evidence: EvidenceModel) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _normalized_document_filename(filename: str | None) -> str | None:
+    """Normalize common correction/copy suffixes for a conservative version suggestion."""
+    if not filename:
+        return None
+    stem = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].rsplit(".", 1)[0].casefold()
+    stem = re.sub(r"\b(corrected|correction|revised|revision|updated|update|final|copy|duplicate|version|v\d+)\b", " ", stem)
+    normalized = "".join(re.findall(r"[a-z0-9]+", stem))
+    return normalized if len(normalized) >= 10 else None
+
+
 def _record_document_lifecycle_event(
     db: Session,
     *,
@@ -991,6 +1001,28 @@ async def upload_evidence(
         .order_by(EvidenceUpload.created_at.asc(), EvidenceUpload.evidence_id.asc())
         .first()
     )
+    possible_version_of_evidence_id = None
+    normalized_filename = _normalized_document_filename(filename) if evidence_type == "document" else None
+    if duplicate_upload is None and normalized_filename:
+        prior_documents = (
+            db.query(EvidenceUpload, EvidenceModel)
+            .join(EvidenceModel, EvidenceModel.id == EvidenceUpload.evidence_id)
+            .filter(
+                EvidenceModel.person_id == scoped_person_id,
+                EvidenceModel.uploaded_by_caregiver_id == scoped_caregiver_id,
+                EvidenceModel.type == "document",
+                (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
+            )
+            .order_by(EvidenceUpload.created_at.desc(), EvidenceUpload.evidence_id.desc())
+            .limit(50)
+            .all()
+        )
+        for prior_upload, prior_evidence in prior_documents:
+            prior_normalized = _normalized_document_filename(prior_upload.filename)
+            if prior_normalized == normalized_filename and prior_upload.sha256 != digest:
+                possible_version_of_evidence_id = str(prior_evidence.id)
+                break
+
     evidence = EvidenceModel(
         person_id=scoped_person_id,
         type=evidence_type,
@@ -1004,6 +1036,8 @@ async def upload_evidence(
             "sha256": digest,
             "duplicate_detected": duplicate_upload is not None,
             "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
+            "possible_version_of_evidence_id": possible_version_of_evidence_id,
+            "possible_version_suggestion_reason": "normalized_filename_match" if possible_version_of_evidence_id else None,
             "text_source": "server_extraction_pending",
             "source_integrity": {
                 "binary_sha256_computed_at_ingest": True,
@@ -1069,6 +1103,8 @@ async def upload_evidence(
         "processing_status": document_job_status,
         "duplicate_detected": duplicate_upload is not None,
         "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
+        "possible_version_of_evidence_id": possible_version_of_evidence_id,
+        "possible_version_suggestion_reason": "normalized_filename_match" if possible_version_of_evidence_id else None,
         "source_integrity": {
             "binary_sha256_computed_at_ingest": True,
             "original_binary_persisted": True,
