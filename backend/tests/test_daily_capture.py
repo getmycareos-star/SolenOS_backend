@@ -1908,7 +1908,7 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
                     },
                     {
                         "subject": "Mum",
-                        "observation": "Nothing unusual that I noticed",
+                        "observation": "nothing unusual that I noticed",
                         "source_quote": original_report,
                         "review_status": "pending_review",
                         "source_event_id": source_event_id,
