@@ -161,7 +161,7 @@ def test_daily_capture_rejection_never_creates_lcr_assertion_or_allows_retry(mon
     client = TestClient(app)
     session = create_session(client, "Rejected care recipient")
     auth = {"Authorization": f"Bearer {session['access_token']}"}
-    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+    monkeypatch.setattr(care_execution, "extract_review_candidates", lambda *args, **kwargs: {
         "observations": [{
             "subject": "sleep",
             "observation": "Unverified generated suggestion.",
@@ -218,7 +218,7 @@ def test_capture_review_rejects_foreign_analysis_and_invalid_candidate_index(mon
     client = TestClient(app)
     first = create_session(client, "First care recipient")
     second = create_session(client, "Second care recipient")
-    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+    monkeypatch.setattr(care_execution, "extract_review_candidates", lambda *args, **kwargs: {
         "observations": [{
             "subject": "sleep",
             "observation": "Caregiver report about sleep.",
@@ -262,7 +262,7 @@ def test_capture_review_rejects_foreign_analysis_and_invalid_candidate_index(mon
 def test_capture_review_rejects_repeat_decisions_and_empty_corrections(monkeypatch):
     client = TestClient(app)
     session = create_session(client, "Care recipient")
-    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+    monkeypatch.setattr(care_execution, "extract_review_candidates", lambda *args, **kwargs: {
         "observations": [{
             "subject": "sleep",
             "observation": "Caregiver report about sleep.",
@@ -313,7 +313,7 @@ def test_daily_capture_cannot_promote_model_observation_not_supported_by_source_
     session = create_session(client, "Source validation recipient")
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     source = "Caregiver report: Mum slept badly last night."
-    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+    monkeypatch.setattr(care_execution, "extract_review_candidates", lambda *args, **kwargs: {
         "observations": [{
             "subject": "sleep",
             "observation": "Mum has severe dementia caused by poor sleep.",
