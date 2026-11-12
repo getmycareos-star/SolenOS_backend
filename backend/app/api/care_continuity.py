@@ -1565,7 +1565,15 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
                 db,
             )
             reviewed.append({"id": row.id, "assertion_status": result.get("assertion_status")})
+        execution = execute_care_continuity_reconciliation(
+            db,
+            person_id,
+            workflow="care_assertion_review",
+            source_assertion_id=name_claim.id,
+            source_evidence_ids=name_claim.evidence_ids or [],
+        )
         db.commit()
+        execution["stages"]["reconciliation"] = "committed"
     except Exception:
         db.rollback()
         raise
@@ -1580,6 +1588,7 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
         "name": name_claim.asserted_value,
         "record_status": "caregiver_reviewed_current_report",
         "assertions": reviewed,
+        "care_continuity_execution": execution,
         "interpretation_limit": (
             "The caregiver explicitly reviewed this report. This is not independent clinical "
             "verification, proof of a prescription, or proof that medicine was administered."
