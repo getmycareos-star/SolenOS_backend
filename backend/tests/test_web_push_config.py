@@ -2,7 +2,7 @@ import base64
 from types import SimpleNamespace
 
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
 from app.services.web_push_config import vapid_configuration_error
 
@@ -33,6 +33,22 @@ def test_vapid_configuration_accepts_matching_p256_key_pair():
     public_key, private_key = _key_pair()
 
     assert vapid_configuration_error(_settings(public_key, private_key)) is None
+
+
+def test_vapid_configuration_accepts_documented_pem_private_key_with_escaped_newlines():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_bytes = private_key.public_key().public_bytes(
+        Encoding.X962,
+        PublicFormat.UncompressedPoint,
+    )
+    private_pem = private_key.private_bytes(
+        Encoding.PEM,
+        PrivateFormat.PKCS8,
+        NoEncryption(),
+    ).decode("ascii")
+    settings = _settings(_encode(public_bytes), private_pem.replace("\n", "\\n"))
+
+    assert vapid_configuration_error(settings) is None
 
 
 def test_vapid_configuration_rejects_mismatched_public_and_private_keys():
