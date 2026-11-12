@@ -1115,3 +1115,41 @@ def test_outlook_msg_extracts_headers_and_body_from_a_real_msg_round_trip(tmp_pa
     assert "Appointment confirmed for Tuesday." in extracted
     assert len(extracted) < 100_000
 
+def test_oversized_pdf_page_is_blocked_and_not_retried_as_a_transient_failure(client, monkeypatch):
+    from pypdf import PdfWriter
+    from app.api import document_lifecycle
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=2500, height=2500)
+    output = io.BytesIO()
+    writer.write(output)
+    original = output.getvalue()
+    test_client, session = client
+    evidence_id = persist_document(session, original, "oversized-scan.pdf", "application/pdf")
+    calls = []
+
+    def unexpected_ocr(_image):
+        calls.append("called")
+        raise AssertionError("A page exceeding the OCR limit must not be rendered or retried")
+
+    monkeypatch.setattr(document_lifecycle, "_ocr_image", unexpected_ocr)
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    first = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert first.status_code == 201, first.text
+    assert first.json()["extraction_status"] == "partial"
+    assert first.json()["unprocessed_page_numbers"] == [1]
+    assert first.json()["retryable_page_numbers"] == []
+    assert first.json()["blocked_page_numbers"] == [1]
+    assert first.json()["unreadable_page_numbers"] == []
+    assert first.json()["processed_page_numbers"] == []
+
+    second = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert second.status_code == 201, second.text
+    assert second.json()["analysis_id"] == first.json()["analysis_id"]
+    assert second.json()["blocked_page_numbers"] == [1]
+    assert calls == []
+
+    original_download = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert original_download.status_code == 200
+    assert original_download.content == original
