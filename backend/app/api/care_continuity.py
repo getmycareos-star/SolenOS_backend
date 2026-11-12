@@ -1396,32 +1396,51 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
         if not name_claim or not status_claim or str(status_claim.asserted_value).strip().casefold() != "active":
             def pending_claim(field_names: tuple[str, ...]) -> CareAssertion | None:
                 candidates = [claim for field_name in field_names for claim in by_field.get(field_name, [])]
-                live = [item for item in candidates if item.assertion_status in {"reported", "review_required"}]
+                live = [item for item in candidates if item.assertion_status in {"reported", "review_required", "accepted", "caregiver_reviewed"}]
                 values = {" ".join(str(item.asserted_value or "").casefold().split()) for item in live}
                 if len(values) != 1 or not live:
                     return None
                 candidate = live[0]
-                if candidate.epistemic_state not in {"reported", "observed"}:
+                if candidate.epistemic_state not in {"reported", "observed", "verified"}:
+                    return None
+                freshness = get_freshness(
+                    candidate,
+                    reviewed_at=latest_caregiver_review(candidate),
+                )
+                if candidate.assertion_status in {"accepted", "caregiver_reviewed"} and freshness.get("status") == "within_review_window":
                     return None
                 return candidate
             pending_name = pending_claim(("name", "medication_name"))
             pending_status = pending_claim(("status", "medication_status"))
             if pending_name and pending_status and str(pending_status.asserted_value).strip().casefold() == "active":
                 pending_dose = pending_claim(("dose", "strength"))
+                reviewed_before = any(
+                    claim.assertion_status in {"accepted", "caregiver_reviewed"}
+                    for claim in (pending_name, pending_status)
+                )
+                age_days = max(
+                    (
+                        get_freshness(
+                            claim,
+                            reviewed_at=latest_caregiver_review(claim),
+                        ).get("age_days") or 0
+                    )
+                    for claim in (pending_name, pending_status)
+                )
+                review_days = min(
+                    (
+                        claim.review_after_days
+                        for claim in (pending_name, pending_status)
+                        if claim.review_after_days is not None
+                    ),
+                    default=None,
+                )
                 pending_records.append({
                     "medication_id": subject_id,
                     "name": str(pending_name.asserted_value).strip(),
                     "dose": str(pending_dose.asserted_value).strip() if pending_dose else None,
-                    "record_status": "awaiting_caregiver_review",
-                    "review_overdue": (
-                        pending_name.review_after_days is not None
-                        and pending_name.recorded_at is not None
-                        and (datetime.now(timezone.utc) - (
-                            pending_name.recorded_at.replace(tzinfo=timezone.utc)
-                            if pending_name.recorded_at.tzinfo is None
-                            else pending_name.recorded_at.astimezone(timezone.utc)
-                        )).days > pending_name.review_after_days
-                    ),
+                    "record_status": "needs_caregiver_review" if reviewed_before else "awaiting_caregiver_review",
+                    "review_overdue": review_days is None or age_days > review_days,
                     "source_label": pending_name.source_label,
                     "recorded_at": pending_name.recorded_at,
                 })
