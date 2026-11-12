@@ -1598,16 +1598,27 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         evidence_id in (row.evidence_ids or [])
         for row in db.query(OpenQuestionAnswerEvent).filter(OpenQuestionAnswerEvent.person_id == person_id).all()
     )
+    def _contains_evidence_reference(value) -> bool:
+        if value == evidence_id:
+            return True
+        if isinstance(value, dict):
+            if any(str(value.get(key) or "") == evidence_id for key in ("evidence_id", "source_evidence_id")):
+                return True
+            return any(_contains_evidence_reference(item) for item in value.values())
+        if isinstance(value, list):
+            return any(_contains_evidence_reference(item) for item in value)
+        return False
+
     linked_open_loop = any(
-        evidence_id in (row.evidence or [])
+        _contains_evidence_reference(row.evidence)
         for row in db.query(OpenLoopRecord).filter(OpenLoopRecord.person_id == person_id).all()
     )
     linked_open_loop_occurrence = any(
-        evidence_id in (row.evidence or [])
+        _contains_evidence_reference(row.evidence)
         for row in db.query(OpenLoopOccurrence).filter(OpenLoopOccurrence.person_id == person_id).all()
     )
     linked_open_loop_event = any(
-        evidence_id in (row.evidence or [])
+        _contains_evidence_reference(row.evidence)
         for row in db.query(OpenLoopEvent).filter(OpenLoopEvent.person_id == person_id).all()
     )
     if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness or linked_open_question or linked_open_question_answer or linked_open_loop or linked_open_loop_occurrence or linked_open_loop_event:
@@ -1640,7 +1651,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     jobs = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.person_id == person_id,
         QwenBackgroundJob.caregiver_id == caregiver_id,
-        QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
+        QwenBackgroundJob.status.in_(["queued", "processing", "failed", "completed"]),
     ).with_for_update().all()
     jobs = [
         job for job in jobs
