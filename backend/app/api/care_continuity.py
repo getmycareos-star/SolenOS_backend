@@ -1442,6 +1442,7 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
                     "record_status": "needs_caregiver_review" if reviewed_before else "awaiting_caregiver_review",
                     "review_overdue": review_days is None or age_days > review_days,
                     "source_label": pending_name.source_label,
+                    "source_text": pending_name.source_text,
                     "recorded_at": pending_name.recorded_at,
                 })
             continue
@@ -1574,7 +1575,7 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
         raise HTTPException(status_code=403, detail="A caregiver identity is required to review a medication record")
     rows = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
-        CareAssertion.subject_type == "medication",
+        func.lower(CareAssertion.subject_type).in_(("medication", "medications")),
         CareAssertion.subject_id == subject_id,
         CareAssertion.assertion_kind == "current_state",
     ).order_by(CareAssertion.recorded_at.asc(), CareAssertion.id.asc()).all()
