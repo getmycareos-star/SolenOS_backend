@@ -189,6 +189,15 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+        accepted_assertion_id = accepted.json()["source_record_ref"]["id"]
+        with Session() as db:
+            accepted_row = db.query(CareAssertion).filter_by(id=accepted_assertion_id).first()
+            all_rows = db.query(CareAssertion).all()
+            assert accepted_row is not None, (
+                f"API returned accepted CareAssertion {accepted_assertion_id}, but it was not persisted; "
+                f"rows={[(row.id, row.person_id, row.assertion_status) for row in all_rows]}"
+            )
+            assert accepted_row.person_id == first["person"]["id"]
         assert len(execution_calls) == 1
         assert execution_calls[0]["source_caregiver_id"] == first["caregiver"]["id"]
         assert execution_calls[0]["source_evidence_id"] == evidence_id
