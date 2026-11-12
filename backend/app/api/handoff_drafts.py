@@ -110,12 +110,12 @@ SOURCES = {
     "care_assertions": {
         "label": "Caregiver-attributed LCR reports and assertions",
         "kind": "care_assertion",
-        "fields": ("id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value", "source_event_id", "source_label", "source_text", "source_conversation_id", "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids", "assertion_status", "observed_at", "created_by_caregiver_id", "updated_by_caregiver_id", "recorded_at"),
+        "fields": ("id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value", "source_event_id", "source_label", "source_text", "source_conversation_id", "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids", "epistemic_state", "assertion_status", "observed_at", "created_by_caregiver_id", "updated_by_caregiver_id", "recorded_at"),
         "text_fields": ("field", "asserted_value", "source_label", "source_text", "event_time_text"),
         "time_fields": ("observed_at", "recorded_at"),
         "event_time_fields": ("observed_at",),
         "recorded_time_fields": ("recorded_at",),
-        "detail_fields": ("subject_type", "subject_id", "field", "assertion_kind", "source_label", "event_time_text", "source_event_id", "source_conversation_id", "source_message_id", "source_proposal_id", "assertion_status", "created_by_caregiver_id", "updated_by_caregiver_id"),
+        "detail_fields": ("subject_type", "subject_id", "field", "assertion_kind", "source_label", "event_time_text", "source_event_id", "source_conversation_id", "source_message_id", "source_proposal_id", "epistemic_state", "assertion_status", "created_by_caregiver_id", "updated_by_caregiver_id"),
     },
     "uncertainty_assessments": {
         "label": "Recorded uncertainty and information gaps",
