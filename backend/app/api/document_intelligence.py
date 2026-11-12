@@ -977,10 +977,36 @@ def review_document_candidate(
             CareAssertion.source_text == quote,
             CareAssertion.created_by_caregiver_id == caregiver_id,
         ).order_by(CareAssertion.recorded_at.desc()).all()
+        # Exact binary duplicates are one source, even when uploaded under a
+        # different filename or by a later retry. Reuse an existing active
+        # assertion from that duplicate group instead of adding a second LCR
+        # assertion. A conflicting interpretation of the same quoted passage
+        # is blocked for review rather than silently accepted.
+        duplicate_group_ids = {
+            str(row[0])
+            for row in db.query(EvidenceUpload.evidence_id)
+            .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
+            .filter(
+                Evidence.person_id == person_id,
+                Evidence.type == "document",
+                EvidenceUpload.sha256 == upload.sha256,
+            ).all()
+        }
+        duplicate_group_ids.add(evidence_id)
+        active_duplicate_assertions = [
+            row for row in existing
+            if duplicate_group_ids.intersection(str(value) for value in (row.evidence_ids or []))
+            and row.assertion_status not in {"rejected", "superseded"}
+        ]
         assertion_row = next(
-            (row for row in existing if evidence_id in (row.evidence_ids or []) and row.asserted_value == asserted_value),
+            (row for row in active_duplicate_assertions if row.asserted_value == asserted_value),
             None,
         )
+        if active_duplicate_assertions and assertion_row is None:
+            raise HTTPException(
+                status_code=409,
+                detail="An exact duplicate document already has a different reviewed interpretation of this passage. No second Living Care Record assertion was created.",
+            )
         # Use ORM writes on this path so the CareStateRevision listener and
         # the document review event share the same database transaction. The
         # generic care-continuity helper commits independently in other routes;
