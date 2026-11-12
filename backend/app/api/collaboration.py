@@ -1076,6 +1076,113 @@ async def upload_evidence(
 
 
 
+@router.get("/documents/status")
+def list_document_processing_status(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Return truthful caregiver-facing status for recent uploaded documents."""
+    person_id, caregiver_id = _scope(request, db)
+    evidence_rows = db.query(EvidenceModel).filter(
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        EvidenceModel.type == "document",
+        (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
+    ).order_by(EvidenceModel.uploaded_at.desc(), EvidenceModel.id.desc()).limit(limit).all()
+    items = []
+    for evidence in evidence_rows:
+        upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence.id).first()
+        if upload is None:
+            continue
+        analysis = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.source_evidence_id == evidence.id,
+        ).order_by(CaptureAnalysis.created_at.desc(), CaptureAnalysis.id.desc()).first()
+        job = db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.person_id == person_id,
+            QwenBackgroundJob.caregiver_id == caregiver_id,
+            QwenBackgroundJob.workflow == "document_intake",
+            QwenBackgroundJob.evidence_ids_json == json.dumps([evidence.id]),
+        ).order_by(QwenBackgroundJob.created_at.desc(), QwenBackgroundJob.id.desc()).first()
+        extraction = analysis.candidates if analysis and isinstance(analysis.candidates, dict) else {}
+        intelligence = extraction.get("document_intelligence") if isinstance(extraction.get("document_intelligence"), dict) else {}
+        observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
+        processed_pages = extraction.get("processed_page_numbers")
+        if not isinstance(processed_pages, list):
+            processed_pages = intelligence.get("processed_page_numbers") if isinstance(intelligence.get("processed_page_numbers"), list) else []
+        unprocessed_pages = extraction.get("unprocessed_page_numbers")
+        if not isinstance(unprocessed_pages, list):
+            unprocessed_pages = intelligence.get("unprocessed_page_numbers") if isinstance(intelligence.get("unprocessed_page_numbers"), list) else []
+        unreadable_pages = extraction.get("unreadable_page_numbers")
+        if not isinstance(unreadable_pages, list):
+            unreadable_pages = intelligence.get("unreadable_page_numbers") if isinstance(intelligence.get("unreadable_page_numbers"), list) else []
+        extraction_status = analysis.extraction_status if analysis else "not_started"
+        job_status = job.status if job else None
+        if job_status == "cancelled":
+            processing_status = "cancelled"
+        elif job_status == "failed":
+            processing_status = "retry_required"
+        elif job_status == "processing":
+            processing_status = "processing"
+        elif job_status == "queued":
+            processing_status = "queued"
+        elif extraction_status == "failed":
+            processing_status = "failed"
+        elif extraction_status in {"partial", "partially_processed"} or unprocessed_pages or unreadable_pages:
+            processing_status = "partially_processed"
+        elif analysis and extraction_status == "available" and intelligence.get("status") == "available":
+            processing_status = "processed"
+        elif analysis and extraction_status == "available":
+            processing_status = "review_required"
+        elif job_status == "completed":
+            processing_status = "failed"
+        else:
+            processing_status = "uploaded"
+        pending_review = any(
+            isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
+            for item in observations
+        )
+        medication_conflict = any(
+            isinstance(item, dict)
+            and item.get("field_type") == "medication"
+            and any("conflicting medication instructions" in str(warning).casefold() for warning in (item.get("warnings") or []))
+            for item in observations
+        )
+        accepted_follow_up_ids = list(dict.fromkeys(
+            str(item.get("accepted_follow_up_id"))
+            for item in observations
+            if isinstance(item, dict) and item.get("accepted_follow_up_id")
+        ))
+        try:
+            evidence_metadata = json.loads(evidence.extra_metadata or "{}") if isinstance(evidence.extra_metadata, str) else (evidence.extra_metadata or {})
+        except (TypeError, ValueError):
+            evidence_metadata = {}
+        items.append({
+            "evidence_id": str(evidence.id),
+            "document_name": upload.filename or (evidence_metadata.get("filename") if isinstance(evidence_metadata, dict) else None) or "Uploaded document",
+            "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+            "processing_status": processing_status,
+            "processing_job_status": job_status,
+            "extraction_status": extraction_status,
+            "intelligence_status": intelligence.get("status") or "not_run",
+            "page_count": extraction.get("page_count") or intelligence.get("total_page_count"),
+            "processed_page_numbers": processed_pages,
+            "unprocessed_page_numbers": unprocessed_pages,
+            "unreadable_page_numbers": unreadable_pages,
+            "review_required": bool(pending_review or processing_status == "review_required"),
+            "written_to_lcr": any(
+                isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
+                for item in observations
+            ),
+            "medication_conflict": medication_conflict,
+            "accepted_follow_up_ids": accepted_follow_up_ids,
+            "duplicate_detected": bool(evidence_metadata.get("duplicate_detected")) if isinstance(evidence_metadata, dict) else False,
+            "duplicate_of_evidence_id": evidence_metadata.get("duplicate_of_evidence_id") if isinstance(evidence_metadata, dict) else None,
+        })
+    return {"items": items, "count": len(items)}
+
+
 @router.post("/upload/{evidence_id}/versions", status_code=201)
 def link_corrected_document_version(
     evidence_id: str,
