@@ -601,15 +601,35 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         processing_history.append(prior_provenance)
     processing_history.append(model_provenance)
     previous_visible_indexes = resume_intelligence.get("visible_candidate_indexes")
+    prior_observations = resume_intelligence.get("observations")
+    prior_observations = prior_observations if isinstance(prior_observations, list) else []
+    prior_next_candidate_offset = resume_intelligence.get("next_candidate_offset")
+    if not isinstance(prior_next_candidate_offset, int) or prior_next_candidate_offset < 0:
+        prior_next_candidate_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(prior_observations))
     if isinstance(previous_visible_indexes, list):
         visible_candidate_indexes = [
             index for index in previous_visible_indexes
             if isinstance(index, int) and 0 <= index < len(grounded)
         ]
+        # Page-window resume can append candidates after the initial review
+        # batch was formed. If every previously extracted candidate was
+        # already visible and that batch has capacity, include the new
+        # candidates now instead of falsely marking them as hidden overflow.
+        if (
+            len(visible_candidate_indexes) < MAX_DOCUMENT_CANDIDATE_BATCH
+            and prior_next_candidate_offset >= len(prior_observations)
+        ):
+            visible_start = min(visible_candidate_indexes, default=0)
+            visible_end = min(
+                visible_start + MAX_DOCUMENT_CANDIDATE_BATCH,
+                len(grounded),
+            )
+            visible_candidate_indexes = list(range(visible_start, visible_end))
+            next_candidate_offset = visible_end
+        else:
+            next_candidate_offset = prior_next_candidate_offset
     else:
         visible_candidate_indexes = list(range(min(MAX_DOCUMENT_CANDIDATE_BATCH, len(grounded))))
-    next_candidate_offset = resume_intelligence.get("next_candidate_offset")
-    if not isinstance(next_candidate_offset, int) or next_candidate_offset < 0:
         next_candidate_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(grounded))
     candidate_overflow = next_candidate_offset < len(grounded)
     metadata["document_intelligence"] = {
