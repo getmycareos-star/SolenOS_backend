@@ -692,3 +692,65 @@ def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatc
         assert upload.content == original
         assert upload.sha256 == hashlib.sha256(original).hexdigest()
     assert observed["size"] != Image.open(io.BytesIO(original)).size
+
+
+def test_docx_extraction_includes_body_table_header_and_footer():
+    import zipfile
+    from app.api.document_lifecycle import _extract_docx
+
+    document_xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p><w:r><w:t>Discharge summary</w:t></w:r></w:p>
+        <w:tbl><w:tr>
+          <w:tc><w:p><w:r><w:t>Mobility</w:t></w:r></w:p></w:tc>
+          <w:tc><w:p><w:r><w:t>Needs walking frame</w:t></w:r></w:p></w:tc>
+        </w:tr></w:tbl>
+      </w:body>
+    </w:document>"""
+    header_xml = b"""<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:p><w:r><w:t>City Hospital</w:t></w:r></w:p></w:hdr>"""
+    footer_xml = b"""<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:p><w:r><w:t>Confidential</w:t></w:r></w:p></w:ftr>"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", document_xml)
+        archive.writestr("word/header1.xml", header_xml)
+        archive.writestr("word/footer1.xml", footer_xml)
+    extracted = _extract_docx(buffer.getvalue())
+    assert "Discharge summary" in extracted
+    assert "Mobility | Needs walking frame" in extracted
+    assert "City Hospital" in extracted
+    assert "Confidential" in extracted
+
+
+def test_legacy_doc_extraction_uses_local_bounded_antiword(monkeypatch):
+    from types import SimpleNamespace
+    import app.api.document_lifecycle as lifecycle
+
+    seen = {}
+    monkeypatch.setattr(lifecycle.shutil, "which", lambda name: "/usr/bin/antiword")
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["timeout"] = kwargs["timeout"]
+        with open(command[-1], "rb") as source:
+            seen["input"] = source.read()
+        return SimpleNamespace(returncode=0, stdout=b"Discharge summary\\nMobility: walking frame", stderr=b"")
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)
+    result = lifecycle._extract_legacy_doc(b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-doc")
+    assert "Mobility: walking frame" in result
+    assert seen["command"][:2] == ["/usr/bin/antiword", "-w"]
+    assert seen["timeout"] == 15
+    assert seen["input"].startswith(b"\\xd0\\xcf\\x11\\xe0")
+
+
+def test_legacy_doc_extraction_fails_clearly_when_antiword_missing(monkeypatch):
+    from fastapi import HTTPException
+    import app.api.document_lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle.shutil, "which", lambda name: None)
+    with pytest.raises(HTTPException) as error:
+        lifecycle._extract_legacy_doc(b"legacy")
+    assert error.value.status_code == 503
