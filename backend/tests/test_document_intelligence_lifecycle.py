@@ -308,12 +308,13 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
             """))
             db.commit()
 
-        with pytest.raises(IntegrityError):
-            client.post(
-                f"/api/v1/documents/intelligence/{analysis_id}/review",
-                headers=auth,
-                json={"candidate_index": 0, "decision": "accept"},
-            )
+        failed_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert failed_review.status_code == 503, failed_review.text
+        assert "review was not committed" in failed_review.json()["detail"]
 
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=caregiver["person"]["id"]).count() == 0
