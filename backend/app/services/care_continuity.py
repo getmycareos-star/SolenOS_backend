@@ -888,7 +888,7 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
             source_kind in {"daily_capture_extraction", "document_extraction"}
             for source_kind, _ in linked
         )
-        if extraction_linked and not matching:
+        if extraction_linked:
             from app.services.uncertainty import _question_is_answered_by_current_lcr
             answered_by_lcr = _question_is_answered_by_current_lcr(
                 db, person_id, question.question or ""
