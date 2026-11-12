@@ -88,6 +88,8 @@ def test_post_situation_creates_evidence_and_event():
         assert data["message"] == "Care input recorded successfully."
         assert data["analysis_status"] == "complete"
         assert data["analysis_warning"] is None
+        assert data["qwen_review_required"] is False
+        assert isinstance(data["qwen_review_available"], bool)
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
         assert data["events"][0]["time_provenance"] == "entry_time_defaulted"
@@ -111,7 +113,7 @@ def test_saved_snap_care_photo_is_linked_to_situation_without_document_ocr():
         created, headers = create_authenticated_session(client, "Snap Photo Person")
         person_id = created["person"]["id"]
         caregiver_id = created["caregiver"]["id"]
-        photo_bytes = b"\\x89PNG\\r\\n\\x1a\\n" + b"care-photo-original-bytes"
+        photo_bytes = b"\x89PNG\r\n\x1a\n" + b"care-photo-original-bytes"
         uploaded = client.post(
             "/api/v1/upload",
             headers=headers,
