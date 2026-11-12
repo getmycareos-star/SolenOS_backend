@@ -437,6 +437,8 @@ class UncertaintyEngine:
                 "An equivalent unanswered clarification question already exists for this claim and subject; review its status and answer history before asking again."
             )
         db_question = OpenQuestionModel(**payload)
+        manual_revision_objects = self.db.info.setdefault("manual_care_state_revision_objects", set())
+        manual_revision_objects.add(id(db_question))
         try:
             self.db.add(db_question)
             self.db.flush()
@@ -452,6 +454,8 @@ class UncertaintyEngine:
         except Exception:
             self.db.rollback()
             raise
+        finally:
+            manual_revision_objects.discard(id(db_question))
 
     def update_open_question(
         self, question_id: str, update: OpenQuestionUpdate
@@ -464,6 +468,8 @@ class UncertaintyEngine:
         if not db_question:
             return None
 
+        manual_revision_objects = self.db.info.setdefault("manual_care_state_revision_objects", set())
+        manual_revision_objects.add(id(db_question))
         from app.services.care_continuity import _open_question_state, _record_open_question_revision
         before_state = _open_question_state(db_question)
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
@@ -650,6 +656,8 @@ class UncertaintyEngine:
         except Exception:
             self.db.rollback()
             raise
+        finally:
+            manual_revision_objects.discard(id(db_question))
 
     def list_open_questions(
         self,
