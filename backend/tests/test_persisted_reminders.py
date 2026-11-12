@@ -275,3 +275,77 @@ def test_web_push_registration_is_encrypted_scoped_and_revocable(monkeypatch):
     )
     assert revoked.status_code == 200, revoked.text
     assert revoked.json()["revoked"] is True
+
+
+
+def test_web_push_worker_records_provider_acceptance_without_exposing_care_details(monkeypatch):
+    from types import SimpleNamespace
+    import sys
+    import app.api.push_notifications as push_api
+    import app.services.reminder_delivery as delivery_service
+    from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
+
+    settings = SimpleNamespace(
+        vapid_public_key="public-vapid-key",
+        vapid_private_key="-----BEGIN PRIVATE KEY-----\\nprivate\\n-----END PRIVATE KEY-----",
+        vapid_subject="mailto:support@solenosai.net",
+        secret_key="stable-test-secret",
+    )
+    monkeypatch.setattr(push_api, "get_settings", lambda: settings)
+    monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
+    sent_payloads = []
+
+    class FakeWebPushException(Exception):
+        response = None
+
+    def fake_webpush(**kwargs):
+        sent_payloads.append(kwargs)
+        return SimpleNamespace(status_code=201)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pywebpush",
+        SimpleNamespace(WebPushException=FakeWebPushException, webpush=fake_webpush),
+    )
+
+    client = TestClient(app)
+    session = create_session(client, "Push delivery owner")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    endpoint = "https://push.example.test/subscription/delivery"
+    registered = client.post(
+        "/api/v1/notifications/push/subscriptions",
+        headers=headers,
+        json={"endpoint": endpoint, "keys": {"p256dh": "public-key", "auth": "auth-secret"}},
+    )
+    assert registered.status_code == 201, registered.text
+
+    db = TestSessionLocal()
+    try:
+        notification = CareNotification(
+            id="push-test-notification",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="Private care event title",
+            body="Private care details that must not appear on the lock screen.",
+            category="care_update",
+            priority="normal",
+        )
+        db.add(notification)
+        db.commit()
+
+        accepted = delivery_service.deliver_pending_web_pushes(
+            db=db,
+            now=datetime.now(timezone.utc),
+        )
+        assert accepted == 1
+        delivery = db.query(CarePushDelivery).filter_by(
+            notification_id=notification.id
+        ).one()
+        assert delivery.status == "accepted"
+        assert delivery.provider_accepted_at is not None
+        assert len(sent_payloads) == 1
+        assert "Private care event title" not in sent_payloads[0]["data"]
+        assert "Private care details" not in sent_payloads[0]["data"]
+        assert "You have a care update" in sent_payloads[0]["data"]
+    finally:
+        db.close()
