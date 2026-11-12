@@ -60,14 +60,14 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
             CareAssertion.subject_type == payload.subject_type,
             CareAssertion.subject_id == payload.subject_id,
             CareAssertion.field == payload.field,
-            CareAssertion.assertion_kind == "current_state",
+            CareAssertion.assertion_kind.in_(["current_state", "document_reviewed_observation"]),
             CareAssertion.id != assertion.id,
             CareAssertion.assertion_status.in_(["reported", "review_required", "accepted", "caregiver_reviewed"]),
         )
         .order_by(CareAssertion.recorded_at.asc())
         .all()
     )
-    if assertion.assertion_kind != "current_state":
+    if assertion.assertion_kind not in {"current_state", "document_reviewed_observation"}:
         peers = []
     conflicts = [peer for peer in peers if _value_key(peer.asserted_value) != _value_key(assertion.asserted_value)]
     if conflicts:
