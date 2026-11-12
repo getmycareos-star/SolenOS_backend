@@ -125,9 +125,13 @@ def deliver_due_reminders(db=None, now=None):
         if in_app_only_pending:
             session.commit()
 
-        from app.services.proactive_care_communications import sync_open_loop_due_notifications
-        if sync_open_loop_due_notifications(session, now=current):
-            session.commit()
+        try:
+            from app.services.proactive_care_communications import sync_open_loop_due_notifications
+            if sync_open_loop_due_notifications(session, now=current):
+                session.commit()
+        except Exception:
+            logger.exception("Open-loop deadline notification sync failed")
+            session.rollback()
 
         due = (
             session.query(CareReminder)
