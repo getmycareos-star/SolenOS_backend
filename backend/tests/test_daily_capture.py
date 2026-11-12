@@ -1469,7 +1469,7 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
         db.commit()
         db.close()
 
-        def claim(subject_id, field, value, *, person_id="person-daily-test", status="accepted", age_days=2):
+        def claim(subject_id, field, value, *, person_id="person-daily-test", status="accepted", age_days=2, epistemic_state="reported"):
             return CareAssertion(
                 person_id=person_id,
                 subject_type="medication",
@@ -1480,7 +1480,7 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
                 source_label="Caregiver report",
                 source_text="Recorded by caregiver",
                 assertion_status=status,
-                epistemic_state="reported",
+                epistemic_state=epistemic_state,
                 review_after_days=30,
                 recorded_at=datetime.now(timezone.utc) - timedelta(days=age_days),
             )
@@ -1497,6 +1497,8 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
             claim("med-conflict", "medication_name", "Aspirin"),
             claim("med-conflict", "medication_name", "Warfarin"),
             claim("med-conflict", "medication_status", "active"),
+            claim("med-inferred", "medication_name", "Inferred medicine", epistemic_state="inferred"),
+            claim("med-inferred", "medication_status", "active", epistemic_state="inferred"),
             claim("med-foreign", "medication_name", "Private medicine", person_id=foreign_person.id),
             claim("med-foreign", "medication_status", "active", person_id=foreign_person.id),
         ])
