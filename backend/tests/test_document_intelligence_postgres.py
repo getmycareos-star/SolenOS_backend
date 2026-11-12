@@ -36,6 +36,7 @@ from app.api.document_intelligence import (
     review_document_candidate,
 )
 from app.models.care import Caregiver, Person
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 from app.models.uncertainty import OpenQuestion
 from app.models.collaboration import EvidenceUpload
@@ -150,21 +151,18 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
         # Exercise the real multipart upload handler and persisted EvidenceUpload bytes.
         with Session() as db:
             uploaded = asyncio.run(upload_evidence(
-                _request(person_id, caregiver_id),
-                UploadFile(
+                request=_request(person_id, caregiver_id),
+                file=UploadFile(
                     filename="discharge-summary.txt",
                     file=io.BytesIO(original),
                     headers=Headers({"content-type": "text/plain"}),
                 ),
-                person_id,
-                caregiver_id,
-                "document",
-                "",
-                "not_provided",
-                "0",
-                json.dumps({"filename": "discharge-summary.txt"}),
-                "false",
-                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_type="document",
+                extracted_text="",
+                scan_review_status="not_provided",
+                db=db,
             ))
             assert uploaded["persisted"] is True
             evidence_id = uploaded["evidence_id"]
@@ -180,26 +178,24 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
         with Session() as db:
             understood = analyze_saved_document(evidence_id, _request(person_id, caregiver_id), db)
             assert understood["analysis_id"] == analysis_id
-            assert understood["review_required"] is True
+            assert understood["review_required"] is False
+            assert understood["review_available"] is True
             assert understood["written_to_lcr"] is False
             assert len(understood["observations"]) == 2
 
-        # Extraction questions must be durable, linked to the saved document,
-        # and visible through the same OpenQuestion store used by the LCR.
+        # Model-generated questions remain attached to the source analysis.
+        # They do not become active caregiver work without a consequential
+        # decision dependency.
         with Session() as db:
-            clarification = db.query(OpenQuestion).filter_by(
+            assert db.query(OpenQuestion).filter_by(
                 person_id=person_id,
                 status="open",
                 question="Was this usual for the person?",
-            ).one()
-            assert clarification.evidence_ids == [evidence_id]
-            assert clarification.created_by_caregiver_id == caregiver_id
-            assert clarification.context[0]["source_kind"] == "document_extraction"
-            assert clarification.context[0]["source_record_refs"] == [
-                {"record_type": "evidence", "record_id": evidence_id}
-            ]
+            ).count() == 0
+            persisted = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+            assert "Was this usual for the person?" in persisted.candidates["document_intelligence"]["open_questions"]
 
-        # Replaying document understanding must not create a duplicate question.
+        # Replaying document understanding preserves the same analysis and questions.
         with Session() as db:
             replayed = analyze_saved_document(evidence_id, _request(person_id, caregiver_id), db)
             assert replayed["analysis_id"] == analysis_id
@@ -208,7 +204,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                 person_id=person_id,
                 status="open",
                 question="Was this usual for the person?",
-            ).count() == 1
+            ).count() == 0
 
         # Persisted extraction reads and reviews must use hashes, not rerun expensive OCR.
         def unexpected_ocr(*args, **kwargs):
