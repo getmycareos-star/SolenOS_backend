@@ -45,8 +45,9 @@ def test_vapid_configuration_rejects_mismatched_public_and_private_keys():
 
 
 def test_vapid_configuration_rejects_invalid_key_encodings():
-    assert "public key" in vapid_configuration_error(_settings("not-base64!", "also-invalid"))
-    assert "private key" in vapid_configuration_error(_settings(*_key_pair()[:1], "bad"))
+    public_key, private_key = _key_pair()
+    assert "public key" in vapid_configuration_error(_settings("not-base64!", private_key))
+    assert "private key" in vapid_configuration_error(_settings(public_key, "bad"))
 
 
 def test_vapid_configuration_rejects_non_https_and_non_mailto_subjects():
