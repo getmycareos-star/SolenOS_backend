@@ -350,6 +350,11 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
             db.commit()
 
         with Session() as db:
+            extraction = extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
+            assert extraction["source_evidence_id"] == evidence_id
+            assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 1
+
+        with Session() as db:
             result = delete_uploaded_document(evidence_id, _request(person_id, caregiver_id), db)
             assert result["deleted"] is True
             assert result["original_file_removed"] is True
