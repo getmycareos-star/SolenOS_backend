@@ -527,7 +527,7 @@ def next_best_questions(
     ).all()
     uncertainty_records = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
-        Contradiction.resolution_status.in_(["unresolved", "qualified"]),
+        Contradiction.resolution_status.in_(["unresolved", "reopened", "partially_resolved", "qualified"]),
     ).all()
     unresolved_keys = {
         (item.subject_type, item.subject_id, item.field)
