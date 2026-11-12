@@ -226,6 +226,51 @@ def test_refresh_rotates_token_without_changing_record_scope():
     )
     assert new_token_response.status_code == 200, new_token_response.text
 
+    from app.models.privacy_delivery import AuditLogEvent
+    db = TestSessionLocal()
+    try:
+        actions = db.query(AuditLogEvent.action).filter(
+            AuditLogEvent.target_type == "anonymous_session",
+            AuditLogEvent.target_id == refreshed["session_id"],
+        ).all()
+        assert "anonymous_session.created" in {row[0] for row in actions}
+        assert "anonymous_session.refreshed" in {row[0] for row in actions}
+    finally:
+        db.close()
+
+
+def test_session_revocation_is_audited_and_old_token_is_denied():
+    client = TestClient(app)
+    created = create_session(client, "Revocation recipient")
+    revoked = client.post(
+        "/api/v1/sessions/revoke",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revoked"] is True
+    assert revoked.json()["care_record_retained"] is True
+
+    denied = client.get(
+        f"/api/v1/persons/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert denied.status_code == 401, denied.text
+
+    from app.models.privacy_delivery import AuditLogEvent
+    db = TestSessionLocal()
+    try:
+        event = db.query(AuditLogEvent).filter_by(
+            action="anonymous_session.revoked",
+            target_type="anonymous_session",
+        ).one()
+        assert event.actor_id == created["caregiver"]["id"]
+        assert event.subject_id == created["person"]["id"]
+        assert event.person_id == created["person"]["id"]
+        assert event.outcome == "success"
+        assert created["access_token"] not in str(event.record_metadata)
+    finally:
+        db.close()
+
 
 def test_situation_hydration_returns_only_persisted_records_for_session_scope():
     client = TestClient(app)
