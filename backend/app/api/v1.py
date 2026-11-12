@@ -850,6 +850,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         qwen_candidates = None
 
     change_intelligence_status = "available"
+    execution = None
     try:
         execution = execute_care_continuity_reconciliation(
             db,
@@ -862,6 +863,19 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     except Exception:
         db.rollback()
         change_intelligence_status = "unavailable"
+        execution = {
+            "contract_version": "1.0",
+            "workflow": event_type,
+            "person_id": person_id,
+            "source_event_id": event.id,
+            "source_evidence_id": evidence.id if evidence is not None else None,
+            "stages": {
+                "source_preservation": "verified",
+                "evidence": "verified" if evidence is not None else "unavailable",
+                "reconciliation": "unavailable",
+            },
+            "transaction_owner": "caller",
+        }
         logger.exception(
             "Shared care-continuity execution failed after durable capture event %s",
             event.id,
@@ -871,6 +885,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "success": True,
         "id": event.id,
         "change_intelligence_status": change_intelligence_status,
+        "care_continuity_execution": execution,
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
         "evidence_ids": list(event.evidence_ids or []),
