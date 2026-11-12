@@ -732,10 +732,15 @@ def get_claim_assessment_impact(
                 .first()
             )
             prerequisite_observation_changes = _observations_added_after_assessment(prerequisite_id, prerequisite)
-            assessment_changed = bool(
-                prerequisite and dependent_assessment and prerequisite.created_at and dependent_assessment.created_at
-                and prerequisite.created_at > dependent_assessment.created_at
-            )
+            assessment_changed = False
+            if prerequisite and dependent_assessment and prerequisite.created_at and dependent_assessment.created_at:
+                prerequisite_time = prerequisite.created_at
+                dependent_time = dependent_assessment.created_at
+                if prerequisite_time.tzinfo is None:
+                    prerequisite_time = prerequisite_time.replace(tzinfo=timezone.utc)
+                if dependent_time.tzinfo is None:
+                    dependent_time = dependent_time.replace(tzinfo=timezone.utc)
+                assessment_changed = prerequisite_time > dependent_time
             if prerequisite_observation_changes or assessment_changed or prerequisite is None:
                 changed_prerequisite_claim_ids.append(prerequisite_id)
             pending_claim_ids.append(prerequisite_id)
