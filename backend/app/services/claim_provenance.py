@@ -84,6 +84,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             ("recorded appointment", "appointment"),
             ("recorded handoff", "care_handoff"),
             ("recorded notification", "notification"),
+            ("recorded freshness policy application", "freshness_assessment"),
             ("canonical lcr source", "lcr_record"),
         ):
             if marker in prefix:
@@ -93,7 +94,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             try:
                 payload = json.loads(text[text.index("{"):])
                 if isinstance(payload, dict):
-                    for key in ("source_id", "event_id", "evidence_id", "appointment_id", "handoff_id", "id"):
+                    for key in ("id", "source_id", "event_id", "evidence_id", "appointment_id", "handoff_id"):
                         if payload.get(key):
                             record_id = str(payload[key])
                             break
@@ -116,12 +117,13 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
                 "appointment": "Appointment record",
                 "care_handoff": "Care handoff",
                 "notification": "Follow-up notice",
+                "freshness_assessment": "Review of how current a source is",
                 "lcr_record": "Care record detail",
             }.get(record_type, "Care record"),
             "source_text": text,
             "source_excerpt": text[:700],
             "record_status": None,
-            "related_evidence_ids": bracket_ids[1:2] if record_type == "document_extraction" and len(bracket_ids) > 1 else [],
+            "related_evidence_ids": bracket_ids[1:2] if record_type in {"document_extraction", "freshness_assessment"} and len(bracket_ids) > 1 else [],
         })
     return records
 
