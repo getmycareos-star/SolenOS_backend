@@ -1478,6 +1478,7 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
     """Scenario 03: separate family reports and administration evidence never pick a medication winner."""
     from app.models.care import Evidence
     from app.models.uncertainty import Contradiction
+    from app.models.care_continuity import CareAssertion
     from app.schemas.care_continuity import CareAssertionCreate
     from app.services.care_continuity import create_assertion
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
