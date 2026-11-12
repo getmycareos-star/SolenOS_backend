@@ -7,6 +7,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -29,8 +30,16 @@ class PushSubscriptionPayload(BaseModel):
     @field_validator("endpoint")
     @classmethod
     def validate_endpoint(cls, value):
-        if not value.startswith("https://"):
-            raise ValueError("Push endpoint must use HTTPS")
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").lower()
+        allowed = (
+            host == "fcm.googleapis.com"
+            or host.endswith(".push.services.mozilla.com")
+            or host.endswith(".push.apple.com")
+            or host.endswith(".notify.windows.com")
+        )
+        if parsed.scheme != "https" or not allowed or parsed.username or parsed.password or parsed.fragment:
+            raise ValueError("Push endpoint must use a supported HTTPS push-service host")
         return value
 
     @field_validator("keys")
