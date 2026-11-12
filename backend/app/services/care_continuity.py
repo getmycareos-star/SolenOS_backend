@@ -349,6 +349,7 @@ def next_best_questions(
             and entry.get("necessity_rationale", "").strip()
             and isinstance(entry.get("decision_dependency"), str)
             and entry.get("decision_dependency", "").strip()
+            and bool(item.evidence_ids)
         ), None)
         necessity = "necessary" if explicit_assessment else "not_assessed"
         necessity_rationale = (
