@@ -134,7 +134,7 @@ def _make_scenario(case_number: int, family: str, variant: int) -> dict:
             "assertions": [
                 {"topic": observation_topic, "value": later_value, "status": "reported",
                  "source_event_id": f"{case_id}-07"},
-                {"topic": "cognition", "value": "increased_confusion", "status": "reported",
+                {"topic": "confusion", "value": "increased confusion", "status": "reported",
                  "source_event_id": f"{case_id}-08"},
             ],
             "medication_current_state": "unresolved_not_promoted",
