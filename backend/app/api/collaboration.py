@@ -872,7 +872,7 @@ async def upload_evidence(
                 "persisted": True,
                 "idempotent_replay": True,
                 "document_processing_job_id": document_job.id if document_job else None,
-                "processing_status": document_job.status if document_job else "not_applicable",
+                "processing_status": document_job.status if document_job else ("queue_unavailable" if prior.type == "document" else "not_applicable"),
                 "duplicate_detected": bool(prior_meta.get("duplicate_detected")),
                 "duplicate_of_evidence_id": prior_meta.get("duplicate_of_evidence_id"),
                 "source_integrity": {
@@ -967,7 +967,7 @@ async def upload_evidence(
         "sha256": digest,
         "persisted": True,
         "document_processing_job_id": document_job.id if document_job else None,
-        "processing_status": "queued" if document_job else "not_applicable",
+        "processing_status": document_job.status if document_job else ("queue_unavailable" if evidence_type == "document" else "not_applicable"),
         "duplicate_detected": duplicate_upload is not None,
         "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
         "source_integrity": {
