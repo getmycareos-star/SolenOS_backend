@@ -1097,46 +1097,121 @@ def fulfil_approved_deletion(
         dependency_foreign_keys = {
             name: inspector.get_foreign_keys(name) for name in dependency_tables
         }
-        reachable_depth = {"persons": 0, "caregivers": 0}
-        # Legacy tables may carry a direct person_id/caregiver_id without a
-        # declared FK. Treat those scoped tables as additional graph roots so
-        # indirect legacy dependants are ordered and erased before their parent.
-        for table_name in dependency_tables:
-            if table_name in {"persons", "caregivers"}:
+        # Collapse schema-level FK cycles into strongly connected components.
+        # A cycle among legacy/ORM tables is not evidence that the scoped rows
+        # themselves form a cycle; refusing every deletion because the schema
+        # contains one blocks unrelated privacy erasures. The condensed graph is
+        # acyclic, so its topological depth still orders dependants before parents.
+        children_by_parent = {name: set() for name in dependency_tables}
+        for child_name, foreign_keys in dependency_foreign_keys.items():
+            if child_name in {"persons", "caregivers"}:
                 continue
-            column_names = {
-                column["name"] for column in inspector.get_columns(table_name)
+            for foreign_key in foreign_keys:
+                parent_name = foreign_key.get("referred_table")
+                if parent_name in children_by_parent:
+                    children_by_parent[parent_name].add(child_name)
+
+        visit_index = 0
+        visit_indices = {}
+        low_links = {}
+        stack = []
+        on_stack = set()
+        components = []
+
+        def visit_dependency(node):
+            nonlocal visit_index
+            visit_indices[node] = visit_index
+            low_links[node] = visit_index
+            visit_index += 1
+            stack.append(node)
+            on_stack.add(node)
+            for child in children_by_parent.get(node, ()):
+                if child not in visit_indices:
+                    visit_dependency(child)
+                    low_links[node] = min(low_links[node], low_links[child])
+                elif child in on_stack:
+                    low_links[node] = min(low_links[node], visit_indices[child])
+            if low_links[node] == visit_indices[node]:
+                component = []
+                while stack:
+                    member = stack.pop()
+                    on_stack.remove(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                components.append(component)
+
+        for table_name in dependency_tables:
+            if table_name not in visit_indices:
+                visit_dependency(table_name)
+
+        component_for = {
+            table_name: component_index
+            for component_index, component in enumerate(components)
+            for table_name in component
+        }
+        component_children = {index: set() for index in range(len(components))}
+        for parent_name, child_names in children_by_parent.items():
+            parent_component = component_for[parent_name]
+            for child_name in child_names:
+                child_component = component_for[child_name]
+                if parent_component != child_component:
+                    component_children[parent_component].add(child_component)
+
+        direct_scope_roots = set()
+        for raw_table_name in raw_tables:
+            raw_column_names = {
+                column["name"] for column in inspector.get_columns(raw_table_name)
             }
-            if "person_id" in column_names or "caregiver_id" in column_names:
-                reachable_depth[table_name] = 1
-        dependency_graph_converged = False
-        for _ in range(len(dependency_tables) + 1):
-            changed_depth = False
-            for child_name, foreign_keys in dependency_foreign_keys.items():
-                # The two subject roots are fixed graph origins, not dependants
-                # of one another even if the schema contains a reverse FK.
-                if child_name in {"persons", "caregivers"}:
+            if {"person_id", "caregiver_id"} & raw_column_names:
+                direct_scope_roots.add(raw_table_name)
+        root_table_names = {"persons", "caregivers"} | direct_scope_roots
+        root_components = {
+            component_for[root]
+            for root in root_table_names
+            if root in component_for
+        }
+        reachable_components = set(root_components)
+        pending_components = list(root_components)
+        while pending_components:
+            parent_component = pending_components.pop()
+            for child_component in component_children[parent_component]:
+                if child_component not in reachable_components:
+                    reachable_components.add(child_component)
+                    pending_components.append(child_component)
+
+        component_indegree = {index: 0 for index in reachable_components}
+        for parent_component in reachable_components:
+            for child_component in component_children[parent_component]:
+                if child_component in reachable_components:
+                    component_indegree[child_component] += 1
+
+        component_depth = {component_index: 0 for component_index in root_components}
+        ready = sorted(
+            component_index
+            for component_index, indegree in component_indegree.items()
+            if indegree == 0
+        )
+        while ready:
+            component_index = ready.pop(0)
+            for child_component in sorted(component_children[component_index]):
+                if child_component not in reachable_components:
                     continue
-                for foreign_key in foreign_keys:
-                    parent_name = foreign_key.get("referred_table")
-                    # Self-referencing tables (for example supersession chains)
-                    # are deleted as a scoped set. Treating the self-FK as a
-                    # table-order dependency makes the longest-depth walk grow
-                    # forever even though it does not introduce a table ordering.
-                    if parent_name not in reachable_depth or parent_name == child_name:
-                        continue
-                    candidate_depth = reachable_depth[parent_name] + 1
-                    if child_name not in reachable_depth or candidate_depth > reachable_depth[child_name]:
-                        reachable_depth[child_name] = candidate_depth
-                        changed_depth = True
-            if not changed_depth:
-                dependency_graph_converged = True
-                break
-        if not dependency_graph_converged:
-            raise HTTPException(
-                status_code=409,
-                detail="Legacy data dependency cycle prevents a safe deletion order; request was not fulfilled.",
-            )
+                candidate_depth = component_depth[component_index] + 1
+                component_depth[child_component] = max(
+                    component_depth.get(child_component, 0),
+                    candidate_depth,
+                )
+                component_indegree[child_component] -= 1
+                if component_indegree[child_component] == 0:
+                    ready.append(child_component)
+                    ready.sort()
+
+        reachable_depth = {
+            table_name: component_depth[component_for[table_name]]
+            for table_name in dependency_tables
+            if component_for[table_name] in component_depth
+        }
 
         for raw_table_name in sorted(
             raw_tables,
