@@ -364,6 +364,7 @@ def _epistemic_context(db: Session, person_id: str, subject_type: str, subject_i
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.subject_type == subject_type,
         OpenQuestionModel.status == "open",
+        OpenQuestionModel.necessity == "necessary",
     ).all()
 
     if contradictions:
