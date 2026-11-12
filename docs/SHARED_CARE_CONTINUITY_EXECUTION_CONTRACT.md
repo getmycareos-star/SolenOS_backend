@@ -173,6 +173,8 @@ The coordinator is now used by these backend paths:
 - Companion care-update acceptance.
 - Care assertion acceptance and clarification-answer acceptance.
 - Caregiver correction and reassessment.
+- Appointment outcome proposal acceptance, with the exact appointment workspace and immutable revision validated before the accepted assertion and reassessment commit together.
+- Handoff draft approval, through a read-only coordinator mode that validates the caregiver-owned draft and persisted revision without writing back into the LCR. Actual handoff creation still performs its own consent, approval-hash, recipient, scope, and source-freshness checks.
 
 The accepted-review paths that use the coordinator commit the review decision and reconciliation in the same transaction. The API surfaces a receipt to the frontend for Daily Capture, Add Record, Companion, and evidence-review responses. The clarification-review API returns a receipt, but its new frontend review controls were reverted after repeated Netlify build failures; the existing UI still saves answers separately and does not yet expose the review action. Correction receipts are returned by the backend response contract, but the caregiver-facing correction UI has not yet been verified to display them.
 
@@ -182,7 +184,7 @@ This ledger is not a claim that the full 13-stage contract is complete.
 
 1. The coordinator currently owns common source validation and the reconciliation boundary. Extraction, epistemic classification, source-span assessment, question generation, and caregiver-review policy remain in their existing domain adapters; they are not yet executed by one generic orchestrator.
 2. There is no generic durable execution ledger for every stage, workflow, retry, and worker attempt. Current receipts are returned by the individual API calls; they are not a universal persisted execution record.
-3. Appointment workspace and handoff workflows have not yet been routed through this coordinator. Their snapshots, consent, and versioning remain specialised. They must be audited to establish whether they are read-only derived artifacts or whether any of their user inputs need to enter the LCR as source evidence.
+3. Appointment outcome review and handoff-draft approval now use the coordinator. Appointment preparation/during-visit note capture remains a versioned workspace artifact and does not independently become an LCR fact. Handoff draft preparation and sharing remain read-only outputs; the handoff draft approval coordinator mode validates the exact persisted draft revision but intentionally does not reconcile or write back into the LCR.
 4. Correction dependency propagation and stale-artifact invalidation still need end-to-end verification across summaries, appointments, handoffs, and other derived views.
 5. The new coordinator tests have been authored but have not been executed in a confirmed PostgreSQL test run. Unit tests, live cross-person denial, process restart, idempotent retry, and transaction-failure tests remain required.
 6. The Railway production service is configured with `watchPatterns: ["MANUAL_DEPLOY_ONLY"]`. Commits to backend `main` do not automatically deploy this service. The live deployment observed during this implementation predates these commits. No production deployment or migration was initiated as part of this work.
