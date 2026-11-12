@@ -653,34 +653,92 @@ def get_claim_assessment_impact(
     if unassessed_claim_evidence_ids:
         reasons.append("claim_has_evidence_not_in_latest_assessment")
 
-    # A declared prerequisite assessment that changed after this assessment
-    # invalidates the assumption that this dependent assessment reflects it.
-    dependency_edges = db.query(EvidenceClaimDependency).filter(
+    def _observations_added_after_assessment(target_claim_id: str, assessment):
+        if assessment is None:
+            return []
+        target = db.query(CareAssertion).filter(
+            CareAssertion.id == target_claim_id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if target is None:
+            return []
+        target_evidence_ids = {str(value) for value in (target.evidence_ids or [])}
+        target_assessment_links = assessment.evidence_links if isinstance(assessment.evidence_links, list) else []
+        target_evidence_ids.update(
+            str(item.get("evidence_id"))
+            for item in target_assessment_links
+            if isinstance(item, dict) and item.get("evidence_id")
+        )
+        if not target_evidence_ids or not inspect(db.get_bind()).has_table("evidence_observations"):
+            return []
+        rows = db.query(EvidenceObservation).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id.in_(target_evidence_ids),
+        ).all()
+        changed = []
+        assessed_at = assessment.created_at
+        for observation in rows:
+            recorded_at = observation.recorded_at
+            if assessed_at is None or recorded_at is None:
+                continue
+            left, right = assessed_at, recorded_at
+            if left.tzinfo is None:
+                left = left.replace(tzinfo=timezone.utc)
+            if right.tzinfo is None:
+                right = right.replace(tzinfo=timezone.utc)
+            if right > left:
+                changed.append(str(observation.id))
+        return changed
+
+    changed_observation_ids = _observations_added_after_assessment(claim_id, latest)
+    if changed_observation_ids:
+        reasons.append("source_observation_added_or_corrected_after_assessment")
+
+    # Walk the complete declared prerequisite chain. A changed source observation
+    # or a newer prerequisite assessment makes each dependent assessment require review.
+    all_dependency_edges = db.query(EvidenceClaimDependency).filter(
         EvidenceClaimDependency.person_id == person_id,
-        EvidenceClaimDependency.claim_id == claim_id,
         EvidenceClaimDependency.dependency_type.in_({"derived_from", "requires"}),
     ).all()
+    edges_by_claim = {}
+    for edge in all_dependency_edges:
+        edges_by_claim.setdefault(str(edge.claim_id), []).append(edge)
     changed_prerequisite_claim_ids = []
-    for edge in dependency_edges:
-        prerequisite = (
+    pending_claim_ids = [str(claim_id)]
+    visited_claim_ids = {str(claim_id)}
+    while pending_claim_ids:
+        dependent_id = pending_claim_ids.pop(0)
+        dependent_assessment = latest if dependent_id == str(claim_id) else (
             db.query(EvidenceClaimAssessment)
             .filter(
                 EvidenceClaimAssessment.person_id == person_id,
-                EvidenceClaimAssessment.claim_id == edge.depends_on_claim_id,
+                EvidenceClaimAssessment.claim_id == dependent_id,
             )
             .order_by(EvidenceClaimAssessment.claim_version.desc())
             .first()
         )
-        if prerequisite and prerequisite.created_at and latest.created_at:
-            latest_time = latest.created_at
-            prerequisite_time = prerequisite.created_at
-            # SQLite may return naive timestamps while PostgreSQL returns aware ones.
-            if latest_time.tzinfo is None and prerequisite_time.tzinfo is not None:
-                latest_time = latest_time.replace(tzinfo=timezone.utc)
-            elif latest_time.tzinfo is not None and prerequisite_time.tzinfo is None:
-                prerequisite_time = prerequisite_time.replace(tzinfo=timezone.utc)
-            if prerequisite_time > latest_time:
-                changed_prerequisite_claim_ids.append(edge.depends_on_claim_id)
+        for edge in edges_by_claim.get(dependent_id, []):
+            prerequisite_id = str(edge.depends_on_claim_id)
+            if prerequisite_id in visited_claim_ids:
+                continue
+            visited_claim_ids.add(prerequisite_id)
+            prerequisite = (
+                db.query(EvidenceClaimAssessment)
+                .filter(
+                    EvidenceClaimAssessment.person_id == person_id,
+                    EvidenceClaimAssessment.claim_id == prerequisite_id,
+                )
+                .order_by(EvidenceClaimAssessment.claim_version.desc())
+                .first()
+            )
+            prerequisite_observation_changes = _observations_added_after_assessment(prerequisite_id, prerequisite)
+            assessment_changed = bool(
+                prerequisite and dependent_assessment and prerequisite.created_at and dependent_assessment.created_at
+                and prerequisite.created_at > dependent_assessment.created_at
+            )
+            if prerequisite_observation_changes or assessment_changed or prerequisite is None:
+                changed_prerequisite_claim_ids.append(prerequisite_id)
+                pending_claim_ids.append(prerequisite_id)
     if changed_prerequisite_claim_ids:
         reasons.append("prerequisite_claim_assessment_changed")
 
@@ -696,7 +754,7 @@ def get_claim_assessment_impact(
     if unresolved_conflicts:
         reasons.append("matching_conflicts_remain_unresolved")
 
-    review_required = bool(reasons) or latest.status in {"unverified", "uncertain", "conflicting", "missing_evidence", "stale"}
+    review_required = bool(reasons or changed_prerequisite_claim_ids) or latest.status in {"unverified", "uncertain", "conflicting", "missing_evidence", "stale"}
     return {
         "claim_id": claim_id,
         "person_id": person_id,
@@ -709,6 +767,7 @@ def get_claim_assessment_impact(
         "missing_evidence_ids": missing_evidence_ids,
         "unassessed_claim_evidence_ids": unassessed_claim_evidence_ids,
         "changed_prerequisite_claim_ids": sorted(set(changed_prerequisite_claim_ids)),
+        "changed_observation_ids": changed_observation_ids,
         "unresolved_conflicts": [
             {
                 "conflict_id": item.id,
