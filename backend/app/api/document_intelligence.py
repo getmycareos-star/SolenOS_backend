@@ -404,7 +404,7 @@ def _persist_medication_document_conflict_question(
     ).all()
     for question in existing_questions:
         context_items = question.context if isinstance(question.context, list) else []
-        if any(
+        if evidence_id in (question.evidence_ids or []) or any(
             isinstance(item, dict) and item.get("source_sha256") == upload.sha256
             for item in context_items
         ):
