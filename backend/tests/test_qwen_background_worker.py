@@ -187,6 +187,9 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
         return {
             "workflow": "appointment",
             "reply": "The appointment date was not supplied.",
+            "ai_generated": True,
+            "provider_status": "available",
+            "model": "qwen3.5:4b",
             "source_event_ids": [],
             "source_evidence_ids": [],
             "source_appointment_ids": ["appointment-record-123456"],
@@ -218,6 +221,10 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
     assert job.result_text is None
     output = db.query(QwenModelOutput).filter_by(job_id=job_id).one()
     assert output.output_text == "The appointment date was not supplied."
+    assert output.model_name == "qwen3.5:4b"
+    assert output.output_metadata["inference_provider"] == "ollama"
+    assert output.output_metadata["model_name"] == "qwen3.5:4b"
+    assert output.output_metadata["live_inference_confirmed"] is True
     assert output.review_status == "pending_review"
     assert output.review_required is True
     assert output.written_to_lcr is False
