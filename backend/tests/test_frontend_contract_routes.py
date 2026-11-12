@@ -1265,7 +1265,7 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
         reminder_id = reminder["id"]
         assert reminder["status"] == "open"
         assert reminder["delivery_mode"] == "in_app_notification_feed"
-        assert reminder["notification_delivery_status"] == "not_sent"
+        assert reminder["notification_delivery_status"] == "in_app_notification_created"
         assert reminder["created_by_caregiver_id"] == caregiver_id
         assert reminder["due_at"].endswith(("Z", "+00:00")), reminder["due_at"]
 
@@ -1294,7 +1294,7 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
         assert completed.json()["status"] == "completed"
         assert completed.json()["completed_by_caregiver_id"] == caregiver_id
         assert completed.json()["completion_note"] == "Questions reviewed."
-        assert completed.json()["notification_delivery_status"] == "not_sent"
+        assert completed.json()["notification_delivery_status"] == "in_app_notification_created"
 
         cannot_cancel_completed = client.patch(
             f"/api/v1/reminders/{reminder_id}/cancel",

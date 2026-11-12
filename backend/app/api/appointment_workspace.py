@@ -185,6 +185,9 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
             if existing is not None:
                 raise HTTPException(status_code=409, detail="This save key was already used for different appointment information") from exc
         raise HTTPException(status_code=503, detail="Appointment workspace could not be persisted") from exc
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Appointment workspace could not be persisted") from exc

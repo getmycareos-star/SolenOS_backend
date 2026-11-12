@@ -3908,6 +3908,12 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         ).all()
         assert {revision.target_id for revision in creation_revisions} == {row.id for row in first}
 
+        first_revision_count = db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person.id,
+            CareStateRevision.target_type == "open_questions",
+        ).count()
+        assert first_revision_count >= len(first)
+
         second = persist_source_clarification_questions(
             db,
             person_id=person.id,
@@ -3925,7 +3931,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         assert db.query(CareStateRevision).filter(
             CareStateRevision.person_id == person.id,
             CareStateRevision.target_type == "open_questions",
-        ).count() == 2
+        ).count() == first_revision_count
 
         # A second authorized caregiver can review a document uploaded by the
         # first caregiver without rewriting the original uploader attribution.
@@ -3946,10 +3952,18 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             {"record_type": "evidence", "record_id": evidence.id}
         ]
         assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 3
-        assert db.query(CareStateRevision).filter(
+        all_question_revisions = db.query(CareStateRevision).filter(
             CareStateRevision.person_id == person.id,
             CareStateRevision.target_type == "open_questions",
-        ).count() == 3
+        ).all()
+        created_question_revisions = [
+            revision for revision in all_question_revisions
+            if revision.change_kind == "created"
+        ]
+        expected_question_ids = {row.id for row in first} | {document_questions[0].id}
+        assert len(created_question_revisions) == 3
+        assert {revision.target_id for revision in created_question_revisions} == expected_question_ids
+        assert len(all_question_revisions) > first_revision_count
     finally:
         teardown_db()
 

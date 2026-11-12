@@ -1341,6 +1341,8 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                for event in ordered_events):
             persisted_conflicts = db.query(Contradiction).filter(
                 Contradiction.person_id == person.id,
+                Contradiction.subject_type == "delta_engine_report",
+                Contradiction.subject_id == "medication",
                 Contradiction.resolution_status == "unresolved",
             ).all()
             assert persisted_conflicts, f"{scenario['scenario_id']}: expected persisted unresolved conflicts"
