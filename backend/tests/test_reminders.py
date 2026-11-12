@@ -182,3 +182,104 @@ def test_reminder_requires_timezone_aware_due_date_and_nonblank_title():
         },
     )
     assert blank.status_code == 422, blank.text
+
+
+
+def test_due_reminders_create_one_in_app_notification_and_are_idempotent():
+    from app.models.notifications import CareNotification
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    session = create_session(client, "Caregiver due reminder")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    due_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=headers,
+        json={
+            "person_id": session["person"]["id"],
+            "title": "Call the clinic",
+            "note": "Ask about the appointment time.",
+            "due_at": due_at,
+        },
+    )
+    assert created.status_code == 201, created.text
+    reminder_id = created.json()["id"]
+
+    db = TestSessionLocal()
+    try:
+        assert deliver_due_reminders(db=db) == 1
+        assert deliver_due_reminders(db=db) == 0
+        notifications = db.query(CareNotification).filter(
+            CareNotification.source_event_id == reminder_id,
+            CareNotification.category == "reminder_due",
+        ).all()
+        assert len(notifications) == 1
+        assert notifications[0].caregiver_id == session["caregiver"]["id"]
+        assert notifications[0].title == "Call the clinic"
+        assert notifications[0].body == "Ask about the appointment time."
+    finally:
+        db.close()
+
+
+def test_due_reminder_delivery_skips_completed_and_disabled_reminders():
+    from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    session = create_session(client, "Caregiver completed reminder")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    due_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=headers,
+        json={"person_id": session["person"]["id"], "title": "Already done", "due_at": due_at},
+    )
+    assert created.status_code == 201, created.text
+    reminder_id = created.json()["id"]
+    completed = client.patch(
+        f"/api/v1/reminders/{reminder_id}/complete",
+        headers=headers,
+        json={},
+    )
+    assert completed.status_code == 200, completed.text
+
+    db = TestSessionLocal()
+    try:
+        assert deliver_due_reminders(db=db) == 0
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id == reminder_id,
+            CareNotification.category == "reminder_due",
+        ).count() == 0
+    finally:
+        db.close()
+
+    second = create_session(client, "Caregiver disabled reminders")
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    disabled = client.post(
+        "/api/v1/reminders",
+        headers=second_headers,
+        json={
+            "person_id": second["person"]["id"],
+            "title": "Notifications disabled",
+            "due_at": due_at,
+        },
+    )
+    assert disabled.status_code == 201, disabled.text
+    db = TestSessionLocal()
+    try:
+        db.add(CareNotificationPreference(
+            person_id=second["person"]["id"],
+            caregiver_id=second["caregiver"]["id"],
+            reminders_enabled=False,
+            quiet_hours_enabled=False,
+        ))
+        db.commit()
+        assert deliver_due_reminders(db=db) == 0
+        assert db.query(CareNotification).filter(
+            CareNotification.source_event_id == disabled.json()["id"],
+            CareNotification.category == "reminder_due",
+        ).count() == 0
+    finally:
+        db.close()
