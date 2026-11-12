@@ -23,6 +23,7 @@ dependencies = [
     "Pillow>=10.1.0",
     "pytesseract>=0.3.13",
     "pywebpush>=2.0.3",
+    "aspose-email-foss==26.3",
 ]
 
 [build-system]
