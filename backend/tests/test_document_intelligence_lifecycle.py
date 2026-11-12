@@ -579,3 +579,83 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+def test_document_medication_assertion_conflicts_with_existing_canonical_medication(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    quote = "Donepezil 10 mg once daily."
+    source = "[Page 1]\\nMedication list: " + quote
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        return {
+            "observations": [{
+                "subject": "Donepezil",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Medication reconciliation caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+
+        db = Session()
+        try:
+            db.add(CareAssertion(
+                person_id=caregiver["person"]["id"],
+                subject_type="person",
+                subject_id=caregiver["person"]["id"],
+                field="medication",
+                assertion_kind="current_state",
+                asserted_value="Medication: Donepezil 5 mg once daily",
+                source_label="Earlier caregiver report",
+                source_text="Caregiver previously reported Donepezil 5 mg once daily.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver["caregiver"]["id"],
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert understood.status_code == 201, understood.text
+        assert understood.json()["observations"][0]["field_type"] == "medication"
+
+        accepted = client.post(
+            f"/api/v1/documents/intelligence/{understood.json()['analysis_id']}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["written_to_lcr"] is True
+
+        from app.models.uncertainty import Contradiction
+        db = Session()
+        try:
+            document_assertion = db.query(CareAssertion).filter(
+                CareAssertion.id == accepted.json()["source_record_ref"]["record_id"],
+                CareAssertion.person_id == caregiver["person"]["id"],
+            ).one()
+            assert document_assertion.field == "medication"
+            assert document_assertion.assertion_status == "accepted"
+            contradiction = db.query(Contradiction).filter(
+                Contradiction.person_id == caregiver["person"]["id"],
+                Contradiction.field == "medication",
+            ).one()
+            assert contradiction.resolution_status == "unresolved"
+            assert document_assertion.id in contradiction.source_assertion_ids
+            assert len(contradiction.source_assertion_ids) == 2
+        finally:
+            db.close()
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
