@@ -25,6 +25,7 @@ from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion, EvidenceObservation
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.care_continuity import get_freshness
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
 logger = logging.getLogger(__name__)
@@ -289,7 +290,7 @@ TEMPLATES = {
         ("transition_summary", "Executive summary and current situation", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Reason for handoff", "Current situation", "Immediate priorities", "Clinician-assessed acuity if documented")),
         ("baseline", "Relevant history and baseline", ("care_facts", "care_timeline_entries", "care_events"), ("Documented diagnoses and source", "Relevant history", "Cognitive and functional baseline", "Changes from baseline", "Person's goals and preferences")),
         ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Freshness policy and assessment status", "Conflicts", "Corrections")),
-        ("medication_reconciliation", "Medication reconciliation", (), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
+        ("medication_reconciliation", "Medication reconciliation", ("medications", "allergies"), ("Caregiver-reviewed current medication reports", "Medication review status and source", "Allergies/reactions when recorded by a verified source", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
         ("clinical_functional", "Current clinical and functional assessment", (), ("Observations and measurements", "Symptoms and events", "Cognition/communication", "Mobility/ADLs", "Nutrition/hydration", "Sleep/mood/behaviour", "Equipment/environment")),
         ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "uncertainty_assessments", "care_facts", "care_events", "actions", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Issue", "Evidence/status", "Freshness review status", "Required response", "Owner", "Deadline")),
         ("care_plan", "Treatment and care plan", ("care_decisions", "actions"), ("Authorised plan", "Care delivered", "Response", "Pending investigations/consultations", "Unresolved decisions", "Escalation instructions")),
@@ -557,6 +558,7 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
     source_records = snapshot.get("source_records", [])
     stale = []
     unknown = []
+    professional_medication_records = None
     try:
         bind = db.get_bind()
         inspector = inspect(bind)
@@ -572,7 +574,15 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 unknown.append(f"{source_table or 'unknown'}:{source_id or 'unknown'}")
                 continue
             current = None
-            if item.get("source_type") == "daily_care_observation":
+            if item.get("source_type") == "caregiver_reviewed_medication_report":
+                if professional_medication_records is None:
+                    _, professional_medication_records = _verified_professional_medication_source(db, draft.person_id)
+                matching = next(
+                    (record for record in professional_medication_records if str(record.get("source_id")) == source_id),
+                    None,
+                )
+                current = matching.get("source_fingerprint") if matching else None
+            elif item.get("source_type") == "daily_care_observation":
                 event = db.query(CareEvent).filter(
                     CareEvent.id == source_id,
                     CareEvent.person_id == draft.person_id,
@@ -860,8 +870,29 @@ def save_handoff_draft_revision(
     serialized = json.dumps(edited_content, ensure_ascii=False, separators=(",", ":"), default=str)
     if len(serialized) > 40000:
         raise HTTPException(status_code=413, detail="Draft content exceeds the supported size")
-    if not _validate_draft_quotes(edited_content, draft.source_snapshot or {}):
-        raise HTTPException(status_code=422, detail="Draft contains unsupported text or source references; only exact retrieved quotations can be saved as grounded content")
+    current_sections = (draft.structured_content or {}).get("sections", [])
+    source_sections_unchanged = edited_content.get("sections", []) == current_sections
+    notes = edited_content.get("caregiver_notes", [])
+    notes_valid = (
+        isinstance(notes, list)
+        and len(notes) <= 20
+        and all(
+            isinstance(note, dict)
+            and note.get("attribution") == "caregiver_authored_unverified"
+            and isinstance(note.get("text"), str)
+            and bool(note["text"].strip())
+            and len(note["text"]) <= 2000
+            for note in notes
+        )
+    )
+    if draft.generation_status == "generated":
+        valid_content = source_sections_unchanged and notes_valid and _validate_draft_quotes(edited_content, draft.source_snapshot or {})
+    else:
+        generation = edited_content.get("generation")
+        generated_sections = generation.get("sections", []) if isinstance(generation, dict) else []
+        valid_content = source_sections_unchanged and not generated_sections and notes_valid
+    if not valid_content:
+        raise HTTPException(status_code=422, detail="Draft edits must preserve sourced records exactly; caregiver notes are labelled as unverified reports")
     content_hash = _draft_content_hash(edited_content)
     if content_hash == _draft_content_hash(draft.structured_content or {}):
         return _draft_response(draft)
@@ -886,7 +917,7 @@ def save_handoff_draft_revision(
     draft.approval_revision = None
     draft.approval_content_sha256 = None
     draft.approval_parameters = None
-    draft.validation_status = "exact_quote_reference_validation_passed"
+    draft.validation_status = "exact_quote_reference_validation_passed" if draft.generation_status == "generated" else "source_records_unchanged_caregiver_notes_attributed"
     db.add(revision)
     db.add(draft)
     db.add(AuditLogEvent(
@@ -1421,6 +1452,115 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
         return {"status": "failed", "reason": "source_retrieval_failed", "label": "Uploaded documents and extracted text", "count": 0}, []
 
 
+
+def _verified_professional_medication_source(db: Session, person_id: str) -> tuple[dict, list[dict]]:
+    """Expose only unambiguous, explicitly caregiver-reviewed current medication reports.
+
+    This is not independent clinical verification. No medication history is promoted,
+    and no allergy source is inferred from free text.
+    """
+    label = "Caregiver-reviewed medication reports"
+    try:
+        rows = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            func.lower(CareAssertion.subject_type).in_(("medication", "medications")),
+            CareAssertion.assertion_kind == "current_state",
+            CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
+        ).order_by(CareAssertion.recorded_at.desc(), CareAssertion.id.desc()).all()
+        grouped: dict[str, list[CareAssertion]] = {}
+        for row in rows:
+            grouped.setdefault(str(row.subject_id), []).append(row)
+
+        revisions = None
+        if inspect(db.connection()).has_table("care_assertion_revisions"):
+            revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+
+        def reviewed_at(assertion: CareAssertion):
+            if revisions is None:
+                return None
+            return db.execute(
+                select(revisions.c.changed_at)
+                .where(
+                    revisions.c.person_id == person_id,
+                    revisions.c.assertion_id == assertion.id,
+                )
+                .order_by(revisions.c.revision_number.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+
+        output: list[dict] = []
+        excluded = 0
+        for subject_id, claims in grouped.items():
+            by_field: dict[str, list[CareAssertion]] = {}
+            for claim in claims:
+                by_field.setdefault(str(claim.field).strip().lower(), []).append(claim)
+
+            def current_claim(fields: tuple[str, ...]):
+                candidates = [claim for field in fields for claim in by_field.get(field, [])]
+                values = {" ".join(str(item.asserted_value or "").casefold().split()) for item in candidates}
+                if len(values) != 1 or not candidates:
+                    return None
+                accepted = next((item for item in candidates if item.assertion_status in {"accepted", "caregiver_reviewed"}), None)
+                if accepted is None or get_freshness(accepted, reviewed_at=reviewed_at(accepted)).get("status") != "within_review_window":
+                    return None
+                return accepted
+
+            name = current_claim(("name", "medication_name"))
+            status = current_claim(("status", "medication_status"))
+            if not name or not status or str(status.asserted_value).strip().casefold() != "active":
+                excluded += 1
+                continue
+            dose = current_claim(("dose", "strength"))
+            recorded_at = name.recorded_at
+            details = {
+                "medication_subject_id": subject_id,
+                "reported_name": str(name.asserted_value).strip(),
+                "reported_dose": str(dose.asserted_value).strip() if dose else None,
+                "reported_status": "active",
+                "review_status": "caregiver_reviewed_current_report",
+                "source_label": name.source_label,
+                "freshness": get_freshness(name, reviewed_at=reviewed_at(name)),
+                "interpretation_limit": (
+                    "Caregiver-reviewed current report within its configured review window. "
+                    "This is not independent clinical verification and does not prove administration."
+                ),
+            }
+            text = f"Caregiver-reviewed medication report: {details['reported_name']}"
+            if details["reported_dose"]:
+                text += f"; reported dose: {details['reported_dose']}"
+            output.append({
+                "source_type": "caregiver_reviewed_medication_report",
+                "source_table": "care_assertions",
+                "source_id": str(name.id),
+                "source_fingerprint": _fingerprint({
+                    "name": name.asserted_value, "status": status.asserted_value,
+                    "dose": dose.asserted_value if dose else None,
+                    "name_status": name.assertion_status, "status_status": status.assertion_status,
+                }),
+                "source_revision": _iso(recorded_at),
+                "source_revision_status": "timestamp_available" if recorded_at else "revision_unavailable",
+                "event_at": _iso(name.observed_at),
+                "recorded_at": _iso(recorded_at),
+                "due_at": None,
+                "details": details,
+                "epistemic_status": name.epistemic_state or "reported",
+                "record_status": "caregiver_reviewed_current_report",
+                "evidence_ids": list(name.evidence_ids or []),
+                "text": text,
+                "stale_warning": False,
+            })
+        return {
+            "status": "available" if output else "empty",
+            "label": label,
+            "count": len(output),
+            "excluded_unconfirmed_or_ambiguous_count": excluded,
+            "interpretation_limit": "Caregiver-reviewed reports only; not an independently verified clinical medication list.",
+        }, output
+    except Exception:
+        logger.exception("Professional handoff medication retrieval failed")
+        return {"status": "failed", "reason": "medication_source_retrieval_failed", "label": label, "count": 0}, []
+
+
 def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str) -> dict:
     """Qwen selects source references and sections; the backend attaches exact source text."""
     try:
@@ -1786,6 +1926,29 @@ def prepare_handoff_draft(
     document_status, document_records = _verified_document_source(db, person_id, caregiver_id)
     statuses["documents"] = document_status
     records.extend(document_records)
+    if payload.audience == "professional":
+        medication_status, medication_records = _verified_professional_medication_source(db, person_id)
+        statuses["medications"] = medication_status
+        records.extend(medication_records)
+        statuses["allergies"] = {
+            "status": "unavailable",
+            "reason": "no_verified_person_scoped_allergy_adapter",
+            "label": "Allergy and reaction records",
+            "count": 0,
+        }
+    if payload.audience == "professional":
+        # Medication and allergy assertions must never leak through the broad
+        # generic assertion adapter. The dedicated medication adapter above
+        # includes only reviewed current reports; allergies remain unavailable.
+        records = [
+            item for item in records
+            if not (
+                item.get("source_table") == "care_assertions"
+                and item.get("source_type") != "caregiver_reviewed_medication_report"
+                and str((item.get("details") or {}).get("subject_type") or "").strip().lower()
+                in {"medication", "medications", "allergy", "allergies"}
+            )
+        ]
     statuses["community"] = {"status": "not_authorized", "reason": "community_source_not_enabled", "count": 0}
 
     # Resolve only explicitly linked evidence and keep author/reporter/uploader,
@@ -1886,6 +2049,9 @@ def prepare_handoff_draft(
     daily_items = [item for item in records if item["source_table"] == "care_events" and item["source_type"] == "daily_care_observation"]
     if daily_items:
         sections.append({"title": "Daily Care observations", "items": daily_items})
+    medication_items = [item for item in records if item["source_table"] == "care_assertions" and item["source_type"] == "caregiver_reviewed_medication_report"]
+    if medication_items:
+        sections.append({"title": "Caregiver-reviewed medication reports", "items": medication_items})
     document_items = [item for item in records if item["source_table"] in {"capture_analyses", "evidence_uploads"}]
     if document_items:
         sections.append({"title": "Uploaded documents and extracted text", "items": document_items})
@@ -2059,3 +2225,312 @@ def prepare_handoff_draft(
         "limitations": gaps,
         "warning": "This is a draft from the listed saved records only. Unavailable sources were not read. Verify every item and resolve uncertainty before sharing.",
     }
+
+
+class CaregiverExportApprovalRequest(BaseModel):
+    approved: bool = True
+
+
+def _caregiver_evidence_label(value) -> str:
+    status = str(value or "").strip().lower()
+    if status in {"confirmed", "verified", "clinically_verified", "source_verified"}:
+        return "Confirmed source record"
+    if status == "observed":
+        return "Observed"
+    if status in {"reported", "caregiver_reported", "reported_by_caregiver", "caregiver_authored"}:
+        return "Reported"
+    if status in {"uncertain", "inferred", "unverified", "disputed", "conflicting", "rejected", "pending_review"}:
+        return "Uncertain or needs review"
+    if status in {"missing", "not_recorded", "not_assessed", "unavailable", "unknown", "not_available"}:
+        return "Missing or not recorded"
+    if status in {"needs_clarification", "clarification_required"}:
+        return "Needs clarification"
+    return "Status not classified"
+
+
+def _pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _handoff_pdf_bytes(draft: HandoffDraft, revision: HandoffDraftRevision) -> bytes:
+    """Build a dependency-free PDF from the exact caregiver-approved revision."""
+    content = revision.content if isinstance(revision.content, dict) else {}
+    snapshot = revision.source_snapshot if isinstance(revision.source_snapshot, dict) else {}
+    records = snapshot.get("source_records") if isinstance(snapshot.get("source_records"), list) else []
+    statuses = snapshot.get("source_statuses") if isinstance(snapshot.get("source_statuses"), dict) else {}
+    lines = [
+        "SOLENOS CARE SUMMARY",
+        "Prepared by caregiver for sharing outside SolenOS",
+        f"Purpose: {draft.purpose.replace('_', ' ')}",
+        f"Prepared: {draft.created_at.isoformat() if draft.created_at else 'Not recorded'}",
+        f"Approved: {draft.approved_at.isoformat() if draft.approved_at else 'Not recorded'}",
+        "",
+        "IMPORTANT: This summary reflects saved care records and caregiver reports. It is not a clinical assessment.",
+        "Reported, uncertain, historical, and missing information has not been independently verified.",
+        "",
+    ]
+    generation = content.get("generation") if isinstance(content.get("generation"), dict) else {}
+    generated_sections = generation.get("sections") if isinstance(generation.get("sections"), list) else []
+    if generated_sections:
+        lines.append("CAREGIVER-REVIEWED SUMMARY")
+        for section in generated_sections:
+            if not isinstance(section, dict):
+                continue
+            lines.extend([
+                str(section.get("section") or "Care information"),
+                str(section.get("text") or ""),
+                "Information status: " + str(section.get("epistemic_status") or "not recorded"),
+                "Record status: " + str(section.get("record_status") or "not recorded"),
+                "Occurred: " + str(section.get("event_at") or "Not recorded"),
+                "Recorded: " + str(section.get("recorded_at") or "Not recorded"),
+                "Historical status: " + ("historical or stale" if section.get("stale_warning") else "not flagged stale"),
+                f"Source reference: {section.get('source_ref') or 'Not available'}",
+                "",
+            ])
+    else:
+        lines.append("SAVED CARE INFORMATION")
+        for section in content.get("sections", []) if isinstance(content.get("sections"), list) else []:
+            if not isinstance(section, dict):
+                continue
+            lines.append(str(section.get("title") or "Care information"))
+            for item in section.get("items", []) if isinstance(section.get("items"), list) else []:
+                if not isinstance(item, dict):
+                    continue
+                lines.extend([
+                    str(item.get("text") or ""),
+                    "Information status: " + str(item.get("epistemic_status") or "not recorded"),
+                    "Record status: " + str(item.get("record_status") or "not recorded"),
+                    "Occurred: " + str(item.get("event_at") or "Not recorded"),
+                    "Recorded: " + str(item.get("recorded_at") or "Not recorded"),
+                    "Source: " + str(item.get("source_table") or "unknown") + "/" + str(item.get("source_id") or "unknown"),
+                    "",
+                ])
+    medication_reports = [item for item in records if isinstance(item, dict) and item.get("source_type") == "caregiver_reviewed_medication_report"]
+    if medication_reports:
+        lines.extend(["", "CAREGIVER-REVIEWED CURRENT MEDICATION REPORTS"])
+        for item in medication_reports:
+            details = item.get("details") if isinstance(item.get("details"), dict) else {}
+            lines.append("Medication: " + str(details.get("reported_name") or "Name not recorded"))
+            if details.get("reported_dose"):
+                lines.append("Reported dose: " + str(details.get("reported_dose")))
+            lines.append("Information status: " + _caregiver_evidence_label(item.get("epistemic_status")))
+            lines.append("Review status: caregiver-reviewed report; not independently clinically verified")
+            lines.append("Recorded: " + str(item.get("recorded_at") or "Not recorded"))
+            lines.append("Source: care_assertions/" + str(item.get("source_id") or "unknown"))
+            lines.append("")
+    allergy_status = statuses.get("allergies") if isinstance(statuses, dict) else None
+    if isinstance(allergy_status, dict):
+        lines.extend([
+            "ALLERGY AND REACTION INFORMATION",
+            "Status: " + str(allergy_status.get("status") or "unavailable"),
+            "No verified allergy adapter is available. This does not mean the person has no allergies.",
+            "",
+        ])
+    caregiver_notes = content.get("caregiver_notes") if isinstance(content.get("caregiver_notes"), list) else []
+    if caregiver_notes:
+        lines.extend(["CAREGIVER-AUTHORED NOTES (NOT INDEPENDENTLY VERIFIED)"])
+        for note in caregiver_notes:
+            if isinstance(note, dict):
+                lines.append(str(note.get("text") or ""))
+            elif isinstance(note, str):
+                lines.append(note)
+        lines.append("")
+    lines.append("SOURCE AVAILABILITY AND LIMITATIONS")
+    statuses = snapshot.get("source_statuses") if isinstance(snapshot.get("source_statuses"), dict) else {}
+    for key, status in statuses.items():
+        if isinstance(status, dict):
+            lines.append(f"{key}: {status.get('status', 'unknown')} ({status.get('count', 0)} records)")
+    lines.extend(["", "SOURCE REGISTER"])
+    for index, item in enumerate(records, 1):
+        if isinstance(item, dict):
+            details = item.get("details") if isinstance(item.get("details"), dict) else {}
+            lines.append(
+                f"{index}. {details.get('source_label') or item.get('source_type') or item.get('source_table') or 'Care record'}"
+                f" | {_caregiver_evidence_label(item.get('epistemic_status'))}"
+                f" | recorded {item.get('recorded_at') or 'not recorded'}"
+            )
+            author_label = details.get("original_author") or details.get("reported_by_label") or details.get("author_label")
+            if author_label:
+                lines.append("Author or reporter: " + str(author_label))
+            original_reference = details.get("original_source_reference") or details.get("document_reference") or details.get("filename")
+            if original_reference:
+                lines.append("Original source: " + str(original_reference))
+            page_references = details.get("page_references")
+            if isinstance(page_references, list) and page_references:
+                lines.append("Document pages: " + ", ".join(str(value) for value in page_references[:30]))
+            evidence_sources = item.get("evidence_sources") if isinstance(item.get("evidence_sources"), list) else []
+            for evidence_source in evidence_sources[:10]:
+                if not isinstance(evidence_source, dict):
+                    continue
+                source_author = evidence_source.get("original_author") or evidence_source.get("reported_by_label")
+                if source_author:
+                    lines.append("Evidence author or reporter: " + str(source_author))
+                if evidence_source.get("original_source_reference"):
+                    lines.append("Evidence source reference: " + str(evidence_source["original_source_reference"]))
+    lines.extend([
+        "",
+        "This document contains the exact caregiver-approved saved revision.",
+        "The caregiver is responsible for checking accuracy and deciding whom to share it with.",
+    ])
+    wrapped = []
+    for line in lines:
+        value = str(line).replace("\r", " ").replace("\n", " ")
+        while len(value) > 92:
+            wrapped.append(value[:92])
+            value = value[92:]
+        wrapped.append(value)
+    pages = [wrapped[index:index + 48] for index in range(0, len(wrapped), 48)] or [[]]
+    objects = []
+    page_ids = []
+    font_id = 3 + len(pages) * 2
+    for page_index, page_lines in enumerate(pages):
+        page_id = 3 + page_index * 2
+        stream_id = page_id + 1
+        page_ids.append(page_id)
+        commands = ["BT", "/F1 9 Tf", "48 790 Td", "12 TL"]
+        for line in page_lines:
+            safe_line = line.encode("latin-1", "replace").decode("latin-1")
+            commands.append(f"({_pdf_escape(safe_line)}) Tj")
+            commands.append("T*")
+        commands.append("ET")
+        stream = "\n".join(commands).encode("latin-1")
+        page = f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {stream_id} 0 R >>"
+        objects.append((page_id, page.encode("ascii")))
+        objects.append((stream_id, b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream"))
+    objects.insert(0, (1, b"<< /Type /Catalog /Pages 2 0 R >>"))
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects.insert(1, (2, f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode("ascii")))
+    objects.append((font_id, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"))
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for object_id, body in sorted(objects):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode("ascii"))
+        output.extend(body)
+        output.extend(b"\nendobj\n")
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF".encode("ascii")
+    )
+    return bytes(output)
+
+
+@router.post("/{draft_id}/approve-export")
+def approve_handoff_export(
+    draft_id: str,
+    payload: CaregiverExportApprovalRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Approve the exact current draft revision for caregiver-controlled PDF export."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    draft = db.query(HandoffDraft).filter(
+        HandoffDraft.id == draft_id,
+        HandoffDraft.person_id == person_id,
+        HandoffDraft.caregiver_id == caregiver_id,
+    ).with_for_update().first()
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Handoff draft not found")
+    if draft.audience != "professional":
+        raise HTTPException(status_code=409, detail="PDF export approval is available only for professional care summaries")
+    if not payload.approved:
+        draft.review_status = "pending_review"
+        draft.approved_at = None
+        draft.approved_by_caregiver_id = None
+        draft.approval_revision = None
+        draft.approval_content_sha256 = None
+        draft.approval_parameters = None
+        db.commit()
+        return {"approved": False, "review_status": draft.review_status}
+    freshness = _draft_source_freshness(db, draft)
+    if freshness.get("status") != "current":
+        raise HTTPException(status_code=409, detail="Care information changed. Prepare a fresh summary before approving.")
+    if draft.review_status not in {"pending_review", "approved", "approved_for_sharing"}:
+        raise HTTPException(status_code=409, detail="This draft is not available for export approval")
+    current_content = draft.structured_content if isinstance(draft.structured_content, dict) else {}
+    if draft.generation_status == "generated":
+        if draft.validation_status != "exact_quote_reference_validation_passed" or not _validate_draft_quotes(current_content, draft.source_snapshot or {}):
+            raise HTTPException(status_code=409, detail="The generated summary could not be validated against its saved sources")
+    canonical = json.dumps(current_content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    revision = db.query(HandoffDraftRevision).filter(
+        HandoffDraftRevision.draft_id == draft.id,
+        HandoffDraftRevision.revision_number == draft.revision_number,
+        HandoffDraftRevision.person_id == person_id,
+        HandoffDraftRevision.caregiver_id == caregiver_id,
+    ).first()
+    if revision is None or revision.content_sha256 != digest:
+        raise HTTPException(status_code=409, detail="The saved draft revision does not match its review record")
+    now = datetime.now(timezone.utc)
+    draft.review_status = "approved"
+    draft.approved_at = now
+    draft.approved_by_caregiver_id = caregiver_id
+    draft.approval_revision = draft.revision_number
+    draft.approval_content_sha256 = digest
+    draft.approval_parameters = {"purpose": draft.purpose, "audience": draft.audience, "revision": draft.revision_number}
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id, action="handoff_draft.approve_export",
+        target_type="handoff_draft", target_id=draft.id, occurred_at=now,
+        outcome="success", request_id=request.headers.get("x-request-id"),
+        policy_version=POLICY_VERSION,
+        record_metadata={"revision_number": draft.revision_number, "content_sha256": digest},
+    ))
+    db.commit()
+    return {"approved": True, "review_status": "approved", "revision_number": draft.revision_number, "approved_at": now.isoformat()}
+
+
+@router.get("/{draft_id}/export.pdf")
+def export_approved_handoff_pdf(draft_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return only the exact caregiver-approved revision; never export a stale draft."""
+    from fastapi.responses import Response
+
+    person_id, caregiver_id = _scoped_identity(request, db)
+    draft = db.query(HandoffDraft).filter(
+        HandoffDraft.id == draft_id,
+        HandoffDraft.person_id == person_id,
+        HandoffDraft.caregiver_id == caregiver_id,
+    ).first()
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Handoff draft not found")
+    if draft.audience != "professional":
+        raise HTTPException(status_code=409, detail="PDF export is available only for professional care summaries")
+    if (
+        draft.review_status != "approved"
+        or draft.approved_by_caregiver_id != caregiver_id
+        or draft.approval_revision != draft.revision_number
+        or not draft.approval_content_sha256
+    ):
+        raise HTTPException(status_code=409, detail="Review and approve the current summary before exporting")
+    freshness = _draft_source_freshness(db, draft)
+    if freshness.get("status") != "current":
+        raise HTTPException(status_code=409, detail="Care information changed. Prepare and review a fresh summary before exporting.")
+    revision = db.query(HandoffDraftRevision).filter(
+        HandoffDraftRevision.draft_id == draft.id,
+        HandoffDraftRevision.revision_number == draft.approval_revision,
+        HandoffDraftRevision.person_id == person_id,
+        HandoffDraftRevision.caregiver_id == caregiver_id,
+    ).first()
+    if revision is None or revision.content_sha256 != draft.approval_content_sha256:
+        raise HTTPException(status_code=409, detail="Approved summary revision could not be verified")
+    pdf = _handoff_pdf_bytes(draft, revision)
+    now = datetime.now(timezone.utc)
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id, action="handoff_draft.export_pdf",
+        target_type="handoff_draft", target_id=draft.id, occurred_at=now,
+        outcome="success", request_id=request.headers.get("x-request-id"),
+        policy_version=POLICY_VERSION,
+        record_metadata={"revision_number": revision.revision_number, "content_sha256": revision.content_sha256, "format": "pdf"},
+    ))
+    db.commit()
+    filename = f"solenos-care-summary-{draft.id[:8]}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )

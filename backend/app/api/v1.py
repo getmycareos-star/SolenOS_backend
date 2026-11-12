@@ -424,10 +424,7 @@ def list_evidence(
 ):
     _require_session_scope(request, db, person_id)
 
-    query = db.query(EvidenceModel).filter(
-        EvidenceModel.person_id == person_id,
-        (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
-    )
+    query = db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id, EvidenceModel.evidence_status != "deleted_by_caregiver")
     if ids is not None:
         # An explicit filter is always bounded and never falls back to the
         # full evidence collection. Empty/blank filters mean no rows.
