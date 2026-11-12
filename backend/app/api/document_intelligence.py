@@ -205,7 +205,6 @@ def _existing_assertion_for_exact_document_duplicate(
     if subject_id is not None:
         existing_query = existing_query.filter(CareAssertion.subject_id == subject_id)
     existing = existing_query.order_by(CareAssertion.recorded_at.desc()).all()
-    ).order_by(CareAssertion.recorded_at.desc()).all()
     duplicate_group_ids = {
         str(row[0])
         for row in db.query(EvidenceUpload.evidence_id)
