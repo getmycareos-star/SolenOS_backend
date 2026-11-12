@@ -14,6 +14,7 @@ from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion
 from app.models.time_location import Appointment
+from app.models.uncertainty import OpenQuestion
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -1343,3 +1344,65 @@ def test_observation_correction_marks_prepared_handoff_source_stale(client, monk
     )
     assert retrieved.status_code == 200, retrieved.text
     assert retrieved.json()["source_freshness"]["status"] == "stale"
+
+
+def test_handoff_includes_only_valid_necessary_open_questions(client):
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    db = TestSessionLocal()
+    try:
+        source = Evidence(
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="The current mobility support plan is needed for the handoff decision.",
+            uploaded_by_caregiver_id=caregiver_id,
+            source_type="caregiver_report",
+        )
+        db.add(source)
+        db.flush()
+        db.add_all([
+            OpenQuestion(
+                id="handoff-necessary-question",
+                person_id=person_id,
+                question="What mobility support is required for the next handoff?",
+                subject_type="person",
+                subject_id=person_id,
+                status="open",
+                necessity="necessary",
+                necessity_rationale="The receiving caregiver needs the current support level to safely plan transfers.",
+                evidence_ids=[source.id],
+                context=[{
+                    "decision_dependency": "The receiving caregiver cannot prepare the transfer plan without the current support level."
+                }],
+            ),
+            OpenQuestion(
+                id="handoff-unassessed-question",
+                person_id=person_id,
+                question="What was the colour of the previous care folder?",
+                subject_type="person",
+                subject_id=person_id,
+                status="open",
+                necessity="not_assessed",
+                evidence_ids=[source.id],
+                context=[{"source_kind": "document_extraction"}],
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    question_refs = [
+        item["source_id"] for item in response.json()["source_references"]
+        if item.get("source_table") == "open_questions"
+    ]
+    assert "handoff-necessary-question" in question_refs
+    assert "handoff-unassessed-question" not in question_refs
