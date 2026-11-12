@@ -466,7 +466,7 @@ def test_image_ocr_failure_is_recorded_as_unprocessed_not_unreadable(client, mon
             "caregiver_id": session["caregiver"]["id"],
             "evidence_type": "document",
         },
-        files={"file": ("ocr-failed.jpg", original, "image/jpeg")},
+        files={"file": ("ocr-failed.png", original, "image/png")},
     )
     assert uploaded.status_code == 201, uploaded.text
     evidence_id = uploaded.json()["evidence_id"]
