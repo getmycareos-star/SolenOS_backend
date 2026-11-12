@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
+import app.main  # noqa: F401 - register the complete SQLAlchemy model graph for create_all
 from app.core.change_enums import ChangeDirection, ChangeType, SignificanceVerdict
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority
 from app.models.care import CareEvent, Caregiver, Person
