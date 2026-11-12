@@ -416,6 +416,7 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "template_sections": content.get("template_sections", []),
         "sections": content.get("sections", []),
         "generation": content.get("generation", {}),
+        "claim_provenance": _handoff_claim_provenance(content, snapshot),
         "caregiver_notes": content.get("caregiver_notes", []),
         "source_statuses": snapshot.get("source_statuses", {}),
         "source_references": [
@@ -436,6 +437,65 @@ def _draft_response(draft: HandoffDraft) -> dict:
 def _draft_content_hash(content: dict) -> str:
     canonical = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
+    """Bind each Qwen-selected handoff quotation to its exact saved source record."""
+    generation = content.get("generation") if isinstance(content, dict) else None
+    sections = generation.get("sections") if isinstance(generation, dict) else []
+    source_records = source_snapshot.get("source_records", []) if isinstance(source_snapshot, dict) else []
+    source_by_ref = {
+        f"{row.get('source_table')}:{row.get('source_id')}": row
+        for row in source_records if isinstance(row, dict)
+    }
+    claims = []
+    for index, item in enumerate(sections if isinstance(sections, list) else []):
+        if not isinstance(item, dict):
+            continue
+        source_ref = item.get("source_ref")
+        source = source_by_ref.get(source_ref) if isinstance(source_ref, str) else None
+        quote = item.get("text")
+        exact_match = bool(source and isinstance(quote, str) and quote.strip() and quote in str(source.get("text") or ""))
+        stale = bool(source and (
+            source.get("stale_warning")
+            or source.get("source_revision_status") in {"stale", "changed", "unavailable"}
+        ))
+        support_status = (
+            "matched_historical_only" if exact_match and stale else
+            "matched_saved_wording" if exact_match else
+            "not_matched_to_saved_wording"
+        )
+        references = []
+        if exact_match and source:
+            references.append({
+                "source_ref": source_ref,
+                "record_type": source.get("source_type"),
+                "record_id": str(source.get("source_id")),
+                "label": str(source.get("source_type") or "Saved care information").replace("_", " ").title(),
+                "occurred_at": source.get("event_at"),
+                "recorded_at": source.get("recorded_at"),
+                "epistemic_status": source.get("epistemic_status"),
+                "record_status": source.get("record_status"),
+                "source_state_label": "This source may have changed since it was saved." if stale else None,
+                "related_evidence": list(source.get("evidence_sources") or []),
+                "related_evidence_ids": [str(value) for value in (source.get("evidence_ids") or [])],
+            })
+        claims.append({
+            "claim_id": f"handoff-section-{index + 1}",
+            "claim_type": "verbatim_handoff_source",
+            "text": str(quote or ""),
+            "support_status": support_status,
+            "validation_basis": "exact_quote_in_saved_source_snapshot" if exact_match else "quote_not_matched_to_source_snapshot",
+            "source_references": references,
+        })
+    unmatched = sum(1 for item in claims if item["support_status"] not in {"matched_saved_wording", "matched_historical_only"})
+    return {
+        "version": "handoff-claim-provenance-v1",
+        "coverage": "all_sections_linked" if claims and unmatched == 0 else "some_sections_unmatched" if claims else "no_generated_sections",
+        "unmatched_statement_count": unmatched,
+        "claims": claims,
+        "interpretation_limit": "Each generated handoff section is copied from its linked saved source. A matching quotation does not establish that the source is clinically true or current.",
+    }
 
 
 def _validate_draft_quotes(content: dict, source_snapshot: dict) -> bool:
@@ -1859,6 +1919,7 @@ def prepare_handoff_draft(
         "source_statuses": statuses,
         "sections": sections,
         "generation": generated_document,
+        "claim_provenance": _handoff_claim_provenance(structured_content, source_snapshot),
         "source_references": [
             {key: item[key] for key in ("source_type", "source_table", "source_id", "event_at", "recorded_at", "due_at", "details", "epistemic_status", "record_status", "stale_warning", "evidence_ids", "evidence_sources", "evidence_reference_status")}
             for item in records
