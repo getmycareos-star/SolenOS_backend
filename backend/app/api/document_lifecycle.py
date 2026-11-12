@@ -546,7 +546,7 @@ def _verify_persisted_extraction(
 
 
 def _unreadable_page_numbers(source_text: str) -> list[int]:
-    markers = list(re.finditer(r"(?m)^\\[Page\\s+(\\d+)", source_text or ""))
+    markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)", source_text or ""))
     unreadable = []
     for index, marker in enumerate(markers):
         end = markers[index + 1].start() if index + 1 < len(markers) else len(source_text)
