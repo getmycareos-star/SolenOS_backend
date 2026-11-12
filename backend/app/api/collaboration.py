@@ -53,6 +53,7 @@ from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 from app.models.uncertainty import OpenQuestion
+from app.models.uncertainty import OpenQuestionAnswerEvent
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -1517,6 +1518,14 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         EvidenceFreshnessAssessment.person_id == person_id,
         EvidenceFreshnessAssessment.evidence_id == evidence_id,
     ).first()
+    linked_open_question = any(
+        evidence_id in (row.evidence_ids or [])
+        for row in db.query(OpenQuestion).filter(OpenQuestion.person_id == person_id).all()
+    )
+    linked_open_question_answer = any(
+        evidence_id in (row.evidence_ids or [])
+        for row in db.query(OpenQuestionAnswerEvent).filter(OpenQuestionAnswerEvent.person_id == person_id).all()
+    )
     linked_open_loop = any(
         evidence_id in (row.evidence or [])
         for row in db.query(OpenLoopRecord).filter(OpenLoopRecord.person_id == person_id).all()
@@ -1529,7 +1538,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         evidence_id in (row.evidence or [])
         for row in db.query(OpenLoopEvent).filter(OpenLoopEvent.person_id == person_id).all()
     )
-    if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness or linked_open_loop or linked_open_loop_occurrence or linked_open_loop_event:
+    if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness or linked_open_question or linked_open_question_answer or linked_open_loop or linked_open_loop_occurrence or linked_open_loop_event:
         raise HTTPException(
             status_code=409,
             detail="This document supports other care-history, follow-up or assessment records. Resolve those source dependencies before deletion. The original file has not been removed.",
