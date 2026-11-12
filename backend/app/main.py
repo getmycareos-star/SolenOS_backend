@@ -681,6 +681,7 @@ def get_situation(
         .filter(
             OpenQuestionModel.person_id == person_id,
             OpenQuestionModel.status == "open",
+            OpenQuestionModel.necessity == "necessary",
         )
         .order_by(OpenQuestionModel.asked_at.asc(), OpenQuestionModel.id.asc())
         .all()
