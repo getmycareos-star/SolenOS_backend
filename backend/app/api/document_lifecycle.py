@@ -238,7 +238,9 @@ def _scan_adjusted_image(image: Image.Image, evidence: Evidence | None) -> tuple
     adjusted = ImageOps.exif_transpose(image).convert("RGB")
     if rotation:
         # Browser canvas uses positive clockwise angles; Pillow's positive angle is counter-clockwise.
-        adjusted = adjusted.rotate(-rotation, expand=True, fillcolor="white")
+        rotated = adjusted.rotate(-rotation, expand=True, fillcolor="white")
+        adjusted.close()
+        adjusted = rotated
     width, height = adjusted.size
     left = round(width * insets["left"] / 100)
     right = round(width * (100 - insets["right"]) / 100)
