@@ -142,9 +142,15 @@ SOURCES = {
     "open_questions": {
         "label": "Open questions",
         "kind": "open_question",
-        "fields": ("id", "question", "description", "status", "created_at", "updated_at"),
+        "fields": (
+            "id", "question", "description", "status", "created_at", "updated_at",
+            "necessity", "necessity_rationale", "context", "subject_type", "subject_id",
+        ),
         "text_fields": ("question", "description"),
         "time_fields": ("created_at", "updated_at"),
+        "active_open_questions_only": True,
+        "necessary_questions_only": True,
+        "validate_necessity": True,
     },
     "information_gaps": {
         "label": "Information gaps",
@@ -1632,6 +1638,10 @@ def prepare_handoff_draft(
             query = select(*selected).where(table.c.person_id == person_id)
             if table_name == "care_events" and "event_type" in table.c:
                 query = query.where(table.c.event_type.notin_(DAILY_CARE_EVENT_TYPES))
+            if spec.get("active_open_questions_only") and "status" in table.c:
+                query = query.where(table.c.status.in_(("open", "unresolved")))
+            if spec.get("necessary_questions_only") and "necessity" in table.c:
+                query = query.where(table.c.necessity == "necessary")
             if spec.get("active_assessments_only"):
                 if "is_active" in table.c:
                     query = query.where(table.c.is_active.is_(True))
@@ -1659,6 +1669,22 @@ def prepare_handoff_draft(
                 query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
             query = query.limit(MAX_ROWS_PER_SOURCE)
             rows = [dict(row) for row in db.execute(query).mappings().all()]
+            if rows and spec.get("validate_necessity"):
+                # Handoffs are caregiver-facing work products. Do not copy
+                # an unassessed or malformed question into the handoff merely
+                # because its database status says "necessary".
+                from app.models.uncertainty import OpenQuestion
+                from app.services.care_continuity import has_valid_caregiver_necessity
+                question_ids = [str(row["id"]) for row in rows if row.get("id")]
+                question_models = db.query(OpenQuestion).filter(
+                    OpenQuestion.person_id == person_id,
+                    OpenQuestion.id.in_(question_ids),
+                ).all()
+                valid_question_ids = {
+                    str(question.id) for question in question_models
+                    if has_valid_caregiver_necessity(question, db, person_id)
+                }
+                rows = [row for row in rows if str(row.get("id")) in valid_question_ids]
             source_status = "available" if rows else "empty"
             statuses[table_name] = {
                 "status": source_status,
