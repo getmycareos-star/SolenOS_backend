@@ -966,8 +966,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         # Exact same subject/value at the same observed instant is a
                         # duplicate observation, not a second independent fact. Keep
                         # the new event/evidence intact and link it to the first assertion.
-                        duplicate_assertion = db.query(CareAssertion).filter(
+                        duplicate_assertion = db.query(CareAssertion).join(
+                            CareEvent,
+                            CareEvent.id == CareAssertion.source_event_id,
+                        ).filter(
                             CareAssertion.person_id == person_id,
+                            CareEvent.person_id == person_id,
                             CareAssertion.subject_type == domain.rstrip("s"),
                             CareAssertion.subject_id == subject_id,
                             CareAssertion.field == field,
@@ -977,11 +981,11 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                                 CareAssertion.source_label == source,
                                 CareAssertion.created_by_caregiver_id == created_by_caregiver_id,
                             ) if created_by_caregiver_id else (CareAssertion.source_label == source),
-                            CareAssertion.observed_at == event_date,
-                            # Duplicate identity is historical, not active-state
-                            # identity. A later observation may supersede the original
-                            # assertion, but must not make the same earlier source
-                            # occurrence eligible for a second assertion.
+                            # The original source event's occurrence time is the
+                            # duplicate identity. Assertion observed_at may be corrected
+                            # later and must not make an earlier source occurrence eligible
+                            # for a second assertion.
+                            CareEvent.occurred_at == event_date,
                             CareAssertion.assertion_status != "rejected",
                             CareAssertion.source_event_id != source_event_id,
                         ).order_by(CareAssertion.recorded_at.asc()).first()
