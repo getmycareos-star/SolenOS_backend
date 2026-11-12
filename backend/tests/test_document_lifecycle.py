@@ -646,3 +646,49 @@ def test_outlook_msg_is_preserved_but_reports_explicit_unsupported_extraction(cl
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert response.status_code == 415, response.text
     assert ".msg files are preserved" in response.json()["detail"]
+
+
+def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatch):
+    import hashlib
+    import app.api.document_lifecycle as lifecycle
+
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    original = _scanned_text_image()
+    observed = {}
+
+    def fake_ocr(image):
+        observed["size"] = image.size
+        return "Follow-up appointment on November 20."
+
+    monkeypatch.setattr(lifecycle, "_ocr_image", fake_ocr)
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+            "capture_method": "scan",
+            "capture_timestamp": "2026-11-12T06:20:00Z",
+            "capture_page_number": "3",
+            "scan_rotation_degrees": "90",
+            "scan_crop_json": '{"top":10,"right":20,"bottom":10,"left":10}',
+        },
+        files={"file": ("scan_page_3.jpg", original, "image/jpeg")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+    extracted = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert extracted.status_code == 201, extracted.text
+    detail = test_client.get(
+        f"/api/v1/documents/analyses/{extracted.json()['analysis_id']}", headers=auth
+    )
+    assert detail.status_code == 200, detail.text
+    assert "[Page 3 OCR]" in detail.json()["extracted_text"]
+    assert "[Page 1 OCR]" not in detail.json()["extracted_text"]
+    with TestSessionLocal() as db:
+        upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+        assert upload.content == original
+        assert upload.sha256 == hashlib.sha256(original).hexdigest()
+    assert observed["size"] != Image.open(io.BytesIO(original)).size
