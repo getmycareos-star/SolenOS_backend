@@ -22,7 +22,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 
 
-DELTA_ENGINE_VERSION = "2026.11.12.2"
+DELTA_ENGINE_VERSION = "2026.11.12.3"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
