@@ -1150,6 +1150,12 @@ def test_oversized_pdf_page_is_blocked_and_not_retried_as_a_transient_failure(cl
     assert second.json()["blocked_page_numbers"] == [1]
     assert calls == []
 
+    listing = test_client.get("/api/v1/documents/intelligence", headers=auth)
+    assert listing.status_code == 200, listing.text
+    document_item = next(item for item in listing.json()["items"] if item["source_evidence_id"] == evidence_id)
+    assert document_item["blocked_page_numbers"] == [1]
+    assert document_item["retryable_page_numbers"] == []
+
     original_download = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
     assert original_download.status_code == 200
     assert original_download.content == original
