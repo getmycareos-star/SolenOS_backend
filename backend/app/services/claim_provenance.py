@@ -48,7 +48,10 @@ _EVENT_TOPIC_TERMS = {
 
 
 def _claim_number(statement: str) -> int | None:
-    match = re.search(r"\b(\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b", statement.casefold())
+    match = re.search(
+        r"\b(\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:separate|distinct|recorded|reported|documented|saved)\s+)*(?:incident|incidents|event|events|occasion|occasions|episode|episodes)\b",
+        statement.casefold(),
+    )
     if not match:
         return None
     token = match.group(1)
