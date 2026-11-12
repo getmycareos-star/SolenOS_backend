@@ -182,6 +182,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "extraction_method": metadata.get("extraction_method"),
         "model_provenance": intelligence.get("model_provenance"),
+        "processing_history": intelligence.get("processing_history", []),
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
         "open_questions": intelligence.get("open_questions", []),
@@ -498,21 +499,29 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         configured_model = None
         configured_provider = "unavailable_or_test_stub"
     source_text_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    model_provenance = {
+        "provider": configured_provider,
+        "model_tag": configured_model,
+        "model_digest": None,
+        "model_digest_status": "not_exposed_by_ollama_chat_response",
+        "processing_version": "document_intelligence_v1",
+        "prompt_version": "source_grounded_review_candidates_v1",
+        "extraction_source": "persisted_server_extraction",
+        "source_evidence_id": str(evidence.id),
+        "source_text_sha256": source_text_hash,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "model_authority": "review_only",
+    }
+    prior_processing_history = resume_intelligence.get("processing_history")
+    processing_history = list(prior_processing_history) if isinstance(prior_processing_history, list) else []
+    prior_provenance = resume_intelligence.get("model_provenance")
+    if isinstance(prior_provenance, dict):
+        processing_history.append(prior_provenance)
+    processing_history.append(model_provenance)
     metadata["document_intelligence"] = {
         "version": 1,
-        "model_provenance": {
-            "provider": configured_provider,
-            "model_tag": configured_model,
-            "model_digest": None,
-            "model_digest_status": "not_exposed_by_ollama_chat_response",
-            "processing_version": "document_intelligence_v1",
-            "prompt_version": "source_grounded_review_candidates_v1",
-            "extraction_source": "persisted_server_extraction",
-            "source_evidence_id": str(evidence.id),
-            "source_text_sha256": source_text_hash,
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-            "model_authority": "review_only",
-        },
+        "model_provenance": model_provenance,
+        "processing_history": processing_history[-20:],
         "observations": grounded,
         "open_questions": list(dict.fromkeys([
             *[
