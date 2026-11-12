@@ -19,6 +19,7 @@ from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 
 main_module = importlib.import_module("app.main")
 intelligence_module = importlib.import_module("app.api.document_intelligence")
+execution_module = importlib.import_module("app.services.care_continuity_execution")
 lifecycle_module = importlib.import_module("app.api.document_lifecycle")
 app = main_module.app
 engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -96,6 +97,18 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         ], "open_questions": ["Was this typical for the person?"]}
 
     monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    execution_calls = []
+    original_execute = execution_module.execute_care_continuity_reconciliation
+
+    def capture_execution_scope(db, person_id, **kwargs):
+        execution_calls.append(dict(kwargs))
+        return original_execute(db, person_id, **kwargs)
+
+    monkeypatch.setattr(
+        intelligence_module,
+        "execute_care_continuity_reconciliation",
+        capture_execution_scope,
+    )
     try:
         first = create_record(client, "Caregiver A")
         auth = {"Authorization": "Bearer " + first["access_token"]}
@@ -176,6 +189,9 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+        assert len(execution_calls) == 1
+        assert execution_calls[0]["source_caregiver_id"] == first["caregiver"]["id"]
+        assert execution_calls[0]["source_evidence_id"] == evidence_id
 
         # Repeating the same acceptance returns the existing assertion; it never duplicates it.
         accepted_again = client.post(
