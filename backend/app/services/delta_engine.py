@@ -1472,12 +1472,15 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     assessment["delta_run_id"] = run.id
             run.delta_json = json.dumps(result, ensure_ascii=False, default=str)
             db.commit()
-        except Exception:
-            logger.exception(
+        except Exception as exc:
+            original_error = getattr(exc, "orig", None)
+            diagnostics = getattr(original_error, "diag", None)
+            logger.error(
                 "Delta reconciliation persistence failed",
                 extra={
-                    "person_id": person_id,
-                    "source_event_id": source_event_id,
+                    "exception_type": type(exc).__name__,
+                    "database_sqlstate": getattr(original_error, "pgcode", None),
+                    "database_constraint": getattr(diagnostics, "constraint_name", None),
                     "evidence_count": len(evidence_ids),
                 },
             )
