@@ -189,11 +189,23 @@ async def process_one_qwen_job() -> bool:
                     raise ValueError("document_intake_evidence_id_invalid")
                 extraction = extract_saved_document(evidence_id, scoped_request, db)
                 intelligence = analyze_saved_document(evidence_id, scoped_request, db)
+                resume_count = 0
+                while (
+                    intelligence.get("intelligence_status") == "partial"
+                    and intelligence.get("unprocessed_page_numbers")
+                    and resume_count < 10
+                ):
+                    intelligence = analyze_saved_document(evidence_id, scoped_request, db)
+                    resume_count += 1
                 completed.append({
                     "evidence_id": evidence_id,
                     "analysis_id": extraction.get("analysis_id"),
                     "intelligence_status": intelligence.get("intelligence_status"),
-                    "candidate_count": intelligence.get("candidate_count", 0),
+                    "candidate_count": len(intelligence.get("observations") or []),
+                    "processed_page_count": intelligence.get("processed_page_count"),
+                    "total_page_count": intelligence.get("total_page_count"),
+                    "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers") or [],
+                    "resume_passes": resume_count,
                 })
             job.status = "completed"
             job.workflow = "document_intake"
