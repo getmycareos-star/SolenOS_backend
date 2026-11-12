@@ -1,4 +1,5 @@
 import io
+import json
 
 import pytest
 from PIL import Image, ImageDraw, ImageFont
@@ -730,6 +731,7 @@ def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatc
             "caregiver_id": session["caregiver"]["id"],
             "evidence_type": "document",
             "capture_method": "scan",
+            "scan_review_status": "not_reviewed",
             "capture_timestamp": "2026-11-12T06:20:00Z",
             "capture_page_number": "3",
             "scan_rotation_degrees": "90",
