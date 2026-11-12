@@ -708,7 +708,7 @@ class UncertaintyEngine:
         # original source can be mistaken for evidence of the caregiver's answer.
         explicit_answer_evidence_ids = (
             list(update_data.get("evidence_ids") or [])
-            if "evidence_ids" in update_data else []
+            if "evidence_ids" in explicit_update_fields else []
         )
         if "evidence_ids" in update_data:
             update_data["evidence_ids"] = self._validate_person_evidence(
@@ -784,9 +784,10 @@ class UncertaintyEngine:
             or ("answer_provenance" in explicit_update_fields and answer_provenance != db_question.answer_provenance)
             or (
                 "evidence_ids" in explicit_update_fields
-                and explicit_answer_evidence_ids != list(latest_answer_event.evidence_ids or [])
-                if latest_answer_event is not None else
-                "evidence_ids" in explicit_update_fields
+                and (
+                    latest_answer_event is None
+                    or explicit_answer_evidence_ids != list(latest_answer_event.evidence_ids or [])
+                )
             )
         )
         if new_status == "answered" and answer_content_changed:
