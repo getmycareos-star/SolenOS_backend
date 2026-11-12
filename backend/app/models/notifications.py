@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -8,6 +8,16 @@ from app.core.database import Base
 
 class CareNotification(Base):
     __tablename__ = "care_notifications"
+    __table_args__ = (
+        Index(
+            "uq_care_notifications_active_source",
+            "person_id", "caregiver_id", "category", "source_event_id",
+            unique=True,
+            postgresql_where=text("status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"),
+            sqlite_where=text("status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"),
+        ),
+        Index("ix_care_notifications_scope_status_created", "person_id", "caregiver_id", "status", "created_at"),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -17,7 +27,11 @@ class CareNotification(Base):
     category = Column(String(40), nullable=False, default="care_update")
     priority = Column(String(20), nullable=False, default="normal")
     source_event_id = Column(String, nullable=True)
+    status = Column(String(16), nullable=False, default="active", server_default="active", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_reason = Column(String(80), nullable=True)
     read_at = Column(DateTime(timezone=True), nullable=True)
 
 
