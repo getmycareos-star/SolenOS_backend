@@ -414,10 +414,39 @@ def _persist_medication_document_conflict_question(
     ).all()
     for question in existing_questions:
         context_items = question.context if isinstance(question.context, list) else []
-        if evidence_id in (question.evidence_ids or []) or any(
+        same_source = any(
             isinstance(item, dict) and item.get("source_sha256") == upload.sha256
             for item in context_items
-        ):
+        )
+        if evidence_id in (question.evidence_ids or []) or same_source:
+            # Identical uploads remain separate evidence records. Preserve the
+            # duplicate's lineage on the existing professional question so
+            # every document status row reports the conflict and deletion of
+            # either source cannot silently orphan the clarification.
+            linked_evidence_ids = list(dict.fromkeys([
+                *(str(value) for value in (question.evidence_ids or [])),
+                evidence_id,
+            ]))
+            if linked_evidence_ids != list(question.evidence_ids or []):
+                question.evidence_ids = linked_evidence_ids
+            if not any(
+                isinstance(item, dict) and item.get("document_evidence_id") == evidence_id
+                for item in context_items
+            ):
+                context_items.append({
+                    "source_kind": "duplicate_document_candidate",
+                    "analysis_id": analysis_id,
+                    "document_evidence_id": evidence_id,
+                    "source_sha256": upload.sha256,
+                    "page_number": candidate.get("page_number"),
+                    "candidate_subject": subject,
+                    "candidate_observation": observation,
+                    "source_quote": quote,
+                    "interpretation": "same_binary_document_duplicate_linked_to_existing_professional_question",
+                })
+                question.context = context_items
+            db.add(question)
+            db.flush()
             return str(question.id)
 
     evidence_ids = list(dict.fromkeys([
