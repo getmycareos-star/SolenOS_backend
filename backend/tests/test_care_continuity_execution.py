@@ -425,18 +425,18 @@ def test_shared_coordinator_rejects_incomplete_handoff_revision_reference(monkey
     db.commit.assert_not_called()
 
 
-def test_shared_coordinator_rejects_appointment_workspace_from_another_caregiver(monkeypatch):
+def test_shared_coordinator_rejects_appointment_revision_from_another_caregiver(monkeypatch):
     person = SimpleNamespace(id="person-1")
     workspace = SimpleNamespace(
         id="workspace-1",
         person_id="person-1",
-        created_by_caregiver_id="different-caregiver",
+        created_by_caregiver_id="caregiver-1",
     )
     revision = SimpleNamespace(
         id="revision-1",
         record_id="workspace-1",
         person_id="person-1",
-        changed_by_caregiver_id="caregiver-1",
+        changed_by_caregiver_id="different-caregiver",
     )
     db = _session({
         Person: person,
