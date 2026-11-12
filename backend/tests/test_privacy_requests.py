@@ -1398,3 +1398,111 @@ def test_approved_evidence_source_correction_preserves_immutable_original(monkey
         assert correction.corrected_text == "The caregiver said the appointment was Tuesday."
     finally:
         db.close()
+
+def test_evidence_correction_is_record_scoped_and_fulfilment_is_idempotent(monkeypatch):
+    from app.models.care import Evidence, Correction
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "m" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    owner = create_session(client, "Evidence owner")
+    unrelated = create_session(client, "Unrelated care record")
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    unrelated_headers = {"Authorization": f"Bearer {unrelated['access_token']}"}
+    reviewer_headers = {
+        **owner_headers,
+        "X-SolenOS-Privacy-Reviewer-Token": "m" * 40,
+    }
+
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            person_id=owner["person"]["id"],
+            type="observation",
+            source_text="The care visit happened on Wednesday.",
+            uploaded_by_caregiver_id=owner["caregiver"]["id"],
+        )
+        db.add(evidence)
+        db.commit()
+        db.refresh(evidence)
+        evidence_id = evidence.id
+        original_text = evidence.source_text
+        original_hash = evidence.source_text_sha256
+    finally:
+        db.close()
+
+    # A different anonymous care record cannot even open a correction request
+    # against the owner's source evidence.
+    denied = client.post(
+        "/api/v1/privacy/requests",
+        headers=unrelated_headers,
+        json={
+            "request_type": "correction",
+            "authority_basis": "self",
+            "authority_attested": True,
+            "correction_target_type": "evidence_source",
+            "correction_target_id": evidence_id,
+            "correction_text": "The care visit happened on Thursday.",
+            "correction_reason": "Corrected weekday.",
+        },
+    )
+    assert denied.status_code == 404, denied.text
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=owner_headers,
+        json={
+            "request_type": "correction",
+            "authority_basis": "self",
+            "authority_attested": True,
+            "correction_target_type": "evidence_source",
+            "correction_target_id": evidence_id,
+            "correction_text": "The care visit happened on Thursday.",
+            "correction_reason": "The original weekday was recorded incorrectly.",
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed identity and correction authority.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+
+    first = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
+        headers=reviewer_headers,
+    )
+    assert first.status_code == 200, first.text
+    correction_id = first.json()["fulfilment"]["correction_id"]
+
+    replay = client.post(
+        f"/api/v1/privacy/requests/{request_id}/fulfil-correction",
+        headers=reviewer_headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["fulfilment"]["correction_id"] == correction_id
+
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(Evidence).filter(Evidence.id == evidence_id).one()
+        assert persisted.source_text == original_text
+        assert persisted.source_text_sha256 == original_hash
+        corrections = db.query(Correction).filter(
+            Correction.person_id == owner["person"]["id"],
+            Correction.target_type == "evidence_source",
+            Correction.target_id == evidence_id,
+        ).all()
+        assert len(corrections) == 1
+        assert corrections[0].id == correction_id
+        assert corrections[0].original_text == original_text
+        assert corrections[0].corrected_text == "The care visit happened on Thursday."
+    finally:
+        db.close()
