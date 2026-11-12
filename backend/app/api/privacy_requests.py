@@ -1151,32 +1151,44 @@ def fulfil_approved_deletion(
             for table_name in component
         }
         component_children = {index: set() for index in range(len(components))}
-        component_indegree = {index: 0 for index in range(len(components))}
         for parent_name, child_names in children_by_parent.items():
             parent_component = component_for[parent_name]
             for child_name in child_names:
                 child_component = component_for[child_name]
-                if parent_component == child_component or child_component in component_children[parent_component]:
-                    continue
-                component_children[parent_component].add(child_component)
-                component_indegree[child_component] += 1
+                if parent_component != child_component:
+                    component_children[parent_component].add(child_component)
 
-        component_depth = {}
-        ready = [
+        root_components = {
             component_for[root]
             for root in ("persons", "caregivers")
             if root in component_for
-        ]
-        ready = list(dict.fromkeys(ready))
-        for component_index in ready:
-            component_depth[component_index] = 0
-        processed = set()
+        }
+        reachable_components = set(root_components)
+        pending_components = list(root_components)
+        while pending_components:
+            parent_component = pending_components.pop()
+            for child_component in component_children[parent_component]:
+                if child_component not in reachable_components:
+                    reachable_components.add(child_component)
+                    pending_components.append(child_component)
+
+        component_indegree = {index: 0 for index in reachable_components}
+        for parent_component in reachable_components:
+            for child_component in component_children[parent_component]:
+                if child_component in reachable_components:
+                    component_indegree[child_component] += 1
+
+        component_depth = {component_index: 0 for component_index in root_components}
+        ready = sorted(
+            component_index
+            for component_index, indegree in component_indegree.items()
+            if indegree == 0
+        )
         while ready:
             component_index = ready.pop(0)
-            if component_index in processed:
-                continue
-            processed.add(component_index)
-            for child_component in component_children[component_index]:
+            for child_component in sorted(component_children[component_index]):
+                if child_component not in reachable_components:
+                    continue
                 candidate_depth = component_depth[component_index] + 1
                 component_depth[child_component] = max(
                     component_depth.get(child_component, 0),
@@ -1185,13 +1197,13 @@ def fulfil_approved_deletion(
                 component_indegree[child_component] -= 1
                 if component_indegree[child_component] == 0:
                     ready.append(child_component)
+                    ready.sort()
 
         reachable_depth = {
             table_name: component_depth[component_for[table_name]]
             for table_name in dependency_tables
             if component_for[table_name] in component_depth
         }
-
 
         for raw_table_name in sorted(
             raw_tables,
