@@ -364,6 +364,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "assertion_id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
         "field": item.field, "value": item.asserted_value, "source": item.source_label,
         "assertion_kind": item.assertion_kind,
+        "epistemic_state": item.epistemic_state or "reported",
         "observed_at": item.observed_at.isoformat() if item.observed_at else None,
         "status": item.assertion_status, "evidence_ids": item.evidence_ids or [],
     } for item in active_assertions]
