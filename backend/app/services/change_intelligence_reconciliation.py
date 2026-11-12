@@ -65,9 +65,31 @@ def reconcile_person_change_intelligence(
         }
         missing = set(protected_ids) - present
         if missing:
+            same_person_rows = db.query(
+                CareAssertion.id,
+                CareAssertion.person_id,
+                CareAssertion.assertion_kind,
+                CareAssertion.assertion_status,
+            ).filter(CareAssertion.person_id == person_id).all()
+            tracked_rows = [
+                {
+                    "id": str(obj.id),
+                    "person_id": str(obj.person_id),
+                    "state": "deleted" if obj in db.deleted else "new" if obj in db.new else "persistent",
+                }
+                for obj in list(db.identity_map.values()) + list(db.new) + list(db.deleted)
+                if isinstance(obj, CareAssertion) and str(obj.id) in missing
+            ]
             logger.error(
-                "Care reconciliation removed protected source assertions at stage %s",
-                stage,
+                "Care reconciliation source assertion retention failed: stage=%s person_id=%s "
+                "protected_ids=%s present_ids=%s same_person_assertions=%s tracked=%s",
+                stage, person_id, sorted(protected_ids), sorted(present),
+                [
+                    {"id": str(row.id), "person_id": str(row.person_id),
+                     "kind": row.assertion_kind, "status": row.assertion_status}
+                    for row in same_person_rows
+                ],
+                tracked_rows,
             )
             raise RuntimeError(
                 f"Source assertion preservation failed during {stage}"
