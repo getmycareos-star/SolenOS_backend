@@ -4308,3 +4308,92 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         db.close()
     finally:
         teardown_db()
+
+
+def test_source_clarification_dedup_merges_rephrasing_but_preserves_time_context():
+    from app.services.uncertainty import persist_source_clarification_questions
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="semantic-question-person", name="Care recipient")
+        caregiver = Caregiver(
+            id="semantic-question-caregiver",
+            name="Family caregiver",
+            email="semantic-question@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence_one = Evidence(
+            id="semantic-question-evidence-one",
+            person_id=person.id,
+            type="document",
+            source_text="Medication instruction document, first source.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        evidence_two = Evidence(
+            id="semantic-question-evidence-two",
+            person_id=person.id,
+            type="document",
+            source_text="Medication instruction document, second source.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        db.add_all([person, caregiver, evidence_one, evidence_two])
+        db.flush()
+
+        first = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="document_extraction",
+            source_record_type="evidence",
+            source_record_id=evidence_one.id,
+            evidence_ids=[evidence_one.id],
+            questions=[
+                "What is her current medication dose?",
+                "Has her sleep changed since Friday?",
+            ],
+        )
+        assert len(first) == 2
+
+        second = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="document_extraction",
+            source_record_type="evidence",
+            source_record_id=evidence_two.id,
+            evidence_ids=[evidence_two.id],
+            questions=[
+                "What medication dose is she taking now?",
+                "Is her sleep different since Friday?",
+                "What was her medication dose last week?",
+                "Has her sleep changed since Monday?",
+            ],
+        )
+        db.flush()
+
+        questions = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+        ).all()
+        assert len(questions) == 4
+        assert len(second) == 4
+
+        current_medication = next(
+            item for item in questions if item.question == "What is her current medication dose?"
+        )
+        friday_sleep = next(
+            item for item in questions if item.question == "Has her sleep changed since Friday?"
+        )
+        assert set(current_medication.evidence_ids or []) == {evidence_one.id, evidence_two.id}
+        assert set(friday_sleep.evidence_ids or []) == {evidence_one.id, evidence_two.id}
+        assert len(current_medication.context or []) == 2
+        assert len(friday_sleep.context or []) == 2
+
+        assert any("last week" in item.question.casefold() for item in questions)
+        assert any("since Monday" in item.question for item in questions)
+    finally:
+        db.close()
+        teardown_db()
