@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage, ConversationSession
-from app.services.lcr_context import build_lcr_context
 from app.services.change_intelligence_reconciliation import (
     reconcile_person_change_intelligence,
 )
@@ -161,7 +160,7 @@ def execute_care_continuity_reconciliation(
         "assessment": "not_applicable",
         "review": "not_required",
         "reconciliation": "staged_in_caller_transaction",
-        "longitudinal_retrieval": "unavailable",
+        "longitudinal_retrieval": "not_verified",
     }
     if stage_statuses:
         allowed = {
@@ -181,21 +180,6 @@ def execute_care_continuity_reconciliation(
     db.flush()
     reconcile_person_change_intelligence(db, person_id, reference_time)
     db.flush()
-
-    try:
-        projection = build_lcr_context(
-            db,
-            person_id,
-            caregiver_id=caregiver_id,
-            limit_per_source=1,
-        )
-        stages["longitudinal_retrieval"] = (
-            "available"
-            if not projection.get("missing_required_sources")
-            else "unavailable"
-        )
-    except Exception:
-        stages["longitudinal_retrieval"] = "unavailable"
 
     return {
         "contract_version": "1.0",
