@@ -165,19 +165,38 @@ def review_qwen_assistance_proposal(
         output.written_to_lcr = True
         rationale = "Caregiver explicitly approved this AI-generated interpretation. It remains classified as inferred, not verified."
 
-    db.add(AIOutputLCRDecision(
-        id=str(uuid.uuid4()),
-        proposal_id=proposal.id,
-        person_id=person_id,
-        reviewer_caregiver_id=caregiver_id,
-        decision=terminal,
-        rationale=rationale,
-        resulting_lcr_revision_id=assertion_id,
-        created_at=now,
-    ))
-    db.add(proposal)
-    db.add(output)
-    db.commit()
+    execution = None
+    try:
+        if decision == "accept":
+            execution = execute_care_continuity_reconciliation(
+                db,
+                person_id,
+                workflow="qwen_assistance_summary_review",
+                source_event_ids=event_ids,
+                source_evidence_ids=evidence_ids,
+                source_assertion_id=assertion_id,
+            )
+        db.add(AIOutputLCRDecision(
+            id=str(uuid.uuid4()),
+            proposal_id=proposal.id,
+            person_id=person_id,
+            reviewer_caregiver_id=caregiver_id,
+            decision=terminal,
+            rationale=rationale,
+            resulting_lcr_revision_id=assertion_id,
+            created_at=now,
+        ))
+        db.add(proposal)
+        db.add(output)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="The Qwen care suggestion review could not be saved with its care-record reassessment. Retry after refreshing.",
+        ) from exc
+    if execution is not None:
+        execution["stages"]["reconciliation"] = "committed"
     return {
         "proposal_id": proposal.id,
         "status": proposal.status,
@@ -185,6 +204,7 @@ def review_qwen_assistance_proposal(
         "assertion_id": assertion_id,
         "written_to_lcr": decision == "accept",
         "epistemic_state": "inferred" if decision == "accept" else None,
+        "reconciliation": execution,
         "idempotent_replay": False,
     }
 
