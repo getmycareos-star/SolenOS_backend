@@ -624,20 +624,20 @@ def _extract(
                 temporary.write(content)
                 temp_path = temporary.name
             with MapiMessage.from_file(temp_path, strict=False) as message:
-                email_message = message.to_email_message()
-                plain_part = email_message.get_body(preferencelist=("plain",))
-                if plain_part is not None:
-                    body = str(plain_part.get_content() or "").strip()
-                else:
-                    html_part = email_message.get_body(preferencelist=("html",))
+                body = str(message.body or "").strip()
+                if not body:
+                    html_body = str(message.body_html or "")
                     parser = _HTMLText()
-                    if html_part is not None:
-                        parser.feed(str(html_part.get_content() or ""))
+                    if html_body:
+                        parser.feed(html_body)
                     body = parser.text()
+                header_values = (
+                    ("From", getattr(message, "sender_email_address", None)),
+                    ("Subject", message.subject),
+                    ("Message-ID", getattr(message, "internet_message_id", None)),
+                )
                 headers = "\n".join(
-                    f"{name}: {email_message.get(name)}"
-                    for name in ("From", "To", "Cc", "Date", "Subject", "Message-ID")
-                    if email_message.get(name)
+                    f"{name}: {value}" for name, value in header_values if value
                 )
                 extracted = (headers + "\n\n" + body).strip()
         except Exception as exc:
