@@ -4335,3 +4335,67 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         db.close()
     finally:
         teardown_db()
+
+
+def test_question_quality_metrics_are_scoped_and_measure_duplicates_and_review_backlog():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="finding6-metrics-person", name="Metrics Person")
+        caregiver = Caregiver(
+            id="finding6-metrics-caregiver", name="Metrics Caregiver",
+            email="finding6-metrics@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        other = Person(id="finding6-metrics-other", name="Other Metrics Person")
+        other_caregiver = Caregiver(
+            id="finding6-metrics-other-caregiver", name="Other Metrics Caregiver",
+            email="finding6-metrics-other@example.com", relationship="Family",
+            person_id=other.id,
+        )
+        db.add_all([person, caregiver, other, other_caregiver])
+        db.flush()
+        db.add_all([
+            OpenQuestion(
+                person_id=person.id, question="Confirm the current sleep schedule?",
+                subject_type="person", subject_id=person.id, status="open",
+                priority=Priority.INFORMATIONAL, necessity="not_assessed",
+                context=[{"source_kind": "document_extraction"}],
+            ),
+            OpenQuestion(
+                person_id=person.id, question="  confirm the current sleep schedule? ",
+                subject_type="person", subject_id=person.id, status="open",
+                priority=Priority.INFORMATIONAL, necessity="not_assessed",
+                context=[{"source_kind": "daily_capture_extraction"}],
+            ),
+            OpenQuestion(
+                person_id=person.id, question="Old extraction question",
+                subject_type="person", subject_id=person.id, status="closed",
+                priority=Priority.INFORMATIONAL, necessity="not_assessed",
+                closed_reason="automatically_suppressed: no current decision dependency",
+            ),
+            OpenQuestion(
+                person_id=other.id, question="Other person's private question",
+                subject_type="person", subject_id=other.id, status="open",
+                priority=Priority.INFORMATIONAL, necessity="not_assessed",
+                context=[{"source_kind": "document_extraction"}],
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        response = client.get("/api/v1/uncertainty/question-quality")
+        assert response.status_code == 200, response.text
+        metrics = response.json()
+        assert metrics["person_id"] == person.id
+        assert metrics["active_questions"] == 2
+        assert metrics["non_actionable_active_questions"] == 2
+        assert metrics["duplicate_question_groups"] == 1
+        assert metrics["duplicate_question_excess"] == 1
+        assert metrics["source_questions_awaiting_necessity_assessment"] == 2
+        assert metrics["manual_review_backlog"] == 2
+        assert metrics["automatically_suppressed_questions"] == 1
+        assert "Other person's private question" not in str(metrics)
+    finally:
+        teardown_db()
