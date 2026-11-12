@@ -1465,7 +1465,6 @@ def test_fresh_companion_session_retrieves_only_accepted_appointment_assertions(
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_ollama)
-    monkeypatch.setattr(collaboration, "process_companion_care_update_message", lambda *args, **kwargs: None)
 
     response = test_client.post(
         "/api/v1/conversation/message",
