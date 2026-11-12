@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 
-SOURCE_TYPE = "appointment_workspace_follow_up"
+SOURCE_TYPE = "appointment_workspace"
 
 
 def _aware_due(value):
