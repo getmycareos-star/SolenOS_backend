@@ -634,12 +634,12 @@ def _extract(
                     if html_part is not None:
                         parser.feed(str(html_part.get_content() or ""))
                     body = parser.text()
-                headers = "\\n".join(
+                headers = "\n".join(
                     f"{name}: {email_message.get(name)}"
                     for name in ("From", "To", "Cc", "Date", "Subject", "Message-ID")
                     if email_message.get(name)
                 )
-                extracted = (headers + "\\n\\n" + body).strip()
+                extracted = (headers + "\n\n" + body).strip()
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved Outlook message could not be read") from exc
         finally:
