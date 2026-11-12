@@ -47,3 +47,22 @@ and unreviewed reports are not promoted into the current-medication selector.
 Medication administration remains a separate append-only Daily Care event.
 
 No migration or new persistence table is required for this contract.
+
+
+## Caregiver authoring and review endpoints
+
+- `POST /api/v1/care-continuity/medications` accepts a name, optional dose/note,
+  and review window. It creates name, explicit `active` status, and optional
+  dose assertions under one generated medication `subject_id`. All assertions
+  begin with `assertion_status = "reported"` and
+  `epistemic_state = "reported"`. The create operation is one transaction.
+- `GET /api/v1/care-continuity/medications` returns eligible current records
+  separately from `pending_review` caregiver reports.
+- `POST /api/v1/care-continuity/medications/{subject_id}/review` records an
+  explicit caregiver review of the assertions in one transaction, appends
+  assertion revisions, and runs the shared care-continuity reconciliation.
+  A review cannot accept conflicting, rejected, superseded, or retracted reports.
+
+The caregiver-facing flow uses a 30-day review window by default. A due date is
+not a promise that a notification will be sent. The freshness projection marks
+the assertion for review when its window expires.
