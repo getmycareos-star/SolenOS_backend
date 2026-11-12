@@ -224,14 +224,25 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
             [item for peer in conflicts for item in (peer.evidence_ids or [])]
             + list(payload.evidence_ids or [])
         ))
-        # Dated document observations may describe a different point in the
-        # care journey. Preserve the conflict as qualified rather than treating
-        # the values as simultaneous; undated competing current-state reports
-        # remain unresolved. Neither path chooses a winner.
+        # A single timestamp does not prove that two assertions describe
+        # different moments. Qualify only when at least two comparable source
+        # time values are present and actually differ. A timestamp cannot be
+        # compared safely with free-text time wording.
+        observed_time_keys = []
+        event_time_keys = []
+        for candidate in [*conflicts, assertion]:
+            if candidate.observed_at is not None:
+                observed_at = candidate.observed_at
+                if observed_at.tzinfo is None:
+                    observed_at = observed_at.replace(tzinfo=timezone.utc)
+                else:
+                    observed_at = observed_at.astimezone(timezone.utc)
+                observed_time_keys.append(observed_at.isoformat())
+            elif candidate.event_time_text and candidate.event_time_text.strip():
+                event_time_keys.append(" ".join(candidate.event_time_text.casefold().split()))
         has_distinct_time_context = (
-            bool(assertion.event_time_text)
-            or assertion.observed_at is not None
-            or any(bool(peer.event_time_text) or peer.observed_at is not None for peer in conflicts)
+            len(set(observed_time_keys)) > 1
+            or len(set(event_time_keys)) > 1
         )
         proposed_conflict_status = "qualified" if has_distinct_time_context else "unresolved"
         if contradiction:
