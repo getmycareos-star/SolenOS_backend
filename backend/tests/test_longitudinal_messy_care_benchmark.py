@@ -972,6 +972,25 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
 
     with TestingSessionLocal() as db:
         person, caregiver = make_person(db, scenario["scenario_id"])
+        # Seed the independently specified initial LCR baseline as a reported
+        # historical assertion. The unknown medication state remains a gap, not
+        # a fabricated "no medication" assertion.
+        db.add(CareAssertion(
+            id=f"baseline-{scenario['scenario_id']}",
+            person_id=person.id,
+            subject_type="symptom",
+            subject_id="sleep",
+            field="symptom_reported_state",
+            assertion_kind="time_bound_observation",
+            asserted_value="usual sleep stable",
+            source_label="Initial LCR baseline (reported)",
+            source_text="Known initial state supplied by the scenario fixture.",
+            evidence_ids=[],
+            assertion_status="reported",
+            observed_at=NOW - timedelta(days=90),
+            created_by_caregiver_id=caregiver.id,
+        ))
+        db.flush()
         ordered_events = sorted(
             scenario["incoming_events"], key=lambda item: item.get("arrival", 0)
         )
@@ -1153,7 +1172,8 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             event["evidence_id"]: event["id"] for event in ordered_events
         }
         for assertion in db.query(CareAssertion).filter(
-            CareAssertion.person_id == person.id
+            CareAssertion.person_id == person.id,
+            CareAssertion.source_event_id.is_not(None),
         ).all():
             assert assertion.source_event_id in expected_event_ids
             assert assertion.evidence_ids
