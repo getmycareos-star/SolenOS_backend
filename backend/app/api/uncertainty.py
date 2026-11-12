@@ -176,12 +176,20 @@ def review_question_answer(
     if answer_event is None:
         raise HTTPException(status_code=409, detail="No persisted answer event is available to review")
 
+    default_review_rationales = {
+        "accepted": "Accepted as a caregiver-reported account after review; not independently verified.",
+        "rejected": "Not accepted into the Living Care Record after review.",
+        "needs_clarification": "More information is needed before this answer can be accepted.",
+    }
+    review_rationale = (review.rationale or "").strip() or default_review_rationales[review.decision]
+    review_interval = review.review_after_days
+
     existing = engine.db.query(OpenQuestionReviewEventModel).filter(
         OpenQuestionReviewEventModel.question_id == question.id,
         OpenQuestionReviewEventModel.answer_version == answer_event.answer_version,
     ).first()
     if existing:
-        if existing.decision == review.decision and existing.rationale == review.rationale.strip():
+        if existing.decision == review.decision and existing.rationale == review_rationale:
             return existing
         raise HTTPException(status_code=409, detail="This answer version already has a review decision; submit a new answer version before another decision")
 
@@ -198,8 +206,7 @@ def review_question_answer(
         ).first()
         if source_claim is None:
             raise HTTPException(status_code=409, detail="The linked care claim is no longer available in this care record")
-        if source_claim.assertion_kind == "current_state" and review.review_after_days is None:
-            raise HTTPException(status_code=422, detail="Accepting a current-state clarification requires a caregiver-selected review interval")
+        review_interval = review.review_after_days if review.review_after_days is not None else source_claim.review_after_days
         if source_claim.assertion_kind == "time_bound_observation" and source_claim.observed_at is None:
             raise HTTPException(status_code=422, detail="The linked time-bound claim has no actual event time; this clarification cannot inherit an invented timestamp")
         evidence_ids = list(answer_event.evidence_ids or [])
@@ -229,7 +236,7 @@ def review_question_answer(
                 source_text=f"Caregiver answer: {answer_event.answer}\nSource or basis: {answer_event.answer_provenance}",
                 evidence_ids=evidence_ids,
                 observed_at=source_claim.observed_at,
-                review_after_days=review.review_after_days,
+                review_after_days=review_interval,
                 created_by_caregiver_id=answer_event.answered_by_caregiver_id,
                 updated_by_caregiver_id=engine.caregiver_id,
             ),
@@ -273,7 +280,7 @@ def review_question_answer(
         answer_event_id=answer_event.id,
         answer_version=answer_event.answer_version,
         decision=review.decision,
-        rationale=review.rationale.strip(),
+        rationale=review_rationale,
         reviewer_caregiver_id=engine.caregiver_id,
         claim_assessment_id=claim_assessment.id if claim_assessment else None,
         resulting_claim_id=resulting_claim.id if resulting_claim else None,
@@ -307,7 +314,7 @@ def review_question_answer(
             OpenQuestionReviewEventModel.question_id == question.id,
             OpenQuestionReviewEventModel.answer_version == answer_event.answer_version,
         ).first()
-        if concurrent and concurrent.decision == review.decision and concurrent.rationale == review.rationale.strip():
+        if concurrent and concurrent.decision == review.decision and concurrent.rationale == review_rationale:
             return concurrent
         raise HTTPException(status_code=409, detail="This answer version was reviewed concurrently; reload its review history") from exc
     except Exception:

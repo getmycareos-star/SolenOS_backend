@@ -2668,16 +2668,10 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         })
         assert answered.status_code == 200, answered.text
 
-        missing_review_window = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
-            "decision": "accepted",
-            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
-        })
-        assert missing_review_window.status_code == 422, missing_review_window.text
-
+        # Routine review requires only the decision. The backend records a
+        # decision-specific audit reason and does not invent a caregiver review interval.
         accepted = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
             "decision": "accepted",
-            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
-            "review_after_days": 30,
         })
         assert accepted.status_code == 200, accepted.text
         review = accepted.json()
@@ -2685,11 +2679,10 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         assert review["reviewer_caregiver_id"] == "review-caregiver-1"
         assert review["resulting_claim_id"]
         assert review["claim_assessment_id"]
+        assert review["rationale"] == "Accepted as a caregiver-reported account after review; not independently verified."
 
         repeated = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
             "decision": "accepted",
-            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
-            "review_after_days": 30,
         })
         assert repeated.status_code == 200
         assert repeated.json()["id"] == review["id"]
@@ -2717,7 +2710,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
             assert resulting.person_id == "review-person-1"
             assert resulting.asserted_value == "The caregiver reports that the appointment was attended on 12 October."
             assert resulting.assertion_status == "reported"
-            assert resulting.review_after_days == 30
+            assert resulting.review_after_days is None
             assert resulting.created_by_caregiver_id == "review-caregiver-1"
             assert "Direct report from the family caregiver." in resulting.source_text
 
@@ -3684,6 +3677,19 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         assert necessary.necessity_rationale == "The current care handoff depends on which discharge instruction is active."
         assert necessary.context[0]["source_id"] == necessary_gap.id
 
+        # Shared reconciliation emits an in-app message only for this explicitly
+        # necessary, source-backed question.
+        from app.models.notifications import CareNotification
+        from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+        reconcile_person_change_intelligence(db, person.id)
+        db.flush()
+        attention_items = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_attention",
+        ).all()
+        assert len(attention_items) == 1
+        assert attention_items[0].source_event_id == necessary.id
+
         # The caregiver-facing question projection fails closed: only questions
         # with an explicit necessity assessment and rationale are returned.
         unassessed = OpenQuestion(
@@ -3715,17 +3721,20 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         # When the explicit decision dependency disappears, the question is
         # automatically suppressed, not marked answered. A later necessity
         # reassessment reopens the same record and preserves revision history.
-        from app.services.care_continuity import reassess_open_question_lifecycle
         from app.models.care_continuity import CareStateRevision
         necessary_gap.context = []
         db.flush()
-        lifecycle = reassess_open_question_lifecycle(db, person.id)
+        reconcile_person_change_intelligence(db, person.id)
         db.flush()
-        assert lifecycle["suppressed"] == 1
         db.refresh(necessary)
         assert necessary.status == "closed"
         assert necessary.closed_reason.startswith("automatically_suppressed")
         assert necessary.answered_at is None
+        retired_attention = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.source_event_id == necessary.id,
+        ).one()
+        assert retired_attention.category == "care_attention_updated"
 
         new_discharge_evidence = Evidence(
             id="finding6-discharge-evidence-update",
@@ -3743,7 +3752,7 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
             "decision_dependency": "The active discharge instruction is again required for the upcoming handoff.",
         }]
         db.flush()
-        next_best_questions(db, person.id, persist=True, commit=False)
+        reconcile_person_change_intelligence(db, person.id)
         db.flush()
         db.refresh(necessary)
         assert necessary.status == "open"
@@ -3752,6 +3761,11 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         assert db.query(OpenQuestion).filter(
             OpenQuestion.person_id == person.id,
             OpenQuestion.question == necessary.question,
+        ).count() == 1
+        assert db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.source_event_id == necessary.id,
+            CareNotification.category == "care_attention",
         ).count() == 1
         db.commit()
         assert db.query(CareStateRevision).filter(
