@@ -127,9 +127,17 @@ def _create_active_notification(db: Session, notification: CareNotification) -> 
             db.flush()
         return True
     except IntegrityError:
-        # Another reconciliation may have committed the same active source
-        # notification. The unique index makes that race a harmless no-op.
-        return False
+        # Treat only the expected active-source uniqueness race as a no-op.
+        duplicate = db.query(CareNotification.id).filter(
+            CareNotification.person_id == notification.person_id,
+            CareNotification.caregiver_id == notification.caregiver_id,
+            CareNotification.category == notification.category,
+            CareNotification.source_event_id == notification.source_event_id,
+            CareNotification.status == "active",
+        ).first()
+        if duplicate:
+            return False
+        raise
 
 
 def create_proactive_care_notifications(
