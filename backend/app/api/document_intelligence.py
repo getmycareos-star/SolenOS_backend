@@ -107,7 +107,9 @@ def _document_assertion_field(candidate: dict) -> str:
     field_type = str(candidate.get("field_type") or "observation")
     if field_type not in {"medication", "allergy", "diagnosis", "appointment", "care_event", "observation"}:
         field_type = "observation"
-    return f"document_{field_type}_statement"
+    # Use the canonical care field so source-backed document reports can
+    # conflict with, confirm, or qualify existing assertions in the LCR.
+    return field_type
 
 
 def _document_asserted_value(candidate: dict, subject: str, observation: str) -> str:
