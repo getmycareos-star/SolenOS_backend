@@ -26,12 +26,28 @@ def _value_key(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def has_valid_caregiver_necessity(question: Any) -> bool:
-    """Fail closed unless a caregiver request has rationale, dependency and source evidence."""
-    evidence_ids = list(getattr(question, "evidence_ids", None) or [])
+def has_valid_caregiver_necessity(
+    question: Any, db: Optional[Session] = None, person_id: Optional[str] = None
+) -> bool:
+    """Fail closed unless rationale, decision dependency and same-record evidence exist."""
+    evidence_ids = list(dict.fromkeys(
+        str(value) for value in (getattr(question, "evidence_ids", None) or []) if value
+    ))
     rationale = getattr(question, "necessity_rationale", None)
     if not evidence_ids or not isinstance(rationale, str) or not rationale.strip():
         return False
+    scoped_person_id = person_id or getattr(question, "person_id", None)
+    if db is not None:
+        if not scoped_person_id:
+            return False
+        found = {
+            str(row[0]) for row in db.query(Evidence.id).filter(
+                Evidence.person_id == scoped_person_id,
+                Evidence.id.in_(evidence_ids),
+            ).all()
+        }
+        if found != set(evidence_ids):
+            return False
     for item in (getattr(question, "context", None) or []):
         if not isinstance(item, dict):
             continue
@@ -213,6 +229,11 @@ def set_assertion_status(db: Session, assertion_id: str, person_id: str, status:
         assertion.review_after_days = review_after_days
     assertion.assertion_status = status
     assertion.updated_by_caregiver_id = updated_by_caregiver_id
+    # Assertion review is a source-workflow event. Reconcile the affected care
+    # record in the same transaction so accepted evidence can settle exact
+    # information gaps and obsolete requests are lifecycle-managed immediately.
+    from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+    reconcile_person_change_intelligence(db, person_id)
     db.commit()
     db.refresh(assertion)
     return assertion
