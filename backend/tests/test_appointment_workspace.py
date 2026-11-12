@@ -218,6 +218,22 @@ def test_appointment_workspace_persists_versions_and_revision_history(client):
     assert record["payload"]["caregiver_report"].startswith("Family-reported")
     record_id = record["id"]
 
+    from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
+    db = TestSessionLocal()
+    synced = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == session["person"]["id"],
+        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+        OpenLoopRecord.source_id.like(f"{record_id}:%"),
+    ).all()
+    assert len(synced) == 1
+    assert synced[0].title == "Call clinic for result"
+    assert synced[0].owner_label == "Family caregiver"
+    # Date-only input has no timezone; preserve the text without inventing a due instant.
+    assert synced[0].deadline_at is None
+    assert synced[0].evidence[0]["reported_due"] == "2026-11-02"
+    assert db.query(OpenLoopEvent).filter_by(loop_id=synced[0].id).count() == 1
+    db.close()
+
     read = test_client.get(f"/api/v1/appointment-workspaces/{record_id}", headers=headers)
     assert read.status_code == 200, read.text
     assert read.json()["payload"] == payload
@@ -229,6 +245,15 @@ def test_appointment_workspace_persists_versions_and_revision_history(client):
     })
     assert updated.status_code == 200, updated.text
     assert updated.json()["version_number"] == 2
+    db = TestSessionLocal()
+    synced_after_update = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == session["person"]["id"],
+        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+        OpenLoopRecord.source_id.like(f"{record_id}:%"),
+    ).all()
+    assert len(synced_after_update) == 1
+    assert db.query(OpenLoopEvent).filter_by(loop_id=synced_after_update[0].id).count() == 2
+    db.close()
 
     conflict = test_client.patch(f"/api/v1/appointment-workspaces/{record_id}", headers=headers, json={
         "expected_version": 1, "payload": payload, "change_reason": "Stale update"
