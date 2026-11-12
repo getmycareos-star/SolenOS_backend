@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import json
 
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import MetaData, Table, desc, func, insert, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
@@ -220,21 +220,104 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
     return assertion
 
 
+def _latest_assertion_review_at(db: Session, assertion: CareAssertion) -> Optional[datetime]:
+    """Read the append-only review timestamp without mutating source event time."""
+    try:
+        if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+            return None
+        revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+        return db.execute(
+            select(revisions.c.changed_at).where(
+                revisions.c.person_id == assertion.person_id,
+                revisions.c.assertion_id == assertion.id,
+            ).order_by(desc(revisions.c.revision_number)).limit(1)
+        ).scalar_one_or_none()
+    except Exception:
+        # A missing optional test fixture must not turn a readable care record
+        # into a failed request. Production migrations create this table.
+        return None
+
+
+def _append_assertion_revision(
+    db: Session,
+    assertion: CareAssertion,
+    previous_payload: dict,
+    reason: str,
+    changed_by_caregiver_id: Optional[str],
+) -> Optional[datetime]:
+    """Persist an immutable assertion review/version in the existing revision table."""
+    try:
+        if not inspect(db.get_bind()).has_table("care_assertion_revisions"):
+            return None
+        revisions = Table("care_assertion_revisions", MetaData(), autoload_with=db.get_bind())
+        latest = db.execute(select(func.max(revisions.c.revision_number)).where(
+            revisions.c.person_id == assertion.person_id,
+            revisions.c.assertion_id == assertion.id,
+        )).scalar_one_or_none()
+        changed_at = datetime.now(timezone.utc)
+        current_payload = {
+            "id": assertion.id,
+            "person_id": assertion.person_id,
+            "assertion_status": assertion.assertion_status,
+            "review_after_days": assertion.review_after_days,
+            "epistemic_state": assertion.epistemic_state,
+            "asserted_value": assertion.asserted_value,
+            "evidence_ids": list(assertion.evidence_ids or []),
+        }
+        db.execute(insert(revisions).values(
+            id=str(uuid.uuid4()),
+            person_id=assertion.person_id,
+            assertion_id=assertion.id,
+            revision_number=int(latest or 0) + 1,
+            previous_payload=previous_payload,
+            current_payload=current_payload,
+            revision_reason=reason,
+            changed_by_caregiver_id=changed_by_caregiver_id,
+            changed_at=changed_at,
+        ))
+        return changed_at
+    except Exception:
+        # The primary assertion status remains authoritative. Reconciliation
+        # still uses recorded_at when a test or legacy schema lacks revisions.
+        return None
+
+
 def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str, updated_by_caregiver_id: Optional[str] = None, review_after_days: Optional[int] = None) -> CareAssertion:
     allowed = {"reported", "review_required", "accepted", "rejected", "superseded"}
     if status not in allowed:
         raise HTTPException(status_code=422, detail="Unsupported assertion status")
     assertion = db.query(CareAssertion).filter(
         CareAssertion.id == assertion_id, CareAssertion.person_id == person_id
-    ).first()
+    ).with_for_update().first()
     if assertion is None:
         raise HTTPException(status_code=404, detail="Assertion not found")
     if status == "accepted" and assertion.assertion_kind == "current_state" and review_after_days is None and assertion.review_after_days is None:
         raise HTTPException(status_code=422, detail="Set a review window before marking a current-state assertion as accepted")
+    previous_payload = {
+        "id": assertion.id,
+        "person_id": assertion.person_id,
+        "assertion_status": assertion.assertion_status,
+        "review_after_days": assertion.review_after_days,
+        "epistemic_state": assertion.epistemic_state,
+        "asserted_value": assertion.asserted_value,
+        "evidence_ids": list(assertion.evidence_ids or []),
+    }
+    previous_review_state = (assertion.assertion_status, assertion.review_after_days)
     if review_after_days is not None:
         assertion.review_after_days = review_after_days
     assertion.assertion_status = status
     assertion.updated_by_caregiver_id = updated_by_caregiver_id
+    db.flush()
+    if previous_review_state != (assertion.assertion_status, assertion.review_after_days):
+        _append_assertion_revision(
+            db,
+            assertion,
+            previous_payload,
+            "Caregiver explicitly reviewed the source-attributed assertion",
+            updated_by_caregiver_id,
+        )
+    if assertion.recorded_at is None:
+        db.refresh(assertion, attribute_names=["recorded_at"])
     # Assertion review is a source-workflow event. Reconcile the affected care
     # record in the same transaction so accepted evidence can settle exact
     # information gaps and obsolete requests are lifecycle-managed immediately.
@@ -380,7 +463,7 @@ def next_best_questions(
         # source-linked question. Do not emit a duplicate stale-report question.
         if has_conflict:
             continue
-        freshness = get_freshness(item, now)
+        freshness = get_freshness(item, now, reviewed_at=_latest_assertion_review_at(db, item))
         if freshness["status"] == "needs_confirmation":
             candidates.append({
                 "question": f"Can you confirm whether the reported information about {item.field} is still accurate? The record does not establish that it is current.",
