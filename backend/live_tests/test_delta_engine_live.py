@@ -118,6 +118,21 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
             assert provenance.get("person_id") == person_id, provenance
             assert provenance.get("source_event_id") == event_id, provenance
             assert provenance.get("persisted") is True, provenance
+
+            claim_provenance = result.get("claim_provenance") or {}
+            assert claim_provenance.get("version") == "delta-claim-provenance-v1", claim_provenance
+            claims = claim_provenance.get("claims")
+            assert isinstance(claims, list), claim_provenance
+            summary_claims = [claim for claim in claims if claim.get("claim_type") == "summary"]
+            for summary_field in ("event_summary", "caregiver_summary", "clinician_summary"):
+                assert any(claim.get("summary_field") == summary_field for claim in summary_claims), claim_provenance
+            for claim in summary_claims:
+                assert claim.get("text", "").strip(), claim
+                if claim.get("support_status") == "matched_exact_source_wording":
+                    assert claim.get("source_references"), claim
+                else:
+                    assert claim.get("support_status") in {"historical_only", "not_matched_to_source"}, claim
+
             delta_run_id = provenance.get("delta_run_id")
             assert delta_run_id, provenance
 
