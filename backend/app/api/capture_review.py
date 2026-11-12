@@ -114,6 +114,18 @@ def review_capture_candidate(
         if source_evidence is None:
             raise HTTPException(status_code=409, detail="The Daily Care source evidence could not be verified")
 
+        source_quote = candidate.get("source_quote")
+        if (
+            not isinstance(source_quote, str)
+            or not source_quote.strip()
+            or source_quote not in (source_evidence.source_text or "")
+            or source_quote not in (source_event.description or "")
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The candidate quotation does not match the preserved Daily Care source event and evidence; no LCR assertion was created",
+            )
+
         subject = str(candidate.get("corrected_subject", candidate.get("subject")) or "").strip()
         observation = str(candidate.get("corrected_observation", candidate.get("observation")) or "").strip()
         if not observation:
