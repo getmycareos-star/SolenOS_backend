@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
+from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.change_intelligence_reconciliation import (
     reconcile_person_change_intelligence,
 )
@@ -36,6 +37,8 @@ def execute_care_continuity_reconciliation(
     source_conversation_id: str | None = None,
     correction_id: str | None = None,
     source_assertion_id: str | None = None,
+    source_appointment_workspace_id: str | None = None,
+    source_appointment_workspace_revision_id: str | None = None,
     reference_time: datetime | None = None,
 ) -> dict[str, Any]:
     """Validate persisted lineage and stage the shared LCR reconciliation.
@@ -51,7 +54,7 @@ def execute_care_continuity_reconciliation(
         [value for value in (source_evidence_ids or []) if isinstance(value, str) and value.strip()]
         + ([source_evidence_id] if source_evidence_id else [])
     ))
-    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id:
+    if not source_event_id and not evidence_ids and not source_message_id and not correction_id and not source_assertion_id and not source_appointment_workspace_revision_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
     if source_message_id and (not source_conversation_id or not source_caregiver_id):
         raise CareContinuityExecutionError(
@@ -114,6 +117,25 @@ def execute_care_continuity_reconciliation(
                 "The source assertion is missing or belongs to another care record"
             )
 
+    appointment_workspace = None
+    appointment_revision = None
+    if source_appointment_workspace_revision_id:
+        if not source_appointment_workspace_id:
+            raise CareContinuityExecutionError("An appointment workspace revision must include its workspace reference")
+        appointment_workspace = db.query(AppointmentWorkspaceRecord).filter(
+            AppointmentWorkspaceRecord.id == source_appointment_workspace_id,
+            AppointmentWorkspaceRecord.person_id == person_id,
+        ).first()
+        appointment_revision = db.query(AppointmentWorkspaceRevision).filter(
+            AppointmentWorkspaceRevision.id == source_appointment_workspace_revision_id,
+            AppointmentWorkspaceRevision.record_id == source_appointment_workspace_id,
+            AppointmentWorkspaceRevision.person_id == person_id,
+        ).first()
+        if appointment_workspace is None or appointment_revision is None:
+            raise CareContinuityExecutionError(
+                "The appointment workspace revision is missing or belongs to another care record"
+            )
+
     correction = None
     if correction_id:
         correction = db.query(Correction).filter(
@@ -169,6 +191,8 @@ def execute_care_continuity_reconciliation(
         "source_conversation_id": source_conversation_id,
         "correction_id": correction_id,
         "source_assertion_id": source_assertion_id,
+        "source_appointment_workspace_id": source_appointment_workspace_id,
+        "source_appointment_workspace_revision_id": source_appointment_workspace_revision_id,
         "stages": {
             "source_preservation": "verified",
             "evidence": "verified" if evidence_rows else "not_applicable",
