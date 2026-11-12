@@ -38,6 +38,7 @@ router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
 MAX_DOCUMENT_QWEN_PAGES = 25
 MAX_DOCUMENT_QWEN_CHUNKS = 60
+MAX_DOCUMENT_CANDIDATES_PER_RUN = 60
 
 
 class CandidateReview(BaseModel):
@@ -463,7 +464,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                         continue
                     if quote not in source_text or quote in seen_quotes or quote in new_seen_quotes:
                         continue
-                    if len(raw_observations) >= 60:
+                    if len(raw_observations) >= MAX_DOCUMENT_CANDIDATES_PER_RUN:
                         candidate_overflow_pages.add(page_number)
                         continue
                     raw_observations.append(item)
