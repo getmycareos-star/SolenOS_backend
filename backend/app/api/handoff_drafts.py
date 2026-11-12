@@ -2380,6 +2380,8 @@ def approve_handoff_export(
     ).with_for_update().first()
     if draft is None:
         raise HTTPException(status_code=404, detail="Handoff draft not found")
+    if draft.audience != "professional":
+        raise HTTPException(status_code=409, detail="PDF export approval is available only for professional care summaries")
     if not payload.approved:
         draft.review_status = "pending_review"
         draft.approved_at = None
@@ -2392,9 +2394,12 @@ def approve_handoff_export(
     freshness = _draft_source_freshness(db, draft)
     if freshness.get("status") != "current":
         raise HTTPException(status_code=409, detail="Care information changed. Prepare a fresh summary before approving.")
-    if draft.review_status not in {"pending_review", "approved"}:
+    if draft.review_status not in {"pending_review", "approved", "approved_for_sharing"}:
         raise HTTPException(status_code=409, detail="This draft is not available for export approval")
     current_content = draft.structured_content if isinstance(draft.structured_content, dict) else {}
+    if draft.generation_status == "generated":
+        if draft.validation_status != "exact_quote_reference_validation_passed" or not _validate_draft_quotes(current_content, draft.source_snapshot or {}):
+            raise HTTPException(status_code=409, detail="The generated summary could not be validated against its saved sources")
     canonical = json.dumps(current_content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     revision = db.query(HandoffDraftRevision).filter(
@@ -2437,6 +2442,8 @@ def export_approved_handoff_pdf(draft_id: str, request: Request, db: Session = D
     ).first()
     if draft is None:
         raise HTTPException(status_code=404, detail="Handoff draft not found")
+    if draft.audience != "professional":
+        raise HTTPException(status_code=409, detail="PDF export is available only for professional care summaries")
     if (
         draft.review_status != "approved"
         or draft.approved_by_caregiver_id != caregiver_id
