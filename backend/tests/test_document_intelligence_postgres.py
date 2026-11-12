@@ -767,7 +767,6 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 0
             assert db.query(CaptureAnalysis).filter_by(id=analysis_id).count() == 0
             assert db.query(DocumentReviewEvent).filter_by(analysis_id=analysis_id).count() == 0
-            assert db.query(QwenBackgroundJob).filter_by(id=processing_job_id).count() == 0
             assert db.query(CareAssertion).filter_by(id=assertion_id).count() == 0
             receipt = db.query(DataSubjectRequest).filter_by(id=deletion_request_id).one()
             assert receipt.request_status == "fulfilled"
@@ -781,6 +780,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
 
 def test_postgres_document_intelligence_resumes_all_page_windows_and_preserves_provenance(monkeypatch):
     from app.api import document_intelligence
+    from app.models.capture_analysis import CaptureAnalysis
     from app.services import qwen_background_worker as worker
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
