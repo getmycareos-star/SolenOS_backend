@@ -149,10 +149,22 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             EvidenceObservation.person_id == person_id,
             EvidenceObservation.evidence_id.in_(all_event_evidence_ids),
         ).all()
-        correction_evidence_ids = {
-            str(item.evidence_id)
-            for item in source_observations if item.supersedes_observation_id
-        }
+        observations_by_id = {str(item.id): item for item in source_observations}
+        correction_evidence_ids = set()
+        for item in source_observations:
+            if not item.supersedes_observation_id:
+                continue
+            previous = observations_by_id.get(str(item.supersedes_observation_id))
+            correction_text = " ".join(
+                str(value or "") for value in (
+                    item.attribute, item.value_text, item.source_passage,
+                    previous.attribute if previous else "",
+                    previous.value_text if previous else "",
+                    previous.source_passage if previous else "",
+                )
+            ).casefold()
+            if any(term in correction_text for term in topic_terms):
+                correction_evidence_ids.add(str(item.evidence_id))
     shared_origin_pairs = set()
     if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
         shared_scope_filters = [
