@@ -68,7 +68,16 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         "open_questions": ["How long has this been happening?"],
         "possible_safety_flags": [],
     }
-    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: candidates)
+    def fake_extract_review_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        return {
+            **candidates,
+            "observations": [
+                {**candidate, "source_event_id": source_event_id}
+                for candidate in candidates["observations"]
+            ],
+        }
+
+    monkeypatch.setattr(api_v1_module, "extract_review_candidates", fake_extract_review_candidates)
 
     saved = client.post(
         "/api/v1/daily/log",
