@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from fastapi import HTTPException
 
 from sqlalchemy.orm import Session
 
@@ -24,8 +27,16 @@ def _aware_due(value):
     return parsed.astimezone(timezone.utc)
 
 
-def _timezone_label(value):
-    """Retain the submitted UTC offset instead of replacing it with UTC."""
+def _timezone_label(value, explicit_timezone=None):
+    """Persist an IANA zone when supplied; otherwise retain the source UTC offset."""
+    if explicit_timezone is not None:
+        if not isinstance(explicit_timezone, str) or not explicit_timezone.strip():
+            raise HTTPException(status_code=422, detail="Follow-up timezone must be a valid IANA timezone")
+        try:
+            ZoneInfo(explicit_timezone.strip())
+        except (ZoneInfoNotFoundError, ValueError):
+            raise HTTPException(status_code=422, detail="Follow-up timezone must be a valid IANA timezone")
+        return explicit_timezone.strip()
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -124,7 +135,7 @@ def sync_appointment_followups(
                 owner_role=owner_role, owner_label=owner_label, source_type=SOURCE_TYPE, source_id=source_id,
                 source_fingerprint=fingerprint, evidence=evidence, uncertainty="reported",
                 deadline_at=due_at, deadline_source="explicit_user" if due_at else None,
-                deadline_timezone=_timezone_label(due_text),
+                deadline_timezone=_timezone_label(due_text, item.get("timezone")),
                 priority="normal",
                 priority_reasons=["Explicit follow-up recorded in an appointment workspace"],
                 version=1, created_at=now, updated_at=now,
@@ -160,7 +171,7 @@ def sync_appointment_followups(
         loop.owner_label = owner_label
         loop.deadline_at = due_at
         loop.deadline_source = "explicit_user" if due_at else None
-        loop.deadline_timezone = _timezone_label(due_text)
+        loop.deadline_timezone = _timezone_label(due_text, item.get("timezone"))
         loop.source_fingerprint = fingerprint
         # A later workspace edit is not authority to erase an independently
         # verified outcome. Workspace completion remains a report only.
