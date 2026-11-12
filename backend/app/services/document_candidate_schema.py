@@ -229,6 +229,10 @@ def canonical_candidate(
     else:
         source_span_end = source_span_start + len(excerpt)
     warnings = candidate_warnings(field_type, observation, excerpt, subject)
+    if source_span_start is None:
+        warnings.append(
+            "The exact source passage is missing or repeated; a unique source span is unavailable and this candidate cannot be promoted."
+        )
     if page_number is None:
         warnings.append("The exact excerpt could not be assigned to one unambiguous page.")
     timestamp = (recorded_at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
