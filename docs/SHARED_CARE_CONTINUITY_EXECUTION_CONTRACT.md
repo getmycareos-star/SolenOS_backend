@@ -151,3 +151,45 @@ A unit test, mocked Qwen response, frontend build, route existence, migration fi
 The current codebase already has useful shared components, including evidence lineage, capture review, document extraction/review, LCR context retrieval, and person-level change-intelligence reconciliation. However, the active main-branch baseline records multiple ingestion implementations and separately owned workflow lifecycles. Calling the same reconciliation function from several endpoints is not, by itself, a shared execution contract.
 
 The next implementation must close the orchestration gap without flattening domain-specific source semantics or promoting model output to fact. The coordinator must own sequencing, stage status, transaction/failure rules and common invariants; existing domain services remain the owners of their specialised persistence and assessment logic.
+
+
+## 12. Main-branch implementation ledger (2026-11-12)
+
+### Implemented in source
+
+The shared coordinator is `backend/app/services/care_continuity_execution.py`. Its current responsibility is deliberately narrower than the full lifecycle contract:
+
+- Validates person-scoped persisted source events, evidence records (including multiple evidence IDs), Companion user messages/conversations, corrections, and care assertions.
+- Verifies event/evidence linkage and caregiver ownership where the workflow requires same-caregiver authorship.
+- Runs the existing person-level change-intelligence reconciliation inside the caller's transaction.
+- Flushes but never commits or rolls back.
+- Returns a stage receipt. The API changes reconciliation to `committed` only after its own commit succeeds.
+
+The coordinator is now used by these backend paths:
+
+- Structured Daily Capture and legacy Add Record (`/api/situation`).
+- Direct evidence creation and evidence-source review.
+- Daily Capture candidate review and document candidate review.
+- Companion care-update acceptance.
+- Care assertion acceptance and clarification-answer acceptance.
+- Caregiver correction and reassessment.
+
+The accepted-review paths that use the coordinator commit the review decision and reconciliation in the same transaction. The API surfaces a receipt to the frontend for the Daily Capture, Add Record, Companion, evidence-review, clarification-review, and correction responses where the response contract supports it.
+
+### Not yet implemented or proven
+
+This ledger is not a claim that the full 13-stage contract is complete.
+
+1. The coordinator currently owns common source validation and the reconciliation boundary. Extraction, epistemic classification, source-span assessment, question generation, and caregiver-review policy remain in their existing domain adapters; they are not yet executed by one generic orchestrator.
+2. There is no generic durable execution ledger for every stage, workflow, retry, and worker attempt. Current receipts are returned by the individual API calls; they are not a universal persisted execution record.
+3. Appointment workspace and handoff workflows have not yet been routed through this coordinator. Their snapshots, consent, and versioning remain specialised. They must be audited to establish whether they are read-only derived artifacts or whether any of their user inputs need to enter the LCR as source evidence.
+4. Correction dependency propagation and stale-artifact invalidation still need end-to-end verification across summaries, appointments, handoffs, and other derived views.
+5. The new coordinator tests have been authored but have not been executed in a confirmed PostgreSQL test run. Unit tests, live cross-person denial, process restart, idempotent retry, and transaction-failure tests remain required.
+6. The Railway production service is configured with `watchPatterns: ["MANUAL_DEPLOY_ONLY"]`. Commits to backend `main` do not automatically deploy this service. The live deployment observed during this implementation predates these commits. No production deployment or migration was initiated as part of this work.
+
+### Required next actions
+
+- Run the backend test suite against PostgreSQL, fix all failures, and add transaction-failure and retry tests for the newly routed review paths.
+- Route appointment and handoff workflows only after classifying each as source ingestion, reviewable derived artifact, or read-only output; never promote workspace text or handoff summaries to care facts by default.
+- Build the generic persisted execution ledger only after confirming that existing models cannot represent the full stage/retry lifecycle without overloading unrelated records.
+- Complete the end-to-end source-to-LCR test matrix before describing the shared contract as complete.
