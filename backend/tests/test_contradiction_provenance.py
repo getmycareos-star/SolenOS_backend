@@ -71,7 +71,7 @@ def test_contradiction_persists_all_source_assertion_ids():
 
 
 
-def test_reconciliation_creates_and_refreshes_source_linked_clarification_question():
+def test_reconciliation_keeps_unassessed_conflicts_internal_without_creating_caregiver_questions():
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -105,14 +105,15 @@ def test_reconciliation_creates_and_refreshes_source_linked_clarification_questi
             ))
 
         reconcile_person_change_intelligence(db, person.id)
-        question = db.query(OpenQuestion).filter(
+        from app.services.care_continuity import next_best_questions
+        candidates = next_best_questions(db, person.id, persist=False)
+        conflict_candidate = next(item for item in candidates if item["source_kind"] == "contradiction")
+        assert conflict_candidate["necessity"] == "not_assessed"
+        assert set(conflict_candidate["source_ids"]) == {item.id for item in assertions}
+        assert db.query(OpenQuestion).filter(
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
-        ).one()
-        original_question_id = question.id
-        assert set(question.context[0]["source_ids"]) == {
-            item.id for item in assertions
-        }
+        ).count() == 0
 
         third = create_assertion(
             db,
@@ -128,13 +129,13 @@ def test_reconciliation_creates_and_refreshes_source_linked_clarification_questi
             ),
         )
         reconcile_person_change_intelligence(db, person.id)
-        refreshed = db.query(OpenQuestion).filter(
-            OpenQuestion.id == original_question_id
-        ).one()
-        assert refreshed.id == original_question_id
-        assert set(refreshed.context[0]["source_ids"]) == {
-            item.id for item in [*assertions, third]
-        }
+        refreshed_candidates = next_best_questions(db, person.id, persist=False)
+        refreshed_conflict = next(item for item in refreshed_candidates if item["source_kind"] == "contradiction")
+        assert set(refreshed_conflict["source_ids"]) == {item.id for item in [*assertions, third]}
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).count() == 0
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
