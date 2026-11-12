@@ -121,6 +121,12 @@ def test_invitation_is_recipient_bound_and_acceptance_creates_separate_identity(
         headers={"Authorization": f"Bearer {result['access_token']}"},
     )
     assert inherited.status_code == 200, inherited.text
+    inherited_projection = client.get(
+        "/api/v1/care-continuity/current-care",
+        headers={"Authorization": f"Bearer {result['access_token']}"},
+    )
+    assert inherited_projection.status_code == 200, inherited_projection.text
+    assert inherited_projection.json()["person_id"] == primary["person"]["id"]
 
     replay = client.post(
         "/api/v1/caregiver-access/invitations/accept",
