@@ -20,6 +20,10 @@ import hashlib
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
+
+# Care changes and clarification requests stay in the authenticated inbox.
+# Browser push is reserved for explicitly due reminders.
+PUSH_NOTIFICATION_CATEGORIES = frozenset({"reminder_due"})
 from app.models.reminder import CareReminder
 
 logger = logging.getLogger(__name__)
@@ -102,6 +106,24 @@ def deliver_due_reminders(db=None, now=None):
             (CareReminder.delivery_generation == 0, literal("reminder-due:") + CareReminder.id),
             else_=(literal("reminder-due:") + CareReminder.id + literal(":") + cast(CareReminder.delivery_generation, String)),
         )
+        # Cancel stale pending deliveries for categories that are now in-app only.
+        # They must never be retried to caregiver devices.
+        in_app_only_pending = (
+            session.query(CarePushDelivery)
+            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
+            .filter(
+                CarePushDelivery.status == "pending",
+                CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
+            )
+            .all()
+        )
+        for delivery in in_app_only_pending:
+            delivery.status = "cancelled"
+            delivery.last_error_code = "in_app_only_category"
+            delivery.last_error_message = "This care message stays in the in-app inbox."
+        if in_app_only_pending:
+            session.commit()
+
         due = (
             session.query(CareReminder)
             .filter(
@@ -192,6 +214,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CareNotification.caregiver_id == subscription.caregiver_id,
                 CareNotification.created_at >= subscription.created_at,
                 CareNotification.status == "active",
+                CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
             ).all()
             for notification in notifications:
                 existing = session.query(CarePushDelivery.id).filter(
@@ -219,6 +242,7 @@ def deliver_pending_web_pushes(db=None, now=None):
             .filter(
                 CarePushDelivery.status == "pending",
                 CareNotification.status == "active",
+                CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
                 CarePushDelivery.next_attempt_at <= current,
                 CarePushDelivery.attempt_count < 5,
                 CarePushSubscription.revoked_at.is_(None),
@@ -243,6 +267,12 @@ def deliver_pending_web_pushes(db=None, now=None):
                 CareNotificationPreference.person_id == notification.person_id,
                 CareNotificationPreference.caregiver_id == notification.caregiver_id,
             ).first()
+            if preference is not None and not preference.reminders_enabled:
+                delivery.status = "cancelled"
+                delivery.last_error_code = "reminders_disabled"
+                delivery.last_error_message = "Caregiver disabled reminder notifications"
+                session.commit()
+                continue
             release_at = quiet_hours_release_at(preference, current)
             if release_at is not None and notification.priority not in {"emergency", "critical", "urgent"}:
                 delivery.next_attempt_at = release_at
