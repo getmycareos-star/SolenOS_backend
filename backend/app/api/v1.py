@@ -676,7 +676,12 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     "pending_review", "corrected_pending_approval", "corrected_by_caregiver",
                 }
             ]
-            if existing_analysis and existing_analysis.extraction_status == "available" and isinstance(existing_analysis.candidates, dict):
+            if (
+                existing_analysis
+                and existing_analysis.extraction_status == "available"
+                and isinstance(existing_analysis.candidates, dict)
+                and detail.get("capture_kind") != "natural_language_update"
+            ):
                 try:
                     persist_source_clarification_questions(
                         db,
