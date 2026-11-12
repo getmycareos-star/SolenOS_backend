@@ -87,10 +87,15 @@ def persist_source_grounded_daily_observations(
         if not all(isinstance(value, str) and value.strip() for value in (subject, observation, quote)):
             continue
         subject_match = re.search(re.escape(subject), quote, re.IGNORECASE)
-        if quote not in source_text or subject_match is None or observation not in quote:
+        # Model extraction may normalise the first letter's casing even when
+        # the quoted source is exact. Match case-insensitively, then persist
+        # the original source-cased substring so provenance remains literal.
+        observation_match = re.search(re.escape(observation), quote, re.IGNORECASE)
+        if quote not in source_text or subject_match is None or observation_match is None:
             continue
 
         subject_text = subject_match.group(0)
+        observation_text = observation_match.group(0)
         start = source_text.find(quote)
         if start < 0:
             continue
@@ -101,16 +106,16 @@ def persist_source_grounded_daily_observations(
             EvidenceObservation.source_span_start == start,
             EvidenceObservation.source_span_end == end,
             EvidenceObservation.source_passage == quote,
-            EvidenceObservation.value_text == observation,
+            EvidenceObservation.value_text == observation_text,
             EvidenceObservation.subject_label == subject_text,
         ).first()
         if existing:
             continue
 
-        hedge = _HEDGE_REFERENCE.search(observation)
+        hedge = _HEDGE_REFERENCE.search(observation_text)
         time_reference = _TIME_REFERENCE.search(observation)
         if time_reference is None:
-            observation_start = quote.find(observation)
+            observation_start = quote.find(observation_text)
             time_matches = list(_TIME_REFERENCE.finditer(quote))
             if observation_start >= 0 and time_matches:
                 time_reference = min(
@@ -129,7 +134,7 @@ def persist_source_grounded_daily_observations(
             epistemic_status="uncertain" if hedge else "reported",
             subject_label=subject_text[:160],
             attribute="caregiver_reported_observation",
-            value_text=observation[:2000],
+            value_text=observation_text[:2000],
             context=" ".join(context_parts),
             reported_at=reported_at,
             observer_label="Caregiver",
