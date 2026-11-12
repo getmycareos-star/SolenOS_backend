@@ -11,7 +11,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models.care import CareEvent, Evidence, Person
+from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.services.change_intelligence_reconciliation import (
     reconcile_person_change_intelligence,
@@ -33,6 +33,7 @@ def execute_care_continuity_reconciliation(
     source_evidence_ids: list[str] | None = None,
     source_message_id: str | None = None,
     source_conversation_id: str | None = None,
+    correction_id: str | None = None,
     reference_time: datetime | None = None,
 ) -> dict[str, Any]:
     """Validate persisted lineage and stage the shared LCR reconciliation.
@@ -48,7 +49,7 @@ def execute_care_continuity_reconciliation(
         [value for value in (source_evidence_ids or []) if isinstance(value, str) and value.strip()]
         + ([source_evidence_id] if source_evidence_id else [])
     ))
-    if not source_event_id and not evidence_ids and not source_message_id:
+    if not source_event_id and not evidence_ids and not source_message_id and not correction_id:
         raise CareContinuityExecutionError("At least one persisted source reference is required")
     if source_message_id and (not source_conversation_id or not caregiver_id):
         raise CareContinuityExecutionError(
@@ -100,6 +101,21 @@ def execute_care_continuity_reconciliation(
                 "The source evidence is not linked to the supplied source event"
             )
 
+    correction = None
+    if correction_id:
+        correction = db.query(Correction).filter(
+            Correction.id == correction_id,
+            Correction.person_id == person_id,
+        ).first()
+        if correction is None:
+            raise CareContinuityExecutionError(
+                "The correction is missing or belongs to another care record"
+            )
+        if caregiver_id and str(correction.caregiver_id) != str(caregiver_id):
+            raise CareContinuityExecutionError(
+                "The correction was not created by the authenticated caregiver"
+            )
+
     conversation = None
     message = None
     if source_message_id:
@@ -138,6 +154,7 @@ def execute_care_continuity_reconciliation(
         "source_evidence_ids": evidence_ids,
         "source_message_id": source_message_id,
         "source_conversation_id": source_conversation_id,
+        "correction_id": correction_id,
         "stages": {
             "source_preservation": "verified",
             "evidence": "verified" if evidence_rows else "not_applicable",
