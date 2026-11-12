@@ -118,6 +118,7 @@ class OpenQuestionReviewResponse(BaseModel):
     claim_assessment_id: Optional[str] = None
     resulting_claim_id: Optional[str] = None
     created_at: datetime
+    care_continuity_execution: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
