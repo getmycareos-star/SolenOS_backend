@@ -260,7 +260,7 @@ def test_scanned_pdf_processes_more_than_25_pages_and_reports_partial_results(cl
     assert payload["page_count"] == 30
     assert payload["unreadable_page_numbers"] == []
     assert payload["unprocessed_page_numbers"] == [2]
-    assert payload["processed_page_numbers"] == list(range(1, 31))
+    assert payload["processed_page_numbers"] == [1, *range(3, 31)]
     assert calls["count"] == 30
     retrieved = test_client.get(f"/api/v1/documents/analyses/{payload['analysis_id']}", headers=auth)
     assert retrieved.status_code == 200, retrieved.text
