@@ -247,6 +247,18 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                 necessity="not_assessed",
                 priority=Priority.INFORMATIONAL,
             ),
+            OpenQuestion(
+                person_id=person.id,
+                question="Is the older medication dose still current?",
+                subject_type="person",
+                subject_id=person.id,
+                status="open",
+                necessity="necessary",
+                necessity_rationale="Legacy request has no source evidence.",
+                priority=Priority.HIGH,
+                evidence_ids=[],
+                context=[{"decision_dependency": "A current handoff depends on the dose."}],
+            ),
         ])
         db.commit()
         db.close()
