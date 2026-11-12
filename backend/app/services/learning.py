@@ -174,32 +174,60 @@ class LearningEngine:
             insight = self.db.query(InsightModel).filter(
                 InsightModel.id == target_id,
                 InsightModel.person_id == person_id,
-            ).first()
-            if insight:
-                old_description = insight.description
-                insight.description = corrected_text
-                insight.updated_at = datetime.utcnow()
-                if commit:
-                    self.db.commit()
+            ).with_for_update().first()
+            if insight is None:
+                raise ValueError("Correction target insight was not found for this care recipient")
 
-                memory = ReasoningMemoryModel(
-                    person_id=person_id,
-                    memory_type="correction_history",
-                    key=f"insight_{target_id}",
-                    value=[
-                        {
-                            "original": old_description,
-                            "corrected": corrected_text,
-                            "reason": reason,
-                            "corrected_at": datetime.utcnow().isoformat(),
-                        }
-                    ],
-                    confidence=None,
-                    source_evidence_ids=[],
-                )
-                self.db.add(memory)
+            existing_link = self.db.query(CareRecordRelationship).filter(
+                CareRecordRelationship.person_id == person_id,
+                CareRecordRelationship.source_type == "correction",
+                CareRecordRelationship.source_id == correction.id,
+                CareRecordRelationship.relationship_type == "corrects",
+                CareRecordRelationship.target_type == "insight",
+                CareRecordRelationship.target_id == target_id,
+            ).first()
+            if existing_link is not None:
                 if commit:
                     self.db.commit()
+                return
+
+            # Insights are also append-only: retain the original wording, remove
+            # the stale interpretation from active views, and preserve the
+            # caregiver correction as its own attributed lifecycle record.
+            old_description = insight.description
+            insight.is_active = False
+            insight.updated_at = datetime.utcnow()
+            self.db.add(CareRecordRelationship(
+                person_id=person_id,
+                source_type="correction",
+                source_id=correction.id,
+                relationship_type="corrects",
+                target_type="insight",
+                target_id=target_id,
+                provenance="Caregiver correction; original insight retained unchanged and deactivated from current views.",
+                created_by_caregiver_id=correction.caregiver_id,
+            ))
+            self.db.add(ReasoningMemoryModel(
+                person_id=person_id,
+                memory_type="correction_history",
+                key=f"insight_{target_id}",
+                value=[{
+                    "original": old_description,
+                    "corrected": corrected_text,
+                    "reason": reason,
+                    "caregiver_id": correction.caregiver_id,
+                    "correction_id": correction.id,
+                    "corrected_at": datetime.utcnow().isoformat(),
+                    "information_status": "caregiver_reported_correction",
+                    "interpretation_limit": "The correction is caregiver-attributed and is not independently verified.",
+                }],
+                confidence=None,
+                source_evidence_ids=[],
+            ))
+            if commit:
+                self.db.commit()
+            else:
+                self.db.flush()
 
     def record_feedback(self, person_id: str, category: str, detail: str, caregiver_id: str):
         memory = ReasoningMemoryModel(
