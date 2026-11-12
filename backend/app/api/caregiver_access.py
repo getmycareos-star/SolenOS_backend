@@ -12,6 +12,7 @@ from app.models.care import Caregiver
 from app.models.caregiver_account import CaregiverAccount
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
 from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.api.accounts import _hash_password, _validate_email
@@ -289,6 +290,23 @@ def create_responsibility_transfer(
         raise HTTPException(status_code=403, detail="The receiving caregiver is not authorised for this care record.")
     if str(source.caregiver_id) == str(target.id):
         raise HTTPException(status_code=409, detail="This responsibility is already assigned to that caregiver.")
+    from_profile = db.query(CaregiverProfile).filter(
+        CaregiverProfile.id == source.caregiver_id,
+        CaregiverProfile.person_id == person_id,
+    ).first()
+    linked_open_loop = None
+    if payload.related_record_type == "open_loop":
+        if not payload.related_record_id:
+            raise HTTPException(status_code=422, detail="An open-loop transfer requires the existing follow-up ID.")
+        linked_open_loop = db.query(OpenLoopRecord).filter(
+            OpenLoopRecord.id == payload.related_record_id,
+            OpenLoopRecord.person_id == person_id,
+        ).with_for_update().first()
+        if linked_open_loop is None or from_profile is None or not from_profile.session_caregiver_id:
+            raise HTTPException(status_code=404, detail="The existing follow-up or its assigned caregiver was not found.")
+        current_assignment = linked_open_loop.assigned_caregiver_id or linked_open_loop.caregiver_id
+        if str(current_assignment) != str(from_profile.session_caregiver_id):
+            raise HTTPException(status_code=409, detail="The follow-up is no longer assigned to the caregiver named in this transfer.")
     pending = db.query(CaregiverResponsibilityTransfer).filter(
         CaregiverResponsibilityTransfer.person_id == person_id,
         CaregiverResponsibilityTransfer.source_responsibility_id == source.id,
@@ -366,6 +384,47 @@ def accept_responsibility_transfer(transfer_id: str, request: Request, db: Sessi
         db.commit()
         raise HTTPException(status_code=409, detail="The original responsibility changed before this transfer was accepted.")
     now = datetime.now(timezone.utc)
+    linked_open_loop = None
+    if transfer.related_record_type == "open_loop":
+        linked_open_loop = db.query(OpenLoopRecord).filter(
+            OpenLoopRecord.id == transfer.related_record_id,
+            OpenLoopRecord.person_id == person_id,
+        ).with_for_update().first()
+        from_profile = db.query(CaregiverProfile).filter(
+            CaregiverProfile.id == transfer.from_caregiver_profile_id,
+            CaregiverProfile.person_id == person_id,
+        ).first()
+        if (
+            linked_open_loop is None
+            or from_profile is None
+            or not from_profile.session_caregiver_id
+            or not profile.session_caregiver_id
+            or str(linked_open_loop.assigned_caregiver_id or linked_open_loop.caregiver_id) != str(from_profile.session_caregiver_id)
+        ):
+            transfer.status = "stale"
+            db.commit()
+            raise HTTPException(status_code=409, detail="The linked follow-up changed before this transfer was accepted.")
+        before_state = {
+            "assigned_caregiver_id": linked_open_loop.assigned_caregiver_id,
+            "creator_caregiver_id": linked_open_loop.caregiver_id,
+        }
+        linked_open_loop.assigned_caregiver_id = profile.session_caregiver_id
+        linked_open_loop.updated_at = now
+        linked_open_loop.version = int(linked_open_loop.version or 0) + 1
+        db.add(OpenLoopEvent(
+            loop_id=linked_open_loop.id,
+            person_id=person_id,
+            caregiver_id=session_caregiver_id,
+            event_type="responsibility_transferred",
+            before_state=before_state,
+            after_state={
+                "assigned_caregiver_id": linked_open_loop.assigned_caregiver_id,
+                "creator_caregiver_id": linked_open_loop.caregiver_id,
+                "transfer_id": transfer.id,
+            },
+            evidence=[{"type": "caregiver_responsibility_transfer", "transfer_id": transfer.id}],
+            actor=session_caregiver_id,
+        ))
     source.status = ResponsibilityStatus.HISTORICAL
     source.effective_end = now
     replacement = CaregiverResponsibility(
