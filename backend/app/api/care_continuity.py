@@ -697,6 +697,37 @@ def get_claim_assessment_impact(
     if changed_observation_ids:
         reasons.append("source_observation_added_or_corrected_after_assessment")
 
+    from app.models.care import Correction
+
+    def _is_after(candidate, baseline):
+        if candidate is None or baseline is None:
+            return False
+        left, right = candidate, baseline
+        if left.tzinfo is None:
+            left = left.replace(tzinfo=timezone.utc)
+        if right.tzinfo is None:
+            right = right.replace(tzinfo=timezone.utc)
+        return left > right
+
+    def _has_correction_after(target_type: str, target_id: str | None, baseline):
+        if not target_id or baseline is None:
+            return False
+        correction_times = db.query(Correction.created_at).filter(
+            Correction.person_id == person_id,
+            Correction.target_type == target_type,
+            Correction.target_id == str(target_id),
+        ).all()
+        return any(_is_after(row[0], baseline) for row in correction_times)
+
+    if _is_after(claim.updated_at or claim.recorded_at, latest.created_at):
+        reasons.append("claim_assertion_changed_after_assessment")
+    if claim.assertion_status in {"superseded", "rejected"}:
+        reasons.append("claim_is_no_longer_current")
+    if _has_correction_after("care_event", claim.source_event_id, latest.created_at):
+        reasons.append("source_event_corrected_after_assessment")
+    if _has_correction_after("care_assertion", claim_id, latest.created_at):
+        reasons.append("claim_assertion_corrected_after_assessment")
+
     # Walk the complete declared prerequisite chain. A changed source observation
     # or a newer prerequisite assessment makes each dependent assessment require review.
     all_dependency_edges = db.query(EvidenceClaimDependency).filter(
@@ -735,6 +766,30 @@ def get_claim_assessment_impact(
                 .first()
             )
             prerequisite_observation_changes = _observations_added_after_assessment(prerequisite_id, prerequisite)
+            prerequisite_claim = db.query(CareAssertion).filter(
+                CareAssertion.id == prerequisite_id,
+                CareAssertion.person_id == person_id,
+            ).first()
+            prerequisite_assertion_changed = bool(
+                prerequisite_claim
+                and (
+                    _is_after(
+                        prerequisite_claim.updated_at or prerequisite_claim.recorded_at,
+                        dependent_assessment.created_at if dependent_assessment else None,
+                    )
+                    or prerequisite_claim.assertion_status in {"superseded", "rejected"}
+                    or _has_correction_after(
+                        "care_event",
+                        prerequisite_claim.source_event_id,
+                        dependent_assessment.created_at if dependent_assessment else None,
+                    )
+                    or _has_correction_after(
+                        "care_assertion",
+                        prerequisite_id,
+                        dependent_assessment.created_at if dependent_assessment else None,
+                    )
+                )
+            )
             assessment_changed = False
             if prerequisite and dependent_assessment and prerequisite.created_at and dependent_assessment.created_at:
                 prerequisite_time = prerequisite.created_at
@@ -744,7 +799,7 @@ def get_claim_assessment_impact(
                 if dependent_time.tzinfo is None:
                     dependent_time = dependent_time.replace(tzinfo=timezone.utc)
                 assessment_changed = prerequisite_time > dependent_time
-            if prerequisite_observation_changes or assessment_changed or prerequisite is None:
+            if prerequisite_observation_changes or prerequisite_assertion_changed or assessment_changed or prerequisite is None:
                 changed_prerequisite_claim_ids.append(prerequisite_id)
             pending_claim_ids.append(prerequisite_id)
     if changed_prerequisite_claim_ids:
