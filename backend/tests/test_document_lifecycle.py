@@ -754,3 +754,101 @@ def test_legacy_doc_extraction_fails_clearly_when_antiword_missing(monkeypatch):
     with pytest.raises(HTTPException) as error:
         lifecycle._extract_legacy_doc(b"legacy")
     assert error.value.status_code == 503
+
+
+def test_snap_upload_is_linked_to_care_event_without_claiming_ocr(client):
+    from app.models.care import CareEvent
+
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    image_bytes = _scanned_text_image()
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "care_photo",
+            "capture_method": "snap",
+            "capture_timestamp": "2026-11-12T06:40:00Z",
+        },
+        files={"file": ("current-moment.png", image_bytes, "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+
+    captured = test_client.post(
+        "/api/situation",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "raw_input": "",
+            "documents": [{
+                "id": "snap-local-1",
+                "evidence_id": evidence_id,
+                "name": "current-moment.png",
+                "mime_type": "image/png",
+                "extracted_text": "",
+                "entry_method": "snap",
+            }],
+            "provenance": {
+                "input_type": "document",
+                "entry_method": "snap",
+                "captured_at": "2026-11-12T06:40:00Z",
+            },
+            "timestamp": "2026-11-12T06:40:00Z",
+            "care_session_id": "snap-e2e-session-1",
+        },
+    )
+    assert captured.status_code == 200, captured.text
+    body = captured.json()
+    assert body["care_event_id"]
+    with TestSessionLocal() as db:
+        event = db.query(CareEvent).filter_by(id=body["care_event_id"]).one()
+        assert evidence_id in (event.evidence_ids or [])
+        evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        assert evidence.type == "care_photo"
+        assert evidence.source_text in (None, "")
+
+
+def test_situation_rejects_snap_evidence_from_another_anonymous_session(client):
+    test_client, first = client
+    second_response = test_client.post("/api/v1/sessions/anonymous", json={
+        "name": "Separate care recipient", "caregiver_name": "Separate caregiver"
+    })
+    assert second_response.status_code == 201, second_response.text
+    auth = {"Authorization": f"Bearer {first['access_token']}"}
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": first["person"]["id"],
+            "caregiver_id": first["caregiver"]["id"],
+            "evidence_type": "care_photo",
+            "capture_method": "snap",
+        },
+        files={"file": ("private-photo.png", _scanned_text_image(), "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+    foreign = second_response.json()
+    response = test_client.post(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {foreign['access_token']}"},
+        json={
+            "person_id": foreign["person"]["id"],
+            "caregiver_id": foreign["caregiver"]["id"],
+            "raw_input": "",
+            "documents": [{
+                "id": "foreign-snap",
+                "evidence_id": evidence_id,
+                "name": "private-photo.png",
+                "mime_type": "image/png",
+                "extracted_text": "",
+                "entry_method": "snap",
+            }],
+            "provenance": {"input_type": "document", "entry_method": "snap"},
+        },
+    )
+    assert response.status_code == 400, response.text
