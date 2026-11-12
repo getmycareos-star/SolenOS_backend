@@ -87,6 +87,9 @@ def _record_open_question_revision(
         evidence_ids=list(question.evidence_ids or []),
         changed_by_caregiver_id=changed_by_caregiver_id,
     ))
+    # Make the revision visible to any subsequent transition in this same
+    # transaction, including sessions configured with autoflush=False.
+    db.flush()
 
 
 def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True) -> CareAssertion:
