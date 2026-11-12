@@ -120,8 +120,8 @@ def _clarification_question_key(value: str) -> tuple[str, ...]:
     questions about different circumstances are not collapsed together.
     """
     text = " ".join(value.casefold().split())
-    text = re.sub(r"\\bhow\\s+many\\s+times\\b|\\bhow\\s+often\\b", " frequency ", text)
-    text = re.sub(r"\\b(?:during\\s+the\\s+night|at\\s+night)\\b", " overnight ", text)
+    text = re.sub(r"\bhow\s+many\s+times\b|\bhow\s+often\b", " frequency ", text)
+    text = re.sub(r"\b(?:during\s+the\s+night|at\s+night)\b", " overnight ", text)
     aliases = {
         "meds": "medication",
         "medicine": "medication",
