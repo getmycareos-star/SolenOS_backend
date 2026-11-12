@@ -190,7 +190,6 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
             db,
             person_id,
             workflow="evidence_source_review",
-            caregiver_id=caregiver_id,
             source_evidence_id=evidence.id,
         )
         db.commit()
@@ -2900,7 +2899,6 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
             db,
             person_id,
             workflow="care_assertion_review",
-            caregiver_id=caregiver_id,
             source_assertion_id=assertion_id,
             source_evidence_ids=previous.get("evidence_ids") or [],
         )
