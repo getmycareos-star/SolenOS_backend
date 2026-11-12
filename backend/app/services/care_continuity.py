@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import uuid
 from typing import Any, Dict, List, Optional
 import json
 
@@ -22,6 +23,58 @@ def _utc(dt: Optional[datetime]) -> Optional[datetime]:
 
 def _value_key(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _open_question_state(question: OpenQuestion) -> Dict[str, Any]:
+    return {
+        "id": question.id,
+        "question": question.question,
+        "subject_type": question.subject_type,
+        "subject_id": question.subject_id,
+        "status": question.status,
+        "necessity": question.necessity,
+        "necessity_rationale": question.necessity_rationale,
+        "priority": str(getattr(question.priority, "value", question.priority)),
+        "evidence_ids": list(question.evidence_ids or []),
+        "context": list(question.context or []),
+        "closed_at": question.closed_at.isoformat() if question.closed_at else None,
+        "closed_reason": question.closed_reason,
+        "answered_at": question.answered_at.isoformat() if question.answered_at else None,
+        "answer": question.answer,
+        "answer_provenance": question.answer_provenance,
+    }
+
+
+def _record_open_question_revision(
+    db: Session,
+    question: OpenQuestion,
+    *,
+    before_state: Optional[Dict[str, Any]],
+    change_kind: str = "updated",
+    actor: str = "solenos_reconciliation",
+    changed_by_caregiver_id: Optional[str] = None,
+) -> None:
+    """Append an immutable care-state revision for every automated question transition."""
+    latest = db.query(CareStateRevision.revision_number).filter(
+        CareStateRevision.person_id == question.person_id,
+        CareStateRevision.target_type == "open_questions",
+        CareStateRevision.target_id == question.id,
+    ).order_by(CareStateRevision.revision_number.desc()).first()
+    revision_number = (latest[0] if latest else 0) + 1
+    after_state = _open_question_state(question)
+    after_state["lifecycle_actor"] = actor
+    db.add(CareStateRevision(
+        id=str(uuid.uuid4()),
+        person_id=question.person_id,
+        target_type="open_questions",
+        target_id=question.id,
+        revision_number=revision_number,
+        change_kind=change_kind,
+        before_state=json.dumps(before_state, sort_keys=True, ensure_ascii=False, default=str) if before_state is not None else None,
+        after_state=json.dumps(after_state, sort_keys=True, ensure_ascii=False, default=str),
+        evidence_ids=list(question.evidence_ids or []),
+        changed_by_caregiver_id=changed_by_caregiver_id,
+    ))
 
 
 def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True) -> CareAssertion:
