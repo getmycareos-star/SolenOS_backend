@@ -67,15 +67,15 @@ The draft stores a versioned source snapshot and revisions. Approval is bound to
 
 ## Required tests before release
 
-1. Missing/invalid session rejected.
-2. Cross-person data cannot be read or inferred through empty/partial response.
-3. Source adapter absent versus empty versus unavailable are distinguished.
-4. Provenance IDs and timestamps survive response and handoff persistence.
-5. Corrections retain history and invalidate stale reviewed drafts.
-6. Medication discrepancies never auto-resolve and no medication-change advice is produced.
-7. Owner/deadline/status/outcome for actions persist and are not auto-completed.
-8. Review changes invalidate approval; share requires explicit review and authorized recipient scope.
-9. Receipt, questions, acceptance/decline and unaccepted responsibility persist.
-10. Expiry/revocation blocks access and original document bytes are access-controlled.
-11. Audit failure fails closed.
-12. Live Railway E2E proves authenticated save/read/restart/isolation; unit or mocked tests alone are insufficient.
+1. Missing/invalid session is rejected; cross-person and cross-caregiver draft access is denied.
+2. Source adapter absent versus empty versus unavailable are distinguished.
+3. Provenance IDs, source/reporter labels, evidence states and event/record timestamps survive draft persistence and PDF export.
+4. Caregiver-reviewed medication reports include only unambiguous current assertions within the review window; unreviewed or conflicting assertions are excluded.
+5. Allergy coverage remains explicitly unavailable and never implies absence.
+6. A caregiver revision cannot alter or fabricate source sections; caregiver notes remain attributed as unverified reports.
+7. Approval is bound to the exact persisted revision; edits invalidate approval.
+8. Approval and export fail closed when source freshness is stale or unknown, or when the revision hash does not match.
+9. PDF export requires approval, preserves evidence labels and source references, and uses no-store response headers.
+10. Device sharing is user initiated; no recipient account, external link, email delivery, or professional receipt is claimed.
+11. Privacy deletion removes scoped records and indirectly linked legacy rows while retaining only the redacted receipt/audit record.
+12. Live backend E2E must verify authenticated prepare/edit/approve/export, cross-person isolation, and restart persistence before production release.
