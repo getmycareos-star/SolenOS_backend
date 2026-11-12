@@ -116,6 +116,27 @@ def upgrade():
         op.create_index("ix_caregiver_invitations_email_normalized", "caregiver_invitations", ["email_normalized"])
         op.create_index("ix_caregiver_invitations_status", "caregiver_invitations", ["status"])
 
+    if not inspect(bind).has_table("caregiver_responsibility_transfers"):
+        op.create_table(
+            "caregiver_responsibility_transfers",
+            sa.Column("id", sa.String(), primary_key=True),
+            sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("source_responsibility_id", sa.String(), sa.ForeignKey("caregiver_responsibilities.id", ondelete="RESTRICT"), nullable=False),
+            sa.Column("from_caregiver_profile_id", sa.String(), sa.ForeignKey("caregiver_profiles.id", ondelete="RESTRICT"), nullable=False),
+            sa.Column("to_caregiver_profile_id", sa.String(), sa.ForeignKey("caregiver_profiles.id", ondelete="RESTRICT"), nullable=False),
+            sa.Column("created_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
+            sa.Column("related_record_type", sa.String(40), nullable=True),
+            sa.Column("related_record_id", sa.String(160), nullable=True),
+            sa.Column("reason", sa.String(1000), nullable=True),
+            sa.Column("status", sa.String(16), nullable=False, server_default="pending"),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("accepted_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
+        )
+        op.create_index("ix_caregiver_responsibility_transfers_person_id", "caregiver_responsibility_transfers", ["person_id"])
+        op.create_index("ix_caregiver_responsibility_transfers_source_responsibility_id", "caregiver_responsibility_transfers", ["source_responsibility_id"])
+        op.create_index("ix_caregiver_responsibility_transfers_status", "caregiver_responsibility_transfers", ["status"])
+
     # Multi-caregiver accounts are required for independently authenticated
     # family members. Email remains globally unique.
     constraints = inspector.get_unique_constraints("caregiver_accounts") if inspector.has_table("caregiver_accounts") else []
