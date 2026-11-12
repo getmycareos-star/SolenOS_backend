@@ -290,7 +290,7 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
     import sys
     import app.api.push_notifications as push_api
     import app.services.reminder_delivery as delivery_service
-    from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
+    from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
 
     settings = SimpleNamespace(
         vapid_public_key="public-vapid-key",
@@ -334,11 +334,48 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             caregiver_id=session["caregiver"]["id"],
             title="Private care event title",
             body="Private care details that must not appear on the lock screen.",
-            category="care_update",
+            category="reminder_due",
             priority="normal",
             created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
         )
-        db.add(notification)
+        in_app_notifications = [
+            CareNotification(
+                id="push-test-care-change",
+                person_id=session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+                title="A care change",
+                body="A saved care pattern may have changed.",
+                category="care_change",
+                priority="normal",
+                created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+            ),
+            CareNotification(
+                id="push-test-care-attention",
+                person_id=session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+                title="A detail needs attention",
+                body="A necessary care detail needs confirmation.",
+                category="care_attention",
+                priority="normal",
+                created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+            ),
+            CareNotification(
+                id="push-test-handoff",
+                person_id=session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+                title="A care handoff",
+                body="A care handoff is ready to review.",
+                category="handoff",
+                priority="normal",
+                created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+            ),
+        ]
+        db.add_all([notification, *in_app_notifications])
+        db.add(CareNotificationPreference(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            reminders_enabled=True,
+        ))
         db.commit()
 
         accepted = delivery_service.deliver_pending_web_pushes(
@@ -355,6 +392,32 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
         assert "Private care event title" not in sent_payloads[0]["data"]
         assert "Private care details" not in sent_payloads[0]["data"]
         assert "You have a care update" in sent_payloads[0]["data"]
+        for in_app_item in in_app_notifications:
+            assert db.query(CarePushDelivery).filter_by(notification_id=in_app_item.id).count() == 0
+
+        preference = db.query(CareNotificationPreference).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).one()
+        preference.reminders_enabled = False
+        disabled = CareNotification(
+            id="push-test-disabled-reminder",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="Disabled reminder",
+            body="This reminder must stay in the inbox.",
+            category="reminder_due",
+            priority="normal",
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
+        )
+        db.add(disabled)
+        db.commit()
+        next_attempt = datetime.now(timezone.utc) + timedelta(seconds=5)
+        assert delivery_service.deliver_pending_web_pushes(db=db, now=next_attempt) == 0
+        disabled_delivery = db.query(CarePushDelivery).filter_by(notification_id=disabled.id).one()
+        assert disabled_delivery.status == "cancelled"
+        assert disabled_delivery.last_error_code == "reminders_disabled"
+        assert len(sent_payloads) == 1
     finally:
         db.close()
 
@@ -419,7 +482,7 @@ def test_web_push_waits_for_quiet_hours_to_end(monkeypatch):
             caregiver_id=session["caregiver"]["id"],
             title="Sensitive title",
             body="Sensitive care detail",
-            category="handoff",
+            category="reminder_due",
             priority="normal",
             created_at=datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc),
         )
