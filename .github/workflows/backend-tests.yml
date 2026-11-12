@@ -278,6 +278,11 @@ jobs:
           print(f"PostgreSQL verified {len(required_tables)} privacy/delivery tables and the unique read-receipt index.")
           PY
 
+      - name: Run privacy request, review, export, correction and deletion tests on PostgreSQL
+        env:
+          TEST_POSTGRES_URL: ${{ env.DATABASE_URL }}
+        run: python -m pytest backend/tests/test_privacy_requests.py -q
+
       - name: Verify handoff draft migration downgrade and re-upgrade
         working-directory: backend
         run: alembic downgrade -1 && alembic upgrade head
