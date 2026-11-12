@@ -273,7 +273,8 @@ def _extract_rtf(content: bytes) -> str:
         if not skip and char not in "\\r\\n":
             output.append(char)
         index += 1
-    return re.sub(r"[ \\t]+", " ", "".join(output)).strip()
+    normalized = re.sub(r"[ \\t]+", " ", "".join(output))
+    return re.sub(r" *\\n *", "\\n", normalized).strip()
 
 
 def _bounded_extraction(text: str, method: str) -> tuple[str, str]:
