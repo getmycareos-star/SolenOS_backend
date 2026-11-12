@@ -814,7 +814,7 @@ def review_document_candidate(
             CareAssertion.field == document_field,
             CareAssertion.assertion_kind == "document_reviewed_observation",
             CareAssertion.source_text == quote,
-            CareAssertion.created_by_caregiver_id == caregiver_id,
+            CareAssertion.assertion_status.notin_(["rejected", "superseded"]),
         ).order_by(CareAssertion.recorded_at.desc()).all()
         assertion_row = next(
             (
@@ -853,7 +853,6 @@ def review_document_candidate(
             assertion_row = db.query(CareAssertion).filter(
                 CareAssertion.id == assertion_row.id,
                 CareAssertion.person_id == person_id,
-                CareAssertion.created_by_caregiver_id == caregiver_id,
             ).with_for_update().first()
             if assertion_row is None:
                 raise HTTPException(status_code=404, detail="Source-linked assertion not found in this care record")
