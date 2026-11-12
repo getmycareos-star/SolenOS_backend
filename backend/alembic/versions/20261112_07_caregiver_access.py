@@ -50,28 +50,24 @@ def upgrade():
             (id, person_id, caregiver_id, caregiver_profile_id, role, status, can_manage_members, granted_at)
         SELECT
             lower(hex(randomblob(16))),
-            s.person_id,
-            s.caregiver_id,
+            ranked.person_id,
+            ranked.caregiver_id,
             p.id,
             CASE WHEN ranked.position = 1 THEN 'primary' ELSE 'family' END,
             'active',
             CASE WHEN ranked.position = 1 THEN TRUE ELSE FALSE END,
-            COALESCE(s.created_at, CURRENT_TIMESTAMP)
+            COALESCE(ranked.first_created_at, CURRENT_TIMESTAMP)
         FROM (
             SELECT person_id, caregiver_id, MIN(created_at) AS first_created_at,
                    ROW_NUMBER() OVER (PARTITION BY person_id ORDER BY MIN(created_at), caregiver_id) AS position
             FROM anonymous_sessions
             GROUP BY person_id, caregiver_id
         ) ranked
-        JOIN anonymous_sessions s
-          ON s.person_id = ranked.person_id
-         AND s.caregiver_id = ranked.caregiver_id
-         AND s.created_at = ranked.first_created_at
         LEFT JOIN caregiver_profiles p
-          ON p.person_id = s.person_id AND p.session_caregiver_id = s.caregiver_id
+          ON p.person_id = ranked.person_id AND p.session_caregiver_id = ranked.caregiver_id
         WHERE NOT EXISTS (
             SELECT 1 FROM caregiver_access_grants g
-            WHERE g.person_id = s.person_id AND g.caregiver_id = s.caregiver_id
+            WHERE g.person_id = ranked.person_id AND g.caregiver_id = ranked.caregiver_id
         )
     """)) if bind.dialect.name == "sqlite" else op.execute(sa.text("""
         INSERT INTO caregiver_access_grants
