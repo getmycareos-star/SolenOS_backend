@@ -1090,14 +1090,18 @@ def fulfil_approved_deletion(
         # tables. Delete deepest dependants first so ON DELETE SET NULL cannot
         # leave indirectly linked personal data behind. Composite foreign keys
         # are handled by matching every constrained/referred column pair.
-        raw_foreign_keys = {
-            name: inspector.get_foreign_keys(name) for name in raw_tables
+        dependency_tables = [
+            name for name in inspector.get_table_names()
+            if name not in protected_tables
+        ]
+        dependency_foreign_keys = {
+            name: inspector.get_foreign_keys(name) for name in dependency_tables
         }
         reachable_depth = {"persons": 0, "caregivers": 0}
         dependency_graph_converged = False
-        for _ in range(len(raw_tables) + 1):
+        for _ in range(len(dependency_tables) + 1):
             changed_depth = False
-            for child_name, foreign_keys in raw_foreign_keys.items():
+            for child_name, foreign_keys in dependency_foreign_keys.items():
                 for foreign_key in foreign_keys:
                     parent_name = foreign_key.get("referred_table")
                     if parent_name not in reachable_depth:
@@ -1140,7 +1144,7 @@ def fulfil_approved_deletion(
 
             # Also remove rows linked through any reachable parent table.
             # This runs before that parent is deleted and supports composite FKs.
-            for foreign_key in raw_foreign_keys.get(raw_table_name, []):
+            for foreign_key in dependency_foreign_keys.get(raw_table_name, []):
                 parent_name = foreign_key.get("referred_table")
                 constrained = foreign_key.get("constrained_columns") or []
                 referred = foreign_key.get("referred_columns") or []
