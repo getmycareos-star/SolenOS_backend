@@ -1238,6 +1238,14 @@ def list_document_processing_status(
                 isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
                 for item in observations
             ),
+            "medication_report_saved": any(
+                isinstance(item, dict)
+                and item.get("field_type") == "medication"
+                and item.get("review_status") == "accepted_by_caregiver"
+                and item.get("accepted_assertion_status") == "reported"
+                and item.get("professional_confirmation_question_id")
+                for item in observations
+            ),
             "medication_conflict": medication_conflict,
             "medication_confirmation_question_ids": medication_confirmation_question_ids,
             "accepted_follow_up_ids": accepted_follow_up_ids,
