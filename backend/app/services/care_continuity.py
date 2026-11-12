@@ -513,9 +513,8 @@ def next_best_questions(
 def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, int]:
     """Reassess source-linked questions without treating silence as an answer.
 
-    OpenQuestion changes are captured by the existing append-only CareStateRevision
-    listener. Automatic transitions therefore remain auditable in the same
-    transaction as source reconciliation; this function never commits.
+    Every automatic transition is written explicitly to the append-only
+    CareStateRevision table in the same transaction; this function never commits.
     """
     candidates = next_best_questions(db, person_id, persist=False, commit=False)
     candidate_by_source = {}
@@ -554,11 +553,7 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
         ), None)
 
         if necessary:
-            question.necessity = "necessary"
-            question.necessity_rationale = necessary["necessity_rationale"].strip()
-            question.evidence_ids = list(dict.fromkeys(
-                list(question.evidence_ids or []) + list(necessary.get("evidence_ids") or [])
-            )) or None
+            before_state = _open_question_state(question)
             if question.status == "closed" and str(question.closed_reason or "").startswith("automatically_"):
                 if not _question_has_new_grounding(question, necessary):
                     counts["untouched"] += 1
@@ -569,6 +564,15 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
                 counts["reopened"] += 1
             else:
                 counts["kept"] += 1
+            question.necessity = "necessary"
+            question.necessity_rationale = necessary["necessity_rationale"].strip()
+            question.evidence_ids = list(dict.fromkeys(
+                list(question.evidence_ids or []) + list(necessary.get("evidence_ids") or [])
+            )) or None
+            if before_state != _open_question_state(question):
+                _record_open_question_revision(
+                    db, question, before_state=before_state, change_kind="updated"
+                )
             continue
 
         # Only questions created from these system-managed candidate sources are
@@ -577,6 +581,7 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
             counts["untouched"] += 1
             continue
 
+        before_state = _open_question_state(question)
         has_active_candidate = bool(matching)
         question.status = "closed"
         question.closed_at = now
@@ -590,6 +595,9 @@ def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, i
         else:
             question.closed_reason = "automatically_superseded: the linked source is no longer an active clarification candidate"
             counts["superseded"] += 1
+        _record_open_question_revision(
+            db, question, before_state=before_state, change_kind="updated"
+        )
 
     db.flush()
     return counts
