@@ -99,6 +99,27 @@ def upgrade():
         )
     """))
 
+    if not inspect(bind).has_table("caregiver_invitations"):
+        op.create_table(
+            "caregiver_invitations",
+            sa.Column("id", sa.String(), primary_key=True),
+            sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("email_normalized", sa.String(320), nullable=False),
+            sa.Column("token_hash", sa.String(64), nullable=False),
+            sa.Column("invited_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
+            sa.Column("role", sa.String(32), nullable=False, server_default="family"),
+            sa.Column("status", sa.String(16), nullable=False, server_default="pending"),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("accepted_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("accepted_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
+            sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.UniqueConstraint("token_hash", name="uq_caregiver_invitations_token_hash"),
+        )
+        op.create_index("ix_caregiver_invitations_person_id", "caregiver_invitations", ["person_id"])
+        op.create_index("ix_caregiver_invitations_email_normalized", "caregiver_invitations", ["email_normalized"])
+        op.create_index("ix_caregiver_invitations_status", "caregiver_invitations", ["status"])
+
     # Multi-caregiver accounts are required for independently authenticated
     # family members. Email remains globally unique.
     constraints = inspector.get_unique_constraints("caregiver_accounts") if inspector.has_table("caregiver_accounts") else []
