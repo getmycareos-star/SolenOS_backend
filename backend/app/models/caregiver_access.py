@@ -1,0 +1,29 @@
+import uuid
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.sql import func
+
+from app.core.database import Base
+
+
+class CaregiverAccessGrant(Base):
+    """Server-enforced membership for one caregiver in one care record.
+
+    A bearer session is valid only while this grant remains active. Profile
+    labels and client-selected caregiver IDs are never authorization.
+    """
+    __tablename__ = "caregiver_access_grants"
+    __table_args__ = (
+        UniqueConstraint("person_id", "caregiver_id", name="uq_caregiver_access_person_caregiver"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
+    caregiver_profile_id = Column(String, ForeignKey("caregiver_profiles.id", ondelete="SET NULL"), nullable=True, index=True)
+    role = Column(String(32), nullable=False, default="family")
+    status = Column(String(16), nullable=False, default="active", index=True)
+    can_manage_members = Column(Boolean, nullable=False, default=False)
+    granted_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
