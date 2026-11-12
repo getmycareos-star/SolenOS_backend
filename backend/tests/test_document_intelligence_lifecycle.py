@@ -519,3 +519,62 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_partial_document_intelligence_resumes_remaining_pages_without_replacing_candidates(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    source = "\\n\\n".join(
+        f"[Page {page}]\\nPatient was observed completing activity on page {page}."
+        for page in range(1, 27)
+    )
+    processed_pages = []
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        quote = page_text.splitlines()[-1]
+        page_number = int(re.search(r"page (\\d+)", quote).group(1))
+        processed_pages.append(page_number)
+        return {
+            "observations": [{
+                "subject": "Patient",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            }],
+            "open_questions": [],
+        }
+
+    import re
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Partial document caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+
+        first = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert first.status_code == 201, first.text
+        assert first.json()["intelligence_status"] == "partial"
+        assert first.json()["unprocessed_page_numbers"] == [26]
+        assert len(first.json()["observations"]) == 25
+        assert processed_pages == list(range(1, 26))
+
+        resumed = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert resumed.status_code == 201, resumed.text
+        assert resumed.json()["intelligence_status"] == "available"
+        assert resumed.json()["unprocessed_page_numbers"] == []
+        assert len(resumed.json()["observations"]) == 26
+        assert processed_pages == list(range(1, 27))
+        assert resumed.json()["processed_page_numbers"] == list(range(1, 27))
+
+        repeated = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert repeated.status_code == 201, repeated.text
+        assert len(repeated.json()["observations"]) == 26
+        assert processed_pages == list(range(1, 27))
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
