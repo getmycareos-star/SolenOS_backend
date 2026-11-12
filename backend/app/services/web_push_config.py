@@ -3,6 +3,7 @@ import hmac
 from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 
@@ -17,8 +18,9 @@ def _decode_base64url(value: str) -> bytes | None:
 def vapid_configuration_error(settings) -> str | None:
     """Validate VAPID subject syntax and prove the configured P-256 key pair matches.
 
-    VAPID keys are base64url-encoded: a 65-byte uncompressed P-256 public point
-    and a 32-byte private scalar. No key material is included in returned errors.
+    The public key is a base64url-encoded 65-byte uncompressed P-256 point.
+    The private key may be a PEM-encoded P-256 key (the documented deployment
+    format) or a base64url-encoded 32-byte scalar. No key material is returned.
     """
     public_text = (settings.vapid_public_key or "").strip()
     private_text = (settings.vapid_private_key or "").strip()
@@ -52,21 +54,31 @@ def vapid_configuration_error(settings) -> str | None:
         return "VAPID subject must be a valid mailto: or HTTPS URI"
 
     public_bytes = _decode_base64url(public_text)
-    private_bytes = _decode_base64url(private_text)
     if public_bytes is None or len(public_bytes) != 65 or public_bytes[0] != 0x04:
         return "VAPID public key must be a base64url P-256 uncompressed point"
-    if private_bytes is None or len(private_bytes) != 32:
-        return "VAPID private key must be a base64url 32-byte P-256 scalar"
 
     try:
-        private_value = int.from_bytes(private_bytes, "big")
-        private_key = ec.derive_private_key(private_value, ec.SECP256R1())
+        if private_text.lstrip().startswith("-----BEGIN"):
+            normalized_pem = private_text.replace("\\n", "\n").encode("ascii")
+            private_key = serialization.load_pem_private_key(normalized_pem, password=None)
+            if (
+                not isinstance(private_key, ec.EllipticCurvePrivateKey)
+                or not isinstance(private_key.curve, ec.SECP256R1)
+            ):
+                return "VAPID private key must be a PEM-encoded P-256 key"
+        else:
+            private_bytes = _decode_base64url(private_text)
+            if private_bytes is None or len(private_bytes) != 32:
+                return "VAPID private key must be a PEM P-256 key or base64url 32-byte scalar"
+            private_value = int.from_bytes(private_bytes, "big")
+            private_key = ec.derive_private_key(private_value, ec.SECP256R1())
+
         expected_public = private_key.public_key().public_bytes(
             Encoding.X962,
             PublicFormat.UncompressedPoint,
         )
-    except (ValueError, TypeError):
-        return "VAPID private key is not a valid P-256 scalar"
+    except (ValueError, TypeError, UnicodeEncodeError):
+        return "VAPID private key is not a valid P-256 key"
 
     if not hmac.compare_digest(expected_public, public_bytes):
         return "VAPID public and private keys do not form a matching pair"
