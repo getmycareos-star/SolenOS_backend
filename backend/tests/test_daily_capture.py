@@ -1542,6 +1542,8 @@ def test_medication_authoring_starts_reported_and_requires_explicit_review():
         finally:
             db.close()
     finally:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("DROP TABLE IF EXISTS care_assertion_revisions")
         teardown_db()
 
 
