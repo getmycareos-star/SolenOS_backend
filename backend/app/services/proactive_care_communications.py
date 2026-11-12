@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.core.change_enums import SignificanceVerdict
-from app.models.care import CareAssertion, CareEvent, Caregiver, Evidence
+from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care_continuity import CareAssertion
 from app.models.change import Change
 from app.models.notifications import CareNotification
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
