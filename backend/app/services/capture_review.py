@@ -85,9 +85,11 @@ def persist_source_grounded_daily_observations(
         quote = candidate.get("source_quote")
         if not all(isinstance(value, str) and value.strip() for value in (subject, observation, quote)):
             continue
-        if quote not in source_text or subject not in quote or observation not in quote:
+        subject_match = re.search(re.escape(subject), quote, re.IGNORECASE)
+        if quote not in source_text or subject_match is None or observation not in quote:
             continue
 
+        subject_text = subject_match.group(0)
         start = source_text.find(quote)
         if start < 0:
             continue
@@ -99,13 +101,21 @@ def persist_source_grounded_daily_observations(
             EvidenceObservation.source_span_end == end,
             EvidenceObservation.source_passage == quote,
             EvidenceObservation.value_text == observation,
-            EvidenceObservation.subject_label == subject,
+            EvidenceObservation.subject_label == subject_text,
         ).first()
         if existing:
             continue
 
         hedge = _HEDGE_REFERENCE.search(observation)
-        time_reference = _TIME_REFERENCE.search(observation) or _TIME_REFERENCE.search(quote)
+        time_reference = _TIME_REFERENCE.search(observation)
+        if time_reference is None:
+            observation_start = quote.find(observation)
+            time_matches = list(_TIME_REFERENCE.finditer(quote))
+            if observation_start >= 0 and time_matches:
+                time_reference = min(
+                    time_matches,
+                    key=lambda match: abs(match.start() - observation_start),
+                )
         context_parts = [
             "Source-grounded extraction from a caregiver report; not an independently verified clinical fact."
         ]
@@ -116,7 +126,7 @@ def persist_source_grounded_daily_observations(
             evidence_id=evidence_id,
             observation_kind="caregiver_report",
             epistemic_status="uncertain" if hedge else "reported",
-            subject_label=subject[:160],
+            subject_label=subject_text[:160],
             attribute="caregiver_reported_observation",
             value_text=observation[:2000],
             context=" ".join(context_parts),
