@@ -266,6 +266,24 @@ def persist_source_clarification_questions(
     else:
         raise ValueError("Unsupported clarification source type.")
 
+    # Source text is used only to verify an explicit prerequisite stated by
+    # the saved source. Model-generated question wording alone never promotes
+    # a question to caregiver work.
+    source_texts = []
+    if source_record_type == "care_event":
+        source_texts.extend([
+            str(source_row.title or ""),
+            str(source_row.description or ""),
+        ])
+    else:
+        source_texts.append(str(source_row.source_text or ""))
+    if linked_ids:
+        linked_evidence_rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(linked_ids),
+        ).all()
+        source_texts.extend(str(row.source_text or "") for row in linked_evidence_rows)
+
     existing_rows = db.query(OpenQuestionModel).filter(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.subject_type == "person",
@@ -301,6 +319,15 @@ def persist_source_clarification_questions(
         # source-backed current-state LCR assertion already covers its field.
         if _question_is_answered_by_current_lcr(db, person_id, question_text):
             continue
+        dependency_quote = (
+            _explicit_dependency_for_question(source_texts, question_text)
+            if linked_ids else None
+        )
+        necessity = "necessary" if dependency_quote else "not_assessed"
+        necessity_rationale = (
+            "The saved source explicitly says this detail must be confirmed before a next step."
+            if dependency_quote else None
+        )
         source_context = {
             "source_kind": source_kind,
             "source_id": source_record_id,
@@ -308,6 +335,14 @@ def persist_source_clarification_questions(
             "reason": "Suggested while reviewing saved care information. Please check the wording before relying on it.",
             "grounding_status": "source_record_linked; question wording not independently verified",
         }
+        if dependency_quote:
+            source_context["necessity_assessment"] = {
+                "necessity": "necessary",
+                "necessity_rationale": necessity_rationale,
+                "decision_dependency": f"The saved source states: {dependency_quote}",
+                "source_quote": dependency_quote,
+                "assessment_method": "deterministic_explicit_source_prerequisite_v1",
+            }
         existing = existing_by_text.get(duplicate_key)
         if existing is None:
             existing = OpenQuestionModel(
@@ -316,7 +351,9 @@ def persist_source_clarification_questions(
                 subject_type="person",
                 subject_id=person_id,
                 status="open",
-                priority=Priority.INFORMATIONAL,
+                priority=Priority.HIGH if necessity == "necessary" else Priority.INFORMATIONAL,
+                necessity=necessity,
+                necessity_rationale=necessity_rationale,
                 evidence_ids=linked_ids or None,
                 context=[source_context],
                 created_by_caregiver_id=caregiver_id,
@@ -336,6 +373,11 @@ def persist_source_clarification_questions(
             ):
                 contexts.append(source_context)
                 existing.context = contexts
+            if necessity == "necessary":
+                existing.necessity = "necessary"
+                existing.necessity_rationale = necessity_rationale
+                if _priority_weight(existing.priority) < _priority_weight(Priority.HIGH):
+                    existing.priority = Priority.HIGH
         persisted.append(existing)
     db.flush()
     return persisted
