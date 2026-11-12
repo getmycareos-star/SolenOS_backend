@@ -126,7 +126,8 @@ def _ocr_quality_marker(image: Image.Image) -> str | None:
 
 def _page_numbers(source_text: str, marker: str) -> list[int]:
     return [
-        int(value) for value in re.findall(r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed:", source_text)
+        int(match.group(1))
+        for match in re.finditer(
             rf"(?m)^\[Page\s+(\d+)\s+{re.escape(marker)}\]",
             source_text or "",
         )

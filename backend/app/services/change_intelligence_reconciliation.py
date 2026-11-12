@@ -5,6 +5,7 @@ caregiver reopening the change-intelligence screen to refresh derived assessment
 This service does not commit: callers own the transaction boundary.
 """
 from datetime import datetime
+import logging
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,9 @@ from app.services.care_continuity import (
     reassess_open_question_lifecycle,
     reconcile_information_gaps_from_accepted_assertions,
 )
+from app.services.proactive_care_communications import create_meaningful_change_notifications
+
+logger = logging.getLogger(__name__)
 
 
 def reconcile_person_change_intelligence(
@@ -62,3 +66,10 @@ def reconcile_person_change_intelligence(
     # the existing append-only care-state revision history.
     reassess_open_question_lifecycle(db, person_id)
     db.flush()
+    # Only notify after evidence reconciliation and significance assessment.
+    # A notification failure must not undo the saved care update.
+    try:
+        with db.begin_nested():
+            create_meaningful_change_notifications(db, person_id, now=reference_time)
+    except Exception:
+        logger.exception("Care-change notification creation failed for person %s", person_id)

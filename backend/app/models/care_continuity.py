@@ -173,6 +173,13 @@ def _version_care_state(session, flush_context, instances):
     if any(isinstance(obj, (CareStateRevision, EvidenceReviewRecord)) for obj in list(session.dirty) + list(session.deleted)):
         raise ValueError("Care-state revisions and evidence review records are append-only and cannot be updated or deleted")
     candidates = list(session.new) + list(session.dirty) + list(session.deleted)
+    # A workflow may append an actor-attributed revision explicitly. Do not
+    # also create the generic ORM snapshot for that target in this same flush.
+    explicit_revision_targets = {
+        (str(item.target_type), str(item.target_id))
+        for item in session.new
+        if isinstance(item, CareStateRevision)
+    }
     seen = set()
     for obj in candidates:
         table = getattr(getattr(obj, "__table__", None), "name", None)
@@ -187,9 +194,10 @@ def _version_care_state(session, flush_context, instances):
         if not person_id:
             continue
         target_id = str(obj.id)
-        # Avoid creating two revisions for the same object in one flush.
+        # Preserve the explicit workflow actor/reason without generating a
+        # second revision number for the same state transition.
         marker = (table, target_id)
-        if marker in seen:
+        if marker in seen or marker in explicit_revision_targets:
             continue
         seen.add(marker)
         is_new = obj in session.new
