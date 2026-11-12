@@ -4730,7 +4730,61 @@ def list_care_notifications(
         record_metadata={"limit": limit, "offset": offset, "unread_only": unread_only, "result_count": len(items)},
     ))
     db.commit()
-    return {"items": [_notification_json(item) for item in items], "total": total, "limit": limit, "offset": offset, "unread_only": unread_only}
+    delivery_rows = []
+    if items:
+        delivery_rows = db.query(CarePushDelivery).filter(
+            CarePushDelivery.notification_id.in_([item.id for item in items])
+        ).all()
+    deliveries_by_notification: dict[str, list[CarePushDelivery]] = {}
+    for delivery in delivery_rows:
+        deliveries_by_notification.setdefault(delivery.notification_id, []).append(delivery)
+
+    serialized_items = []
+    push_categories = {"reminder_due", "open_loop_due"}
+    for item in items:
+        payload = _notification_json(item)
+        if item.category in push_categories:
+            deliveries = deliveries_by_notification.get(item.id, [])
+            statuses = [delivery.status for delivery in deliveries]
+            accepted = statuses.count("accepted")
+            pending = statuses.count("pending")
+            failed = statuses.count("failed") + statuses.count("expired")
+            cancelled = statuses.count("cancelled")
+            if not deliveries:
+                delivery_status = "not_attempted"
+                delivery_message = "No device notification attempt is recorded. This notification remains in your SolenOS inbox."
+            elif pending:
+                delivery_status = "pending"
+                delivery_message = "A device notification is waiting to be sent. This notification remains in your SolenOS inbox."
+            elif failed and accepted:
+                delivery_status = "partial_failure"
+                delivery_message = "The push service accepted some device notifications, but at least one device could not be reached. Device display is not confirmed."
+            elif failed:
+                delivery_status = "failed"
+                delivery_message = "SolenOS could not send this notification to a device. It remains available in your SolenOS inbox."
+            elif accepted:
+                delivery_status = "accepted_by_push_service"
+                delivery_message = "The push service accepted this notification. SolenOS cannot confirm whether it appeared on the device."
+            elif cancelled:
+                delivery_status = "cancelled"
+                delivery_message = "Device delivery was cancelled because the reminder no longer required it."
+            else:
+                delivery_status = "unknown"
+                delivery_message = "Device delivery status is not available. This notification remains in your SolenOS inbox."
+            payload["push_delivery"] = {
+                "status": delivery_status,
+                "target_count": len(deliveries),
+                "accepted_count": accepted,
+                "pending_count": pending,
+                "failed_count": failed,
+                "cancelled_count": cancelled,
+                "message": delivery_message,
+            }
+        else:
+            payload["push_delivery"] = {"status": "in_app_only", "message": "This care update is available in your SolenOS inbox."}
+        serialized_items.append(payload)
+
+    return {"items": serialized_items, "total": total, "limit": limit, "offset": offset, "unread_only": unread_only}
 
 
 @router.get("/notifications/unread-count")
