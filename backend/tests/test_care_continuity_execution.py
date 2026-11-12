@@ -7,6 +7,7 @@ from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
+from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
 from app.services import care_continuity_execution as execution
 
 
@@ -346,3 +347,78 @@ def test_shared_coordinator_validates_multiple_persisted_source_events(monkeypat
     reconciled.assert_called_once_with(db, "person-1", None)
     db.commit.assert_not_called()
     db.rollback.assert_not_called()
+
+
+def test_shared_coordinator_validates_read_only_handoff_draft_without_reconciliation(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    draft = SimpleNamespace(
+        id="draft-1",
+        person_id="person-1",
+        caregiver_id="caregiver-1",
+    )
+    revision = SimpleNamespace(
+        id="draft-revision-1",
+        draft_id="draft-1",
+        person_id="person-1",
+        caregiver_id="caregiver-1",
+        revision_number=3,
+    )
+    db = _session({Person: person, HandoffDraft: draft, HandoffDraftRevision: revision})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    result = execution.execute_care_continuity_reconciliation(
+        db,
+        "person-1",
+        workflow="handoff_draft_approval",
+        source_caregiver_id="caregiver-1",
+        source_handoff_draft_id="draft-1",
+        source_handoff_draft_revision_number=3,
+        reconcile_lcr=False,
+    )
+
+    assert result["stages"]["handoff_draft"] == "verified"
+    assert result["stages"]["handoff_draft_revision"] == "verified"
+    assert result["stages"]["reconciliation"] == "not_applicable_read_only_output"
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_handoff_draft_from_another_caregiver(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    db = _session({Person: person, HandoffDraft: None, HandoffDraftRevision: None})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="another care record or caregiver"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="handoff_draft_approval",
+            source_caregiver_id="caregiver-1",
+            source_handoff_draft_id="draft-owned-by-another-caregiver",
+            source_handoff_draft_revision_number=3,
+            reconcile_lcr=False,
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_incomplete_handoff_revision_reference(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    db = _session({Person: person})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="supplied together"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="handoff_draft_approval",
+            source_handoff_draft_id="draft-1",
+            reconcile_lcr=False,
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
