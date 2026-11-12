@@ -402,7 +402,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if str(number).isdigit()
     }
     if resume_intelligence and not prior_candidate_overflow_pages and resume_intelligence.get("candidate_overflow"):
-        legacy_pending = resume_intelligence.get("unprocessed_page_numbers") or resume_intelligence.get("processed_page_numbers") or []
+        legacy_pending = resume_intelligence.get("processed_page_numbers") or resume_intelligence.get("unprocessed_page_numbers") or []
         prior_candidate_overflow_pages = {
             int(number) for number in legacy_pending if str(number).isdigit()
         } or {number for number, _ in page_inputs}
