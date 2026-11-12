@@ -1852,6 +1852,9 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             assert sleep.source_span_end == len(original_report)
             assert sleep.epistemic_status == "reported"
             assert "last night" in sleep.context
+            assert sleep.reported_at == event.recorded_at
+            assert sleep.observed_at is None
+            assert sleep.occurred_at is None
             assert unsettled.epistemic_status == "uncertain"
             assert unsettled.hedge_marker == "seemed"
             assert "this morning" in unsettled.context
