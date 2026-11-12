@@ -12,7 +12,7 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareSta
 from app.models.care import CareEvent, Evidence
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
-from app.core.uncertainty_enums import GapLifecycleStatus, Priority
+from app.core.uncertainty_enums import GapLifecycleStatus, Priority, ResolutionMechanism
 
 
 def _utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -528,6 +528,108 @@ def next_best_questions(
             db.flush()
     return output
 
+
+
+def reconcile_information_gaps_from_accepted_assertions(
+    db: Session, person_id: str
+) -> Dict[str, int]:
+    """Resolve only exact-field gaps covered by accepted, source-backed current-state assertions.
+
+    This records that the missing field now has a reviewed source assertion. It
+    does not upgrade the assertion to verified or choose between conflicting
+    reports. The caller owns the transaction.
+    """
+    active_statuses = (
+        GapLifecycleStatus.OPEN,
+        GapLifecycleStatus.REOPENED,
+        GapLifecycleStatus.PARTIALLY_RESOLVED,
+    )
+    gaps = db.query(InformationGap).filter(
+        InformationGap.person_id == person_id,
+        InformationGap.lifecycle_status.in_(active_statuses),
+    ).with_for_update().all()
+    if not gaps:
+        return {"scanned": 0, "resolved": 0, "skipped_conflict": 0}
+
+    assertions = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.assertion_kind == "current_state",
+        CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
+    ).order_by(CareAssertion.recorded_at.desc()).all()
+
+    evidence_by_assertion = {}
+    for assertion in assertions:
+        ids = list(dict.fromkeys(str(value) for value in (assertion.evidence_ids or []) if value))
+        if not ids:
+            continue
+        found = {
+            str(row[0]) for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(ids),
+            ).all()
+        }
+        if found == set(ids):
+            evidence_by_assertion[assertion.id] = ids
+
+    assertion_groups = {}
+    for assertion in assertions:
+        if assertion.id not in evidence_by_assertion:
+            continue
+        key = (assertion.subject_type, assertion.subject_id, assertion.field)
+        assertion_groups.setdefault(key, []).append(assertion)
+
+    unresolved_conflicts = {
+        (row.subject_type, row.subject_id, row.field)
+        for row in db.query(Contradiction).filter(
+            Contradiction.person_id == person_id,
+            Contradiction.resolution_status.in_(("unresolved", "reopened", "qualified", "partially_resolved")),
+        ).all()
+    }
+
+    now = datetime.now(timezone.utc)
+    resolved = skipped_conflict = 0
+    for gap in gaps:
+        key = (gap.subject_type, gap.subject_id, gap.field)
+        candidates = assertion_groups.get(key, [])
+        if not candidates:
+            continue
+        if key in unresolved_conflicts or len({_value_key(row.asserted_value) for row in candidates}) > 1:
+            skipped_conflict += 1
+            continue
+
+        source_ids = [row.id for row in candidates]
+        evidence_ids = list(dict.fromkeys(
+            evidence_id
+            for row in candidates
+            for evidence_id in evidence_by_assertion[row.id]
+        ))
+        before_context = list(gap.context or [])
+        resolution_entry = {
+            "actor": "solenos_reconciliation",
+            "change": "information_gap_resolved_from_accepted_current_state_assertion",
+            "assertion_ids": source_ids,
+            "evidence_ids": evidence_ids,
+            "field_scope": gap.field,
+            "epistemic_limit": "The accepted assertion remains source-attributed and reported; this transition records field coverage, not independent clinical verification.",
+            "resolved_at": now.isoformat(),
+        }
+        if resolution_entry not in before_context:
+            before_context.append(resolution_entry)
+        gap.context = before_context
+        gap.lifecycle_status = GapLifecycleStatus.RESOLVED
+        gap.resolution_mechanism = ResolutionMechanism.NEW_EVIDENCE
+        gap.resolution_date = now
+        gap.resolution_notes = (
+            "The missing field now has an accepted, source-backed current-state assertion. "
+            "The assertion remains source-attributed and is not independently clinically verified."
+        )
+        gap.evidence_ids = list(dict.fromkeys(
+            list(gap.evidence_ids or []) + evidence_ids
+        ))
+        resolved += 1
+
+    db.flush()
+    return {"scanned": len(gaps), "resolved": resolved, "skipped_conflict": skipped_conflict}
 
 
 def reassess_open_question_lifecycle(db: Session, person_id: str) -> Dict[str, int]:
