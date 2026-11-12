@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
+from app.services.lcr_context import build_lcr_context
 from app.services.change_intelligence_reconciliation import (
     reconcile_person_change_intelligence,
 )
@@ -35,6 +36,7 @@ def execute_care_continuity_reconciliation(
     source_conversation_id: str | None = None,
     correction_id: str | None = None,
     reference_time: datetime | None = None,
+    stage_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Validate persisted lineage and stage the shared LCR reconciliation.
 
@@ -138,11 +140,49 @@ def execute_care_continuity_reconciliation(
                 "The original caregiver-authored Companion message could not be verified"
             )
 
+    stages = {
+        "source_preservation": "verified",
+        "evidence": "verified" if evidence_rows else "not_applicable",
+        "source_message": "verified" if message is not None else "not_applicable",
+        "extraction": "not_applicable",
+        "assessment": "not_applicable",
+        "review": "not_required",
+        "reconciliation": "staged_in_caller_transaction",
+        "longitudinal_retrieval": "unavailable",
+    }
+    if stage_statuses:
+        allowed = {
+            "extraction": {"available", "pending", "failed", "not_applicable"},
+            "assessment": {"available", "pending", "failed", "not_applicable"},
+            "review": {"required", "completed", "not_required", "pending"},
+        }
+        for name, value in stage_statuses.items():
+            if name not in allowed or value not in allowed[name]:
+                raise CareContinuityExecutionError(
+                    f"Unsupported execution stage status: {name}={value}"
+                )
+            stages[name] = value
+
     # Make pending assertions/review decisions visible to reconciliation in
     # this same unit of work. The caller retains commit/rollback ownership.
     db.flush()
     reconcile_person_change_intelligence(db, person_id, reference_time)
     db.flush()
+
+    try:
+        projection = build_lcr_context(
+            db,
+            person_id,
+            caregiver_id=caregiver_id,
+            limit_per_source=1,
+        )
+        stages["longitudinal_retrieval"] = (
+            "available"
+            if not projection.get("missing_required_sources")
+            else "unavailable"
+        )
+    except Exception:
+        stages["longitudinal_retrieval"] = "unavailable"
 
     return {
         "contract_version": "1.0",
@@ -155,12 +195,6 @@ def execute_care_continuity_reconciliation(
         "source_message_id": source_message_id,
         "source_conversation_id": source_conversation_id,
         "correction_id": correction_id,
-        "stages": {
-            "source_preservation": "verified",
-            "evidence": "verified" if evidence_rows else "not_applicable",
-            "source_message": "verified" if message is not None else "not_applicable",
-            "reconciliation": "staged_in_caller_transaction",
-            "longitudinal_retrieval": "not_verified",
-        },
+        "stages": stages,
         "transaction_owner": "caller",
     }
