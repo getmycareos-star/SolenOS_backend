@@ -1485,6 +1485,7 @@ def test_medication_authoring_starts_reported_and_requires_explicit_review():
         )
         assert reviewed.status_code == 200, reviewed.text
         assert reviewed.json()["record_status"] == "caregiver_reviewed_current_report"
+        assert reviewed.json()["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
         assert len(reviewed.json()["assertions"]) == 3
         assert {row["assertion_status"] for row in reviewed.json()["assertions"]} == {"accepted"}
 
