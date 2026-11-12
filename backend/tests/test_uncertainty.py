@@ -335,6 +335,26 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
                 "decision_dependency": "The handoff cannot state the current dose without this source.",
             }],
         )
+        stale_source = Evidence(
+            id="evidence-gap-reconcile-stale",
+            person_id=person.id,
+            type="document",
+            source_text="An old prescription record outside its review window.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        stale_gap = InformationGap(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="medication-3",
+            field="current_dose",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="Current dose remains unestablished because only an expired source exists.",
+            evidence_ids=[stale_source.id],
+        )
         conflict_gap_source = Evidence(
             id="evidence-gap-reconcile-conflict",
             person_id=person.id,
@@ -355,7 +375,10 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
             description="The current dose has competing reports.",
             evidence_ids=[conflict_gap_source.id],
         )
-        db.add_all([person, caregiver, gap_source, current_source, gap, conflict_gap_source, conflict_gap])
+        db.add_all([
+            person, caregiver, gap_source, current_source, gap,
+            stale_source, stale_gap, conflict_gap_source, conflict_gap,
+        ])
         db.flush()
 
         from app.services.care_continuity import (
@@ -385,6 +408,23 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
             created_by_caregiver_id=caregiver.id,
             updated_by_caregiver_id=caregiver.id,
         )
+        stale_assertion = CareAssertion(
+            person_id=person.id,
+            subject_type="medication",
+            subject_id="medication-3",
+            field="current_dose",
+            assertion_kind="current_state",
+            asserted_value="Old dose from an expired prescription",
+            source_label="Historical prescription",
+            source_text="An old prescription record outside its review window.",
+            evidence_ids=[stale_source.id],
+            assertion_status="accepted",
+            epistemic_state="reported",
+            observed_at=datetime.now(timezone.utc) - timedelta(days=60),
+            review_after_days=30,
+            created_by_caregiver_id=caregiver.id,
+            updated_by_caregiver_id=caregiver.id,
+        )
         accepted_conflicting_assertion = CareAssertion(
             person_id=person.id,
             subject_type="medication",
@@ -401,7 +441,7 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
             created_by_caregiver_id=caregiver.id,
             updated_by_caregiver_id=caregiver.id,
         )
-        db.add_all([accepted_assertion, accepted_conflicting_assertion])
+        db.add_all([accepted_assertion, accepted_conflicting_assertion, stale_assertion])
         db.add(Contradiction(
             person_id=person.id,
             subject_type="medication",
@@ -425,6 +465,7 @@ def test_accepted_current_state_evidence_resolves_gap_and_supersedes_question():
         db.refresh(question)
         assert gap.lifecycle_status == GapLifecycleStatus.RESOLVED
         assert conflict_gap.lifecycle_status == GapLifecycleStatus.OPEN
+        assert stale_gap.lifecycle_status == GapLifecycleStatus.OPEN
         assert gap.resolution_mechanism.value == "new_evidence"
         assert current_source.id in gap.evidence_ids
         assert question.status == "closed"
