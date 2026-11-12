@@ -231,6 +231,15 @@ def persist_source_clarification_questions(
     # refresh, rather than allowing an older duplicate to overwrite it.
     for row in existing_rows:
         existing_by_text.setdefault(_clarification_question_key(row.question or ""), row)
+    # Source extraction writes must use the same append-only question
+    # lifecycle as other care workflows. Import locally to avoid a module
+    # import cycle; this service is called by Daily Capture and Documents.
+    from app.services.care_continuity import (
+        _open_question_state,
+        _record_open_question_revision,
+        reassess_open_question_lifecycle,
+    )
+
     persisted: List[OpenQuestionModel] = []
     seen: set[tuple[str, ...]] = set()
     for value in (questions or [])[:20]:
@@ -342,8 +351,13 @@ def persist_source_clarification_questions(
             )
             db.add(existing)
             db.flush()
+            _record_open_question_revision(
+                db, existing, before_state=None, change_kind="created",
+                actor=f"source_workflow:{source_kind}",
+            )
             existing_by_text[normalized] = existing
         else:
+            before_state = _open_question_state(existing)
             existing.evidence_ids = list(dict.fromkeys(
                 list(existing.evidence_ids or []) + assessed_evidence_ids
             )) or None
@@ -362,7 +376,18 @@ def persist_source_clarification_questions(
                 ):
                     contexts.append(new_context)
             existing.context = contexts
+            if before_state != _open_question_state(existing):
+                _record_open_question_revision(
+                    db, existing, before_state=before_state,
+                    change_kind="updated", actor=f"source_workflow:{source_kind}",
+                )
         persisted.append(existing)
+
+    # Reconcile the newly linked source against accepted LCR assertions and
+    # explicit decision dependencies before the caller commits the source.
+    # This never commits and never turns an unassessed extraction question
+    # into caregiver work on wording or model confidence alone.
+    reassess_open_question_lifecycle(db, person_id)
     db.flush()
     return persisted
 
