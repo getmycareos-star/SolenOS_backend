@@ -4849,15 +4849,21 @@ def update_care_notification_preferences(
         payload.quiet_hours_enabled, payload.quiet_hours_start,
         payload.quiet_hours_end, payload.timezone_name,
     )):
-        pending_pushes = db.query(CarePushDelivery).join(
-            CareNotification, CareNotification.id == CarePushDelivery.notification_id
-        ).filter(
+        pending_notification_ids = db.query(CareNotification.id).filter(
             CareNotification.person_id == person_id,
             CareNotification.caregiver_id == caregiver_id,
+            *(
+                [CareNotification.category == "reminder_due"]
+                if payload.reminders_enabled is False
+                else []
+            ),
+        ).subquery()
+        pending_pushes = db.query(CarePushDelivery).filter(
+            CarePushDelivery.notification_id.in_(pending_notification_ids),
             CarePushDelivery.status == "pending",
         )
         if payload.reminders_enabled is False:
-            pending_pushes.filter(CareNotification.category == "reminder_due").update(
+            pending_pushes.update(
                 {CarePushDelivery.status: "cancelled"},
                 synchronize_session=False,
             )
