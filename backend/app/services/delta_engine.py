@@ -691,18 +691,26 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     # Use exact, person-scoped source records for loop provenance. A run-level
     # evidence ID is not automatically support for every model-generated finding.
     source_evidence_rows = list(prior_evidence)
-    prior_event_evidence_ids = list(dict.fromkeys(
-        str(evidence_id)
-        for event in prior_events
-        for evidence_id in (getattr(event, "evidence_ids", None) or [])
-        if evidence_id
-    ))
+    linked_source_evidence_ids = list(dict.fromkeys([
+        *[
+            str(evidence_id)
+            for event in prior_events
+            for evidence_id in (getattr(event, "evidence_ids", None) or [])
+            if evidence_id
+        ],
+        *[
+            str(evidence_id)
+            for assertion in active_assertions
+            for evidence_id in (assertion.evidence_ids or [])
+            if evidence_id
+        ],
+    ]))
     linked_prior_evidence_rows = (
         db.query(Evidence).filter(
             Evidence.person_id == person_id,
-            Evidence.id.in_(prior_event_evidence_ids),
+            Evidence.id.in_(linked_source_evidence_ids),
         ).all()
-        if prior_event_evidence_ids else []
+        if linked_source_evidence_ids else []
     )
     source_evidence_rows.extend(linked_prior_evidence_rows)
     if evidence_ids:
