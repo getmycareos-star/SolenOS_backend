@@ -1,3 +1,4 @@
+from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -87,6 +88,64 @@ def create_question(question: OpenQuestionCreate, engine: UncertaintyEngine = De
         return engine.create_open_question(question)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/question-quality")
+def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
+    """Care-record-scoped operational counts for question noise and review burden."""
+    if not engine.person_id:
+        raise HTTPException(status_code=403, detail="A session-bound care record is required")
+    rows = engine.db.query(OpenQuestionModel).filter(
+        OpenQuestionModel.person_id == engine.person_id,
+    ).all()
+    active = [row for row in rows if row.status in {"open", "unresolved"}]
+    normalized = [
+        " ".join((row.question or "").casefold().split())
+        for row in active if (row.question or "").strip()
+    ]
+    frequencies = Counter(normalized)
+    duplicate_groups = sum(1 for count in frequencies.values() if count > 1)
+    duplicate_excess = sum(count - 1 for count in frequencies.values() if count > 1)
+    source_active = [
+        row for row in active
+        if any(
+            isinstance(item, dict) and item.get("source_kind")
+            for item in (row.context or [])
+        )
+    ]
+    unassessed_source = [
+        row for row in source_active
+        if row.necessity != "necessary"
+    ]
+    auto_suppressed = [
+        row for row in rows
+        if row.status == "closed"
+        and str(row.closed_reason or "").startswith("automatically_suppressed")
+    ]
+    auto_superseded = [
+        row for row in rows
+        if row.status == "closed"
+        and str(row.closed_reason or "").startswith("automatically_superseded")
+    ]
+    return {
+        "person_id": engine.person_id,
+        "active_questions": len(active),
+        "caregiver_actionable_questions": sum(1 for row in active if row.necessity == "necessary"),
+        "non_actionable_active_questions": sum(1 for row in active if row.necessity != "necessary"),
+        "duplicate_question_groups": duplicate_groups,
+        "duplicate_question_excess": duplicate_excess,
+        "source_questions_awaiting_necessity_assessment": len(unassessed_source),
+        "manual_review_backlog": len(unassessed_source),
+        "automatically_suppressed_questions": len(auto_suppressed),
+        "automatically_superseded_questions": len(auto_superseded),
+        "answered_questions": sum(1 for row in rows if row.status == "answered"),
+        "definitions": {
+            "non_actionable_active_questions": "Open questions not marked necessary; these must not appear in the caregiver action list.",
+            "manual_review_backlog": "Source-linked open questions without a valid necessary assessment.",
+            "duplicate_question_excess": "Additional active records beyond one per normalized question text.",
+            "automatic_transitions": "System-suppressed or superseded questions; neither is counted as a caregiver answer.",
+        },
+    }
 
 
 @router.get("/questions/{person_id}", response_model=List[OpenQuestion])
