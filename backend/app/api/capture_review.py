@@ -118,6 +118,38 @@ def review_capture_candidate(
         observation = str(candidate.get("corrected_observation", candidate.get("observation")) or "").strip()
         if not observation:
             raise HTTPException(status_code=422, detail="The reviewed observation is empty")
+
+        # Re-check provenance at the point of promotion, not only when Qwen
+        # generated the candidate. The immutable source quote must still occur
+        # verbatim in the persisted capture text. Uncorrected model wording must
+        # be contained in that quote. A caregiver correction may differ, but is
+        # recorded as a separate human-authored statement in the assertion trace.
+        source_quote = candidate.get("source_quote")
+        persisted_source = analysis.source_text or ""
+        if (
+            not isinstance(source_quote, str)
+            or not source_quote.strip()
+            or source_quote not in persisted_source
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The candidate's original source passage could not be verified; no LCR assertion was created",
+            )
+        was_corrected = prior_status in {"corrected_pending_approval", "corrected_by_caregiver"}
+        original_observation = str(candidate.get("observation") or "").strip()
+        if not was_corrected and original_observation not in source_quote:
+            raise HTTPException(
+                status_code=409,
+                detail="The extracted observation is not supported by its preserved source passage; no LCR assertion was created",
+            )
+        if was_corrected and observation != original_observation:
+            candidate["accepted_correction"] = {
+                "original_observation": original_observation,
+                "caregiver_approved_observation": observation,
+                "source_quote": source_quote,
+                "correction_author": caregiver_id,
+                "correction_approved_at": reviewed_at,
+            }
         asserted_value = f"{subject}: {observation}" if subject else observation
         assertion = create_assertion(
             db,
