@@ -1689,3 +1689,91 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
         assert "not independent clinical verification" in payload["medications"][0]["interpretation_limit"]
     finally:
         teardown_db()
+
+
+
+def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extraction_failure(monkeypatch):
+    from app.api import v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night and seemed more unsettled this morning."
+
+        def extraction_unavailable(*args, **kwargs):
+            raise RuntimeError("injected extraction outage")
+
+        monkeypatch.setattr(api_v1, "extract_review_candidates", extraction_unavailable)
+        payload = {
+            "person_id": "person-daily-test",
+            "caregiver_id": "caregiver-daily-test",
+            "capture_kind": "natural_language_update",
+            "capture_idempotency_key": "natural-language-update-001",
+            "notes": original_report,
+        }
+
+        first = client.post("/api/v1/daily-care/entries", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        receipt = first.json()
+        assert receipt["success"] is True
+        assert receipt["event_type"] == "daily_care_entry"
+        assert receipt["qwen_extraction_status"] == "unavailable"
+        assert receipt["execution_status"]["source_preservation"] == "verified"
+        assert receipt["execution_status"]["extraction"] == "failed"
+
+        db = TestingSessionLocal()
+        try:
+            event = db.query(CareEvent).filter_by(id=receipt["id"]).one()
+            evidence = db.query(Evidence).filter_by(id=receipt["evidence_ids"][0]).one()
+            event_detail = json.loads(event.description)
+            source_payload = json.loads(evidence.source_text)
+            assert event_detail["notes"] == original_report
+            assert source_payload["original_capture"]["notes"] == original_report
+            assert evidence.evidence_kind == "caregiver_report"
+            assert evidence.epistemic_status == "caregiver_reported"
+            assert evidence.reported_by_caregiver_id == "caregiver-daily-test"
+            assert event.created_by_caregiver_id == "caregiver-daily-test"
+            assert event.evidence_ids == [evidence.id]
+        finally:
+            db.close()
+
+        # The same persisted source is visible through history and the LCR even
+        # when extraction is unavailable; failed understanding never erases it.
+        history = client.get("/api/v1/events/person-daily-test", headers=headers)
+        assert history.status_code == 200, history.text
+        assert len([row for row in history.json() if row["id"] == receipt["id"]]) == 1
+        current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert current.status_code == 200, current.text
+        lcr_rows = [row for row in current.json()["items"] if row["id"] == receipt["id"]]
+        assert len(lcr_rows) == 1
+        assert lcr_rows[0]["source_type"] == "caregiver_report"
+        assert lcr_rows[0]["epistemic_status"] == "caregiver_reported"
+        assert lcr_rows[0]["evidence_ids"] == receipt["evidence_ids"]
+
+        replay = client.post("/api/v1/daily-care/entries", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["id"] == receipt["id"]
+        assert replay.json()["evidence_ids"] == receipt["evidence_ids"]
+        assert replay.json()["idempotent_replay"] is True
+
+        changed = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={**payload, "notes": "A different caregiver report."},
+        )
+        assert changed.status_code == 409, changed.text
+
+        seed_second_person_and_caregiver()
+        foreign_headers = session_headers("person-other-test", "caregiver-other-test")
+        cross_person_write = client.post(
+            "/api/v1/daily-care/entries",
+            headers=foreign_headers,
+            json={**payload, "capture_idempotency_key": "foreign-natural-update-001"},
+        )
+        assert cross_person_write.status_code == 403
+        cross_person_read = client.get("/api/v1/events/person-daily-test", headers=foreign_headers)
+        assert cross_person_read.status_code == 403
+    finally:
+        teardown_db()
