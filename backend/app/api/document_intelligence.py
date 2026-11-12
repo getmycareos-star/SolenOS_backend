@@ -806,6 +806,9 @@ def review_document_candidate(
         source_label = source_prefix + filename[:max(0, 160 - len(source_prefix) - len(source_suffix))] + source_suffix
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
+        related_source_evidence_ids = {evidence_id}
+        if duplicate_of_evidence_id:
+            related_source_evidence_ids.add(duplicate_of_evidence_id)
         existing = db.query(CareAssertion).filter(
             CareAssertion.person_id == person_id,
             CareAssertion.field == document_field,
@@ -814,7 +817,11 @@ def review_document_candidate(
             CareAssertion.created_by_caregiver_id == caregiver_id,
         ).order_by(CareAssertion.recorded_at.desc()).all()
         assertion_row = next(
-            (row for row in existing if evidence_id in (row.evidence_ids or []) and row.asserted_value == asserted_value),
+            (
+                row for row in existing
+                if related_source_evidence_ids.intersection(row.evidence_ids or [])
+                and row.asserted_value == asserted_value
+            ),
             None,
         )
         # Use ORM writes on this path so the CareStateRevision listener and
