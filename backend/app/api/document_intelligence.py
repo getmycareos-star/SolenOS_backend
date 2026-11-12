@@ -321,7 +321,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     if isinstance(value, str) and value.strip()
                 )
     prior_observations = copy.deepcopy(resume_intelligence.get("observations") or [])
-    candidate_overflow = len(prior_observations) + len(raw_observations) > 60
+    candidate_overflow = bool(resume_intelligence.get("candidate_overflow")) or len(prior_observations) + len(raw_observations) > 60
     raw_observations = raw_observations[:max(0, 60 - len(prior_observations))]
     grounded = prior_observations
     seen_quotes = {
@@ -421,6 +421,8 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         "unreadable_page_numbers": unreadable_pages,
         "next_page_window_start": next_page_window_start,
         "next_chunk_offset": next_chunk_offset_to_store,
+        "candidate_overflow": candidate_overflow,
+        "status": "partial" if (unprocessed_pages or unreadable_pages or candidate_overflow) else "available",
         "model_authority": "review_only",
         "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
     }
