@@ -4557,3 +4557,96 @@ def test_blocked_medication_and_appointment_actions_create_scoped_necessary_ques
         db.close()
     finally:
         teardown_db()
+
+
+def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim():
+    setup_db()
+    try:
+        from app.services.care_continuity import create_assertion
+        from app.schemas.care_continuity import CareAssertionCreate
+
+        db = TestingSessionLocal()
+        person = Person(id="finding6-document-conflict-person", name="Document Conflict Person")
+        caregiver = Caregiver(
+            id="finding6-document-conflict-caregiver",
+            name="Document Conflict Caregiver",
+            email="finding6-document-conflict@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        first = Evidence(
+            id="finding6-document-conflict-evidence-a",
+            person_id=person.id,
+            type="document",
+            source_text="Earlier care plan records one mobility support level.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        second = Evidence(
+            id="finding6-document-conflict-evidence-b",
+            person_id=person.id,
+            type="document",
+            source_text="New discharge document records a different mobility support level on 12 November.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        db.add_all([person, caregiver, first, second])
+        db.commit()
+
+        existing = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="mobility_support",
+                assertion_kind="current_state",
+                asserted_value="Needs one-person assistance",
+                source_label="Earlier care plan",
+                source_text=first.source_text,
+                evidence_ids=[first.id],
+                review_after_days=30,
+                created_by_caregiver_id=caregiver.id,
+            ),
+            commit=False,
+        )
+        existing.assertion_status = "accepted"
+        db.flush()
+
+        document = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="mobility_support",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="Walks independently with a frame",
+                source_label="Caregiver-reviewed discharge document",
+                source_text=second.source_text,
+                evidence_ids=[second.id],
+                event_time_text="12 November 2026",
+                review_after_days=30,
+                created_by_caregiver_id=caregiver.id,
+            ),
+            commit=False,
+        )
+        document.assertion_status = "accepted"
+        db.commit()
+
+        conflict = db.query(Contradiction).filter(
+            Contradiction.person_id == person.id,
+            Contradiction.subject_type == "person",
+            Contradiction.subject_id == person.id,
+            Contradiction.field == "mobility_support",
+        ).one()
+        assert conflict.resolution_status == "qualified"
+        assert set(conflict.source_assertion_ids) == {existing.id, document.id}
+        assert set(conflict.evidence_ids) == {first.id, second.id}
+        assert db.query(CareAssertion).filter(
+            CareAssertion.person_id == person.id,
+            CareAssertion.field == "mobility_support",
+        ).count() == 2
+    finally:
+        db.close()
+        teardown_db()
