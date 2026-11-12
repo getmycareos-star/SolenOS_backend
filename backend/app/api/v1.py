@@ -20,6 +20,7 @@ from app.models.collaboration import ConsentRecord, EvidenceUpload
 from app.models.care_continuity import (
     EvidenceFreshnessAssessment,
     EvidenceCompletenessAssessment,
+    CareAssertion,
 )
 from app.models.care import (
     Person as PersonModel,
@@ -1276,6 +1277,22 @@ def list_insights(person_id: str, request: Request, db: Session = Depends(get_db
 def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
+
+    target_models = {
+        "care_event": CareEventModel,
+        "care_assertion": CareAssertion,
+        "insight": InsightModel,
+    }
+    target_model = target_models.get(correction.target_type)
+    if target_model is None:
+        raise HTTPException(status_code=422, detail="This care record type cannot be corrected through this endpoint")
+    target = db.query(target_model).filter(
+        target_model.id == correction.target_id,
+        target_model.person_id == correction.person_id,
+    ).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="The correction target was not found in this care record")
+
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
     try:
