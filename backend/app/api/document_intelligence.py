@@ -175,6 +175,53 @@ def _document_asserted_value(candidate: dict, subject: str, observation: str) ->
     )
 
 
+def _existing_assertion_for_exact_document_duplicate(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    evidence_id: str,
+    upload: EvidenceUpload,
+    field: str,
+    source_quote: str,
+    asserted_value: str,
+):
+    """Reuse a prior assertion only when the uploaded binaries are exact duplicates."""
+    existing = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.field == field,
+        CareAssertion.assertion_kind == "document_reviewed_observation",
+        CareAssertion.source_text == source_quote,
+        CareAssertion.created_by_caregiver_id == caregiver_id,
+    ).order_by(CareAssertion.recorded_at.desc()).all()
+    duplicate_group_ids = {
+        str(row[0])
+        for row in db.query(EvidenceUpload.evidence_id)
+        .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
+        .filter(
+            Evidence.person_id == person_id,
+            Evidence.type == "document",
+            EvidenceUpload.sha256 == upload.sha256,
+        ).all()
+    }
+    duplicate_group_ids.add(evidence_id)
+    active_duplicate_assertions = [
+        row for row in existing
+        if duplicate_group_ids.intersection(str(value) for value in (row.evidence_ids or []))
+        and row.assertion_status not in {"rejected", "superseded"}
+    ]
+    assertion_row = next(
+        (row for row in active_duplicate_assertions if row.asserted_value == asserted_value),
+        None,
+    )
+    if active_duplicate_assertions and assertion_row is None:
+        raise HTTPException(
+            status_code=409,
+            detail="An exact duplicate document already has a different reviewed interpretation of this passage. No second Living Care Record assertion was created.",
+        )
+    return assertion_row
+
+
 def _analysis_for_evidence(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
@@ -970,43 +1017,16 @@ def review_document_candidate(
         source_label = source_prefix + filename[:max(0, 160 - len(source_prefix) - len(source_suffix))] + source_suffix
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
-        existing = db.query(CareAssertion).filter(
-            CareAssertion.person_id == person_id,
-            CareAssertion.field == document_field,
-            CareAssertion.assertion_kind == "document_reviewed_observation",
-            CareAssertion.source_text == quote,
-            CareAssertion.created_by_caregiver_id == caregiver_id,
-        ).order_by(CareAssertion.recorded_at.desc()).all()
-        # Exact binary duplicates are one source, even when uploaded under a
-        # different filename or by a later retry. Reuse an existing active
-        # assertion from that duplicate group instead of adding a second LCR
-        # assertion. A conflicting interpretation of the same quoted passage
-        # is blocked for review rather than silently accepted.
-        duplicate_group_ids = {
-            str(row[0])
-            for row in db.query(EvidenceUpload.evidence_id)
-            .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
-            .filter(
-                Evidence.person_id == person_id,
-                Evidence.type == "document",
-                EvidenceUpload.sha256 == upload.sha256,
-            ).all()
-        }
-        duplicate_group_ids.add(evidence_id)
-        active_duplicate_assertions = [
-            row for row in existing
-            if duplicate_group_ids.intersection(str(value) for value in (row.evidence_ids or []))
-            and row.assertion_status not in {"rejected", "superseded"}
-        ]
-        assertion_row = next(
-            (row for row in active_duplicate_assertions if row.asserted_value == asserted_value),
-            None,
+        assertion_row = _existing_assertion_for_exact_document_duplicate(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            evidence_id=evidence_id,
+            upload=upload,
+            field=document_field,
+            source_quote=quote,
+            asserted_value=asserted_value,
         )
-        if active_duplicate_assertions and assertion_row is None:
-            raise HTTPException(
-                status_code=409,
-                detail="An exact duplicate document already has a different reviewed interpretation of this passage. No second Living Care Record assertion was created.",
-            )
         # Use ORM writes on this path so the CareStateRevision listener and
         # the document review event share the same database transaction. The
         # generic care-continuity helper commits independently in other routes;
