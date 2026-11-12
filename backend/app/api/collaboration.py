@@ -137,6 +137,26 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             Caregiver.id.in_(actor_ids or {"__no_matching_caregiver__"}),
         ).all()
     }
+    all_event_evidence_ids = list(dict.fromkeys(
+        str(evidence_id)
+        for row in selected
+        for evidence_id in (row.evidence_ids or [])
+        if evidence_id
+    ))
+    shared_origin_pairs = set()
+    if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
+        shared_rows = db.query(EvidenceSourceRelationship).filter(
+            EvidenceSourceRelationship.person_id == person_id,
+            EvidenceSourceRelationship.source_independence_status.in_(("shared_origin", "copied_or_same_origin")),
+            or_(
+                EvidenceSourceRelationship.source_evidence_id.in_(all_event_evidence_ids),
+                EvidenceSourceRelationship.related_evidence_id.in_(all_event_evidence_ids),
+            ),
+        ).all()
+        shared_origin_pairs = {
+            frozenset((str(item.source_evidence_id), str(item.related_evidence_id)))
+            for item in shared_rows
+        }
     aggregate = build_distinct_event_aggregate(
         [{
             "id": str(row.id),
@@ -155,6 +175,7 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         end_at=end_utc,
         window_label=f"this calendar month ({local_start.strftime('%b %d')}–{local_now.strftime('%b %d, %Y')}, {timezone_name})",
         truncated=truncated,
+        shared_origin_evidence_pairs=shared_origin_pairs,
     )
     if aggregate.get("status") == "validated":
         evidence_ids = list(dict.fromkeys(
