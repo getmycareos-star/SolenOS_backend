@@ -4840,7 +4840,7 @@ def mark_care_notification_read(notification_id: str, request: Request, db: Sess
             if item is None:
                 raise HTTPException(status_code=404, detail="Notification not found")
         db.refresh(item)
-    return _notification_json(item)
+    return _notification_json(item, db)
 
 
 @router.get("/notifications/preferences")
