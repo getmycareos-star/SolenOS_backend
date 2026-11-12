@@ -79,7 +79,8 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
             assert receipt["success"] is True
             assert receipt["qwen_extraction_status"] == "available", receipt
             assert receipt["qwen_analysis_id"]
-            assert receipt["qwen_review_required"] is True
+            assert receipt["qwen_review_required"] is False
+            assert receipt["qwen_review_available"] is True
             assert receipt["qwen_written_to_lcr"] is False
             assert isinstance(receipt["qwen_candidates"], dict)
             assert set(receipt["qwen_candidates"]).issuperset({"observations", "open_questions"})
