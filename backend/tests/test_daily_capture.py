@@ -2213,6 +2213,7 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
             assert "this morning" in by_value["seemed more unsettled this morning"].context
             assert "today" in by_value["barely touched her lunch today"].context
             assert "this evening" in by_value["was calmer this evening"].context
+            assert "now" in by_value["is now resting"].context
             assert all(row.observed_at is None and row.occurred_at is None for row in all_observations)
             assert db.query(OpenQuestion).filter_by(
                 person_id="person-daily-test", status="open"
