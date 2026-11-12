@@ -21,6 +21,7 @@ class CaregiverAccessGrant(Base):
     caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
     caregiver_profile_id = Column(String, ForeignKey("caregiver_profiles.id", ondelete="SET NULL"), nullable=True, index=True)
     role = Column(String(32), nullable=False, default="family")
+    access_scope = Column(String(32), nullable=False, default="full_record")
     status = Column(String(16), nullable=False, default="active", index=True)
     can_manage_members = Column(Boolean, nullable=False, default=False)
     granted_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
