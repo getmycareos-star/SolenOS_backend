@@ -14,7 +14,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Evidence
-from app.models.care_continuity import CareAssertion, CareDeltaRun
+from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
@@ -712,6 +712,48 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         if later_state_exists:
                             item["historical_only"] = True
                             item["promotion_warning"] = "This event predates a later-dated care-state report. It is preserved in reconciliation history but not promoted as current state."
+                            continue
+                    if assertion_kind == "time_bound_observation" and source_event_id and event_date is not None:
+                        # Exact same subject/value at the same observed instant is a
+                        # duplicate observation, not a second independent fact. Keep
+                        # the new event/evidence intact and link it to the first assertion.
+                        duplicate_assertion = db.query(CareAssertion).filter(
+                            CareAssertion.person_id == person_id,
+                            CareAssertion.subject_type == domain.rstrip("s"),
+                            CareAssertion.subject_id == subject_id,
+                            CareAssertion.field == field,
+                            CareAssertion.assertion_kind == assertion_kind,
+                            CareAssertion.asserted_value == str(current),
+                            CareAssertion.observed_at == event_date,
+                            CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
+                            CareAssertion.source_event_id != source_event_id,
+                        ).order_by(CareAssertion.recorded_at.asc()).first()
+                        if duplicate_assertion is not None:
+                            existing_duplicate_link = db.query(CareRecordRelationship.id).filter(
+                                CareRecordRelationship.person_id == person_id,
+                                CareRecordRelationship.source_type == "care_event",
+                                CareRecordRelationship.source_id == source_event_id,
+                                CareRecordRelationship.relationship_type == "duplicate_observation_of",
+                                CareRecordRelationship.target_type == "care_assertion",
+                                CareRecordRelationship.target_id == duplicate_assertion.id,
+                            ).first()
+                            if existing_duplicate_link is None:
+                                db.add(CareRecordRelationship(
+                                    person_id=person_id,
+                                    source_type="care_event",
+                                    source_id=source_event_id,
+                                    relationship_type="duplicate_observation_of",
+                                    target_type="care_assertion",
+                                    target_id=duplicate_assertion.id,
+                                    provenance=json.dumps({
+                                        "match_basis": "exact_subject_value_and_observed_at",
+                                        "evidence_ids": finding_evidence_ids,
+                                        "original_source_event_id": duplicate_assertion.source_event_id,
+                                    }),
+                                    created_by_caregiver_id=created_by_caregiver_id,
+                                ))
+                            item["duplicate_observation"] = True
+                            item["duplicate_of_assertion_id"] = duplicate_assertion.id
                             continue
                     if source_event_id:
                         # Daily Capture may already have created a source assertion
