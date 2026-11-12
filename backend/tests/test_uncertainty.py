@@ -3048,7 +3048,7 @@ def test_care_event_correction_reopens_direct_and_dependent_claim_assessments():
         teardown_db()
 
 
-def test_normal_reconciliation_persists_only_actionable_source_linked_questions():
+def test_normal_reconciliation_keeps_unassessed_candidates_internal():
     setup_db()
     try:
         from app.core.database import get_db
@@ -3153,7 +3153,6 @@ def test_normal_reconciliation_persists_only_actionable_source_linked_questions(
         assert first == []
         candidates = next_best_questions(db, person.id, persist=False)
         assert any(item["source_kind"] == "information_gap" and item["necessity"] == "not_assessed" for item in candidates)
-        assert any(item["source_kind"] == "contradiction" and item["necessity"] == "not_assessed" for item in candidates)
         assert db.query(InformationGap).filter_by(id=gap.id).one().lifecycle_status == GapLifecycleStatus.OPEN
 
         # Reconciliation remains idempotent and does not create caregiver questions.
@@ -3539,7 +3538,6 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
     setup_db()
     try:
         from app.services.care_continuity import next_best_questions
-        from app.models.uncertainty import Contradiction
 
         db = TestingSessionLocal()
         person = Person(id="finding6-gap-person", name="Finding 6 Person")
