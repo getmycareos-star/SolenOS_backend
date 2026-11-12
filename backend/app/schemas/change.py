@@ -208,6 +208,7 @@ class ChangeAssertionEvidenceResponse(BaseModel):
     field: str
     assertion_kind: str
     asserted_value: str
+    epistemic_state: str = "reported"
     source_event_id: Optional[str] = None
     source_label: str
     source_text: Optional[str] = None
