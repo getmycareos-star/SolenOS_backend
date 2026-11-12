@@ -604,6 +604,11 @@ def _verify_persisted_extraction(
     return content
 
 
+def _display_extracted_text(source_text: str) -> str:
+    """Keep machine OCR quality metadata out of the caregiver's text transcript."""
+    return re.sub(r"(?m)^\[OCR quality:.*\]\s*$", "", source_text or "").strip()
+
+
 def _ocr_quality_by_page(source_text: str) -> list[dict]:
     results = []
     page_markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)", source_text or ""))
@@ -772,7 +777,7 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
             raise HTTPException(status_code=409, detail="The persisted extraction text changed after document understanding")
     return {
         **_response(analysis),
-        "extracted_text": analysis.source_text,
+        "extracted_text": _display_extracted_text(analysis.source_text or ""),
         "document": {
             "filename": details.get("filename"),
             "mime_type": details.get("mime_type"),
