@@ -27,11 +27,23 @@ def vapid_configuration_error(settings) -> str | None:
     if not public_text or not private_text:
         return "VAPID public and private keys are both required"
 
-    parsed = urlparse(subject)
-    valid_mailto = parsed.scheme == "mailto" and bool(parsed.path) and "@" in parsed.path
+    try:
+        parsed = urlparse(subject)
+        hostname = parsed.hostname if parsed.scheme == "https" else None
+    except ValueError:
+        return "VAPID subject must be a valid mailto: or HTTPS URI"
+
+    valid_mailto = (
+        parsed.scheme == "mailto"
+        and not parsed.netloc
+        and bool(parsed.path)
+        and "@" in parsed.path
+        and not any(character.isspace() for character in parsed.path)
+        and not parsed.fragment
+    )
     valid_https = (
         parsed.scheme == "https"
-        and bool(parsed.hostname)
+        and bool(hostname)
         and parsed.username is None
         and parsed.password is None
         and not parsed.fragment
