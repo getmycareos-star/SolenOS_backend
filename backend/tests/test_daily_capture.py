@@ -1529,6 +1529,33 @@ def test_medication_authoring_starts_reported_and_requires_explicit_review():
         assert current.json()["medications"][0]["dose"] == "500 mg"
         assert current.json()["pending_review"] == []
 
+        # A previously reviewed current medication must return to the review
+        # queue when its review window expires, then become current again only
+        # after a new append-only review revision.
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE care_assertion_revisions SET changed_at = :old_time",
+                {"old_time": datetime.now(timezone.utc) - timedelta(days=60)},
+            )
+        expired_review = client.get("/api/v1/care-continuity/medications", headers=headers)
+        assert expired_review.status_code == 200, expired_review.text
+        assert expired_review.json()["medications"] == []
+        assert len(expired_review.json()["pending_review"]) == 1
+        assert expired_review.json()["pending_review"][0]["record_status"] == "needs_caregiver_review"
+        assert expired_review.json()["pending_review"][0]["review_overdue"] is True
+
+        renewed = client.post(
+            f"/api/v1/care-continuity/medications/{report['medication_id']}/review",
+            headers=headers,
+            json={},
+        )
+        assert renewed.status_code == 200, renewed.text
+        assert renewed.json()["record_status"] == "caregiver_reviewed_current_report"
+        refreshed = client.get("/api/v1/care-continuity/medications", headers=headers)
+        assert refreshed.status_code == 200, refreshed.text
+        assert refreshed.json()["count"] == 1
+        assert refreshed.json()["pending_review"] == []
+
         db = TestingSessionLocal()
         try:
             stored = db.query(CareAssertion).filter_by(
