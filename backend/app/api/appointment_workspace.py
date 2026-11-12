@@ -957,7 +957,39 @@ def review_appointment_outcome_proposal(
             CareAssertion.source_proposal_id == proposal.id,
             CareAssertion.person_id == person_id,
         ).first()
+        expected_source_text = source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else "")
         if assertion is None:
+            # The immutable appointment revision is promoted into a same-record
+            # evidence object before the accepted assertion is written. This
+            # gives the shared LCR reconciler a verifiable evidence ID rather
+            # than treating proposal text alone as source evidence.
+            evidence_key = f"appointment-outcome:{proposal.id}"[:128]
+            source_evidence = db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.ingestion_key == evidence_key,
+            ).first()
+            if source_evidence is None:
+                source_evidence = Evidence(
+                    person_id=person_id,
+                    type="note",
+                    evidence_kind="caregiver_report",
+                    epistemic_status="caregiver_reported",
+                    source_text=expected_source_text,
+                    uploaded_by_caregiver_id=caregiver_id,
+                    reported_by_caregiver_id=caregiver_id,
+                    collected_by_caregiver_id=caregiver_id,
+                    reported_by_label="Caregiver",
+                    source_type="appointment_workspace_review",
+                    origin_channel="appointment_workspace",
+                    collection_method="caregiver_review",
+                    ingestion_key=evidence_key,
+                    ingestion_request_sha256=_request_fingerprint({
+                        "proposal_id": proposal.id,
+                        "source_text": expected_source_text,
+                    }),
+                )
+                db.add(source_evidence)
+                db.flush()
             assertion = create_assertion(
                 db,
                 CareAssertionCreate(
@@ -968,13 +1000,14 @@ def review_appointment_outcome_proposal(
                     assertion_kind="time_bound_observation",
                     asserted_value=accepted_value,
                     source_label="Caregiver-reviewed appointment workspace",
-                    source_text=source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else ""),
+                    source_text=expected_source_text,
                     source_proposal_id=proposal.id,
                     source_conversation_id=None,
                     source_message_id=None,
                     event_time_text=original.get("event_time_text"),
-                    evidence_ids=[],
-                    observed_at=_parse_appointment_event_time(original.get("event_time_text")),
+                    evidence_ids=[source_evidence.id],
+                    review_after_days=30,
+                    observed_at=_parse_appointment_event_time(original.get("event_time_text")) or datetime.now(timezone.utc),
                     created_by_caregiver_id=caregiver_id,
                     updated_by_caregiver_id=caregiver_id,
                 ),
@@ -982,7 +1015,6 @@ def review_appointment_outcome_proposal(
             )
             assertion.assertion_status = "caregiver_reviewed"
         else:
-            expected_source_text = source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else "")
             if (
                 assertion.asserted_value != accepted_value
                 or assertion.source_text != expected_source_text
