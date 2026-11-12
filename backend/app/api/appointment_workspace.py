@@ -27,6 +27,7 @@ from app.models.appointment_workspace import AppointmentWorkspaceRecord, Appoint
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(prefix="/appointment-workspaces", tags=["appointment-workspace"])
 
@@ -983,8 +984,22 @@ def review_appointment_outcome_proposal(
             created_at=now,
         ))
 
+    reconciliation_receipt = None
+    if decision == "accept":
+        reconciliation_receipt = execute_care_continuity_reconciliation(
+            db,
+            person_id,
+            workflow="appointment_outcome_review",
+            caregiver_id=caregiver_id,
+            source_assertion_id=assertion_id,
+            source_appointment_workspace_id=record.id,
+            source_appointment_workspace_revision_id=revision.id,
+        )
+
     db.add(proposal)
     db.commit()
+    if reconciliation_receipt is not None:
+        reconciliation_receipt["stages"]["reconciliation"] = "committed"
     db.refresh(proposal)
     if corrected_proposal is not None:
         db.refresh(corrected_proposal)
@@ -994,6 +1009,7 @@ def review_appointment_outcome_proposal(
         "decision": decision,
         "assertion_id": assertion_id,
         "written_to_lcr": bool(assertion_id),
+        "reconciliation": reconciliation_receipt,
         "idempotent_replay": False,
     }
 
