@@ -1494,6 +1494,17 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         field=topic, description=description, evidence_ids=conflict_evidence_ids,
                         source_assertion_ids=[], resolution_status="unresolved",
                     ))
+                else:
+                    # A later source can add corroborating or competing evidence
+                    # to an existing unresolved conflict. Preserve all exact
+                    # source links instead of leaving the first single-source ID.
+                    existing.evidence_ids = list(dict.fromkeys(
+                        list(existing.evidence_ids or []) + conflict_evidence_ids
+                    ))
+                    if description and description not in (existing.description or ""):
+                        existing.description = "\\n\\n".join(
+                            value for value in (existing.description or "", description) if value
+                        )
             run = CareDeltaRun(
                 person_id=person_id, source=source,
                 event_date=event_date or datetime.now(timezone.utc),
