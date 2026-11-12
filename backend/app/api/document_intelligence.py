@@ -353,7 +353,9 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     resume_intelligence = {}
     if existing:
         pending_pages = existing.get("unprocessed_page_numbers")
-        if existing.get("status") == "partial" and isinstance(pending_pages, list) and pending_pages:
+        has_pending_pages = isinstance(pending_pages, list) and bool(pending_pages)
+        legacy_overflow = bool(existing.get("candidate_overflow")) and not has_pending_pages
+        if existing.get("status") == "partial" and (has_pending_pages or legacy_overflow):
             resume_intelligence = existing
         else:
             try:
@@ -386,35 +388,59 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     if not page_inputs:
         raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
 
-    if resume_intelligence:
-        page_window_start = resume_intelligence.get("next_page_window_start")
-        chunk_offset = resume_intelligence.get("next_chunk_offset", 0)
-        if not isinstance(page_window_start, int) or page_window_start < 0:
-            pending = set(resume_intelligence.get("unprocessed_page_numbers") or [])
-            page_window_start = next(
-                (index for index, (number, _) in enumerate(page_inputs) if number in pending),
-                0,
-            )
-        if not isinstance(chunk_offset, int) or chunk_offset < 0:
-            chunk_offset = 0
-    else:
-        page_window_start = 0
-        chunk_offset = 0
+    prior_observations = copy.deepcopy(resume_intelligence.get("observations") or [])
+    seen_quotes = {
+        item.get("source_quote")
+        for item in prior_observations
+        if isinstance(item, dict) and isinstance(item.get("source_quote"), str)
+    }
+    prior_candidate_overflow_pages = {
+        int(number)
+        for number in (resume_intelligence.get("candidate_overflow_page_numbers") or [])
+        if str(number).isdigit()
+    }
+    if resume_intelligence and not prior_candidate_overflow_pages and resume_intelligence.get("candidate_overflow"):
+        legacy_pending = resume_intelligence.get("unprocessed_page_numbers") or resume_intelligence.get("processed_page_numbers") or []
+        prior_candidate_overflow_pages = {
+            int(number) for number in legacy_pending if str(number).isdigit()
+        } or {number for number, _ in page_inputs}
 
-    selected_pages = page_inputs[page_window_start:page_window_start + MAX_DOCUMENT_QWEN_PAGES]
-    qwen_chunks = chunk_document_pages(selected_pages)
-    selected_chunks = qwen_chunks[chunk_offset:chunk_offset + MAX_DOCUMENT_QWEN_CHUNKS]
-    next_chunk_offset = chunk_offset + len(selected_chunks)
-    if next_chunk_offset < len(qwen_chunks):
-        next_page_window_start = page_window_start
-        next_chunk_offset_to_store = next_chunk_offset
-        unprocessed_pages = {number for number, _ in qwen_chunks[next_chunk_offset:]}
-        unprocessed_pages.update(number for number, _ in page_inputs[page_window_start + len(selected_pages):])
+    resume_pending_pages = {
+        int(number)
+        for number in (resume_intelligence.get("unprocessed_page_numbers") or [])
+        if str(number).isdigit()
+    }
+    if resume_intelligence and prior_candidate_overflow_pages:
+        resume_pending_pages.update(prior_candidate_overflow_pages)
+
+    if resume_intelligence:
+        selected_pages = [
+            (number, page_text)
+            for number, page_text in page_inputs
+            if number in resume_pending_pages
+        ][:MAX_DOCUMENT_QWEN_PAGES]
+        selected_page_numbers = {number for number, _ in selected_pages}
+        remaining_pending_pages = resume_pending_pages - selected_page_numbers
+        selected_page_indexes = [
+            index for index, (number, _) in enumerate(page_inputs)
+            if number in selected_page_numbers
+        ]
+        next_page_window_start = max(selected_page_indexes) + 1 if selected_page_indexes else 0
     else:
-        next_page_window_start = page_window_start + len(selected_pages)
-        next_chunk_offset_to_store = 0
-        unprocessed_pages = {number for number, _ in page_inputs[next_page_window_start:]}
-    unprocessed_pages = sorted(unprocessed_pages)
+        selected_pages = page_inputs[:MAX_DOCUMENT_QWEN_PAGES]
+        selected_page_numbers = {number for number, _ in selected_pages}
+        remaining_pending_pages = {
+            number for number, _ in page_inputs[MAX_DOCUMENT_QWEN_PAGES:]
+        }
+        next_page_window_start = len(selected_pages)
+
+    qwen_chunks = chunk_document_pages(selected_pages)
+    selected_chunks = qwen_chunks[:MAX_DOCUMENT_QWEN_CHUNKS]
+    unprocessed_pages = set(remaining_pending_pages)
+    unprocessed_pages.update(number for number, _ in qwen_chunks[len(selected_chunks):])
+
+    candidate_overflow_pages = set()
+    new_seen_quotes = set()
     for page_number, page_text in selected_chunks:
         try:
             page_result = extract_review_candidates(
@@ -428,7 +454,19 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if isinstance(page_result, dict):
             page_items = page_result.get("observations")
             if isinstance(page_items, list):
-                raw_observations.extend(page_items)
+                for item in page_items:
+                    if not isinstance(item, dict):
+                        continue
+                    quote = item.get("source_quote")
+                    if not isinstance(quote, str) or not quote.strip():
+                        continue
+                    if quote not in source_text or quote in seen_quotes or quote in new_seen_quotes:
+                        continue
+                    if len(raw_observations) >= 60:
+                        candidate_overflow_pages.add(page_number)
+                        continue
+                    raw_observations.append(item)
+                    new_seen_quotes.add(quote)
             page_questions = page_result.get("open_questions")
             if isinstance(page_questions, list):
                 all_open_questions.extend(
@@ -436,9 +474,14 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     for value in page_questions
                     if isinstance(value, str) and value.strip()
                 )
-    prior_observations = copy.deepcopy(resume_intelligence.get("observations") or [])
-    candidate_overflow = bool(resume_intelligence.get("candidate_overflow")) or len(prior_observations) + len(raw_observations) > 60
-    raw_observations = raw_observations[:max(0, 60 - len(prior_observations))]
+
+    remaining_candidate_overflow_pages = (
+        prior_candidate_overflow_pages - selected_page_numbers
+    ) | candidate_overflow_pages
+    candidate_overflow = bool(remaining_candidate_overflow_pages)
+    unprocessed_pages.update(remaining_candidate_overflow_pages)
+    unprocessed_pages = sorted(unprocessed_pages)
+    next_chunk_offset_to_store = 0
     grounded = prior_observations
     seen_quotes = {
         item.get("source_quote")
@@ -523,6 +566,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     if isinstance(prior_provenance, dict) and (not processing_history or processing_history[-1] != prior_provenance):
         processing_history.append(prior_provenance)
     processing_history.append(model_provenance)
+    processed_page_numbers = sorted(
+        (
+            set(resume_intelligence.get("processed_page_numbers") or [])
+            | {number for number, _ in selected_chunks}
+        )
+        - set(unprocessed_pages)
+    )
     metadata["document_intelligence"] = {
         "version": 1,
         "model_provenance": model_provenance,
@@ -556,14 +606,15 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 if candidate_overflow else []
             ),
         ])),
-        "processed_page_count": len(set(resume_intelligence.get("processed_page_numbers") or []) | {number for number, _ in selected_chunks}),
+        "processed_page_count": len(processed_page_numbers),
         "total_readable_page_count": len(page_inputs),
         "total_page_count": len(all_page_numbers) or len(page_inputs),
-        "processed_page_numbers": sorted(set(resume_intelligence.get("processed_page_numbers") or []) | {number for number, _ in selected_chunks}),
+        "processed_page_numbers": processed_page_numbers,
         "unprocessed_page_numbers": unprocessed_pages,
         "unreadable_page_numbers": unreadable_pages,
         "next_page_window_start": next_page_window_start,
         "next_chunk_offset": next_chunk_offset_to_store,
+        "candidate_overflow_page_numbers": sorted(remaining_candidate_overflow_pages),
         "candidate_overflow": candidate_overflow,
         "status": "partial" if (unprocessed_pages or unreadable_pages or candidate_overflow) else "available",
         "model_authority": "review_only",
