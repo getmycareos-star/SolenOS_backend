@@ -369,6 +369,7 @@ def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(m
         assert body["epistemic_state"] == "inferred"
         assert body["reconciliation"]["stages"]["reconciliation"] == "committed"
         assert body["reconciliation"]["source_event_ids"] == event_ids
+        assert body["reconciliation"]["source_caregiver_id"] == caregiver_id
         assertion_id = body["assertion_id"]
 
         after = client.get("/api/v1/care-continuity/current-care", headers=headers)
