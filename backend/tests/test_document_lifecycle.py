@@ -476,7 +476,9 @@ def test_image_ocr_failure_is_recorded_as_unprocessed_not_unreadable(client, mon
     assert response.json()["extraction_status"] == "partial"
     assert response.json()["unreadable_page_numbers"] == []
     assert response.json()["unprocessed_page_numbers"] == [1]
-    assert "[Page not processed: OCR operation failed]" in response.json()["source_text"]
+    detail = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert detail.status_code == 200, detail.text
+    assert "[Page not processed: OCR operation failed]" in detail.json()["extracted_text"]
 
 
 def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_text(client, monkeypatch):
@@ -914,12 +916,13 @@ def test_real_outlook_msg_upload_extract_and_original_download(client, tmp_path)
     extracted = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert extracted.status_code == 201, extracted.text
     assert extracted.json()["source_evidence_id"] == evidence_id
-    assert "Subject: Clinic appointment" in extracted.json()["source_text"]
-    assert "The follow-up appointment is confirmed for Tuesday." in extracted.json()["extracted_text"]
-
     downloaded = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
     assert downloaded.status_code == 200
     assert downloaded.content == original
+    detail = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert detail.status_code == 200, detail.text
+    assert "Subject: Clinic appointment" in detail.json()["extracted_text"]
+    assert "The follow-up appointment is confirmed for Tuesday." in detail.json()["extracted_text"]
 
 
 def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatch):
