@@ -1501,10 +1501,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     existing.evidence_ids = list(dict.fromkeys(
                         list(existing.evidence_ids or []) + conflict_evidence_ids
                     ))
-                    if description and description not in (existing.description or ""):
-                        existing.description = "\\n\\n".join(
-                            value for value in (existing.description or "", description) if value
-                        )
             run = CareDeltaRun(
                 person_id=person_id, source=source,
                 event_date=event_date or datetime.now(timezone.utc),
