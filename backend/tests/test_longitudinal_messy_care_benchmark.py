@@ -1541,38 +1541,43 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
         assert response.status_code in {200, 201}, response.text
         saved_ids.append(response.json()["id"])
 
-    # Conflicting medication statements remain reports, not prescribing authority.
+    # The existing medication list is created through its real API and
+    # explicitly caregiver-reviewed. It is not falsely sourced to Sarah's
+    # later uncertainty report, and review does not imply clinician verification.
+    medication_response = client.post(
+        "/api/v1/care-continuity/medications",
+        headers=headers,
+        json={
+            "name": "Evening tablet",
+            "dose": "Existing listed dose",
+            "note": "Existing medication list before this week's reports",
+            "review_after_days": 30,
+        },
+    )
+    assert medication_response.status_code == 201, medication_response.text
+    medication_id = medication_response.json()["medication_id"]
+    review_response = client.post(
+        f"/api/v1/care-continuity/medications/{medication_id}/review",
+        headers=headers,
+        json={},
+    )
+    assert review_response.status_code == 200, review_response.text
+
+    # James's verbal instruction is a separate reported assertion. It creates
+    # an unresolved conflict with the existing caregiver-reviewed record.
     with TestingSessionLocal() as db:
-        sarah_claim = create_assertion(
-            db,
-            CareAssertionCreate(
-                person_id=person.id,
-                subject_type="medication",
-                subject_id="evening-tablet",
-                field="medication_status",
-                assertion_kind="current_state",
-                asserted_value="active",
-                source_label="Existing medication record awaiting source verification",
-                source_text="Existing medication list records the evening tablet as active.",
-                evidence_ids=[saved_ids[0]],
-                assertion_status="reported",
-                epistemic_state="reported",
-                created_by_caregiver_id=sarah.id,
-            ),
-        )
         james_claim = create_assertion(
             db,
             CareAssertionCreate(
                 person_id=person.id,
                 subject_type="medication",
-                subject_id="evening-tablet",
+                subject_id=medication_id,
                 field="medication_status",
                 assertion_kind="current_state",
                 asserted_value="discontinued",
                 source_label="James verbal report",
                 source_text=reports[1]["text"],
                 evidence_ids=[saved_ids[1]],
-                assertion_status="reported",
                 epistemic_state="reported",
                 created_by_caregiver_id=james.id,
             ),
@@ -1598,18 +1603,26 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
 
         claims = verify_db.query(CareAssertion).filter(
             CareAssertion.person_id == person.id,
-            CareAssertion.subject_id == "evening-tablet",
+            CareAssertion.subject_id == medication_id,
             CareAssertion.field == "medication_status",
         ).all()
-        assert {row.id for row in claims} == {sarah_claim.id, james_claim.id}
-        assert {row.asserted_value for row in claims} == {"active", "discontinued"}
-        assert all(row.assertion_status == "reported" for row in claims)
-        assert all(row.epistemic_state == "reported" for row in claims)
+        assert {row.id for row in claims} >= {james_claim.id}
+        active_claims = [row for row in claims if row.asserted_value == "active"]
+        reported_stop_claims = [row for row in claims if row.asserted_value == "discontinued"]
+        assert len(active_claims) == 1
+        assert active_claims[0].assertion_status == "accepted"
+        assert active_claims[0].epistemic_state == "reported"
+        assert len(reported_stop_claims) == 1
+        assert reported_stop_claims[0].assertion_status == "reported"
+        assert reported_stop_claims[0].epistemic_state == "reported"
+        assert reported_stop_claims[0].evidence_ids == [saved_ids[1]]
 
         conflict = verify_db.query(Contradiction).filter(
             Contradiction.person_id == person.id,
-            Contradiction.subject_id == "evening-tablet",
+            Contradiction.subject_id == medication_id,
             Contradiction.field == "medication_status",
         ).one()
         assert conflict.resolution_status == "unresolved"
-        assert set(conflict.source_assertion_ids or []) == {sarah_claim.id, james_claim.id}
+        assert set(conflict.source_assertion_ids or []) == {
+            active_claims[0].id, james_claim.id
+        }
