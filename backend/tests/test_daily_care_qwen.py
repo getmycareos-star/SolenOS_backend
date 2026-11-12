@@ -147,6 +147,9 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     result = answer.json()
     assert result["status"] == "completed"
     assert result["written_to_lcr"] is False
+    assert result["review_required"] is False
+    assert result["review_available"] is True
+    assert result["proposals_requested"] is True
     assert result["proposal_analysis_id"]
     assert result["proposals"][0]["source_ids"] == [event_id]
     assert result["history_scope"]["records_sent_to_model"] >= 1
@@ -340,13 +343,18 @@ def test_daily_care_qwen_reads_shared_lcr_facts_and_reports_context_coverage(mon
         json={
             "person_id": session["person"]["id"],
             "question": "What morning routine is recorded?",
-            "prepare_lcr_proposals": False,
+            
         },
     )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == "completed"
     assert body["written_to_lcr"] is False
+    assert body["review_required"] is False
+    assert body["review_available"] is False
+    assert body["proposals_requested"] is False
+    assert body["proposal_analysis_id"] is None
+    assert body["proposals"] == []
     assert body["history_scope"]["lcr_context"]["query_applied"] is True
     serialized = json.dumps(captured["messages"], ensure_ascii=False)
     assert "Usually sleeps poorly before waking around 7 AM." in serialized
