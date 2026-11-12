@@ -6,6 +6,7 @@ import pytest
 from app.models.care import CareEvent, Correction, Evidence, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
+from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services import care_continuity_execution as execution
 
 
@@ -232,6 +233,86 @@ def test_shared_coordinator_rejects_assertion_from_another_person(monkeypatch):
             "person-1",
             workflow="care_assertion_review",
             source_assertion_id="assertion-from-another-person",
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+
+def test_shared_coordinator_validates_appointment_workspace_revision_and_keeps_caller_transaction(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    workspace = SimpleNamespace(
+        id="workspace-1",
+        person_id="person-1",
+        created_by_caregiver_id="caregiver-1",
+    )
+    revision = SimpleNamespace(
+        id="revision-1",
+        record_id="workspace-1",
+        person_id="person-1",
+        changed_by_caregiver_id="caregiver-1",
+    )
+    db = _session({
+        Person: person,
+        AppointmentWorkspaceRecord: workspace,
+        AppointmentWorkspaceRevision: revision,
+    })
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    result = execution.execute_care_continuity_reconciliation(
+        db,
+        "person-1",
+        workflow="appointment_outcome_review",
+        source_appointment_workspace_id="workspace-1",
+        source_appointment_workspace_revision_id="revision-1",
+    )
+
+    assert result["source_appointment_workspace_id"] == "workspace-1"
+    assert result["source_appointment_workspace_revision_id"] == "revision-1"
+    assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
+    reconciled.assert_called_once_with(db, "person-1", None)
+    db.commit.assert_not_called()
+    db.rollback.assert_not_called()
+
+
+def test_shared_coordinator_rejects_appointment_revision_from_another_person(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    workspace = SimpleNamespace(id="workspace-1", person_id="person-1")
+    db = _session({
+        Person: person,
+        AppointmentWorkspaceRecord: workspace,
+        AppointmentWorkspaceRevision: None,
+    })
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="another care record"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="appointment_outcome_review",
+            source_appointment_workspace_id="workspace-1",
+            source_appointment_workspace_revision_id="revision-from-another-person",
+        )
+
+    reconciled.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_shared_coordinator_rejects_incomplete_appointment_revision_reference(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    db = _session({Person: person})
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    with pytest.raises(execution.CareContinuityExecutionError, match="supplied together"):
+        execution.execute_care_continuity_reconciliation(
+            db,
+            "person-1",
+            workflow="appointment_outcome_review",
+            source_appointment_workspace_id="workspace-1",
         )
 
     reconciled.assert_not_called()
