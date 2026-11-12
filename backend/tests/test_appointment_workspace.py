@@ -1511,6 +1511,7 @@ def test_appointment_workspace_follow_up_is_system_tracked_without_assuming_care
                 "followUps": [{
                     "action": "Check whether the clinic has released the result",
                     "due": "2026-11-15T09:00:00-05:00",
+                    "timezone": "America/New_York",
                     "status": "pending",
                 }],
             },
@@ -1531,7 +1532,7 @@ def test_appointment_workspace_follow_up_is_system_tracked_without_assuming_care
     )
     assert managed["owner_role"] == "unassigned"
     assert managed["owner_label"] is None
-    assert managed["deadline_timezone"] == "UTC-05:00"
+    assert managed["deadline_timezone"] == "America/New_York"
     assert managed["status"] == "open"
     assert managed["outcome_status"] == "outcome_unknown"
 
