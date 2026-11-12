@@ -2236,6 +2236,8 @@ def _caregiver_evidence_label(value) -> str:
     status = str(value or "").strip().lower()
     if status in {"confirmed", "verified", "clinically_verified", "source_verified"}:
         return "Confirmed source record"
+    if status == "observed":
+        return "Observed"
     if status in {"reported", "caregiver_reported", "reported_by_caregiver", "caregiver_authored"}:
         return "Reported"
     if status in {"uncertain", "inferred", "unverified", "disputed", "conflicting", "rejected", "pending_review"}:
