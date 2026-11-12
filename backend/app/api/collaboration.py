@@ -48,7 +48,7 @@ from app.models.collaboration import (
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
-from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
 from app.models.time_location import Appointment
 from app.services.qwen_workflows import QwenWorkflow
 from app.services.qwen_gateway import (
@@ -2208,8 +2208,28 @@ async def create_qwen_lcr_proposal(
         QwenModelOutput.person_id == person_id,
         QwenModelOutput.caregiver_id == caregiver_id,
     ).with_for_update().first()
-    if output is None or output.written_to_lcr or not output.output_text.strip():
+    if (
+        output is None
+        or output.written_to_lcr
+        or not output.output_text.strip()
+        or output.review_required is not True
+        or output.review_status != "pending_review"
+    ):
         raise HTTPException(status_code=409, detail="This suggestion cannot be added to the care record")
+
+    safety = db.query(QwenSafetyEvaluation).filter(
+        QwenSafetyEvaluation.output_id == output.id,
+        QwenSafetyEvaluation.job_id == job.id,
+        QwenSafetyEvaluation.person_id == person_id,
+        QwenSafetyEvaluation.caregiver_id == caregiver_id,
+    ).order_by(QwenSafetyEvaluation.created_at.desc()).first()
+    if (
+        safety is None
+        or safety.human_review_required is not True
+        or safety.decision != "review_required"
+        or safety.risk_class not in {"unassessed", "low"}
+    ):
+        raise HTTPException(status_code=409, detail="This suggestion has not passed the required safety review gate")
 
     existing = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.output_id == output.id,
