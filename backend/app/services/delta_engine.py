@@ -356,7 +356,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         active_assertions_query = active_assertions_query.filter(
             or_(
                 CareAssertion.source_event_id.is_(None),
-                CareAssertion.source_event_id != source_event_id,
+                or_(CareAssertion.source_event_id.is_(None), CareAssertion.source_event_id != source_event_id),
             )
         )
     active_assertions = active_assertions_query.order_by(CareAssertion.recorded_at.desc()).limit(250).all()
