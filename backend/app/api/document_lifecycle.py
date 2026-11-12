@@ -456,7 +456,7 @@ def _extract(
 
         previous_page_blocks = {}
         if retry_only_pages is not None and previous_source_text:
-            markers = list(re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]\\s*$", previous_source_text))
+            markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]\s*$", previous_source_text))
             for marker_index, marker in enumerate(markers):
                 block_end = markers[marker_index + 1].start() if marker_index + 1 < len(markers) else len(previous_source_text)
                 previous_page_blocks[int(marker.group(1))] = previous_source_text[marker.start():block_end].strip()
