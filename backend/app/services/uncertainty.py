@@ -234,7 +234,6 @@ def persist_source_clarification_questions(
         if not isinstance(value, str):
             continue
         question_text = " ".join(value.strip().split())[:300]
-        normalized = " ".join(question_text.casefold().split())
         duplicate_key = _question_duplicate_key(question_text)
         if len(question_text) < 5 or duplicate_key in seen:
             continue
