@@ -351,3 +351,59 @@ def test_daily_care_qwen_reads_shared_lcr_facts_and_reports_context_coverage(mon
     serialized = json.dumps(captured["messages"], ensure_ascii=False)
     assert "Usually sleeps poorly before waking around 7 AM." in serialized
     assert "care_fact" in serialized
+
+
+def test_daily_care_acceptance_rolls_back_when_shared_reconciliation_fails(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Atomic Daily Care recipient")
+    event_id = add_event(
+        session, "Medication note", "Caregiver reported the pharmacy confirmed the refill was collected.",
+        "2026-11-10T09:00:00Z",
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    def fake_qwen(*args, **kwargs):
+        return json.dumps({
+            "answer": "A refill collection was recorded.",
+            "proposals": [{
+                "title": "Refill collection",
+                "field": "medication_refill",
+                "proposed_value": "Caregiver reported the refill was collected.",
+                "source_ids": [event_id],
+                "uncertainty": "Caregiver report; no medication change inferred.",
+                "reason": "Preserve the reported refill outcome.",
+            }],
+        })
+
+    monkeypatch.setattr(daily_qwen, "qwen_chat", fake_qwen)
+    proposed = client.post(
+        "/api/v1/daily-care/intelligence/ask",
+        headers=auth,
+        json={"person_id": session["person"]["id"], "question": "What happened with the refill?", "prepare_lcr_proposals": True},
+    )
+    assert proposed.status_code == 200, proposed.text
+    analysis_id = proposed.json()["proposal_analysis_id"]
+
+    def fail_reconciliation(*args, **kwargs):
+        raise RuntimeError("synthetic reconciliation failure")
+
+    monkeypatch.setattr(daily_qwen, "execute_care_continuity_reconciliation", fail_reconciliation)
+    accepted = client.post(
+        f"/api/v1/daily-care/intelligence/proposals/{analysis_id}/0/review",
+        headers=auth,
+        json={"decision": "accept", "reason": "Reviewed against the original daily entry."},
+    )
+    assert accepted.status_code == 503, accepted.text
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareAssertion).filter(
+            CareAssertion.person_id == session["person"]["id"],
+        ).count() == 0
+        analysis = db.query(__import__("app.models.capture_analysis", fromlist=["CaptureAnalysis"]).CaptureAnalysis).filter_by(
+            id=analysis_id, person_id=session["person"]["id"],
+        ).one()
+        assert analysis.candidates["proposals"][0]["review_status"] == "pending_review"
+        assert analysis.review_history in (None, [])
+    finally:
+        db.close()
