@@ -957,7 +957,6 @@ def review_document_candidate(
     # Persist the assertion, append-only review event, candidate state and
     # reconciliation in one transaction for accepted document candidates.
     if payload.decision == "accept" and assertion_id:
-        db.add(assertion_row)
         db.flush()
         persisted_assertion = db.query(CareAssertion.id).filter(
             CareAssertion.id == assertion_id,
