@@ -176,6 +176,7 @@ from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurren
 from app.api.collaboration import (
     upload_evidence,
     delete_uploaded_document,
+    list_document_processing_status,
     link_corrected_document_version,
     compare_document_version,
     DocumentVersionLinkRequest,
@@ -614,5 +615,39 @@ def test_postgres_accepted_document_follow_up_is_persisted_once_and_not_booked()
             assert loop.evidence[0]["evidence_id"] == first["evidence_id"]
             assert db.query(OpenLoopOccurrence).filter_by(person_id=person_id, source_id=loop.source_id).count() == 1
             assert db.query(OpenLoopEvent).filter_by(person_id=person_id, loop_id=loop.id).count() == 1
+    finally:
+        engine.dispose()
+
+
+def test_postgres_document_status_reports_queued_upload_without_claiming_processing_success():
+    """A persisted upload with queued work is not represented as processed."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-status-person-{suffix}"
+    caregiver_id = f"doc-status-caregiver-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document status fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Document status caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            uploaded = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "hospital-discharge.txt",
+                b"Discharge instructions are preserved in the original file.",
+            )
+            assert uploaded["persisted"] is True
+
+        with Session() as db:
+            status = list_document_processing_status(_request(person_id, caregiver_id), 10, db)
+            assert status["count"] == 1
+            item = status["items"][0]
+            assert item["evidence_id"] == uploaded["evidence_id"]
+            assert item["processing_status"] == "queued"
+            assert item["written_to_lcr"] is False
+            assert item["review_required"] is False
+            assert item["document_name"] == "hospital-discharge.txt"
     finally:
         engine.dispose()
