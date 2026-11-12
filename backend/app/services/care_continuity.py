@@ -48,6 +48,27 @@ def has_valid_caregiver_necessity(
         }
         if found != set(evidence_ids):
             return False
+        claim_id = getattr(question, "claim_id", None)
+        if claim_id:
+            claim = db.query(CareAssertion).filter(
+                CareAssertion.id == claim_id,
+                CareAssertion.person_id == scoped_person_id,
+            ).first()
+            if claim is None:
+                return False
+            if (
+                getattr(question, "subject_type", None)
+                and claim.subject_type != question.subject_type
+            ):
+                return False
+            if (
+                getattr(question, "subject_id", None)
+                and claim.subject_id != question.subject_id
+            ):
+                return False
+            claim_evidence_ids = set(str(value) for value in (claim.evidence_ids or []) if value)
+            if not claim_evidence_ids.intersection(evidence_ids):
+                return False
     for item in (getattr(question, "context", None) or []):
         if not isinstance(item, dict):
             continue
