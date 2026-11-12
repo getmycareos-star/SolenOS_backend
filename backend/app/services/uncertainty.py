@@ -442,6 +442,24 @@ class UncertaintyEngine:
         from app.services.care_continuity import _open_question_state, _record_open_question_revision
         before_state = _open_question_state(db_question)
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
+        if "evidence_ids" in update_data:
+            update_data["evidence_ids"] = self._validate_person_evidence(
+                db_question.person_id, update_data["evidence_ids"]
+            ) or None
+        new_necessity = update_data.get("necessity", db_question.necessity)
+        new_necessity_rationale = update_data.get("necessity_rationale", db_question.necessity_rationale)
+        if new_necessity not in {"necessary", "optional", "not_assessed"}:
+            raise ValueError("Necessity must be necessary, optional, or not_assessed.")
+        if new_necessity in {"necessary", "optional"} and not (
+            isinstance(new_necessity_rationale, str) and new_necessity_rationale.strip()
+        ):
+            raise ValueError("A necessity assessment requires a recorded rationale.")
+        if new_necessity == "necessary":
+            linked_evidence = update_data.get("evidence_ids", db_question.evidence_ids) or []
+            if not linked_evidence and not db_question.claim_id:
+                raise ValueError(
+                    "A necessary caregiver question requires persisted source evidence or a linked care assertion."
+                )
         new_status = update_data.get("status", db_question.status)
         allowed_statuses = {"open", "answered", "declined", "closed", "unresolved"}
         if new_status not in allowed_statuses:
