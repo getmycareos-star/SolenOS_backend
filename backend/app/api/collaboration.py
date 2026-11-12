@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.epistemic_contract import assertion_information_status
 from app.models.anonymous_session import AnonymousSession
-from app.models.capture_analysis import CaptureAnalysis
+from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import (
@@ -68,6 +68,62 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 
 router = APIRouter(tags=["community and companion"])
+
+class DocumentVersionLinkRequest(BaseModel):
+    replacement_evidence_id: str = Field(min_length=1, max_length=128)
+
+
+def _document_metadata(evidence: EvidenceModel) -> dict:
+    raw = evidence.extra_metadata
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        parsed = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        parsed = {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _record_document_lifecycle_event(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    evidence_id: str,
+    event_type: str,
+    metadata: dict,
+) -> None:
+    evidence_ids_json = json.dumps([evidence_id])
+    job = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow == "document_lifecycle",
+        QwenBackgroundJob.evidence_ids_json == evidence_ids_json,
+    ).order_by(QwenBackgroundJob.created_at.desc()).first()
+    if job is None:
+        now = datetime.now(timezone.utc)
+        job = QwenBackgroundJob(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            task_text="Record a document lifecycle event.",
+            context_text="",
+            evidence_ids_json=evidence_ids_json,
+            workflow="document_lifecycle",
+            status="completed",
+            completed_at=now,
+        )
+        db.add(job)
+        db.flush()
+    db.add(QwenJobEvent(
+        job_id=job.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        event_type=event_type,
+        from_status=None,
+        to_status=None,
+        metadata_json=metadata,
+    ))
+
 logger = logging.getLogger(__name__)
 
 
@@ -1012,6 +1068,217 @@ async def upload_evidence(
             "text_extraction_status": "server_extraction_pending",
             "client_supplied_document_text_ignored": client_text_submitted,
         },
+    }
+
+
+
+@router.post("/upload/{evidence_id}/versions", status_code=201)
+def link_corrected_document_version(
+    evidence_id: str,
+    payload: DocumentVersionLinkRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Link an explicitly identified corrected upload without replacing its predecessor."""
+    person_id, caregiver_id = _scope(request, db)
+    if payload.replacement_evidence_id == evidence_id:
+        raise HTTPException(status_code=422, detail="A document cannot be a corrected version of itself")
+    original = db.query(EvidenceModel).filter(
+        EvidenceModel.id == evidence_id,
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        EvidenceModel.type == "document",
+    ).with_for_update().first()
+    replacement = db.query(EvidenceModel).filter(
+        EvidenceModel.id == payload.replacement_evidence_id,
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        EvidenceModel.type == "document",
+    ).with_for_update().first()
+    if original is None or replacement is None:
+        raise HTTPException(status_code=404, detail="Both documents must belong to this caregiver's care record")
+    if original.evidence_status == "deleted_by_caregiver" or replacement.evidence_status == "deleted_by_caregiver":
+        raise HTTPException(status_code=410, detail="A deleted document cannot be linked as a current version")
+    original_blob = db.query(EvidenceUpload).filter_by(evidence_id=original.id).first()
+    replacement_blob = db.query(EvidenceUpload).filter_by(evidence_id=replacement.id).first()
+    if original_blob is None or replacement_blob is None:
+        raise HTTPException(status_code=409, detail="Both original files must still be available")
+    if original_blob.sha256 == replacement_blob.sha256:
+        raise HTTPException(status_code=409, detail="These files are exact duplicates, not corrected versions")
+    if replacement.parent_evidence_id not in (None, original.id):
+        raise HTTPException(status_code=409, detail="The replacement is already linked to another document version")
+    if original.parent_evidence_id == replacement.id:
+        raise HTTPException(status_code=409, detail="This link would create a document-version cycle")
+    # A document can have one predecessor. The original remains preserved and
+    # continues to support its historical interpretation.
+    replacement.parent_evidence_id = original.id
+    original_meta = _document_metadata(original)
+    replacement_meta = _document_metadata(replacement)
+    replacement_meta["document_version"] = {
+        "relationship": "corrected_version_of",
+        "predecessor_evidence_id": original.id,
+        "linked_at": datetime.now(timezone.utc).isoformat(),
+        "linked_by_caregiver_id": caregiver_id,
+        "comparison_status": "pending_extraction_comparison",
+    }
+    original_meta["document_version"] = {
+        "relationship": "superseded_by_corrected_version",
+        "replacement_evidence_id": replacement.id,
+        "linked_at": datetime.now(timezone.utc).isoformat(),
+        "linked_by_caregiver_id": caregiver_id,
+    }
+    original.extra_metadata = json.dumps(original_meta, ensure_ascii=False)
+    replacement.extra_metadata = json.dumps(replacement_meta, ensure_ascii=False)
+    _record_document_lifecycle_event(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        evidence_id=replacement.id,
+        event_type="document_version_linked",
+        metadata={
+            "predecessor_evidence_id": original.id,
+            "replacement_evidence_id": replacement.id,
+            "content_hashes_differ": True,
+            "automatic_lcr_replacement": False,
+        },
+    )
+    db.commit()
+    return {
+        "original_evidence_id": original.id,
+        "replacement_evidence_id": replacement.id,
+        "relationship": "corrected_version_of",
+        "automatic_lcr_replacement": False,
+        "comparison_status": "pending_extraction_comparison",
+    }
+
+
+@router.delete("/upload/{evidence_id}")
+def delete_uploaded_document(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    """Remove a caregiver-owned document and its uncommitted derived data.
+
+    Accepted LCR assertions are never silently removed. If the document is a
+    source for any assertion, deletion is blocked until that dependency is
+    explicitly resolved through the care-record correction workflow.
+    """
+    person_id, caregiver_id = _scope(request, db)
+    evidence = db.query(EvidenceModel).filter(
+        EvidenceModel.id == evidence_id,
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+        EvidenceModel.type == "document",
+    ).with_for_update().first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Document not found in this care record")
+    if evidence.evidence_status == "deleted_by_caregiver":
+        return {"evidence_id": evidence_id, "deleted": True, "idempotent_replay": True}
+    dependent_assertions = []
+    for assertion in db.query(CareAssertion).filter(CareAssertion.person_id == person_id).all():
+        if evidence_id in (assertion.evidence_ids or []):
+            dependent_assertions.append(assertion)
+    if dependent_assertions:
+        raise HTTPException(
+            status_code=409,
+            detail="This document supports information in the Living Care Record. Resolve those source links before deleting the document.",
+        )
+    child_version = db.query(EvidenceModel.id).filter(EvidenceModel.parent_evidence_id == evidence_id).first()
+    if child_version:
+        raise HTTPException(
+            status_code=409,
+            detail="This document has a corrected version linked to it. Remove or relink the version relationship first.",
+        )
+
+    now = datetime.now(timezone.utc)
+    jobs = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow == "document_intake",
+        QwenBackgroundJob.evidence_ids_json == json.dumps([evidence_id]),
+        QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
+    ).with_for_update().all()
+    for job in jobs:
+        previous_status = job.status
+        job.status = "cancelled"
+        job.error_code = "document_deleted"
+        job.result_text = None
+        job.locked_at = None
+        job.completed_at = now
+        db.add(QwenJobEvent(
+            job_id=job.id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            event_type="document_processing_cancelled",
+            from_status=previous_status,
+            to_status="cancelled",
+            error_code="document_deleted",
+            metadata_json={"source_evidence_id": evidence_id, "reason": "caregiver_deleted_document"},
+        ))
+
+    analyses = db.query(CaptureAnalysis.id).filter(
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
+        CaptureAnalysis.source_evidence_id == evidence_id,
+    ).all()
+    analysis_ids = [str(row[0]) for row in analyses]
+    if analysis_ids:
+        # The database trigger normally makes review events append-only. A
+        # caregiver-authorized erasure may remove uncommitted review payloads;
+        # the lifecycle event below retains only non-content audit metadata.
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+        db.execute(
+            DocumentReviewEvent.__table__.delete().where(
+                DocumentReviewEvent.analysis_id.in_(analysis_ids)
+            )
+        )
+        db.execute(
+            CaptureAnalysis.__table__.delete().where(CaptureAnalysis.id.in_(analysis_ids))
+        )
+    upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).with_for_update().first()
+    original_hash = upload.sha256 if upload is not None else None
+    if upload is not None:
+        db.execute(EvidenceUpload.__table__.delete().where(EvidenceUpload.evidence_id == evidence_id))
+
+    metadata = {
+        "lifecycle": {
+            "status": "deleted_by_caregiver",
+            "deleted_at": now.isoformat(),
+            "deleted_by_caregiver_id": caregiver_id,
+            "original_binary_sha256": original_hash,
+            "derived_analysis_records_removed": len(analysis_ids),
+        }
+    }
+    evidence.extra_metadata = json.dumps(metadata, ensure_ascii=False)
+    evidence.evidence_status = "deleted_by_caregiver"
+    _record_document_lifecycle_event(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        evidence_id=evidence_id,
+        event_type="document_deleted",
+        metadata={
+            "source_evidence_id": evidence_id,
+            "original_binary_sha256": original_hash,
+            "derived_analysis_records_removed": len(analysis_ids),
+            "processing_jobs_cancelled": len(jobs),
+            "lcr_assertion_dependencies": 0,
+            "content_retained_in_lifecycle_event": False,
+        },
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Document deletion transaction failed for evidence %s", evidence_id)
+        raise HTTPException(status_code=503, detail="The document could not be deleted. No deletion was confirmed.")
+    return {
+        "evidence_id": evidence_id,
+        "deleted": True,
+        "original_file_removed": True,
+        "derived_extraction_removed": True,
+        "processing_jobs_cancelled": len(jobs),
+        "lcr_assertion_dependencies": 0,
+        "audit_recorded": True,
+        "idempotent_replay": False,
     }
 
 
