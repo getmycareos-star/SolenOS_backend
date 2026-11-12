@@ -42,11 +42,17 @@ Each action should have an owner, due time or condition, status, source, and out
 - Audit logs should be content-minimizing; do not copy sensitive care text into metadata.
 - Fail closed when required audit persistence or authorization checks fail.
 
-## Current endpoint boundary
+## Current endpoint boundary (verified against backend main after PR #471)
 
-POST /api/v1/handoff-drafts/prepare is a read-only first vertical slice. It reads a fixed allowlist of care facts, care decisions, open questions, information gaps, timeline entries, care events, care transitions, and appointments. Action records are included only when their linked evidence belongs to the requesting caregiver; evidence from another caregiver is excluded unless a separately verified sharing adapter is implemented. Daily Care, document contents, medication/allergy data, routines/preferences, contacts, measurements, and professional identity are not to be represented as retrieved until their scoped adapters are implemented and tested. Community is not authorised. It does not create a handoff, deliver a share, or mutate the LCR.
+`POST /api/v1/handoff-drafts/prepare` remains a read-only preparation endpoint. It does not create a recipient-bound handoff, send or share information, establish professional access, or mutate the Living Care Record.
 
-The current endpoint emits source references, separate event/record/due times, allowlisted source metadata, and source-availability states. Active LCR facts may be included even when older than the requested event window; superseded historical facts are included only when their record timestamp falls inside that window and are labelled superseded. Audience-specific template coverage is a checklist, not a clinical completeness score. The draft should not be treated as a transactionally consistent immutable snapshot until snapshot/version semantics are implemented and tested.
+The endpoint reads a fixed allowlist of care facts, decisions and outcomes, open questions, information gaps, timeline entries, care events, care transitions, appointments, evidence freshness records, Daily Care observations, and document/extraction records when their adapters are available. Daily Care and document retrieval now have explicit adapters. Document records are person-scoped rather than restricted to the requesting caregiver; the requesting caregiver's private action evidence remains excluded from another caregiver's draft. This is a person-scope rule, not proof of a separately recorded caregiver consent grant. Do not describe it as professional authorization or unrestricted sharing.
+
+Medication/allergy reconciliation, routines/preferences, contacts, measurements, and authenticated professional identity/credentials do not have verified dedicated handoff adapters in this endpoint. The professional template includes a medication-reconciliation checklist, but its coverage must remain `not_assessed` unless a verified source adapter is added. Appointment details or medication-related narrative text are not a verified medication list. Do not infer medication name, dose, route, schedule, adherence, allergy, diagnosis, or clinical instruction from incidental text.
+
+The `audience: professional` value selects a professional-oriented draft template; it does not authenticate a clinician or establish that the recipient is authorized. Community is not an authorized source. Source references retain provenance and separate event, record, and due times. Active LCR facts may be included even when older than the selected event window; superseded historical facts are included only when their record timestamp falls inside that window and are labelled superseded. Source coverage is a retrieval checklist, not clinical completeness or clinical validation.
+
+The draft is not yet a transactionally consistent immutable snapshot: source revision fingerprints are used for stale-draft checks, but full snapshot/version semantics, recipient-bound consent/authorization, expiry/revocation, professional receipt/acceptance, and live production end-to-end verification remain release blockers.
 
 ## Required tests before release
 
