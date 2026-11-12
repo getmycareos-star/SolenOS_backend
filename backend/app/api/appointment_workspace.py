@@ -1021,6 +1021,10 @@ def review_appointment_outcome_proposal(
                 or assertion.source_proposal_id != proposal.id
             ):
                 raise HTTPException(status_code=409, detail="An existing care-record assertion differs from this appointment proposal; it was not overwritten")
+        # The caregiver has explicitly reviewed this appointment report.
+        # Keep it as a reported observation; proposal lineage does not make the
+        # accepted report an AI inference or an independently verified fact.
+        assertion.epistemic_state = "reported"
         assertion_id = assertion.id
         proposal.status = "accepted"
         db.add(AIOutputLCRDecision(
