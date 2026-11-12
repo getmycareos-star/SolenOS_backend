@@ -452,3 +452,89 @@ def test_quiet_hours_use_caregiver_timezone_and_overnight_window():
     assert is_quiet_hours(preference, datetime(2026, 1, 15, 7, 0, tzinfo=timezone.utc)) is True
     # 10:00 local is outside the configured overnight quiet window.
     assert is_quiet_hours(preference, datetime(2026, 1, 15, 15, 0, tzinfo=timezone.utc)) is False
+
+
+
+def test_snooze_complete_and_cancel_stop_queued_push_retries():
+    from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
+
+    client = TestClient(app)
+    session = create_session(client, "Reminder push cancellation")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        subscription = CarePushSubscription(
+            id="push-subscription-test",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            endpoint_hash="a" * 64,
+            encrypted_subscription="encrypted-test-subscription",
+        )
+        db.add(subscription)
+        db.commit()
+
+        reminder_ids = []
+        for index in range(3):
+            created = client.post(
+                "/api/v1/reminders",
+                headers=headers,
+                json={
+                    "person_id": session["person"]["id"],
+                    "title": f"Reminder {index}",
+                    "due_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+                },
+            )
+            assert created.status_code == 201, created.text
+            reminder_id = created.json()["id"]
+            reminder_ids.append(reminder_id)
+            notification = CareNotification(
+                id=f"reminder-due:{reminder_id}",
+                person_id=session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+                title=f"Reminder {index}",
+                body="Due",
+                category="reminder_due",
+                source_event_id=reminder_id,
+            )
+            db.add(notification)
+            db.commit()
+            db.add(CarePushDelivery(
+                id=f"push-delivery-{index}",
+                notification_id=notification.id,
+                subscription_id=subscription.id,
+                status="pending",
+                attempt_count=2,
+                next_attempt_at=datetime.now(timezone.utc),
+            ))
+            db.commit()
+
+        snoozed = client.patch(
+            f"/api/v1/reminders/{reminder_ids[0]}/snooze",
+            headers=headers,
+            json={"snooze_until": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()},
+        )
+        assert snoozed.status_code == 200, snoozed.text
+        completed = client.patch(
+            f"/api/v1/reminders/{reminder_ids[1]}/complete",
+            headers=headers,
+            json={},
+        )
+        assert completed.status_code == 200, completed.text
+        cancelled = client.patch(
+            f"/api/v1/reminders/{reminder_ids[2]}/cancel",
+            headers=headers,
+        )
+        assert cancelled.status_code == 200, cancelled.text
+
+        db.expire_all()
+        statuses = {
+            row.notification_id: row.status
+            for row in db.query(CarePushDelivery).all()
+        }
+        assert statuses == {
+            f"reminder-due:{reminder_ids[0]}": "cancelled",
+            f"reminder-due:{reminder_ids[1]}": "cancelled",
+            f"reminder-due:{reminder_ids[2]}": "cancelled",
+        }
+    finally:
+        db.close()
