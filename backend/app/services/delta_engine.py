@@ -307,30 +307,58 @@ def _match_source_references(
     active_state: list[dict[str, Any]],
     prior_events: list[Any],
     evidence_rows: list[Any],
+    source_event_evidence_ids: list[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Return exact-excerpt references only; never attach every run-level ID to every finding."""
+    """Return exact-excerpt references and only evidence linked to the matched source."""
     normalized_excerpt = _normalise(excerpt)
     excerpt_tokens = [token for token in normalized_excerpt.split() if any(char.isalnum() for char in token)]
     if len(normalized_excerpt) < 16 or len(excerpt_tokens) < 3:
         return []
 
     references: list[dict[str, str]] = []
+    evidence_by_id = {
+        str(getattr(row, "id", "")): row
+        for row in evidence_rows
+        if getattr(row, "id", None)
+    }
 
-    def add(record_type: str, record_id: Any, source_text: Any) -> None:
+    def add(record_type: str, record_id: Any, source_text: Any) -> bool:
         if record_id and normalized_excerpt in _normalise(source_text):
             references.append({
                 "record_type": record_type,
                 "record_id": str(record_id),
                 "match_basis": "exact_normalized_excerpt",
             })
+            return True
+        return False
 
-    if source_event_id:
-        add("care_event", source_event_id, new_content)
+    if source_event_id and add("care_event", source_event_id, new_content):
+        for evidence_id in source_event_evidence_ids or []:
+            if str(evidence_id) in evidence_by_id:
+                references.append({
+                    "record_type": "evidence",
+                    "record_id": str(evidence_id),
+                    "match_basis": "linked_to_exactly_matched_source_event",
+                })
     for assertion in active_state:
-        add("care_assertion", assertion.get("assertion_id"), assertion.get("value"))
+        if add("care_assertion", assertion.get("assertion_id"), assertion.get("value")):
+            for evidence_id in assertion.get("evidence_ids") or []:
+                if str(evidence_id) in evidence_by_id:
+                    references.append({
+                        "record_type": "evidence",
+                        "record_id": str(evidence_id),
+                        "match_basis": "linked_to_exactly_matched_assertion",
+                    })
     for event in prior_events:
-        add("care_event", getattr(event, "id", None),
-            f"{getattr(event, 'title', '') or ''} {getattr(event, 'description', '') or ''}")
+        event_text = f"{getattr(event, 'title', '') or ''} {getattr(event, 'description', '') or ''}"
+        if add("care_event", getattr(event, "id", None), event_text):
+            for evidence_id in getattr(event, "evidence_ids", None) or []:
+                if str(evidence_id) in evidence_by_id:
+                    references.append({
+                        "record_type": "evidence",
+                        "record_id": str(evidence_id),
+                        "match_basis": "linked_to_exactly_matched_prior_event",
+                    })
     for evidence in evidence_rows:
         add("evidence", getattr(evidence, "id", None), getattr(evidence, "source_text", None))
 
@@ -663,6 +691,28 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     # Use exact, person-scoped source records for loop provenance. A run-level
     # evidence ID is not automatically support for every model-generated finding.
     source_evidence_rows = list(prior_evidence)
+    linked_source_evidence_ids = list(dict.fromkeys([
+        *[
+            str(evidence_id)
+            for event in prior_events
+            for evidence_id in (getattr(event, "evidence_ids", None) or [])
+            if evidence_id
+        ],
+        *[
+            str(evidence_id)
+            for assertion in active_assertions
+            for evidence_id in (assertion.evidence_ids or [])
+            if evidence_id
+        ],
+    ]))
+    linked_prior_evidence_rows = (
+        db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(linked_source_evidence_ids),
+        ).all()
+        if linked_source_evidence_ids else []
+    )
+    source_evidence_rows.extend(linked_prior_evidence_rows)
     if evidence_ids:
         source_evidence_rows.extend(db.query(Evidence).filter(
             Evidence.person_id == person_id,
@@ -1382,10 +1432,17 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 })
             db.flush()
         except Exception as exc:
-            # Keep the API response generic, but retain the original database or
-            # validation exception in server logs so persistence regressions are
-            # diagnosable without exposing care content to the caller.
-            logger.exception("Delta reconciliation persistence failed")
+            original_error = getattr(exc, "orig", None)
+            diagnostics = getattr(original_error, "diag", None)
+            logger.error(
+                "Delta reconciliation persistence failed",
+                extra={
+                    "exception_type": type(exc).__name__,
+                    "database_sqlstate": getattr(original_error, "pgcode", None),
+                    "database_constraint": getattr(diagnostics, "constraint_name", None),
+                    "evidence_count": len(evidence_ids),
+                },
+            )
             db.rollback()
             raise HTTPException(
                 status_code=500,
@@ -1420,6 +1477,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         active_state=active_state,
                         prior_events=prior_events,
                         evidence_rows=source_evidence_rows,
+                        source_event_evidence_ids=evidence_ids,
                     ))
                 unique_conflict_refs = {
                     (ref["record_type"], ref["record_id"]): ref
@@ -1442,6 +1500,13 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         person_id=person_id, subject_type="delta_engine_report", subject_id=topic,
                         field=topic, description=description, evidence_ids=conflict_evidence_ids,
                         source_assertion_ids=[], resolution_status="unresolved",
+                    ))
+                else:
+                    # A later source can add corroborating or competing evidence
+                    # to an existing unresolved conflict. Preserve all exact
+                    # source links instead of leaving the first single-source ID.
+                    existing.evidence_ids = list(dict.fromkeys(
+                        list(existing.evidence_ids or []) + conflict_evidence_ids
                     ))
             run = CareDeltaRun(
                 person_id=person_id, source=source,
@@ -1472,7 +1537,18 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     assessment["delta_run_id"] = run.id
             run.delta_json = json.dumps(result, ensure_ascii=False, default=str)
             db.commit()
-        except Exception:
+        except Exception as exc:
+            original_error = getattr(exc, "orig", None)
+            diagnostics = getattr(original_error, "diag", None)
+            logger.error(
+                "Delta reconciliation persistence failed",
+                extra={
+                    "exception_type": type(exc).__name__,
+                    "database_sqlstate": getattr(original_error, "pgcode", None),
+                    "database_constraint": getattr(diagnostics, "constraint_name", None),
+                    "evidence_count": len(evidence_ids),
+                },
+            )
             db.rollback()
             raise HTTPException(status_code=500, detail="The reconciliation could not be persisted; the transaction was rolled back.")
     return result

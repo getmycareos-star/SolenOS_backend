@@ -20,6 +20,7 @@ from app.services.qwen_gateway import qwen_chat
 from app.services.qwen_workflows import ENABLED_WORKFLOWS
 
 logger = logging.getLogger(__name__)
+MAX_DOCUMENT_EXTRACTION_RETRIES = 3
 
 
 def _process_document_evidence(evidence_id: str, person_id: str, caregiver_id: str) -> tuple[dict, dict]:
@@ -37,7 +38,22 @@ def _process_document_evidence(evidence_id: str, person_id: str, caregiver_id: s
     session = SessionLocal()
     try:
         extraction = extract_saved_document(evidence_id, scoped_request, session)
-        intelligence = analyze_saved_document(evidence_id, scoped_request, session)
+        extraction_pending_pages = extraction.get("unprocessed_page_numbers") or []
+        if extraction_pending_pages:
+            # Do not interpret an incomplete PDF. Let the durable job retry
+            # failed extraction pages first; Qwen only sees the completed
+            # persisted source text on a later worker pass.
+            intelligence = {
+                "analysis_id": extraction.get("analysis_id"),
+                "intelligence_status": "partial",
+                "observations": [],
+                "processed_page_count": 0,
+                "total_page_count": extraction.get("page_count"),
+                "unprocessed_page_numbers": extraction_pending_pages,
+                "deferred_until_extraction_complete": True,
+            }
+        else:
+            intelligence = analyze_saved_document(evidence_id, scoped_request, session)
         return extraction, intelligence
     finally:
         session.close()
@@ -218,18 +234,52 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 })
                 pending_pages = intelligence.get("unprocessed_page_numbers") or []
                 if intelligence.get("intelligence_status") == "partial" and pending_pages:
-                    # Yield the worker between page windows so a long packet
-                    # does not block reminders or other caregiver jobs.
+                    extraction_retry = bool(intelligence.get("deferred_until_extraction_complete"))
+                    retry_count = 0
+                    if extraction_retry:
+                        retry_count = db.query(QwenJobEvent).filter_by(
+                            job_id=job.id,
+                            event_type="document_intake_extraction_retry_scheduled",
+                        ).count()
+                        if retry_count >= MAX_DOCUMENT_EXTRACTION_RETRIES:
+                            job.status = "failed"
+                            job.error_code = "document_extraction_retry_limit_reached"
+                            job.completed_at = datetime.now(timezone.utc)
+                            job.locked_at = None
+                            db.add(QwenJobEvent(
+                                job_id=job.id,
+                                person_id=job.person_id,
+                                caregiver_id=job.caregiver_id,
+                                event_type="document_intake_extraction_retry_exhausted",
+                                from_status="processing",
+                                to_status="failed",
+                                error_code=job.error_code,
+                                metadata_json={
+                                    "source_evidence_id": evidence_id,
+                                    "retry_count": retry_count,
+                                    "unprocessed_page_numbers": pending_pages,
+                                    "written_to_lcr": False,
+                                },
+                            ))
+                            db.commit()
+                            return True
+                    # Yield between page windows so a long packet does not
+                    # block other caregiver jobs. Extraction failures receive
+                    # bounded exponential retries instead of an infinite loop.
                     job.status = "queued"
                     job.attempt_count = 0
-                    job.available_at = datetime.now(timezone.utc) + timedelta(seconds=3)
+                    retry_delay = min(30, 3 * (2 ** retry_count)) if extraction_retry else 3
+                    job.available_at = datetime.now(timezone.utc) + timedelta(seconds=retry_delay)
                     job.locked_at = None
                     job.result_text = json.dumps(completed)
                     db.add(QwenJobEvent(
                         job_id=job.id,
                         person_id=job.person_id,
                         caregiver_id=job.caregiver_id,
-                        event_type="document_intake_page_window_completed",
+                        event_type=(
+                            "document_intake_extraction_retry_scheduled"
+                            if extraction_retry else "document_intake_page_window_completed"
+                        ),
                         from_status="processing",
                         to_status="queued",
                         metadata_json={
@@ -237,6 +287,8 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                             "processed_page_count": intelligence.get("processed_page_count"),
                             "total_page_count": intelligence.get("total_page_count"),
                             "unprocessed_page_numbers": pending_pages,
+                            "retry_count": retry_count + 1 if extraction_retry else None,
+                            "retry_delay_seconds": retry_delay,
                             "written_to_lcr": False,
                         },
                     ))

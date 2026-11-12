@@ -32,7 +32,7 @@ from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config
 from app.services.uncertainty import persist_source_clarification_questions
-from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, medication_details_for_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
+from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, medication_details_for_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers, unprocessed_page_numbers
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
@@ -382,7 +382,44 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     all_open_questions = []
     page_inputs = split_document_pages(source_text)
     unreadable_pages = unreadable_page_numbers(source_text)
+    extraction_unprocessed_pages = unprocessed_page_numbers(source_text)
     all_page_numbers = sorted({int(match.group(1)) for match in re.finditer(r"(?m)^\[Page\s+(\d+)", source_text)})
+    if extraction_unprocessed_pages:
+        # Do not let a direct intelligence request bypass the durable worker's
+        # extraction-first gate. Preserve any prior candidates but keep the
+        # document visibly partial until failed source pages have been retried.
+        prior_intelligence = copy.deepcopy(resume_intelligence or existing or {})
+        prior_intelligence["version"] = 1
+        prior_intelligence.setdefault("observations", [])
+        prior_questions = prior_intelligence.get("open_questions")
+        prior_questions = prior_questions if isinstance(prior_questions, list) else []
+        extraction_question = (
+            "Document interpretation is paused until failed extraction pages "
+            f"{', '.join(map(str, extraction_unprocessed_pages))} are processed."
+        )
+        prior_intelligence["open_questions"] = list(dict.fromkeys([
+            *[value for value in prior_questions if isinstance(value, str) and value.strip()],
+            extraction_question,
+        ]))
+        prior_intelligence.update({
+            "processed_page_count": len(prior_intelligence.get("processed_page_numbers") or []),
+            "total_readable_page_count": len(page_inputs),
+            "total_page_count": len(all_page_numbers) or len(page_inputs),
+            "unprocessed_page_numbers": extraction_unprocessed_pages,
+            "unreadable_page_numbers": unreadable_pages,
+            "next_page_window_start": 0,
+            "next_chunk_offset": 0,
+            "status": "partial",
+            "model_authority": "review_only",
+            "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+        })
+        metadata = copy.deepcopy(metadata)
+        metadata["document_intelligence"] = prior_intelligence
+        analysis.candidates = metadata
+        db.add(analysis)
+        db.commit()
+        db.refresh(analysis)
+        return _response(analysis)
     if not page_inputs:
         raise HTTPException(status_code=422, detail="No readable page text is available for document understanding")
 

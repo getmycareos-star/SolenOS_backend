@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -278,6 +279,41 @@ def test_worker_waits_quietly_when_job_table_is_not_yet_migrated(tmp_path, monke
         engine.dispose()
 
 
+def test_document_worker_defers_intelligence_until_failed_extraction_pages_are_retried(monkeypatch, tmp_path):
+    from app.api import document_lifecycle, document_intelligence
+
+    _isolated_job_store(tmp_path, monkeypatch)
+    extraction = {
+        "analysis_id": "analysis-incomplete",
+        "extraction_status": "partial",
+        "page_count": 3,
+        "unprocessed_page_numbers": [2],
+    }
+    monkeypatch.setattr(
+        document_lifecycle,
+        "extract_saved_document",
+        lambda *args, **kwargs: extraction,
+    )
+    monkeypatch.setattr(
+        document_intelligence,
+        "analyze_saved_document",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("AI interpretation must wait until failed extraction pages are retried")
+        ),
+    )
+
+    result = worker._process_document_evidence(
+        "evidence-incomplete-pdf",
+        "person-test",
+        "caregiver-test",
+    )
+
+    assert result[0] is extraction
+    assert result[1]["intelligence_status"] == "partial"
+    assert result[1]["unprocessed_page_numbers"] == [2]
+    assert result[1]["deferred_until_extraction_complete"] is True
+
+
 def test_worker_processes_document_intake_job_without_qwen_output(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     db = sessions()
@@ -352,6 +388,62 @@ def test_worker_marks_permanent_document_extraction_errors_failed(tmp_path, monk
     assert failed.status == "failed"
     assert failed.attempt_count == 1
     assert failed.error_code == "unsupported document"
+    db.close()
+
+
+def test_document_intake_bounds_retries_for_persistently_failed_extraction_pages(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    db = sessions()
+    job = QwenBackgroundJob(
+        person_id="person-test",
+        caregiver_id="caregiver-test",
+        task_text="Process saved document for caregiver review.",
+        evidence_ids_json=json.dumps(["evidence-stuck-pdf"]),
+        workflow="document_intake",
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    db.close()
+
+    monkeypatch.setattr(
+        worker,
+        "_process_document_evidence",
+        lambda *args, **kwargs: (
+            {"analysis_id": "analysis-stuck", "extraction_status": "partial"},
+            {
+                "analysis_id": "analysis-stuck",
+                "intelligence_status": "partial",
+                "observations": [],
+                "unprocessed_page_numbers": [2],
+                "deferred_until_extraction_complete": True,
+            },
+        ),
+    )
+
+    for attempt in range(4):
+        assert asyncio.run(worker.process_one_qwen_job()) is True
+        db = sessions()
+        current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        if attempt < 3:
+            assert current.status == "queued"
+            current.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+        else:
+            assert current.status == "failed"
+            assert current.error_code == "document_extraction_retry_limit_reached"
+        db.close()
+
+    db = sessions()
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id,
+        event_type="document_intake_extraction_retry_scheduled",
+    ).count() == 3
+    assert db.query(QwenJobEvent).filter_by(
+        job_id=job_id,
+        event_type="document_intake_extraction_retry_exhausted",
+    ).count() == 1
     db.close()
 
 

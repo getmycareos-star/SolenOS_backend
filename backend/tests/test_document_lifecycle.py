@@ -258,14 +258,14 @@ def test_scanned_pdf_processes_more_than_25_pages_and_reports_partial_results(cl
     payload = response.json()
     assert payload["extraction_status"] == "partial"
     assert payload["page_count"] == 30
-    assert payload["unreadable_page_numbers"] == [2]
-    assert payload["unprocessed_page_numbers"] == []
-    assert payload["processed_page_numbers"] == list(range(1, 31))
+    assert payload["unreadable_page_numbers"] == []
+    assert payload["unprocessed_page_numbers"] == [2]
+    assert payload["processed_page_numbers"] == [page for page in range(1, 31) if page != 2]
     assert calls["count"] == 30
     retrieved = test_client.get(f"/api/v1/documents/analyses/{payload['analysis_id']}", headers=auth)
     assert retrieved.status_code == 200, retrieved.text
     assert "[Page 2 OCR]" in retrieved.json()["extracted_text"]
-    assert "[No readable text detected on this page]" in retrieved.json()["extracted_text"]
+    assert "[Page not processed: OCR operation failed]" in retrieved.json()["extracted_text"]
     assert "Extracted page 30" in retrieved.json()["extracted_text"]
 
 
@@ -282,33 +282,40 @@ def test_partial_extraction_retries_saved_original_without_duplicate_upload(clie
     writer.write(output)
     original = output.getvalue()
     evidence_id = persist_document(session, original, "recoverable-two-page-scan.pdf", "application/pdf")
-    state = {"attempt": 1, "page": 0}
+    state = {"attempt": 1, "calls": 0}
 
     def page_ocr(_image):
-        state["page"] += 1
-        if state["attempt"] == 1 and state["page"] == 2:
+        state["calls"] += 1
+        if state["attempt"] == 1 and state["calls"] == 2:
             raise HTTPException(status_code=422, detail="Temporary page OCR failure")
-        return f"Recovered page {state['page']}"
+        if state["attempt"] == 1:
+            return "Recovered page 1"
+        return "Recovered page 2"
 
     monkeypatch.setattr(document_lifecycle, "_ocr_image", page_ocr)
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     first = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert first.status_code == 201, first.text
     assert first.json()["extraction_status"] == "partial"
-    assert first.json()["unreadable_page_numbers"] == [2]
+    assert first.json()["unreadable_page_numbers"] == []
+    assert first.json()["unprocessed_page_numbers"] == [2]
+    assert state["calls"] == 2
     analysis_id = first.json()["analysis_id"]
 
     state["attempt"] = 2
-    state["page"] = 0
+    state["calls"] = 0
     second = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert second.status_code == 201, second.text
     assert second.json()["analysis_id"] == analysis_id
     assert second.json()["extraction_status"] == "available"
     assert second.json()["unreadable_page_numbers"] == []
+    assert second.json()["unprocessed_page_numbers"] == []
     assert second.json()["processed_page_numbers"] == [1, 2]
+    assert state["calls"] == 1, "Retry must process only failed page 2, not rerun successful page 1"
 
     retrieved = test_client.get(f"/api/v1/documents/analyses/{analysis_id}", headers=auth)
     assert retrieved.status_code == 200, retrieved.text
+    assert "Recovered page 1" in retrieved.json()["extracted_text"]
     assert "Recovered page 2" in retrieved.json()["extracted_text"]
     with TestSessionLocal() as db:
         assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
@@ -439,6 +446,41 @@ def test_duplicate_upload_is_preserved_and_linked_to_original(client):
 
 
 
+def test_image_ocr_failure_is_recorded_as_unprocessed_not_unreadable(client, monkeypatch):
+    from fastapi import HTTPException
+    from app.api import document_lifecycle
+
+    test_client, session = client
+    original = _scanned_text_image()
+    monkeypatch.setattr(
+        document_lifecycle,
+        "_ocr_image",
+        lambda _image: (_ for _ in ()).throw(HTTPException(status_code=422, detail="OCR engine failed")),
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+        },
+        files={"file": ("ocr-failed.png", original, "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_status"] == "partial"
+    assert response.json()["unreadable_page_numbers"] == []
+    assert response.json()["unprocessed_page_numbers"] == [1]
+    detail = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert detail.status_code == 200, detail.text
+    assert "[Page not processed: OCR operation failed]" in detail.json()["extracted_text"]
+
+
 def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_text(client, monkeypatch):
     from app.api import document_lifecycle
     from app.models.capture_analysis import CaptureAnalysis
@@ -472,15 +514,26 @@ def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_te
         assert stored.type == "document"
 
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
-    assert response.status_code == 422, response.text
-    assert "No readable text" in response.json()["detail"]
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_status"] == "partial"
+    assert response.json()["processed_page_numbers"] == [1]
+    assert response.json()["unreadable_page_numbers"] == [1]
+    assert response.json()["unprocessed_page_numbers"] == []
 
     original_download = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
     assert original_download.status_code == 200, original_download.text
     assert original_download.content == original_bytes
     with TestSessionLocal() as db:
         assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
-        assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
+        analysis = db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).one()
+        assert "[No readable text detected on this page]" in analysis.source_text
+        assert "Medication 500 mg" not in analysis.source_text
+        assert analysis.extraction_status == "partial"
+
+    retry = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["analysis_id"] == response.json()["analysis_id"]
+    assert retry.json()["unreadable_page_numbers"] == [1]
 
 
 
@@ -792,18 +845,84 @@ def test_upload_retry_key_returns_same_evidence_and_rejects_changed_payload(clie
         assert db.query(Evidence).filter_by(person_id=session["person"]["id"]).count() == 1
 
 
-def test_outlook_msg_is_preserved_but_reports_explicit_unsupported_extraction(client):
+def test_invalid_outlook_msg_is_preserved_and_reported_as_unreadable(client):
     test_client, session = client
+    original = b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-outlook-binary"
     evidence_id = persist_document(
         session,
-        b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-outlook-binary",
+        original,
         "clinic-message.msg",
         "application/vnd.ms-outlook",
     )
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
-    assert response.status_code == 415, response.text
-    assert ".msg files are preserved" in response.json()["detail"]
+    assert response.status_code == 422, response.text
+    assert "Outlook message could not be read" in response.json()["detail"]
+    retrieved = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert retrieved.status_code == 200
+    assert retrieved.content == original
+
+
+def test_outlook_msg_extracts_headers_and_body_from_a_real_msg_round_trip(tmp_path):
+    from aspose.email_foss.msg import MapiMessage
+    from app.api import document_lifecycle
+
+    msg_path = tmp_path / "appointment.msg"
+    generated = MapiMessage.create(
+        "Appointment confirmation",
+        "Appointment confirmed for Tuesday.",
+    )
+    generated.save(str(msg_path))
+
+    class Upload:
+        mime_type = "application/vnd.ms-outlook"
+        filename = "appointment.msg"
+
+    extracted, method = document_lifecycle._extract(Upload(), msg_path.read_bytes())
+
+    assert method == "server_outlook_msg"
+    assert "Subject: Appointment confirmation" in extracted
+    assert "Appointment confirmed for Tuesday." in extracted
+
+
+def test_real_outlook_msg_upload_extract_and_original_download(client, tmp_path):
+    from aspose.email_foss.msg import MapiMessage
+
+    test_client, session = client
+    msg_path = tmp_path / "clinic-appointment.msg"
+    message = MapiMessage.create(
+        "Clinic appointment",
+        "The follow-up appointment is confirmed for Tuesday.",
+    )
+    message.save(str(msg_path))
+    original = msg_path.read_bytes()
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    uploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+        },
+        files={"file": ("clinic-appointment.msg", original, "application/vnd.ms-outlook")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    evidence_id = uploaded.json()["evidence_id"]
+    assert uploaded.json()["persisted"] is True
+    assert uploaded.json()["sha256"] == hashlib.sha256(original).hexdigest()
+
+    extracted = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert extracted.status_code == 201, extracted.text
+    assert extracted.json()["source_evidence_id"] == evidence_id
+    downloaded = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert downloaded.status_code == 200
+    assert downloaded.content == original
+    detail = test_client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+    assert detail.status_code == 200, detail.text
+    assert "Subject: Clinic appointment" in detail.json()["extracted_text"]
+    assert "The follow-up appointment is confirmed for Tuesday." in detail.json()["extracted_text"]
 
 
 def test_scanned_image_extraction_preserves_batch_page_number(client, monkeypatch):

@@ -306,6 +306,16 @@ def chunk_document_pages(
     return chunks
 
 
+def unprocessed_page_numbers(source_text: str) -> list[int]:
+    return [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?m)^\[Page\s+(\d+)\s+OCR\]\n\[Page not processed:",
+            source_text or "",
+        )
+    ]
+
+
 def unreadable_page_numbers(source_text: str) -> list[int]:
     """Return page labels whose OCR/text extraction produced no usable passage."""
     markers = list(_PAGE_MARKER.finditer(source_text or ""))
