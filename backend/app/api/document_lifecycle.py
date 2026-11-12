@@ -16,6 +16,7 @@ from email.parser import BytesParser
 from html.parser import HTMLParser
 from datetime import datetime, timezone
 
+import extract_msg
 import pypdfium2 as pdfium
 import pytesseract
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -615,10 +616,42 @@ def _extract(
         return _bounded_extraction(extracted, "server_email_text")
 
     if mime == "application/vnd.ms-outlook" or filename.endswith(".msg"):
-        raise HTTPException(
-            status_code=415,
-            detail="Outlook .msg files are preserved, but extraction is not available on this server. Export the message as .eml or PDF and upload it again.",
-        )
+        message = None
+        body = ""
+        extracted = ""
+        try:
+            # extract-msg accepts the original bytes directly. Delay attachment
+            # parsing: this stage extracts the message body and headers only.
+            message = extract_msg.Message(content, delayAttachments=True)
+            body = str(message.body or "").strip()
+            if not body:
+                html_body = message.htmlBody
+                if html_body:
+                    parser = _HTMLText()
+                    parser.feed(html_body.decode("utf-8", errors="replace"))
+                    body = parser.text()
+            header_values = (
+                ("From", message.sender),
+                ("To", message.to),
+                ("Cc", message.cc),
+                ("Date", message.date),
+                ("Subject", message.subject),
+            )
+            headers = "\n".join(
+                f"{name}: {value}" for name, value in header_values if value
+            )
+            extracted = (headers + "\n\n" + body).strip()
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="The saved Outlook message could not be read") from exc
+        finally:
+            if message is not None:
+                try:
+                    message.close()
+                except Exception:
+                    pass
+        if not extracted:
+            raise HTTPException(status_code=422, detail="The Outlook message contains no readable content")
+        return _bounded_extraction(extracted, "server_outlook_msg")
 
     if mime == "application/msword" or filename.endswith(".doc"):
         extracted = _extract_legacy_doc(content)
