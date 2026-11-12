@@ -108,6 +108,10 @@ def _record_open_question_revision(
     revision_number = (latest[0] if latest else 0) + 1
     after_state = _open_question_state(question)
     after_state["lifecycle_actor"] = actor
+    # The ORM revision listener also tracks open_questions. Mark this object
+    # before the flush so this explicit, actor-attributed revision is the only
+    # revision for the transition.
+    db.info.setdefault("manual_care_state_revision_objects", set()).add(id(question))
     db.add(CareStateRevision(
         id=str(uuid.uuid4()),
         person_id=question.person_id,
