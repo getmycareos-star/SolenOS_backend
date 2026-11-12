@@ -485,18 +485,39 @@ def test_supported_office_and_email_formats_extract_from_saved_original(
     assert expected in retrieved.json()["extracted_text"]
 
 
-def test_legacy_doc_is_preserved_but_reports_explicit_unsupported_extraction(client):
+def test_legacy_doc_is_preserved_and_extracted_with_local_antiword(client, monkeypatch):
+    from types import SimpleNamespace
+    import app.api.document_lifecycle as lifecycle
+
     test_client, session = client
-    evidence_id = persist_document(
-        session,
-        b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1legacy-word-binary",
-        "legacy.doc",
-        "application/msword",
-    )
+    original = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-word-binary"
+    evidence_id = persist_document(session, original, "legacy.doc", "application/msword")
+    observed = {}
+    monkeypatch.setattr(lifecycle.shutil, "which", lambda name: "/usr/bin/antiword")
+
+    def fake_run(command, **kwargs):
+        with open(command[-1], "rb") as source:
+            observed["original"] = source.read()
+        return SimpleNamespace(
+            returncode=0,
+            stdout=b"Discharge summary\nNeeds a walking frame.",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", fake_run)
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
-    assert response.status_code == 415, response.text
-    assert ".doc files are preserved" in response.json()["detail"]
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_method"] == "server_antiword_doc"
+    detail = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}", headers=auth
+    )
+    assert detail.status_code == 200, detail.text
+    assert "Needs a walking frame" in detail.json()["extracted_text"]
+    assert observed["original"] == original
+    with TestSessionLocal() as db:
+        upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+        assert upload.content == original
 
 
 def test_snap_care_photo_upload_is_persisted_without_document_ocr(client):
