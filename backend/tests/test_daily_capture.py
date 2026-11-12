@@ -1477,6 +1477,7 @@ def test_medication_authoring_starts_reported_and_requires_explicit_review():
         assert projection.json()["medications"] == []
         assert len(projection.json()["pending_review"]) == 1
         assert projection.json()["pending_review"][0]["medication_id"] == report["medication_id"]
+        assert "Listed on the discharge papers" in projection.json()["pending_review"][0]["source_text"]
 
         # Simulate a report that has remained unreviewed beyond its original
         # review window. It must stay visible for review, not silently disappear.
