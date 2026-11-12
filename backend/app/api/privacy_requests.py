@@ -1125,6 +1125,12 @@ def fulfil_approved_deletion(
             prior.caregiver_id = None
             prior.record_metadata = {"redacted_for_privacy_erasure": True}
 
+        # The document-review history is append-only for ordinary operations.
+        # A separately reviewed privacy erasure may delete it only inside this
+        # transaction; the database trigger rejects all other deletes and every update.
+        if bind.dialect.name == "postgresql":
+            db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+
         for table in reversed(tables):
             if table.name in excluded_tables:
                 continue
@@ -1143,6 +1149,14 @@ def fulfil_approved_deletion(
             db.query(EvidenceUpload).filter(
                 EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
             ).delete(synchronize_session=False)
+            # Repeat by immutable evidence IDs using Core SQL. This remains
+            # deterministic if earlier FK cleanup changed nullable ownership
+            # columns or left an upload object stale in the ORM identity map.
+            for evidence_id in evidence_ids_to_erase:
+                db.execute(
+                    text("DELETE FROM evidence_uploads WHERE evidence_id = :evidence_id"),
+                    {"evidence_id": str(evidence_id)},
+                )
         # Also mark any remaining ORM evidence objects for deletion. This
         # prevents a loaded identity-map row from surviving a bulk/Core delete path.
         evidence_rows = db.query(Evidence).filter(Evidence.person_id == person_id).all()
