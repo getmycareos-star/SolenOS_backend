@@ -317,3 +317,32 @@ def test_shared_coordinator_rejects_incomplete_appointment_revision_reference(mo
 
     reconciled.assert_not_called()
     db.commit.assert_not_called()
+
+
+
+def test_shared_coordinator_validates_multiple_persisted_source_events(monkeypatch):
+    person = SimpleNamespace(id="person-1")
+    event_one = SimpleNamespace(id="event-1", person_id="person-1", evidence_ids=[])
+    event_two = SimpleNamespace(id="event-2", person_id="person-1", evidence_ids=[])
+    db = Mock()
+    db.query.side_effect = [
+        _Query(person),
+        _Query(event_one),
+        _Query(event_two),
+    ]
+    reconciled = Mock()
+    monkeypatch.setattr(execution, "reconcile_person_change_intelligence", reconciled)
+
+    result = execution.execute_care_continuity_reconciliation(
+        db,
+        "person-1",
+        workflow="qwen_assistance_summary_review",
+        source_event_ids=["event-1", "event-2"],
+    )
+
+    assert result["source_event_id"] is None
+    assert result["source_event_ids"] == ["event-1", "event-2"]
+    assert result["stages"]["reconciliation"] == "staged_in_caller_transaction"
+    reconciled.assert_called_once_with(db, "person-1", None)
+    db.commit.assert_not_called()
+    db.rollback.assert_not_called()
