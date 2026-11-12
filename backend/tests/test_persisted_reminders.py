@@ -329,6 +329,7 @@ def test_web_push_worker_records_provider_acceptance_without_exposing_care_detai
             body="Private care details that must not appear on the lock screen.",
             category="care_update",
             priority="normal",
+            created_at=datetime.now(timezone.utc) + timedelta(seconds=2),
         )
         db.add(notification)
         db.commit()
