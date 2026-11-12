@@ -3900,10 +3900,13 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         )
         # Creation of source-linked questions is itself audited, including
         # review-only questions that are not yet caregiver work.
-        assert db.query(CareStateRevision).filter(
+        creation_revisions = db.query(CareStateRevision).filter(
             CareStateRevision.person_id == person.id,
             CareStateRevision.target_type == "open_questions",
-        ).count() == 2
+            CareStateRevision.target_id.in_([row.id for row in first]),
+            CareStateRevision.change_kind == "created",
+        ).all()
+        assert {revision.target_id for revision in creation_revisions} == {row.id for row in first}
 
         second = persist_source_clarification_questions(
             db,
