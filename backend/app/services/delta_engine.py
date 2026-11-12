@@ -924,11 +924,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         continue
                     if domain == "medications" and change_type == "discontinued" and current is None:
                         current = "discontinued"
+                    claim_support_required = assertion_kind != "time_bound_observation"
                     if (
                         not name or current is None
                         or item.get("certainty") != "supported"
                         or not item.get("evidence_supported")
-                        or not item.get("claim_supported")
+                        or (claim_support_required and not item.get("claim_supported"))
                         or not finding_source_supported
                     ):
                         continue
@@ -1034,6 +1035,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     create_assertion(db, CareAssertionCreate(
                         person_id=person_id, subject_type=domain.rstrip("s"), subject_id=subject_id,
                         field=field, assertion_kind=assertion_kind,
+                        epistemic_state="reported" if assertion_kind == "time_bound_observation" else "inferred",
                         asserted_value=str(current), source_event_id=source_event_id, source_label=source,
                         source_text=str(item.get("evidence_excerpt") or content[:500]),
                         evidence_ids=finding_evidence_ids, observed_at=event_date or datetime.now(timezone.utc),
