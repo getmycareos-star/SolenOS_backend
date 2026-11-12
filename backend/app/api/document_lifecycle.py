@@ -475,7 +475,8 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
         "intelligence_status": intelligence.get("status") or "not_run",
-        "review_required": any(
+        "review_required": False,
+        "review_available": any(
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in observations
         ),
