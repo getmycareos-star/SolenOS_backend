@@ -156,6 +156,76 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         window_label=f"this calendar month ({local_start.strftime('%b %d')}–{local_now.strftime('%b %d, %Y')}, {timezone_name})",
         truncated=truncated,
     )
+    if aggregate.get("status") == "validated":
+        evidence_ids = list(dict.fromkeys(
+            evidence_id
+            for reference in aggregate.get("source_references", [])
+            for evidence_id in reference.get("related_evidence_ids", [])
+        ))
+        evidence_rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(evidence_ids or {"__no_linked_evidence__"}),
+        ).all() if evidence_ids else []
+        evidence_by_id = {str(item.id): item for item in evidence_rows}
+        attribution_ids = set()
+        for item in evidence_rows:
+            attribution_ids.update(
+                str(value) for value in (
+                    item.uploaded_by_caregiver_id,
+                    item.reported_by_caregiver_id,
+                    item.collected_by_caregiver_id,
+                ) if value
+            )
+        caregiver_names = {
+            str(item.id): item.name
+            for item in db.query(Caregiver).filter(
+                Caregiver.person_id == person_id,
+                Caregiver.id.in_(attribution_ids or {"__no_matching_caregiver__"}),
+            ).all()
+        }
+        observation_by_evidence = {}
+        if evidence_ids and inspect(db.get_bind()).has_table("evidence_observations"):
+            observations = db.query(EvidenceObservation).filter(
+                EvidenceObservation.person_id == person_id,
+                EvidenceObservation.evidence_id.in_(evidence_ids),
+            ).all()
+            for observation in observations:
+                searchable = " ".join((
+                    observation.attribute or "",
+                    observation.value_text or "",
+                    observation.source_passage or "",
+                )).casefold()
+                if any(term in searchable for term in topic_terms):
+                    observation_by_evidence.setdefault(str(observation.evidence_id), []).append({
+                        "label": "Detail from the original note",
+                        "attribute": observation.attribute,
+                        "value": observation.value_text,
+                        "occurred_at": observation.occurred_at.isoformat() if observation.occurred_at else None,
+                        "recorded_at": observation.recorded_at.isoformat() if observation.recorded_at else None,
+                        "reported_by": observation.observer_label,
+                        "source_excerpt": observation.source_passage[:700],
+                    })
+        for reference in aggregate.get("source_references", []):
+            related = []
+            for evidence_id in reference.get("related_evidence_ids", []):
+                evidence = evidence_by_id.get(str(evidence_id))
+                if evidence is None:
+                    continue
+                metadata = evidence.extra_metadata or {}
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except (TypeError, ValueError):
+                        metadata = {}
+                related.append({
+                    "label": (metadata.get("filename") if isinstance(metadata, dict) else None) or "Original note or document",
+                    "reported_by": evidence.reported_by_label or evidence.original_author or caregiver_names.get(str(evidence.reported_by_caregiver_id or "")),
+                    "entered_by": caregiver_names.get(str(evidence.uploaded_by_caregiver_id or "")),
+                    "recorded_at": evidence.ingested_at.isoformat() if evidence.ingested_at else (evidence.uploaded_at.isoformat() if evidence.uploaded_at else None),
+                    "source_excerpt": (evidence.source_text or "")[:700],
+                    "observations": observation_by_evidence.get(str(evidence.id), []),
+                })
+            reference["related_evidence"] = related
     return [aggregate]
 
 
