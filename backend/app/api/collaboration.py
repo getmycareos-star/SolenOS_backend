@@ -61,7 +61,9 @@ from app.services.qwen_gateway import (
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.companion_care_updates import process_companion_care_update_message, proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
-from app.models.ai_output_governance import AIOutputLCRProposal
+from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
+from app.schemas.care_continuity import CareAssertionCreate
+from app.services.care_continuity import create_assertion
 
 router = APIRouter(tags=["community and companion"])
 logger = logging.getLogger(__name__)
@@ -2113,6 +2115,97 @@ async def create_qwen_background_job(
     db.commit()
     db.refresh(job)
     return {"job_id": job.id, "status": job.status, "status_url": f"/api/v1/assistant/jobs/{job.id}"}
+
+
+@router.post("/assistant/jobs/{job_id}/proposal", status_code=201)
+async def create_qwen_lcr_proposal(
+    job_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Create a caregiver-reviewable LCR proposal from one completed, source-backed Qwen output."""
+    person_id, caregiver_id = _scope(request, db)
+    job = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.id == job_id,
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.status == "completed",
+    ).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Completed care suggestion not found")
+    output = db.query(QwenModelOutput).filter(
+        QwenModelOutput.job_id == job.id,
+        QwenModelOutput.person_id == person_id,
+        QwenModelOutput.caregiver_id == caregiver_id,
+    ).with_for_update().first()
+    if output is None or output.written_to_lcr or not output.output_text.strip():
+        raise HTTPException(status_code=409, detail="This suggestion cannot be added to the care record")
+
+    existing = db.query(AIOutputLCRProposal).filter(
+        AIOutputLCRProposal.output_id == output.id,
+        AIOutputLCRProposal.person_id == person_id,
+        AIOutputLCRProposal.caregiver_id == caregiver_id,
+        AIOutputLCRProposal.proposal_type == "qwen_assistance_summary",
+    ).first()
+    if existing is not None:
+        return {"proposal": {
+            "id": existing.id,
+            "status": existing.status,
+            "proposed_change": existing.proposed_change_json or {},
+        }, "idempotent_replay": True}
+
+    try:
+        event_ids = list(dict.fromkeys(str(value) for value in json.loads(output.source_event_ids_json or "[]")))
+        evidence_ids = list(dict.fromkeys(str(value) for value in json.loads(output.source_evidence_ids_json or "[]")))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=409, detail="The saved source references could not be verified") from exc
+    events = db.query(CareEvent.id).filter(
+        CareEvent.person_id == person_id, CareEvent.id.in_(event_ids or ["__none__"])
+    ).all()
+    evidence = db.query(EvidenceModel.id).filter(
+        EvidenceModel.person_id == person_id, EvidenceModel.id.in_(evidence_ids or ["__none__"])
+    ).all()
+    verified_event_ids = {str(row[0]) for row in events}
+    verified_evidence_ids = {str(row[0]) for row in evidence}
+    if verified_event_ids != set(event_ids) or verified_evidence_ids != set(evidence_ids):
+        raise HTTPException(status_code=409, detail="One or more source records are no longer available in this care record")
+    if not event_ids and not evidence_ids:
+        raise HTTPException(status_code=409, detail="This suggestion has no saved care-record sources and cannot be added to the Living Care Record")
+
+    proposal = AIOutputLCRProposal(
+        id=str(uuid.uuid4()),
+        output_id=output.id,
+        job_id=job.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        proposal_type="qwen_assistance_summary",
+        proposed_change_json={
+            "subject_type": "person",
+            "subject_id": person_id,
+            "field": "care_record_summary",
+            "assertion_kind": "ai_assisted_summary",
+            "asserted_value": output.output_text[:4000],
+            "information_status": "ai_generated_interpretation_pending_caregiver_review",
+            "workflow": output.workflow,
+            "model_name": output.model_name,
+            "source_event_ids": event_ids,
+            "source_evidence_ids": evidence_ids,
+            "not_independent_clinical_verification": True,
+        },
+        source_event_ids_json=event_ids,
+        source_evidence_ids_json=evidence_ids,
+        rationale="Qwen-generated summary of saved care information. It remains an inference and is not a verified clinical fact.",
+        uncertainty_json={"epistemic_state": "inferred", "caregiver_approval_required": True},
+        status="pending_authorization",
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return {"proposal": {
+        "id": proposal.id,
+        "status": proposal.status,
+        "proposed_change": proposal.proposed_change_json,
+    }, "idempotent_replay": False}
 
 
 @router.get("/assistant/jobs/{job_id}")
