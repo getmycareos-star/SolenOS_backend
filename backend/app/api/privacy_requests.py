@@ -1108,7 +1108,11 @@ def fulfil_approved_deletion(
                     continue
                 for foreign_key in foreign_keys:
                     parent_name = foreign_key.get("referred_table")
-                    if parent_name not in reachable_depth:
+                    # Self-referencing tables (for example supersession chains)
+                    # are deleted as a scoped set. Treating the self-FK as a
+                    # table-order dependency makes the longest-depth walk grow
+                    # forever even though it does not introduce a table ordering.
+                    if parent_name not in reachable_depth or parent_name == child_name:
                         continue
                     candidate_depth = reachable_depth[parent_name] + 1
                     if child_name not in reachable_depth or candidate_depth > reachable_depth[child_name]:
