@@ -237,7 +237,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
             assertion = assertions[0]
             assert assertion.assertion_status == "accepted"
             assert assertion.assertion_kind == "document_reviewed_observation"
-            assert assertion.field == "document_observation_statement"
+            assert assertion.field == "observation"
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quotes[1]
             assert "page 1" in assertion.source_label
@@ -419,7 +419,7 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
             ).one()
             assert f"page {body['observations'][0]['page_number']}" in assertion.source_label
             assert "duplicate copy; not independent corroboration" in assertion.source_label
-            assert assertion.field == "document_medication_statement"
+            assert assertion.field == "medication"
             assert "Strength: 500 mg" in assertion.asserted_value
             assert "Dosage instructions:" in assertion.asserted_value
         current_care = client.get(
@@ -429,7 +429,7 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         assert current_care.status_code == 200, current_care.text
         lcr_item = next(
             item for item in current_care.json()["items"]
-            if item["title"] == "document_medication_statement"
+            if item["title"] == "medication"
         )
         assert "Strength: 500 mg" in lcr_item["description"]
         assert "Dosage instructions:" in lcr_item["description"]
@@ -497,7 +497,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
             assertion = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"]
             ).one()
-            assert assertion.field == "document_medication_statement"
+            assert assertion.field == "medication"
             assert "Strength: 1000 mg" in assertion.asserted_value
             assert "Dosage instructions: Metformin 1000 mg twice daily" in assertion.asserted_value
             assert quote == assertion.source_text
@@ -511,7 +511,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         assert current_care.status_code == 200, current_care.text
         lcr_item = next(
             item for item in current_care.json()["items"]
-            if item["title"] == "document_medication_statement"
+            if item["title"] == "medication"
         )
         assert "Event date: 2026-10-12" in lcr_item["description"]
         assert "Source-recorded date: 2026-10-13" in lcr_item["description"]
@@ -575,6 +575,171 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
         assert repeated.status_code == 201, repeated.text
         assert len(repeated.json()["observations"]) == 26
         assert processed_pages == list(range(1, 27))
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+
+def test_document_candidate_overflow_is_preserved_and_revealed_in_review_batches(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    source = "\n\n".join(
+        f"[Page {page}]\n" + "\n".join(
+            f"Patient record for page {page}. Observation {item_number}."
+            for item_number in range(1, 13)
+        )
+        for page in range(1, 7)
+    )
+    processed_pages = []
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        page_number = int(re.search(r"page (\d+)", page_text).group(1))
+        processed_pages.append(page_number)
+        observations = []
+        for item_number in range(1, 13):
+            quote = f"Patient record for page {page_number}. Observation {item_number}."
+            observations.append({
+                "subject": "Patient record",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            })
+        return {"observations": observations, "open_questions": []}
+
+    import re
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Candidate batch caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+
+        first = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert first.status_code == 201, first.text
+        first_payload = first.json()
+        assert len(first_payload["observations"]) == 60
+        assert [item["candidate_index"] for item in first_payload["observations"]] == list(range(60))
+        assert first_payload["has_more_candidates"] is True
+        assert first_payload["remaining_candidate_count"] == 12
+        assert first_payload["intelligence_status"] == "partial"
+        assert processed_pages == list(range(1, 7))
+
+        blocked = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert blocked.status_code == 201, blocked.text
+        assert [item["candidate_index"] for item in blocked.json()["observations"]] == list(range(60))
+        assert processed_pages == list(range(1, 7)), "review paging must not repeat successful model extraction"
+
+        db = Session()
+        try:
+            analysis = db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).one()
+            metadata = dict(analysis.candidates)
+            intelligence = dict(metadata["document_intelligence"])
+            observations = list(intelligence["observations"])
+            for index in range(60):
+                observations[index] = {**observations[index], "review_status": "rejected_by_caregiver"}
+            intelligence["observations"] = observations
+            metadata["document_intelligence"] = intelligence
+            analysis.candidates = metadata
+            db.commit()
+        finally:
+            db.close()
+
+        next_batch = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert next_batch.status_code == 201, next_batch.text
+        next_payload = next_batch.json()
+        assert len(next_payload["observations"]) == 12
+        assert [item["candidate_index"] for item in next_payload["observations"]] == list(range(60, 72))
+        assert next_payload["has_more_candidates"] is False
+        assert next_payload["remaining_candidate_count"] == 0
+        assert next_payload["intelligence_status"] == "available"
+        assert processed_pages == list(range(1, 7))
+
+        repeated = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert [item["candidate_index"] for item in repeated.json()["observations"]] == list(range(60, 72))
+        assert processed_pages == list(range(1, 7))
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+
+def test_document_medication_assertion_conflicts_with_existing_canonical_medication(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    quote = "Donepezil 10 mg once daily."
+    source = "[Page 1]\\nMedication list: " + quote
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        return {
+            "observations": [{
+                "subject": "Donepezil",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Medication reconciliation caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+
+        db = Session()
+        try:
+            db.add(CareAssertion(
+                person_id=caregiver["person"]["id"],
+                subject_type="person",
+                subject_id=caregiver["person"]["id"],
+                field="medication",
+                assertion_kind="current_state",
+                asserted_value="Medication: Donepezil 5 mg once daily",
+                source_label="Earlier caregiver report",
+                source_text="Caregiver previously reported Donepezil 5 mg once daily.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver["caregiver"]["id"],
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert understood.status_code == 201, understood.text
+        assert understood.json()["observations"][0]["field_type"] == "medication"
+
+        accepted = client.post(
+            f"/api/v1/documents/intelligence/{understood.json()['analysis_id']}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["written_to_lcr"] is True
+
+        from app.models.uncertainty import Contradiction
+        db = Session()
+        try:
+            document_assertion = db.query(CareAssertion).filter(
+                CareAssertion.id == accepted.json()["source_record_ref"]["record_id"],
+                CareAssertion.person_id == caregiver["person"]["id"],
+            ).one()
+            assert document_assertion.field == "medication"
+            assert document_assertion.assertion_status == "accepted"
+            contradiction = db.query(Contradiction).filter(
+                Contradiction.person_id == caregiver["person"]["id"],
+                Contradiction.field == "medication",
+            ).one()
+            assert contradiction.resolution_status == "unresolved"
+            assert document_assertion.id in contradiction.source_assertion_ids
+            assert len(contradiction.source_assertion_ids) == 2
+        finally:
+            db.close()
     finally:
         client.close()
         app.dependency_overrides.clear()
