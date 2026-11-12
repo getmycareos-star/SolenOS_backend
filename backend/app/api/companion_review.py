@@ -14,7 +14,7 @@ from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.care_continuity import CareAssertion
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
-from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(prefix="/companion/care-updates", tags=["companion care updates"])
 
@@ -296,14 +296,21 @@ def review_companion_care_update(
 
     db.add(proposal)
     change_intelligence_status = "not_required"
+    execution = None
     if decision == "accept":
-        # Keep the accepted assertion, governance decision, proposal state and
-        # derived LCR change assessments in one transaction. A failed
-        # reconciliation must not leave a partially committed Companion update.
-        db.flush()
-        reconcile_person_change_intelligence(db, person_id)
+        # The original user message is the persisted Companion source. Verify
+        # its conversation/person scope before reconciling the accepted claim.
+        execution = execute_care_continuity_reconciliation(
+            db,
+            person_id,
+            workflow="companion_care_update_review",
+            source_message_id=source_message.id,
+            source_conversation_id=session.id,
+        )
         change_intelligence_status = "available"
     db.commit()
+    if execution is not None:
+        execution["stages"]["reconciliation"] = "committed"
     db.refresh(proposal)
     if corrected_proposal is not None:
         db.refresh(corrected_proposal)
@@ -314,5 +321,6 @@ def review_companion_care_update(
         "assertion_id": assertion_id,
         "written_to_lcr": bool(assertion_id),
         "change_intelligence_status": change_intelligence_status,
+        "care_continuity_execution": execution,
         "idempotent_replay": False,
     }
