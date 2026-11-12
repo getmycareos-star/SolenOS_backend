@@ -72,6 +72,12 @@ def save_original(session_data, source_text):
 
 
 def test_document_understanding_review_accept_reject_reload_and_cross_person(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
@@ -122,6 +128,14 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert understood.status_code == 201, understood.text
         assert understood.json()["review_required"] is True
         assert understood.json()["written_to_lcr"] is False
+        provenance = understood.json()["model_provenance"]
+        assert provenance["provider"] == "private_ollama"
+        assert provenance["model_tag"] == "qwen2.5:1.5b"
+        assert provenance["processing_version"] == "document_intelligence_v1"
+        assert provenance["extraction_source"] == "persisted_server_extraction"
+        assert provenance["source_evidence_id"] == evidence_id
+        assert provenance["source_text_sha256"] == hashlib.sha256(source.encode("utf-8")).hexdigest()
+        assert provenance["model_authority"] == "review_only"
         assert all(item["source_quote"] in source for item in understood.json()["observations"])
 
         # Re-running understanding is idempotent and does not create a second analysis.
