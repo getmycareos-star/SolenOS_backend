@@ -105,6 +105,7 @@ jobs:
               "care_conflicts": {"person_id", "conflict_type", "claim_refs", "description", "status"},
               "care_action_outcomes": {"person_id", "action_id", "outcome_status"},
               "caregiver_profiles": {"person_id", "session_caregiver_id", "name", "email"},
+              "care_notifications": {"person_id", "caregiver_id", "category", "source_event_id", "status", "updated_at", "resolved_at", "resolution_reason"},
               "caregiver_contexts": {"person_id", "reported_by_caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
               "caregiver_perspectives": {"person_id", "reported_by_caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
               "caregiver_observations": {"person_id", "reported_by_caregiver_id", "observation_category", "description", "epistemic_status", "recorded_at"},
