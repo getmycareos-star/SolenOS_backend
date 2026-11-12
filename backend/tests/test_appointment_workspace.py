@@ -1525,7 +1525,7 @@ def test_appointment_workspace_follow_up_is_system_tracked_without_assuming_care
     items = listed.json().get("items", [])
     managed = next(
         item for item in items
-        if item.get("source_type") == "appointment_workspace"
+        if item.get("source_type") == "appointment_workspace_follow_up"
         and item.get("source_id", "").startswith(saved.json()["id"] + ":")
     )
     assert managed["owner_role"] == "unassigned"
