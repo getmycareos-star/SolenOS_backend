@@ -157,8 +157,11 @@ def downgrade():
             op.drop_index(item["name"], table_name="caregiver_responsibility_transfers")
         op.drop_table("caregiver_responsibility_transfers")
     if inspector.has_table("caregiver_invitations"):
+        # The token hash unique constraint owns its backing index. Drop only
+        # standalone lookup indexes; DROP TABLE removes the constraint safely.
         for item in inspect(bind).get_indexes("caregiver_invitations"):
-            op.drop_index(item["name"], table_name="caregiver_invitations")
+            if item.get("name", "").startswith("ix_caregiver_invitations_"):
+                op.drop_index(item["name"], table_name="caregiver_invitations")
         op.drop_table("caregiver_invitations")
     if inspector.has_table("caregiver_access_grants"):
         for item in inspect(bind).get_indexes("caregiver_access_grants"):
