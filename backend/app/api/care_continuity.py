@@ -1598,12 +1598,13 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
     reviewed = []
     try:
         for row in rows:
-            if row.assertion_status == "accepted":
-                reviewed.append({"id": row.id, "assertion_status": "accepted"})
-                continue
             result = review_assertion_status(
                 row.id,
-                {"assertion_status": "accepted", "review_after_days": row.review_after_days or 30},
+                {
+                    "assertion_status": "accepted",
+                    "review_after_days": row.review_after_days or 30,
+                    "force_review": True,
+                },
                 request,
                 db,
             )
