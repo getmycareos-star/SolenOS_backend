@@ -72,6 +72,12 @@ def save_original(session_data, source_text):
 
 
 def test_document_understanding_review_accept_reject_reload_and_cross_person(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
@@ -122,6 +128,15 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert understood.status_code == 201, understood.text
         assert understood.json()["review_required"] is True
         assert understood.json()["written_to_lcr"] is False
+        provenance = understood.json()["model_provenance"]
+        assert provenance["provider"] == "private_ollama"
+        assert provenance["model_tag"] == "qwen2.5:1.5b"
+        assert provenance["processing_version"] == "document_intelligence_v1"
+        assert provenance["extraction_source"] == "persisted_server_extraction"
+        assert provenance["source_evidence_id"] == evidence_id
+        assert provenance["source_text_sha256"] == hashlib.sha256(source.encode("utf-8")).hexdigest()
+        assert provenance["model_authority"] == "review_only"
+        assert understood.json()["processing_history"] == [provenance]
         assert all(item["source_quote"] in source for item in understood.json()["observations"])
 
         # Re-running understanding is idempotent and does not create a second analysis.
@@ -412,7 +427,58 @@ def test_multi_page_document_flags_unreadable_pages_and_medication_conflicts(mon
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+
+        # A second upload of the exact same bytes must reuse the existing
+        # source-linked assertion rather than create duplicate care knowledge.
+        duplicate_evidence_id = "duplicate-" + hashlib.sha256(source.encode("utf-8")).hexdigest()[:20]
+        duplicate_bytes = source.encode("utf-8")
         with Session() as db:
+            db.add(Evidence(
+                id=duplicate_evidence_id,
+                person_id=caregiver["person"]["id"],
+                type="document",
+                source_text="",
+                uploaded_by_caregiver_id=caregiver["caregiver"]["id"],
+                extra_metadata=json.dumps({
+                    "filename": "duplicate-copy.txt",
+                    "duplicate_of_evidence_id": evidence_id,
+                }),
+                source_type="caregiver_upload",
+                evidence_status="recorded",
+            ))
+            db.add(EvidenceUpload(
+                evidence_id=duplicate_evidence_id,
+                filename="duplicate-copy.txt",
+                mime_type="text/plain",
+                content=duplicate_bytes,
+                size_bytes=len(duplicate_bytes),
+                sha256=hashlib.sha256(duplicate_bytes).hexdigest(),
+            ))
+            db.commit()
+        duplicate_extraction = client.post(
+            f"/api/v1/documents/{duplicate_evidence_id}/extract", headers=auth
+        )
+        assert duplicate_extraction.status_code == 201, duplicate_extraction.text
+        duplicate_understanding = client.post(
+            f"/api/v1/documents/{duplicate_evidence_id}/intelligence", headers=auth
+        )
+        assert duplicate_understanding.status_code == 201, duplicate_understanding.text
+        duplicate_accepted = client.post(
+            f"/api/v1/documents/intelligence/{duplicate_understanding.json()['analysis_id']}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert duplicate_accepted.status_code == 200, duplicate_accepted.text
+        assert duplicate_accepted.json()["written_to_lcr"] is True
+
+        with Session() as db:
+            assertions = db.query(CareAssertion).filter_by(
+                person_id=caregiver["person"]["id"],
+                assertion_kind="document_reviewed_observation",
+            ).all()
+            assert len(assertions) == 1
+            assertion = assertions[0]
+            assert duplicate_accepted.json()["source_record_ref"]["record_id"] == assertion.id
             assertion = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"]
             ).one()
@@ -578,3 +644,65 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_document_understanding_retry_processes_only_remaining_pages(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    processed_pages = []
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        page_number = int(page_text.rsplit(" ", 1)[-1].rstrip("."))
+        processed_pages.append(page_number)
+        quote = page_text.strip()
+        return {
+            "observations": [{
+                "subject": "Patient",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Paged document caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        source = "\n\n".join(
+            f"[Page {page}]\nPatient completed therapy session {page}."
+            for page in range(1, 27)
+        )
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+
+        first = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert first.status_code == 201, first.text
+        first_body = first.json()
+        assert first_body["intelligence_status"] == "partial"
+        assert first_body["processed_page_count"] == 25
+        assert first_body["unprocessed_page_numbers"] == [26]
+        assert processed_pages == list(range(1, 26))
+
+        resumed = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert resumed.status_code == 201, resumed.text
+        resumed_body = resumed.json()
+        assert resumed_body["intelligence_status"] == "available"
+        assert resumed_body["processed_page_count"] == 26
+        assert resumed_body["processed_page_numbers"] == list(range(1, 27))
+        assert resumed_body["unprocessed_page_numbers"] == []
+        assert processed_pages == list(range(1, 27))
+        assert len(resumed_body["processing_history"]) == 2
+        assert resumed_body["processing_history"][0]["source_text_sha256"] == resumed_body["processing_history"][1]["source_text_sha256"]
+    finally:
+        client.close()
+        app.dependency_overrides.pop(get_db, None)

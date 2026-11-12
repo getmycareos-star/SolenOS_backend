@@ -20,7 +20,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.document_lifecycle import _verify_persisted_extraction
+from app.api.document_lifecycle import _verify_persisted_extraction, _ocr_quality_by_page
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
@@ -30,7 +30,7 @@ from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.models.collaboration import EvidenceUpload
-from app.services.qwen_gateway import extract_review_candidates
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config
 from app.services.uncertainty import persist_source_clarification_questions
 from app.services.document_candidate_schema import canonical_candidate, candidate_warnings, medication_details_for_candidate, classify_field, split_document_pages, chunk_document_pages, apply_medication_conflict_warnings, unreadable_page_numbers
 
@@ -179,7 +179,10 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "processed_page_numbers": intelligence.get("processed_page_numbers", []),
         "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers", []),
         "unreadable_page_numbers": intelligence.get("unreadable_page_numbers", []),
+        "ocr_quality_by_page": _ocr_quality_by_page(analysis.source_text or ""),
         "extraction_method": metadata.get("extraction_method"),
+        "model_provenance": intelligence.get("model_provenance"),
+        "processing_history": intelligence.get("processing_history", []),
         "extracted_char_count": len(analysis.source_text or ""),
         "observations": observations,
         "open_questions": intelligence.get("open_questions", []),
@@ -489,8 +492,36 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
 
 
     metadata = copy.deepcopy(metadata)
+    try:
+        configured_model = get_ollama_config()[1]
+        configured_provider = "private_ollama"
+    except HTTPException:
+        configured_model = None
+        configured_provider = "unavailable_or_test_stub"
+    source_text_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    model_provenance = {
+        "provider": configured_provider,
+        "model_tag": configured_model,
+        "model_digest": None,
+        "model_digest_status": "not_exposed_by_ollama_chat_response",
+        "processing_version": "document_intelligence_v1",
+        "prompt_version": "source_grounded_review_candidates_v1",
+        "extraction_source": "persisted_server_extraction",
+        "source_evidence_id": str(evidence.id),
+        "source_text_sha256": source_text_hash,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "model_authority": "review_only",
+    }
+    prior_processing_history = resume_intelligence.get("processing_history")
+    processing_history = list(prior_processing_history) if isinstance(prior_processing_history, list) else []
+    prior_provenance = resume_intelligence.get("model_provenance")
+    if isinstance(prior_provenance, dict) and (not processing_history or processing_history[-1] != prior_provenance):
+        processing_history.append(prior_provenance)
+    processing_history.append(model_provenance)
     metadata["document_intelligence"] = {
         "version": 1,
+        "model_provenance": model_provenance,
+        "processing_history": processing_history[-20:],
         "observations": grounded,
         "open_questions": list(dict.fromkeys([
             *[
@@ -531,7 +562,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         "candidate_overflow": candidate_overflow,
         "status": "partial" if (unprocessed_pages or unreadable_pages or candidate_overflow) else "available",
         "model_authority": "review_only",
-        "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+        "source_text_sha256": source_text_hash,
     }
     analysis.candidates = metadata
     db.add(analysis)
@@ -775,15 +806,22 @@ def review_document_candidate(
         source_label = source_prefix + filename[:max(0, 160 - len(source_prefix) - len(source_suffix))] + source_suffix
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
+        related_source_evidence_ids = {evidence_id}
+        if duplicate_of_evidence_id:
+            related_source_evidence_ids.add(duplicate_of_evidence_id)
         existing = db.query(CareAssertion).filter(
             CareAssertion.person_id == person_id,
             CareAssertion.field == document_field,
             CareAssertion.assertion_kind == "document_reviewed_observation",
             CareAssertion.source_text == quote,
-            CareAssertion.created_by_caregiver_id == caregiver_id,
+            CareAssertion.assertion_status.in_(["accepted", "caregiver_reviewed"]),
         ).order_by(CareAssertion.recorded_at.desc()).all()
         assertion_row = next(
-            (row for row in existing if evidence_id in (row.evidence_ids or []) and row.asserted_value == asserted_value),
+            (
+                row for row in existing
+                if related_source_evidence_ids.intersection(row.evidence_ids or [])
+                and row.asserted_value == asserted_value
+            ),
             None,
         )
         # Use ORM writes on this path so the CareStateRevision listener and
@@ -815,7 +853,6 @@ def review_document_candidate(
             assertion_row = db.query(CareAssertion).filter(
                 CareAssertion.id == assertion_row.id,
                 CareAssertion.person_id == person_id,
-                CareAssertion.created_by_caregiver_id == caregiver_id,
             ).with_for_update().first()
             if assertion_row is None:
                 raise HTTPException(status_code=404, detail="Source-linked assertion not found in this care record")

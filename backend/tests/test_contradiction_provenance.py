@@ -236,3 +236,61 @@ def test_assertion_epistemic_state_is_separate_from_review_lifecycle():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_conflicting_accepted_document_assertions_create_unresolved_contradiction():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = session_factory()
+    try:
+        person = Person(id="document-conflict-person", name="Document conflict test person")
+        db.add(person)
+        db.commit()
+
+        first = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="document_medication_statement",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="Metformin 500 mg once daily",
+                source_label="Caregiver-reviewed discharge summary · page 1",
+                source_text="Metformin 500 mg once daily.",
+            ),
+        )
+        second = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="document_medication_statement",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="Metformin 1000 mg twice daily",
+                source_label="Caregiver-reviewed medication list · page 2",
+                source_text="Metformin 1000 mg twice daily.",
+            ),
+        )
+
+        contradiction = db.query(Contradiction).filter(
+            Contradiction.person_id == person.id,
+            Contradiction.subject_id == person.id,
+            Contradiction.field == "document_medication_statement",
+            Contradiction.resolution_status == "unresolved",
+        ).one()
+        assert contradiction.resolution_status == "unresolved"
+        assert set(contradiction.source_assertion_ids or []) == {first.id, second.id}
+        assert "no assertion was selected as true" in contradiction.description
+        assert first.assertion_status == "reported"
+        assert second.assertion_status == "reported"
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
