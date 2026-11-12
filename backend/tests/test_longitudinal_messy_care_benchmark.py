@@ -1007,16 +1007,32 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 "tests": [],
                 "follow_ups": [],
                 "contradictions": [],
-                "clinical_gaps": [{
-                    "gap": "current medication and administration details are missing",
-                    "why_it_matters": "The supplied history does not establish the current prescription or later dose administration.",
-                    "next_question": "Can the current medication list and administration record be confirmed?",
-                    "evidence_excerpt": claim,
-                }],
+                "clinical_gaps": [],
                 "caregiver_summary": claim[:140],
                 "clinician_summary": claim[:140],
             }
             topic = event.get("topic")
+            if topic == "medication":
+                result["clinical_gaps"].append({
+                    "gap": "current prescribed medication is not established",
+                    "why_it_matters": "A medication mention or caregiver report does not establish the current prescription.",
+                    "next_question": "What is the currently prescribed medication and dose?",
+                    "evidence_excerpt": claim,
+                })
+            elif topic == "medication_administration":
+                result["clinical_gaps"].append({
+                    "gap": "later administration of the missed dose is unknown",
+                    "why_it_matters": "The record does not establish whether the reported missed dose was later administered.",
+                    "next_question": "Was the reported missed dose later administered?",
+                    "evidence_excerpt": claim,
+                })
+            elif event.get("kind") == "correction":
+                result["clinical_gaps"].append({
+                    "gap": "corrected date of the original observation is not independently established",
+                    "why_it_matters": "The correction must remain attributed to the caregiver and the original event must remain in history.",
+                    "next_question": "What is the corrected date of the original sleep observation?",
+                    "evidence_excerpt": claim,
+                })
             if event.get("assertion_name") and event.get("classification") != "duplicate_same_occurrence":
                 result["symptoms"] = [{
                     "change_type": "new",
@@ -1219,15 +1235,22 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
 
         if any(event.get("classification") == "historical_conflicting_evidence"
                for event in ordered_events):
-            assert db.query(Contradiction).filter(
+            persisted_conflict = db.query(Contradiction).filter(
                 Contradiction.person_id == person.id,
                 Contradiction.resolution_status == "unresolved",
-            ).count() >= 1
+            ).one()
+            assert len(persisted_conflict.evidence_ids or []) >= 2
+            assert set(persisted_conflict.evidence_ids).issubset(
+                {event["evidence_id"] for event in ordered_events}
+            )
 
-        assert db.query(OpenQuestion).filter(
-            OpenQuestion.person_id == person.id,
-            OpenQuestion.status == "open",
-        ).count() >= 1
+        actual_questions = {
+            row.question for row in db.query(OpenQuestion).filter(
+                OpenQuestion.person_id == person.id,
+                OpenQuestion.status == "open",
+            ).all()
+        }
+        assert actual_questions == set(scenario["expected_final_state"]["unresolved_questions"])
 
 
 def test_correction_supersedes_assertion_and_preserves_append_only_history():
