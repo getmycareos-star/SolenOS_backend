@@ -73,7 +73,7 @@ def test_reminder_create_list_complete_and_cancel_persist_in_database():
     assert created["status"] == "open"
     assert created["created_by_caregiver_id"] == session["caregiver"]["id"]
     assert created["delivery_mode"] == "in_app_notification_feed"
-    assert created["notification_delivery_status"] == "in_app_feed_only"
+    assert created["notification_delivery_status"] == "in_app_notification_created"
 
     listed = client.get(
         f"/api/v1/reminders/{session['person']['id']}",
