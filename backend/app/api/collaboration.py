@@ -865,13 +865,23 @@ async def upload_evidence(
             prior_mime_type = prior_blob.mime_type
             prior_sha256 = prior_blob.sha256
             prior_type = prior.type
-            document_job = _ensure_document_intake_job(
-                db, scoped_person_id, scoped_caregiver_id, prior_evidence_id
-            ) if prior_type == "document" else None
-            document_job_id = str(document_job.id) if document_job else None
-            document_job_status = str(document_job.status) if document_job else ("queue_unavailable" if prior_type == "document" else "not_applicable")
+            document_job_id = None
+            document_job_status = "not_applicable"
             prior_source_text = bool(prior.source_text)
-            db.commit()
+            if prior_type == "document":
+                document_job_status = "queue_unavailable"
+                try:
+                    document_job = _ensure_document_intake_job(
+                        db, scoped_person_id, scoped_caregiver_id, prior_evidence_id
+                    )
+                    db.commit()
+                    document_job_id = str(document_job.id)
+                    document_job_status = str(document_job.status)
+                except Exception:
+                    db.rollback()
+                    logger.exception("Document processing could not be queued for existing evidence %s", prior_evidence_id)
+            else:
+                db.commit()
             return {
                 "evidence_id": prior_evidence_id,
                 "size_bytes": prior_size_bytes,
