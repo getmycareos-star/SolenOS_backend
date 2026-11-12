@@ -971,13 +971,13 @@ def review_appointment_outcome_proposal(
             )
             assertion.assertion_status = "caregiver_reviewed"
         else:
-            assertion.assertion_status = "caregiver_reviewed"
-            assertion.asserted_value = accepted_value
-            assertion.source_label = "Caregiver-reviewed appointment workspace"
-            assertion.source_text = source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else "")
-            assertion.observed_at = _parse_appointment_event_time(original.get("event_time_text"))
-            assertion.event_time_text = original.get("event_time_text")
-            assertion.updated_by_caregiver_id = caregiver_id
+            expected_source_text = source_quote + (("\nCaregiver correction context: " + correction_context) if correction_context else "")
+            if (
+                assertion.asserted_value != accepted_value
+                or assertion.source_text != expected_source_text
+                or assertion.source_proposal_id != proposal.id
+            ):
+                raise HTTPException(status_code=409, detail="An existing care-record assertion differs from this appointment proposal; it was not overwritten")
         assertion_id = assertion.id
         proposal.status = "accepted"
         db.add(AIOutputLCRDecision(
