@@ -48,3 +48,22 @@ class CaregiverInvitation(Base):
     accepted_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CaregiverResponsibilityTransfer(Base):
+    """Explicit, single-responsibility transfer with recipient acceptance."""
+    __tablename__ = "caregiver_responsibility_transfers"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_responsibility_id = Column(String, ForeignKey("caregiver_responsibilities.id", ondelete="RESTRICT"), nullable=False, index=True)
+    from_caregiver_profile_id = Column(String, ForeignKey("caregiver_profiles.id", ondelete="RESTRICT"), nullable=False)
+    to_caregiver_profile_id = Column(String, ForeignKey("caregiver_profiles.id", ondelete="RESTRICT"), nullable=False)
+    created_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
+    related_record_type = Column(String(40), nullable=True)
+    related_record_id = Column(String(160), nullable=True)
+    reason = Column(String(1000), nullable=True)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
