@@ -477,6 +477,14 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert uploaded.status_code == 201, uploaded.text
         upload_receipt = uploaded.json()
         evidence_id = upload_receipt["evidence_id"]
+        with Session() as db:
+            processing_job = db.query(QwenBackgroundJob).filter_by(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                workflow="document_intake",
+                evidence_ids_json=json.dumps([evidence_id]),
+            ).one()
+            processing_job_id = processing_job.id
         assert upload_receipt["persisted"] is True
         assert upload_receipt["sha256"] == hashlib.sha256(source.encode("utf-8")).hexdigest()
 
@@ -781,6 +789,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
 
 def test_postgres_document_intelligence_resumes_all_page_windows_and_preserves_provenance(monkeypatch):
     from app.api import document_intelligence
+    from app.models.capture_analysis import CaptureAnalysis
     from app.services import qwen_background_worker as worker
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
