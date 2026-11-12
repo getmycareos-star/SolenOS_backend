@@ -966,7 +966,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
     """
     import json
     from app.models.care import CareEvent, Caregiver, Correction, Evidence
-    from app.models.care_continuity import CareAssertion, CareDeltaRun
+    from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
     from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
     from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
     from app.services import delta_engine
@@ -1046,7 +1046,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                     "next_question": "What is the corrected date of the original sleep observation?",
                     "evidence_excerpt": claim,
                 })
-            if event.get("assertion_name") and event.get("classification") != "duplicate_same_occurrence":
+            if event.get("assertion_name"):
                 result["symptoms"] = [{
                     "change_type": "new",
                     "name": event["assertion_name"],
@@ -1207,6 +1207,19 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 CareAssertion.person_id == person.id,
                 CareAssertion.source_event_id == duplicate_id,
             ).count() == 0
+            duplicate_link = db.query(CareRecordRelationship).filter(
+                CareRecordRelationship.person_id == person.id,
+                CareRecordRelationship.source_type == "care_event",
+                CareRecordRelationship.source_id == duplicate_id,
+                CareRecordRelationship.relationship_type == "duplicate_observation_of",
+                CareRecordRelationship.target_type == "care_assertion",
+            ).one()
+            assert duplicate_link.target_id
+            duplicate_provenance = json.loads(duplicate_link.provenance)
+            assert duplicate_provenance["match_basis"] == "exact_subject_value_and_observed_at"
+            assert duplicate_provenance["evidence_ids"] == [
+                next(event["evidence_id"] for event in ordered_events if event["id"] == duplicate_id)
+            ]
 
         # Medication references, historical lists and missed-dose reports are not
         # sufficient to establish a current prescription.
