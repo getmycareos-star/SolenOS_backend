@@ -493,13 +493,15 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     metadata = copy.deepcopy(metadata)
     try:
         configured_model = get_ollama_config()[1]
+        configured_provider = "private_ollama"
     except HTTPException:
-        configured_model = os.getenv("OLLAMA_MODEL", "").strip() or None
+        configured_model = None
+        configured_provider = "unavailable_or_test_stub"
     source_text_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
     metadata["document_intelligence"] = {
         "version": 1,
         "model_provenance": {
-            "provider": "private_ollama" if configured_model else "unavailable_or_test_stub",
+            "provider": configured_provider,
             "model_tag": configured_model,
             "model_digest": None,
             "model_digest_status": "not_exposed_by_ollama_chat_response",
