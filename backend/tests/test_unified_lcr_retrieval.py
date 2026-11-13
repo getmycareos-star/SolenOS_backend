@@ -498,6 +498,28 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         _close_postgres_conversation_db(engine, connection, schema)
 
 
+def test_temporal_retrieval_rejects_invalid_and_reversed_explicit_dates():
+    now = datetime(2026, 11, 6, 12, tzinfo=UTC)
+    with pytest.raises(ValueError, match="Invalid calendar date"):
+        _temporal_window("What happened on 2026-02-30?", now=now)
+    with pytest.raises(ValueError, match="start date is after the end date"):
+        _temporal_window(
+            "Show care history between 2026-11-07 and 2026-11-01",
+            now=now,
+        )
+
+
+def test_temporal_retrieval_uses_exclusive_before_and_after_date_boundaries():
+    now = datetime(2026, 11, 6, 12, tzinfo=UTC)
+    before = _temporal_window("What happened before 2026-11-06?", now=now)
+    after = _temporal_window("What happened after 2026-11-05?", now=now)
+    assert before is not None and after is not None
+    assert before["start"] == "0001-01-01T00:00:00+00:00"
+    assert before["end"].startswith("2026-11-05T23:59:59")
+    assert after["start"] == "2026-11-06T00:00:00+00:00"
+    assert after["end"].startswith("2026-11-06T23:59:59")
+
+
 def test_temporal_retrieval_resolves_explicit_relative_windows():
     now = datetime(2026, 11, 6, 12, tzinfo=UTC)
     window = _temporal_window("What happened yesterday with sleep?", now=now)
