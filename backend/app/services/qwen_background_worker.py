@@ -173,6 +173,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     from app.models.care import CareEvent, Evidence
     from app.models.capture_analysis import CaptureAnalysis
     from app.services.capture_review import persist_source_grounded_daily_observations
+    from app.services.uncertainty import persist_source_clarification_questions
     from app.services.care_continuity_execution import execute_care_continuity_reconciliation
     from app.services.lcr_context import build_lcr_context
 
@@ -213,16 +214,37 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         evidence_payload = json.loads(evidence.source_text or "{}")
     except (TypeError, ValueError):
         evidence_payload = {}
+    try:
+        job_context = json.loads(job.context_text or "{}")
+    except (TypeError, ValueError):
+        job_context = {}
+    capture_mode = (
+        job_context.get("capture_mode")
+        if isinstance(job_context, dict) else None
+    )
+    natural_language_update = capture_mode == "natural_language_update"
     original_capture = evidence_payload.get("original_capture") if isinstance(evidence_payload, dict) else None
-    source_text = original_capture.get("notes") if isinstance(original_capture, dict) else None
+    if isinstance(original_capture, dict):
+        source_text = original_capture.get("notes") if natural_language_update else json.dumps(
+            original_capture, ensure_ascii=False, sort_keys=True, default=str
+        )
+    else:
+        source_text = evidence_payload.get("original_notes") if isinstance(evidence_payload, dict) else None
+        if not isinstance(source_text, str) or not source_text.strip():
+            quick_check_in = evidence_payload.get("quick_check_in") if isinstance(evidence_payload, dict) else None
+            source_text = json.dumps(quick_check_in, ensure_ascii=False, sort_keys=True, default=str) if isinstance(quick_check_in, dict) else None
     if not isinstance(source_text, str) or not source_text.strip():
         try:
             event_detail = json.loads(event.description or "{}")
         except (TypeError, ValueError):
             event_detail = {}
-        source_text = event_detail.get("notes") if isinstance(event_detail, dict) else None
+        if isinstance(event_detail, dict):
+            source_text = event_detail.get("notes") or json.dumps(
+                event_detail, ensure_ascii=False, sort_keys=True, default=str
+            )
     if not isinstance(source_text, str) or not source_text.strip():
         raise ValueError("daily_capture_source_text_missing")
+    source_text = source_text[:12_000]
 
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == job.person_id,
@@ -277,13 +299,22 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         raise ValueError("daily_capture_extraction_invalid")
     candidates = dict(candidates)
     candidates["observations"] = [
-        {**item, "review_status": "recorded_as_reported_observation"}
+        {
+            **item,
+            "review_status": (
+                "recorded_as_reported_observation"
+                if natural_language_update else "pending_review"
+            ),
+        }
         for item in candidates["observations"]
         if isinstance(item, dict)
     ]
-    # Natural-language updates preserve the caregiver's report without
-    # creating clarification tasks or follow-up work from model uncertainty.
-    candidates["open_questions"] = []
+    if natural_language_update:
+        # A free-form update preserves the caregiver's report as reported
+        # evidence; model-generated questions must not create extra work.
+        candidates["open_questions"] = []
+    elif not isinstance(candidates.get("open_questions"), list):
+        candidates["open_questions"] = []
 
     current_job = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.id == job.id,
@@ -321,18 +352,36 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         db.commit()
         return True
 
-    observation_count = persist_source_grounded_daily_observations(
-        db,
-        person_id=job.person_id,
-        caregiver_id=job.caregiver_id,
-        evidence_id=evidence_id,
-        source_event_id=event_id,
-        source_text=source_text,
-        candidates=candidates,
-        reported_at=event.recorded_at,
-    )
     candidate_count = len(candidates["observations"])
+    if natural_language_update:
+        observation_count = persist_source_grounded_daily_observations(
+            db,
+            person_id=job.person_id,
+            caregiver_id=job.caregiver_id,
+            evidence_id=evidence_id,
+            source_event_id=event_id,
+            source_text=source_text,
+            candidates=candidates,
+            reported_at=event.recorded_at,
+        )
+    else:
+        # Structured captures are not promoted from model candidates into LCR
+        # assertions. Keep every extracted item pending caregiver review.
+        observation_count = 0
+        questions = candidates.get("open_questions") or []
+        if questions:
+            persist_source_clarification_questions(
+                db,
+                person_id=job.person_id,
+                caregiver_id=job.caregiver_id,
+                source_kind="daily_capture_extraction",
+                source_record_type="care_event",
+                source_record_id=event_id,
+                evidence_ids=[evidence_id],
+                questions=questions,
+            )
     assessment_status = "available" if candidate_count else "not_applicable"
+    review_status = "not_required" if natural_language_update or not candidate_count else "required"
     reconciliation = execute_care_continuity_reconciliation(
         db,
         job.person_id,
@@ -344,7 +393,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         stage_statuses={
             "extraction": "available",
             "assessment": assessment_status,
-            "review": "not_required",
+            "review": review_status,
         },
     )
     lcr_context = build_lcr_context(
@@ -375,7 +424,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "evidence": "verified",
         "extraction": "available",
         "assessment": assessment_status,
-        "review": "not_required",
+        "review": review_status,
         "reconciliation": "completed",
         "longitudinal_retrieval": "not_verified",
         "projection": projection_status,
@@ -389,6 +438,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "extraction_status": "available",
         "candidate_count": candidate_count,
         "observation_count": observation_count,
+        "review_required": review_status == "required",
+        "capture_mode": capture_mode or "legacy_natural_language_update",
         "assessment_status": assessment_status,
         "reconciliation_status": "completed",
         "projection_status": projection_status,
@@ -411,6 +462,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "analysis_id": analysis.id,
             "candidate_count": candidate_count,
             "observation_count": observation_count,
+            "review_required": review_status == "required",
+            "capture_mode": capture_mode or "legacy_natural_language_update",
             "projection_status": projection_status,
             "model_output_written_to_lcr": False,
             "source_grounded_observations_projected": observation_count,
