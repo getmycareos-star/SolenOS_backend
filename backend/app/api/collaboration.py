@@ -4243,7 +4243,7 @@ def _fit_model_context_lines_across_sources(
             while cursor < len(candidates):
                 candidate = candidates[cursor]
                 cursor += 1
-                rendered_length = len(candidate[2])
+                rendered_length = len(candidate[2]) + (1 if selected else 0)
                 if used_chars + rendered_length <= max(0, int(max_chars)):
                     selected.append(candidate)
                     used_chars += rendered_length
