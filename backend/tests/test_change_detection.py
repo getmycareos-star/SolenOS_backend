@@ -2216,11 +2216,12 @@ def test_future_dated_events_are_not_counted_as_occurrences_yet():
         teardown_db()
 
 
-def test_truncated_longitudinal_history_never_claims_a_stable_baseline(monkeypatch):
+def test_longitudinal_history_is_fetched_in_batches_without_truncation(monkeypatch):
     setup_db()
     try:
         import app.services.baseline as baseline_service
 
+        # A tiny fetch batch proves the batch size is not a historical row cap.
         monkeypatch.setattr(baseline_service, "MAX_LONGITUDINAL_EVENTS", 2)
         db = TestingSessionLocal()
         person = Person(id="bounded-history-person", name="Bounded history test")
@@ -2250,18 +2251,19 @@ def test_truncated_longitudinal_history_never_claims_a_stable_baseline(monkeypat
         ))
         db.commit()
         counts = baseline_service.get_longitudinal_event_counts(db, person.id, "mobility", None, now)
-        assert counts["history_truncated"] is True
+        assert counts["history_truncated"] is False
         assert {event.id for event in counts["all_events"]} == {
-            "bounded-baseline-event", "bounded-current-event"
+            "bounded-old-event", "bounded-baseline-event", "bounded-current-event"
         }
         baseline = baseline_service.build_baseline(db, person.id, "mobility", None, now)
         assert baseline is not None
+        assert baseline.history_completeness == "complete"
+        assert baseline.state_value is None
+        # Complete source history does not imply complete observation coverage.
         assert baseline.confidence.value == "low"
         assert baseline.is_stable is False
         assert baseline.frequency_per_period is None
         assert baseline.documentation_bias_flag is True
-        assert "bounded to the most recent 2" in baseline.state_value
-        assert baseline.history_completeness == "truncated"
         db.close()
     finally:
         teardown_db()
@@ -2312,7 +2314,7 @@ def test_truncated_source_history_withholds_rate_and_frequency_patterns(monkeypa
         teardown_db()
 
 
-def test_truncated_baseline_history_does_not_claim_emergence(monkeypatch):
+def test_complete_baseline_history_can_identify_emergence_when_coverage_exists(monkeypatch):
     setup_db()
     try:
         from app.services.change_detection import detect_event_changes
@@ -2347,11 +2349,14 @@ def test_truncated_baseline_history_does_not_claim_emergence(monkeypatch):
         ))
         db.commit()
         changes = detect_event_changes(db, person.id, "mobility", None, now)
-        assert all(change.change_type.value != "emergence" for change in changes)
-        recurrence_changes = [change for change in changes if change.change_type.value == "recurrence"]
-        assert recurrence_changes
-        assert recurrence_changes[0].previous_count is None
-        assert "unavailable because eligible source history was truncated" in recurrence_changes[0].previous_state
+        emergence_changes = [change for change in changes if change.change_type.value == "emergence"]
+        assert emergence_changes
+        assert emergence_changes[0].previous_count == 0
+        assert emergence_changes[0].current_count == 3
+        assert emergence_changes[0].baseline_coverage_status == "covered"
+        baseline = baseline_service.build_baseline(db, person.id, "mobility", None, now)
+        assert baseline is not None
+        assert baseline.history_completeness == "complete"
         db.close()
     finally:
         teardown_db()
