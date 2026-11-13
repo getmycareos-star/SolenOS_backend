@@ -944,6 +944,13 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
         teardown()
 
 
+
+def test_companion_recognizes_common_care_document_names():
+    assert collaboration._is_document_question("What does the discharge summary say about walking?")
+    assert collaboration._is_document_question("Can you find the care plan?")
+    assert collaboration._is_document_question("What did the clinic letter say?")
+    assert not collaboration._is_document_question("Has Mum been walking more often?")
+
 def test_companion_source_ranking_prefers_relevance_over_recency_and_synonyms():
     older_relevant = SimpleNamespace(
         title="Overnight rest", description="Restless sleep and repeated waking.",
