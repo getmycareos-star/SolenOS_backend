@@ -510,10 +510,19 @@ def build_lcr_context(
             }.get(source_name, ("occurred_at", "observed_at", "effective_at", "scheduled_at", "recorded_at", "uploaded_at", "created_at", "updated_at"))
             temporal_columns = [table.c[name] for name in temporal_fields if name in table.c]
             if temporal_columns:
-                temporal_value = temporal_columns[0] if len(temporal_columns) == 1 else func.coalesce(*temporal_columns)
                 start_value = datetime.fromisoformat(temporal_window["start"])
                 end_value = datetime.fromisoformat(temporal_window["end"])
-                statement = statement.where(temporal_value >= start_value, temporal_value <= end_value)
+                # A delayed entry has two valid clocks: when the care event
+                # happened and when it entered SolenOS. Coalescing these fields
+                # silently hides a record when its event time is outside the
+                # requested window but its recording time is inside it (or vice
+                # versa). Include the row when either available timestamp falls
+                # in the window; retain both timestamps in the returned record
+                # so the caregiver can see the distinction.
+                statement = statement.where(or_(*[
+                    and_(column >= start_value, column <= end_value)
+                    for column in temporal_columns
+                ]))
             else:
                 # Undated sources cannot satisfy an explicit temporal query.
                 statement = statement.where(false())
