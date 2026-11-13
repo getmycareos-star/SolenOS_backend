@@ -576,6 +576,8 @@ def build_lcr_context(
             "returned_count": len(items),
             "candidate_count": candidate_count,
             "candidate_scan_complete": query_scan,
+            # A completed database scan may still return only a ranked subset.
+            "returned_history_complete": bool(query_scan and not has_more),
             "has_more": has_more,
             "limit": limit,
             "selection": "ranked_query_matches" if query_scan and direct_terms else (
@@ -666,6 +668,17 @@ def build_lcr_context(
         "read_only": True,
         "history_coverage": "complete_history_scan_ranked_subset" if include_all_history else ("query_scanned_ranked_subset" if terms or temporal_window else "bounded_recent_subset"),
         "retrieval_scan_complete": bool(terms or temporal_window or include_all_history) and not missing_required and not missing_optional,
+        "retrieval_projection_complete": (
+            bool(terms or temporal_window or include_all_history)
+            and not missing_required
+            and not missing_optional
+            and all(
+                source.get("candidate_scan_complete") is True
+                and source.get("has_more") is False
+                for source in sources.values()
+                if source.get("status") in {"available", "empty"}
+            )
+        ),
         "query_applied": bool(terms),
         "retrieval_strategy": "person_scoped_full_source_scan" if include_all_history else ("hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history"),
         "temporal_window": temporal_window,
@@ -692,6 +705,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             "schema_status": context.get("schema_status"),
             "history_coverage": context.get("history_coverage"),
             "retrieval_scan_complete": context.get("retrieval_scan_complete", False),
+            "retrieval_projection_complete": context.get("retrieval_projection_complete", False),
             "missing_required_sources": context.get("missing_required_sources", []),
             "missing_optional_sources": context.get("missing_optional_sources", []),
             "evidence_lineage": context.get("evidence_lineage", {
