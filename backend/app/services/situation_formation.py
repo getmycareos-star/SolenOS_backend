@@ -11,7 +11,10 @@ from app.models.uncertainty import (
 from app.models.significance import SignificanceAssessment
 from app.services.change_detection import detect_event_changes
 from app.services.pattern_detection import detect_patterns
-from app.services.care_continuity import has_valid_caregiver_necessity, prioritize_caregiver_questions
+from app.services.care_continuity import (
+    has_valid_caregiver_necessity,
+    prioritize_caregiver_questions,
+)
 from app.core.change_enums import (
     SituationType,
     SituationState,
