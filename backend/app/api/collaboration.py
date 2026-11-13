@@ -69,6 +69,7 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
+from app.services.lcr_context import _expanded_search_terms
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -2260,10 +2261,11 @@ def _lcr_context_chronological_key(line: str) -> tuple[float, str]:
 
 def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
     """Remove unrelated records from model context after ranking, preserving broad queries."""
-    query_terms = {
+    query_tokens = [
         token for token in re.findall(r"[a-z0-9']{3,}", (query or "").casefold())
         if token not in _CONTEXT_STOPWORDS
-    }
+    ]
+    query_terms = set(_expanded_search_terms(query_tokens))
     generic_terms = {
         "record", "records", "recorded", "history", "information", "care", "caregiver",
         "caregivers", "person", "people", "observation", "observations", "note", "notes",
