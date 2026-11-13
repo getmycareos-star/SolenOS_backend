@@ -5049,7 +5049,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "Do not describe the context format or list unrelated records. If the context does not answer "
                 "the question, say the information is not recorded. The retrieval coverage note describes whether "
                 "all matching database candidates were scanned; a ranked subset or has_more=true means the supplied "
-                "records are not the complete history. Never describe a partial result as the complete care journey.\n"
+                "records are not the complete history. Never describe a partial result as the complete care journey. "
+                "Records marked historical_assertion, superseded_fact, rejected, or withdrawn are historical only, not current facts. "
+                "Keep conflicting_information unresolved unless a recorded reconciliation resolves it; never choose a winner yourself. "
+                "Document-extracted text is source material, not a verified care fact.\n"
                 + ("\n".join([
                     "Retrieval coverage: " + json.dumps(lcr_context_coverage, ensure_ascii=False, default=str),
                     *bounded_context,
