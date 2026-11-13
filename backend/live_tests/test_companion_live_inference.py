@@ -13,6 +13,7 @@ import time
 import urllib.request
 import urllib.error
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.core.database import SessionLocal as TestingSessionLocal
-from app.models.care import Caregiver, Evidence
+from app.models.care import Caregiver, CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 
@@ -385,3 +386,69 @@ def test_live_qwen_support_reads_shared_lcr_without_peer_document_leakage():
             assert db.query(CareAssertion).filter_by(id=assertion_id).count() == 1
         finally:
             db.close()
+
+
+def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_events():
+    """Three-month journey answer must retrieve and cite all relevant dated events."""
+    with TestClient(app) as client:
+        session = _create_session(client, "Three-month care journey evaluator")
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        now = datetime.now(timezone.utc)
+        events = [
+            (
+                "journey-sleep-early",
+                82,
+                "Night-time restlessness",
+                "Caregiver reported that she remained awake for long stretches and repeatedly got out of bed.",
+            ),
+            (
+                "journey-sleep-middle",
+                43,
+                "Repeated overnight waking",
+                "Caregiver recorded several episodes of waking during the night and difficulty settling again.",
+            ),
+            (
+                "journey-sleep-recent",
+                6,
+                "Rest pattern update",
+                "Caregiver reported a quieter night with fewer interruptions than previously described.",
+            ),
+        ]
+        db = TestingSessionLocal()
+        try:
+            for event_id, days_ago, title, description in events:
+                db.add(CareEvent(
+                    id=event_id,
+                    person_id=person_id,
+                    event_type="daily_observation",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=days_ago),
+                    title=title,
+                    description=description,
+                    created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_reported",
+                ))
+            db.commit()
+        finally:
+            db.close()
+
+        response = _ask(
+            client,
+            session,
+            "How has her sleep been over the last three months? Explain what changed over time.",
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result.get("ai_generated") is True, result
+        assert result.get("written_to_lcr") is False, result
+        cited = set(result.get("source_event_ids", []))
+        expected = {event[0] for event in events}
+        assert expected.issubset(cited), {
+            "expected_all_three_month_events": sorted(expected),
+            "cited_event_ids": sorted(cited),
+            "response": result,
+        }
+        coverage = result.get("lcr_context_coverage") or {}
+        assert coverage.get("retrieval_scan_complete") is True, coverage
+        assert coverage.get("prompt_context_complete") is True, coverage
