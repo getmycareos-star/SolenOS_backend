@@ -258,6 +258,19 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 assert completed_analysis.execution_status["review"] == "required"
                 assert completed_analysis.execution_status["projection"] == "verified"
                 assert completed_analysis.execution_status["longitudinal_retrieval"] == "verified"
+                analysis_id = completed_analysis.id
+
+            analysis_response = client.get(
+                f"/api/v1/capture/analyses/{analysis_id}", headers=headers
+            )
+            assert analysis_response.status_code == 200, analysis_response.text
+            assert analysis_response.json()["review_required"] is True
+            assert analysis_response.json()["candidates"]["observations"][0]["review_status"] == "pending_review"
+            foreign_analysis_response = client.get(
+                f"/api/v1/capture/analyses/{analysis_id}",
+                headers={"Authorization": "Bearer " + other_token},
+            )
+            assert foreign_analysis_response.status_code == 404
 
             retry = client.post(
                 "/api/v1/daily/log",
