@@ -165,9 +165,26 @@ def test_full_care_journey_scan_does_not_require_lexical_match_and_reports_remai
         assert source["returned_count"] == 50
         assert source["has_more"] is True
         assert source["returned_history_complete"] is False
+        assert source["next_offset"] == 50
         assert context["history_coverage"] == "complete_history_scan_ranked_subset"
         assert context["retrieval_scan_complete"] is True
         assert context["retrieval_projection_complete"] is False
+        with Session(engine) as db:
+            second_page = build_lcr_context(
+                db, "person-a", limit_per_source=50,
+                query="tell me the complete care journey",
+                include_all_history=True,
+                source_offsets={"events": 50},
+            )
+        second_source = second_page["sources"]["events"]
+        assert second_source["candidate_count"] == 60
+        assert second_source["offset"] == 50
+        assert second_source["returned_count"] == 10
+        assert second_source["has_more"] is False
+        assert second_source["returned_history_complete"] is False
+        assert {item["id"] for item in second_source["items"]} == {
+            f"journey-event-{index:03d}" for index in range(50, 60)
+        }
         prompt = format_lcr_context_for_prompt(context)
         assert '"retrieval_projection_complete":false' in prompt
     finally:
