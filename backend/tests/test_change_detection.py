@@ -2269,12 +2269,12 @@ def test_longitudinal_history_is_fetched_in_batches_without_truncation(monkeypat
         teardown_db()
 
 
-def test_truncated_source_history_withholds_rate_and_frequency_patterns(monkeypatch):
+def test_pattern_detection_reads_full_history_in_bounded_fetch_batches(monkeypatch):
     setup_db()
     try:
         import app.services.pattern_detection as pattern_service
 
-        monkeypatch.setattr(pattern_service, "MAX_PATTERN_SOURCE_EVENTS", 2)
+        monkeypatch.setattr(pattern_service, "PATTERN_SOURCE_FETCH_BATCH_SIZE", 2)
         db = TestingSessionLocal()
         person = Person(id="bounded-pattern-person", name="Bounded pattern test")
         caregiver = Caregiver(
@@ -2285,8 +2285,8 @@ def test_truncated_source_history_withholds_rate_and_frequency_patterns(monkeypa
         db.commit()
         now = datetime.now(timezone.utc)
         for event_id, days_ago in (
-            ("bounded-pattern-event-1", 20),
-            ("bounded-pattern-event-2", 10),
+            ("bounded-pattern-event-1", 420),
+            ("bounded-pattern-event-2", 200),
             ("bounded-pattern-event-3", 1),
         ):
             db.add(CareEvent(
@@ -2296,19 +2296,18 @@ def test_truncated_source_history_withholds_rate_and_frequency_patterns(monkeypa
             ))
         db.add(ObservationCoverage(
             id="bounded-pattern-coverage", person_id=person.id, subject_type="fall",
-            window_start=now - timedelta(days=90), window_end=now,
+            window_start=now - timedelta(days=500), window_end=now,
             coverage_status="covered", source_evidence_ids=[],
-            rationale="The benchmark interval was explicitly observed.",
+            rationale="The full benchmark interval was explicitly observed.",
             recorded_by_caregiver_id=caregiver.id,
         ))
         db.commit()
         patterns = pattern_service.detect_patterns(db, person.id, "fall", None, now)
         recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
-        assert recurrence.rate_per_period is None
-        assert recurrence.pattern_metrics["normalized_rate_available"] is False
-        assert recurrence.pattern_metrics["source_history_truncated"] is True
-        assert any("denominator may be incomplete" in note for note in recurrence.alternative_interpretations or [])
-        assert all(item.pattern_type.value not in {"frequency_increase", "frequency_decrease"} for item in patterns)
+        assert recurrence.evidence_count == 3
+        assert recurrence.pattern_metrics["source_history_truncated"] is False
+        assert not any("denominator may be incomplete" in note for note in recurrence.alternative_interpretations or [])
+        assert recurrence.temporal_start <= now - timedelta(days=420)
         db.close()
     finally:
         teardown_db()
