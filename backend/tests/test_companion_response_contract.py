@@ -168,7 +168,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert "collected date: 2026-10-26T08:20:00" in user_payload
         assert "reported by: Daughter" in user_payload
         assert "Did the restless sleep continue on another night?" in user_payload
-        assert "intended_answerer_role" in user_payload
+        assert '"intended_answerer_role": "professional"' in user_payload
         assert "ask no more than one focused question" in system_prompt
         assert "Did the restless sleep continue on another night?" not in data["reply"]
         assert captured["options"]["num_predict"] > 32
