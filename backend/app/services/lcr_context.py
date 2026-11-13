@@ -102,6 +102,17 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "evidence_ids", "is_intended_outcome", "created_at"],
         "order": ["observed_at", "created_at"],
     },
+    "handoffs": {
+        "table": "caregiver_handoffs",
+        "required": False,
+        "fields": [
+            "id", "from_caregiver_id", "to_caregiver_id", "person_id",
+            "responsibility_type", "scope", "timestamp", "effective_time",
+            "context", "acceptance_status", "acceptance_evidence",
+            "completion_evidence", "is_completed", "provenance", "created_at",
+        ],
+        "order": ["effective_time", "timestamp", "created_at"],
+    },
     "timeline": {
         "table": "care_timeline_entries",
         "required": False,
@@ -232,6 +243,7 @@ SEARCH_FIELDS = {
     "document_extractions": ["source_text"],
     "decisions": ["title", "decision_text", "context", "decision_status"],
     "decision_outcomes": ["outcome_status", "description"],
+    "handoffs": ["responsibility_type", "scope", "context", "acceptance_status", "acceptance_evidence", "completion_evidence", "provenance"],
     "timeline": ["entry_type", "title", "summary", "epistemic_status"],
     "uncertainties": ["question", "uncertainty_type", "status"],
     "uncertainty_assessments": ["subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "known_value"],
