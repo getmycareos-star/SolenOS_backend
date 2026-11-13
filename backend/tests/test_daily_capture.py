@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -2010,8 +2011,6 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
 
 
 def test_uncertain_medication_change_report_never_overwrites_reviewed_medication_record(monkeypatch):
-    from app.api import v1 as api_v1
-
     setup_db()
     try:
         seed_person_and_caregiver()
@@ -2161,12 +2160,18 @@ def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatc
 
 def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeypatch):
     """Reference scenario: preserve a full day without shifting recordkeeping work to the caregiver."""
+    from app.api import v1 as api_v1
 
     setup_db()
     try:
         seed_person_and_caregiver()
         client = TestClient(app)
         headers = session_headers("person-daily-test", "caregiver-daily-test")
+
+        def reject_inline_extraction(*args, **kwargs):
+            raise AssertionError("Daily Care save must not wait for Qwen extraction")
+
+        monkeypatch.setattr(api_v1, "extract_review_candidates", reject_inline_extraction)
         reports = [
             "Mum slept poorly last night and seemed more unsettled this morning.",
             "Mum barely touched her lunch today. She drank some water, though.",
@@ -2206,6 +2211,7 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
 
         receipts = []
         for index, report in enumerate(reports, start=1):
+            started_at = time.monotonic()
             response = client.post(
                 "/api/v1/daily-care/entries",
                 headers=headers,
@@ -2217,7 +2223,9 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
                     "notes": report,
                 },
             )
+            elapsed = time.monotonic() - started_at
             assert response.status_code == 200, response.text
+            assert elapsed < 10, f"Daily Care save waited {elapsed:.1f}s for background extraction"
             assert response.json()["success"] is True
             receipts.append(response.json())
 
