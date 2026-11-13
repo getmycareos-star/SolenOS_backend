@@ -5255,6 +5255,40 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # use. A sentence is linked only when its wording appears in that source;
     # paraphrases and unmatched statements are explicitly left unsupported.
     claim_source_records = []
+    handoff_ids = list(dict.fromkeys(selected_ids_by_type.get("handoffs", [])))
+    handoff_rows = db.query(CaregiverHandoff).filter(
+        CaregiverHandoff.person_id == person_id,
+        CaregiverHandoff.id.in_(handoff_ids or {"__no_matching_handoff__"}),
+    ).all()
+    for handoff in handoff_rows:
+        handoff_status = getattr(handoff.acceptance_status, "value", handoff.acceptance_status)
+        handoff_source_text = " ".join(
+            str(value).strip()
+            for value in (
+                handoff.responsibility_type,
+                handoff.scope,
+                handoff.context,
+                handoff.acceptance_evidence,
+                handoff.completion_evidence,
+                handoff.provenance,
+            )
+            if value and str(value).strip()
+        )
+        claim_source_records.append({
+            "record_type": "caregiver_handoff",
+            "record_id": str(handoff.id),
+            "label": "Caregiver handoff",
+            "source_text": handoff_source_text,
+            "occurred_at": (
+                handoff.effective_time.isoformat() if handoff.effective_time
+                else handoff.timestamp.isoformat() if handoff.timestamp else None
+            ),
+            "recorded_at": handoff.created_at.isoformat() if handoff.created_at else None,
+            "from_caregiver_id": str(handoff.from_caregiver_id),
+            "to_caregiver_id": str(handoff.to_caregiver_id),
+            "acceptance_status": str(handoff_status),
+            "is_completed": bool(handoff.is_completed),
+        })
     event_rows = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
         CareEvent.id.in_(list(dict.fromkeys(source_event_ids)) or {"__no_matching_event__"}),
