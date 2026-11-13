@@ -530,13 +530,15 @@ def build_lcr_context(
         query_scan = bool(terms or temporal_window)
         candidate_count = 0
         ranked_items: list[tuple[int, int, dict[str, Any]]] = []
-        scan_statement = statement if query_scan else statement.limit(limit)
+        scan_statement = statement if query_scan else statement.limit(limit + 1)
         result = db.execute(
             scan_statement.execution_options(stream_results=True)
         ).mappings().yield_per(500)
         expanded_only = [term for term in terms if term not in direct_terms]
         for row in result:
             candidate_count += 1
+            if not query_scan and candidate_count > limit:
+                continue
             item = {key: _safe_value(value, key) for key, value in dict(row).items()}
             information_status, interpretation_limit = _information_status(source_name, item)
             item["information_status"] = information_status
@@ -681,7 +683,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
     chunks = [header]
     current_length = len(header)
     for source_name, source in context.get("sources", {}).items():
-        section = f"\n[{source_name}; status={source.get('status')}; returned={source.get('returned_count', 0)}; has_more={source.get('has_more', False)}]"
+        section = f"\n[{source_name}; status={source.get('status')}; returned={source.get('returned_count', 0)}; candidates={source.get('candidate_count', 'not_counted')}; scan_complete={source.get('candidate_scan_complete', False)}; has_more={source.get('has_more', False)}]"
         if current_length + len(section) > max_chars:
             chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
             break
