@@ -4822,16 +4822,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # evidence context. Client OCR text is never read here: only a persisted
         # CaptureAnalysis bound to the original upload and checksum is eligible.
         from app.api.document_lifecycle import _verify_persisted_extraction
-        for evidence in evidence_rows:
-            if evidence.type != "document":
-                continue
-            analysis = db.query(CaptureAnalysis).filter(
+        # Query verified document analyses from their canonical evidence linkage,
+        # not from the recent-evidence display window. This prevents a document
+        # from disappearing when many newer evidence rows crowd that window.
+        document_analysis_rows = (
+            db.query(CaptureAnalysis, EvidenceModel)
+            .join(EvidenceModel, EvidenceModel.id == CaptureAnalysis.source_evidence_id)
+            .filter(
                 CaptureAnalysis.person_id == person_id,
                 CaptureAnalysis.caregiver_id == caregiver_id,
-                CaptureAnalysis.source_evidence_id == evidence.id,
                 CaptureAnalysis.extraction_status == "available",
-            ).order_by(CaptureAnalysis.created_at.desc()).first()
-            if analysis is None:
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+            )
+            .order_by(CaptureAnalysis.created_at.desc())
+            .limit(12)
+            .all()
+        )
+        for analysis, evidence in document_analysis_rows:
+            if evidence.type != "document":
                 continue
             upload = db.query(EvidenceUpload).filter(
                 EvidenceUpload.evidence_id == evidence.id
@@ -4863,10 +4872,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "Persisted server-extracted document evidence: "
                 + json.dumps(extraction_context, ensure_ascii=False)
             )
-            # Companion's canonical retrieval projection is preferred. Keep a
-            # caregiver-scoped, integrity-verified fallback record so a relevant
-            # document cannot disappear merely because the projection's lexical
-            # selector omits its extraction row.
             verified_document_context_lines.append(
                 "Shared LCR context (source-attributed; verified original upload): "
                 + json.dumps({
