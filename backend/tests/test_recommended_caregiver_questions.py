@@ -3,6 +3,7 @@ import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -15,6 +16,8 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.anonymous_session import AnonymousSession
 from app.models.uncertainty import OpenQuestion, InformationGap
+
+pytestmark = pytest.mark.session_security
 
 
 engine = create_engine(
