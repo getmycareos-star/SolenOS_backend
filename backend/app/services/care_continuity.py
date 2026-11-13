@@ -124,7 +124,11 @@ def has_valid_caregiver_necessity(
                 isinstance(source_id, str) and db.query(InformationGap.id).filter(
                     InformationGap.id == source_id,
                     InformationGap.person_id == scoped_person_id,
-                    InformationGap.lifecycle_status == GapLifecycleStatus.OPEN,
+                    InformationGap.lifecycle_status.in_([
+                        GapLifecycleStatus.OPEN,
+                        GapLifecycleStatus.REOPENED,
+                        GapLifecycleStatus.PARTIALLY_RESOLVED,
+                    ]),
                 ).first()
             )
         if (
