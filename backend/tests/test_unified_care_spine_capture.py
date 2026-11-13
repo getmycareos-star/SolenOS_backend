@@ -438,7 +438,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 json={
                     "person_id": person_id,
                     "text": "What does the uploaded care document say about sleep?",
-                    "client_turn_id": "document-companion-" + suffix,
+                    "client_turn_id": str(uuid.uuid4()),
                 },
             )
             assert companion_document.status_code == 200, companion_document.text
