@@ -613,6 +613,20 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         capture_request_fingerprint = hashlib.sha256(
             json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
         ).hexdigest()
+        # Use the indexed immutable evidence-ingestion key to reject changed
+        # content before scanning event JSON or touching the extraction worker.
+        # A reused key can never silently create a second care event.
+        capture_ingestion_key = f"daily-capture:{caregiver_id}:{capture_idempotency_key}"[:128]
+        existing_capture_evidence = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.ingestion_key == capture_ingestion_key,
+        ).first()
+        if (
+            existing_capture_evidence is not None
+            and existing_capture_evidence.ingestion_request_sha256
+            and existing_capture_evidence.ingestion_request_sha256 != capture_request_fingerprint
+        ):
+            raise HTTPException(status_code=409, detail="This Daily Care request key was already used for different content")
         existing_events = db.query(CareEventModel).filter(
             CareEventModel.person_id == person_id,
             CareEventModel.created_by_caregiver_id == caregiver_id,
