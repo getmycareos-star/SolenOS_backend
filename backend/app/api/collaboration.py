@@ -5102,7 +5102,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
             document_question_for_fallback = bool(re.search(
-                r"\b(?:uploaded document|document|file|attachment|letter|pdf)\b",
+                r"\b(?:uploaded document|document|file|attachment|letter|pdf|discharge summary|medical record)\b",
                 user_text,
                 re.IGNORECASE,
             ))
