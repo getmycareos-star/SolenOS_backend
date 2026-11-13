@@ -8,7 +8,7 @@ from app.services.temporal_intelligence import utc_now
 from app.services.observation_coverage import assess_observation_coverage
 
 
-MAX_LONGITUDINAL_EVENTS = 5000
+LONGITUDINAL_FETCH_BATCH_SIZE = 500
 BASELINE_ANALYSIS_VERSION = "longitudinal-baseline-v2"
 
 
@@ -99,7 +99,7 @@ def get_longitudinal_event_counts(
     # older evidence and can turn an incomplete baseline into a false change.
     queried_events = list(
         query.order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
-        .yield_per(MAX_LONGITUDINAL_EVENTS)
+        .yield_per(LONGITUDINAL_FETCH_BATCH_SIZE)
     )
     history_truncated = False
     queried_events.sort(key=lambda event: (_ensure_utc(event.occurred_at), event.id))
