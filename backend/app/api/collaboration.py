@@ -5487,15 +5487,39 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             record_id = reference.get("record_id")
             if record_type and record_id:
                 selected_ids_by_type.setdefault(record_type, []).append(record_id)
+        # Preserve exact IDs for the verified direct-document lines actually
+        # selected into the prompt, even if a projection serializer omitted
+        # its top-level source_id.
+        included_line_set = set(included_model_context_lines)
+        selected_verified_document_ids: list[str] = []
+        selected_verified_document_evidence_ids: list[str] = []
+        for document_line in verified_document_context_lines:
+            if document_line not in included_line_set:
+                continue
+            try:
+                document_payload = json.loads(document_line[document_line.index("{"):])
+                document_id = document_payload.get("source_id")
+                document_record = document_payload.get("record") if isinstance(document_payload.get("record"), dict) else {}
+                linked_evidence_id = document_record.get("source_evidence_id")
+            except (ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if document_id:
+                selected_verified_document_ids.append(str(document_id))
+            if linked_evidence_id:
+                selected_verified_document_evidence_ids.append(str(linked_evidence_id))
         # Public source-ID fields must describe only records actually supplied
         # to the model, never the larger pre-ranking candidate pools.
         source_event_ids = list(dict.fromkeys(selected_ids_by_type.get("events", [])))
         source_appointment_ids = list(dict.fromkeys(selected_ids_by_type.get("appointments", [])))
         source_assertion_ids = list(dict.fromkeys(selected_ids_by_type.get("assertions", [])))
-        source_document_analysis_ids = list(dict.fromkeys(selected_ids_by_type.get("document_extractions", [])))
+        source_document_analysis_ids = list(dict.fromkeys([
+            *selected_ids_by_type.get("document_extractions", []),
+            *selected_verified_document_ids,
+        ]))
         source_evidence_ids = list(dict.fromkeys([
             *selected_ids_by_type.get("evidence", []),
             *selected_ids_by_type.get("care_evidence", []),
+            *selected_verified_document_evidence_ids,
         ]))
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
