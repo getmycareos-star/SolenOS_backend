@@ -180,25 +180,31 @@ def has_valid_caregiver_necessity(
                     and source_row.subject_id == getattr(question, "subject_id", None)
                 )
             elif source_kind == "registered_action":
+                source_row = db.query(Action).filter(
+                    Action.id == source_id,
+                    Action.person_id == scoped_person_id,
+                    Action.status.in_(("needs_clarification", "pending_confirmation")),
+                    Action.requires_confirmation.is_(True),
+                    Action.expired_at.is_(None),
+                    Action.cancelled_at.is_(None),
+                    Action.superseded_by_action_id.is_(None),
+                ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
-                    isinstance(source_id, str) and db.query(Action.id).filter(
-                        Action.id == source_id,
-                        Action.person_id == scoped_person_id,
-                        Action.status.in_(("needs_clarification", "pending_confirmation")),
-                        Action.requires_confirmation.is_(True),
-                        Action.expired_at.is_(None),
-                        Action.cancelled_at.is_(None),
-                        Action.superseded_by_action_id.is_(None),
-                    ).first()
+                    source_row
+                    and str(source_row.subject_type or "patient") == getattr(question, "subject_type", None)
+                    and str(source_row.subject_id or scoped_person_id) == getattr(question, "subject_id", None)
                 )
             elif source_kind == "appointment_workspace_follow_up":
+                source_row = db.query(OpenLoopRecord).filter(
+                    OpenLoopRecord.id == source_id,
+                    OpenLoopRecord.person_id == scoped_person_id,
+                    OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+                    OpenLoopRecord.status == "blocked",
+                ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
-                    isinstance(source_id, str) and db.query(OpenLoopRecord.id).filter(
-                        OpenLoopRecord.id == source_id,
-                        OpenLoopRecord.person_id == scoped_person_id,
-                        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
-                        OpenLoopRecord.status == "blocked",
-                    ).first()
+                    source_row
+                    and getattr(question, "subject_type", None) == "appointment_follow_up"
+                    and getattr(question, "subject_id", None) == str(source_row.id)
                 )
         if (
             has_dependency and has_source_reference and has_rationale
