@@ -295,7 +295,7 @@ def list_caregivers(person_id: str, request: Request, db: Session = Depends(get_
 def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = Depends(get_db)):
     if (
         getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
-        and str(evidence.evidence_type).lower() != "document"
+        and str(evidence.type).lower() != "document"
     ):
         raise HTTPException(status_code=403, detail="This caregiver can add documents, not other care updates.")
     # Evidence confidence must not be supplied by a client until a task-specific
@@ -434,7 +434,7 @@ def list_evidence(
         (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
     )
     if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
-        query = query.filter(EvidenceModel.evidence_type == "document")
+        query = query.filter(EvidenceModel.type == "document")
     if ids is not None:
         # An explicit filter is always bounded and never falls back to the
         # full evidence collection. Empty/blank filters mean no rows.
