@@ -15,6 +15,7 @@ from app.models.care_continuity import EvidenceObservation, CareAssertion
 from app.models.change import Situation
 from app.models.uncertainty import OpenQuestion, Contradiction
 from app.core.change_enums import SituationType, SituationState
+from app.core.uncertainty_enums import Priority
 from app.schemas.situation import SituationInput
 from app.services.situation import process_situation_input
 
@@ -425,6 +426,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     status="open",
                     necessity="necessary",
                     necessity_rationale="A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
+                    priority=Priority.CRITICAL,
                     context=[{
                         "source_kind": "caregiver_report",
                         "source_id": first_evidence_id,
@@ -432,6 +434,69 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                         "necessity_assessment": {
                             "necessity_rationale": "A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
                             "decision_dependency": "The current mobility handoff cannot accurately describe the observed mobility concern without this clarification.",
+                            "evidence_ids": [first_evidence_id],
+                        },
+                    }],
+                ),
+                OpenQuestion(
+                    id="mobility-question-high",
+                    person_id=person_id,
+                    question="Has the person needed more support when standing?",
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    evidence_ids=[first_evidence_id],
+                    status="open",
+                    necessity="necessary",
+                    necessity_rationale="The next mobility handoff depends on confirming the support needed when standing.",
+                    priority=Priority.HIGH,
+                    context=[{
+                        "source_kind": "caregiver_report",
+                        "source_id": first_evidence_id,
+                        "necessity_assessment": {
+                            "necessity_rationale": "The next mobility handoff depends on confirming the support needed when standing.",
+                            "decision_dependency": "The receiving caregiver cannot describe the current transfer support accurately without this detail.",
+                            "evidence_ids": [first_evidence_id],
+                        },
+                    }],
+                ),
+                OpenQuestion(
+                    id="mobility-question-medium",
+                    person_id=person_id,
+                    question="Has the person avoided any usual walking route?",
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    evidence_ids=[first_evidence_id],
+                    status="open",
+                    necessity="necessary",
+                    necessity_rationale="The current mobility plan depends on knowing whether a usual route is being avoided.",
+                    priority=Priority.MEDIUM,
+                    context=[{
+                        "source_kind": "caregiver_report",
+                        "source_id": first_evidence_id,
+                        "necessity_assessment": {
+                            "necessity_rationale": "The current mobility plan depends on knowing whether a usual route is being avoided.",
+                            "decision_dependency": "The care team cannot review the current walking plan without knowing whether the usual route is still being used.",
+                            "evidence_ids": [first_evidence_id],
+                        },
+                    }],
+                ),
+                OpenQuestion(
+                    id="mobility-question-low",
+                    person_id=person_id,
+                    question="Would a different time of day make walking easier?",
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    evidence_ids=[first_evidence_id],
+                    status="open",
+                    necessity="necessary",
+                    necessity_rationale="A future mobility review depends on knowing whether timing affects the walking routine.",
+                    priority=Priority.LOW,
+                    context=[{
+                        "source_kind": "caregiver_report",
+                        "source_id": first_evidence_id,
+                        "necessity_assessment": {
+                            "necessity_rationale": "A future mobility review depends on knowing whether timing affects the walking routine.",
+                            "decision_dependency": "The next routine review can compare walking at different times if the caregiver records this detail.",
                             "evidence_ids": [first_evidence_id],
                         },
                     }],
@@ -572,7 +637,12 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         mobility_questions = threads["persisted-mobility-thread"]["openQuestions"]
         # Only the source-grounded, explicitly necessary question is exposed;
         # the unrelated unassessed question remains internal.
-        assert mobility_questions == ["Has the unsteadiness also happened indoors?"]
+        assert mobility_questions == [
+            "Has the unsteadiness also happened indoors?",
+            "Has the person needed more support when standing?",
+            "Has the person avoided any usual walking route?",
+        ]
+        assert "Would a different time of day make walking easier?" not in body["return_continuity"]["important_unresolved"]
         assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
         assert threads["persisted-mobility-thread"]["conflicts"][0]["resolution_status"] == "unresolved"
         assert threads["persisted-appetite-thread"]["openQuestions"] == []
