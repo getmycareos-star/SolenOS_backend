@@ -102,6 +102,7 @@ def _close_postgres_conversation_db(engine, connection, schema):
 
 def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
     engine, connection, schema = _postgres_conversation_db()
+    metadata = ConversationSession.metadata
     try:
         with Session(bind=connection) as db:
             person = Person(id="person-a", name="Care recipient A")
