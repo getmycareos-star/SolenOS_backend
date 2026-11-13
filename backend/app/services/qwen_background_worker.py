@@ -172,7 +172,10 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     """Extract a saved Daily Care report after the caregiver-facing save has committed."""
     from app.models.care import CareEvent, Evidence
     from app.models.capture_analysis import CaptureAnalysis
-    from app.services.capture_review import persist_source_grounded_daily_observations
+    from app.services.capture_review import (
+        persist_source_grounded_daily_observations,
+        supplement_source_grounded_daily_observations,
+    )
     from app.services.uncertainty import persist_source_clarification_questions
     from app.services.care_continuity_execution import execute_care_continuity_reconciliation
     from app.services.lcr_context import build_lcr_context
@@ -320,6 +323,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         if not isinstance(candidates, dict) or not isinstance(candidates.get("observations"), list):
             raise ValueError("daily_capture_extraction_invalid")
         candidates = dict(candidates)
+        if natural_language_update:
+            candidates = supplement_source_grounded_daily_observations(source_text, candidates)
     candidates["observations"] = [
         {
             **item,
