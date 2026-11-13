@@ -58,7 +58,7 @@ def client_for(person_id):
     return client
 
 
-def add_question(db, person_id, caregiver_id, question_id, priority, *, necessary=True, evidence_id=None):
+def add_question(db, person_id, caregiver_id, question_id, priority, *, necessary=True, evidence_id=None, source_kind="document_extraction"):
     evidence_id = evidence_id or f"evidence-{question_id}"
     db.add(Evidence(
         id=evidence_id,
@@ -69,9 +69,9 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
         source_type="caregiver_report",
     ))
     context = [{
-        "source_kind": "document_extraction",
+        "source_kind": source_kind,
         "source_id": evidence_id,
-        "source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}],
+        **({"source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}]} if source_kind == "document_extraction" else {}),
         "necessity_assessment": {
             "necessity": "necessary" if necessary else "not_assessed",
             "necessity_rationale": "A recorded care decision depends on this answer." if necessary else None,
@@ -92,6 +92,34 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
         evidence_ids=[evidence_id],
         context=context,
     ))
+
+
+
+def test_caregiver_report_question_requires_its_exact_persisted_evidence_source():
+    setup()
+    try:
+        db = SessionLocal()
+        person = Person(id="caregiver-report-person", name="Caregiver Report Person")
+        caregiver = Caregiver(
+            id="caregiver-report-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        add_question(
+            db, person.id, caregiver.id, "caregiver-report-question", "high",
+            evidence_id="caregiver-report-evidence", source_kind="caregiver_report",
+        )
+        db.commit()
+        db.close()
+
+        response = client_for("caregiver-report-person").get(
+            "/api/v1/uncertainty/questions/recommended/caregiver-report-person"
+        )
+        assert response.status_code == 200, response.text
+        assert "caregiver-report-question" in response.json()["eligible_question_ids"]
+    finally:
+        teardown()
 
 
 def test_recommended_projection_keeps_critical_and_caps_ordinary_questions():
