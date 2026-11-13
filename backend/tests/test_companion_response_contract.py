@@ -1366,3 +1366,30 @@ def test_repeated_question_complaint_reuses_prior_caregiver_question_for_retriev
     )
     assert "Has Mum's sleep been getting worse?" in query
     assert "Maybe the sleep is changing." not in query
+
+def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair(monkeypatch):
+    client = setup_client(monkeypatch)
+    invalid_answer = "First, call the clinic. Second, review the notes. Third, update the calendar. Fourth, message your family."
+    outputs = iter([invalid_answer, invalid_answer, invalid_answer])
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append((messages, options))
+        return next(outputs)
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "I'm exhausted. I don't know what to do anymore."},
+        )
+        assert response.status_code == 503, response.text
+        assert len(calls) == 3
+        assert all("current greeting" not in call[0][-1]["content"].casefold() for call in calls[1:])
+        assert all("no more than three short sentences" in call[0][-1]["content"] for call in calls[1:])
+    finally:
+        teardown()
+
