@@ -10,6 +10,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
+from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
+from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
@@ -47,6 +49,7 @@ def _postgres_conversation_db():
             Person.__table__, Caregiver.__table__, CareEvent.__table__,
             CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
+            CaregiverProfile.__table__, CaregiverHandoff.__table__,
             QwenBackgroundJob.__table__, QwenModelOutput.__table__,
             AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
         ],
@@ -90,6 +93,44 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
             db.add_all([
                 Caregiver(id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"),
                 Caregiver(id="caregiver-b", name="Caregiver B", relationship="family", person_id="person-a"),
+                Caregiver(id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b"),
+            ])
+            db.flush()
+            db.add_all([
+                CaregiverProfile(
+                    id="profile-a", person_id="person-a", session_caregiver_id="caregiver-a",
+                    name="Caregiver A", relationship="family",
+                ),
+                CaregiverProfile(
+                    id="profile-b", person_id="person-a", session_caregiver_id="caregiver-b",
+                    name="Caregiver B", relationship="family",
+                ),
+                CaregiverProfile(
+                    id="profile-c", person_id="person-b", session_caregiver_id="caregiver-c",
+                    name="Caregiver C", relationship="family",
+                ),
+            ])
+            db.flush()
+            db.add_all([
+                CaregiverHandoff(
+                    id="handoff-person-a", person_id="person-a",
+                    from_caregiver_id="profile-a", to_caregiver_id="profile-b",
+                    responsibility_type="Sleep observations",
+                    scope="Overnight waking history",
+                    context="Caregiver A handed over repeated overnight waking observations.",
+                    acceptance_status=HandoffAcceptanceStatus.ACCEPTED,
+                    acceptance_evidence="Caregiver B accepted the handoff.",
+                    is_completed=True,
+                ),
+                CaregiverHandoff(
+                    id="handoff-person-b", person_id="person-b",
+                    from_caregiver_id="profile-c", to_caregiver_id="profile-c",
+                    responsibility_type="Sleep observations",
+                    scope="Private overnight waking history",
+                    context="This handoff belongs to a different care recipient.",
+                    acceptance_status=HandoffAcceptanceStatus.ACCEPTED,
+                    is_completed=True,
+                ),
             ])
             db.flush()
             own = ConversationSession(
@@ -132,8 +173,18 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
                 db, person_id="person-a", caregiver_id="caregiver-a",
                 query="sleep waking", limit=8,
             )
+            from app.services.lcr_context import _load_source_schema
+            _load_source_schema.cache_clear()
+            lcr_context = build_unified_lcr_context(
+                db, "person-a", "caregiver-a",
+                query="sleep handoff", limit_per_source=20, include_all_history=True,
+            )
 
         assert result["returned_count"] == 2
+        handoffs = lcr_context["sources"]["handoffs"]
+        assert handoffs["candidate_scan_complete"] is True
+        assert handoffs["candidate_count"] == 1
+        assert [item["id"] for item in handoffs["items"]] == ["handoff-person-a"]
         by_id = {item["id"]: item for item in result["items"]}
         assert set(by_id) == {"own-message", "assistant-message"}
         assert all(item["information_status"] == "conversation_context_only" for item in by_id.values())
