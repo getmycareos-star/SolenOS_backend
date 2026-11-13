@@ -4709,6 +4709,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
             if care_journey_request:
                 shared_lcr_lines.sort(key=_lcr_context_chronological_key)
+            selected_source_counts: dict[str, int] = {}
+            for selected_line in shared_lcr_lines:
+                try:
+                    selected_payload = json.loads(selected_line[selected_line.index("{"):])
+                    selected_source = selected_payload.get("source_type")
+                    if isinstance(selected_source, str):
+                        selected_source_counts[selected_source] = selected_source_counts.get(selected_source, 0) + 1
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
             source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
@@ -4723,6 +4732,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "status": source.get("status", "unknown"),
                         "candidate_count": source.get("candidate_count"),
                         "returned_count": source.get("returned_count", 0),
+                        "selected_for_answer": selected_source_counts.get(name, 0),
+                        "selection_truncated": selected_source_counts.get(name, 0) < source.get("returned_count", 0),
                         "candidate_scan_complete": source.get("candidate_scan_complete", False),
                         "has_more": source.get("has_more", False),
                     }
