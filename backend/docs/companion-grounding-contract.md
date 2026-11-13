@@ -17,6 +17,16 @@ This contract implements the relevant requirements in `docs/SOLENOS_MASTER_VALUE
 7. **Keep authority bounded.** Do not diagnose, infer causation, invent clinical details, claim actions occurred without verified backend evidence, or write LCR facts from a conversation response.
 8. **Fail honestly.** If inference fails or the response cannot pass grounding checks, do not substitute a canned answer. Return the existing explicit failure state and do not persist a fake assistant response.
 
+## Caregiver question selection
+
+Companion receives a separate `caregiver_question_queue` built from the existing LCR open-question records. It is the only approved source for proactively asking a care question.
+
+A queue item must have explicit `necessity=necessary`, a matching rationale and decision dependency in the same source context, evidence that belongs to the authorized person, and a live source record that still matches the question's care subject. The shared selector deduplicates within the same subject and source claim, preserves every critical item, and exposes no more than two ordinary items initially.
+
+The queue also carries `intended_answerer_role`. Companion must not ask the caregiver to supply an answer intended for a professional, another caregiver, or the person receiving care. An unknown answerer must remain unknown; do not silently assign the task to the caregiver. Ask at most one focused question in a reply, and do not ask one when the queue is empty or when the caregiver is greeting, thanking, recording information, or asking a general question. Historical open questions and information gaps remain available for answering explicit history requests, but they are not automatic caregiver tasks.
+
+The deterministic 100-case API benchmark measures queue eligibility precision/recall and critical/duplicate/cross-person behavior. It does not measure whether a real model chooses the right moment or wording. Real-model evaluation and caregiver usability testing remain required.
+
 ## Caregiver capacity and continuity repair
 
 The conversation route adds deterministic, turn-local guidance for explicit caregiver signals before model inference:
