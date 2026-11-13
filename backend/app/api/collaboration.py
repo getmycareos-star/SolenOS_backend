@@ -4655,12 +4655,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if _is_casual_greeting(user_text):
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
+            care_journey_request = bool(re.search(
+                r"\\b(?:care journey|full (?:care )?history|complete (?:care )?history|whole (?:care )?history|"
+                r"timeline of (?:the )?care|everything that happened|what has been happening throughout)\\b",
+                user_text,
+                re.IGNORECASE,
+            ))
             shared_lcr_context = build_unified_lcr_context(
-                db, person_id, caregiver_id, limit_per_source=50, query=retrieval_query
+                db, person_id, caregiver_id, limit_per_source=50, query=retrieval_query,
+                include_all_history=care_journey_request,
             )
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
             for source_name, source in shared_lcr_context["sources"].items():
-                if source_name in {"living_record", "events", "evidence", "assertions", "appointments"}:
+                if source_name == "companion_conversation":
                     continue
                 for item in source.get("items", []):
                     source_id = str(item.get("id") or "")
@@ -4674,12 +4681,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "record": item,
                         }, ensure_ascii=False, default=str)
                     )
-            shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 50)
+            shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
             source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
                 "history_coverage": shared_lcr_context["history_coverage"],
                 "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
+                "full_source_scan_requested": care_journey_request,
                 "query_applied": shared_lcr_context["query_applied"],
                 "missing_required_sources": shared_lcr_context["missing_required_sources"],
                 "missing_optional_sources": shared_lcr_context["missing_optional_sources"],
@@ -4842,9 +4850,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 if row.role in {"user", "assistant"}
             )
 
+        # The shared LCR projection is the single source set for model context.
+        # The purpose-specific lists above remain available to deterministic
+        # safety validators, but are not duplicated into the prompt.
         model_context_lines = [
-            *event_context, *assertion_context, *appointment_context, *evidence_context,
-            *freshness_context[:1], *shared_lcr_lines, *aggregate_context_lines,
+            *shared_lcr_lines, *freshness_context[:1], *aggregate_context_lines,
         ]
         if source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",
