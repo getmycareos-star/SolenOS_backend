@@ -30,7 +30,7 @@ jobs:
       - name: Compile backend and benchmark
         run: python -m compileall -q backend/app backend/tests
       - name: Run longitudinal messy-care benchmark
-        run: python -m pytest -q backend/tests/test_longitudinal_messy_care_benchmark.py backend/tests/test_unified_lcr_retrieval.py
+        run: python -m pytest -q backend/tests
 
   postgres-benchmark:
     name: Longitudinal benchmark (PostgreSQL)
