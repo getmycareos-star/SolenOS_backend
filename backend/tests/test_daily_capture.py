@@ -2044,6 +2044,19 @@ def test_uncertain_medication_change_report_never_overwrites_reviewed_medication
         teardown_db()
 
 
+def test_source_time_reference_is_not_borrowed_from_a_separate_clause():
+    from app.services.capture_review import _source_time_for_observation
+
+    quote = "Mum slept poorly last night, but ate lunch today."
+
+    sleep_time = _source_time_for_observation(quote, "slept poorly")
+    lunch_time = _source_time_for_observation(quote, "ate lunch")
+
+    assert sleep_time is not None and sleep_time.group(0) == "last night"
+    assert lunch_time is not None and lunch_time.group(0) == "today"
+    assert _source_time_for_observation("Mum slept poorly last night, but ate lunch today.", "ate lunch") is lunch_time
+
+
 def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatch):
     from app.api import v1 as api_v1
 
