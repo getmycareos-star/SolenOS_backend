@@ -17,6 +17,20 @@ This contract implements the relevant requirements in `docs/SOLENOS_MASTER_VALUE
 7. **Keep authority bounded.** Do not diagnose, infer causation, invent clinical details, claim actions occurred without verified backend evidence, or write LCR facts from a conversation response.
 8. **Fail honestly.** If inference fails or the response cannot pass grounding checks, do not substitute a canned answer. Return the existing explicit failure state and do not persist a fake assistant response.
 
+## Caregiver capacity and continuity repair
+
+The conversation route adds deterministic, turn-local guidance for explicit caregiver signals before model inference:
+
+- Repeated-question complaints trigger a continuity-repair response: retrieve authorized history first, do not defend the system, and distinguish retrieved information from unavailable or absent information.
+- Explicit overload language constrains the response to a short, situation-grounded answer and at most one consequential focus, without a default checklist or burnout diagnosis.
+- Explicit distress language suppresses forced workflows while preserving immediate-danger guidance.
+- Explicit corrections are treated as corrections, not new independent evidence; chat does not silently rewrite the durable LCR.
+- Vague concern statements trigger relevant-history retrieval before one focused clarification.
+
+These signals are narrow behavioral controls, not diagnoses or permanent caregiver labels. They do not bypass the existing emergency checks, authorization, evidence grounding, persistence rules, or model-output validation. Neutral questions must not trigger these adaptations.
+
+Acceptance requires tests for each signal and a neutral control case. These deterministic tests prove that the correct instructions are added; they do not prove the model follows them in production. Real-model and caregiver evaluation remain required.
+
 ## Retrieval behavior in this change
 
 The Companion considers a bounded candidate pool of recent care events, caregiver-reviewed assertions, appointments, and caregiver-provided evidence. Query-term relevance orders candidate records before the context budget is applied; the original ordering is the stable tie-breaker. Only the selected records are sent to Qwen and included in response source-ID metadata.
