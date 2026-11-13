@@ -3870,10 +3870,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             source_evidence_ids.append(str(row.id))
 
     document_query_text = (payload.text or "").casefold()
-    document_context_requested = payload.workflow in appointment_workflows or any(
-        term in document_query_text for term in ("document", "upload", "letter", "file", "scan")
-    )
-    if document_context_requested:
+    document_context_requested = payload.workflow in appointment_workflows or _is_document_question(payload.text)
         source_document_status = "empty"
         try:
             document_analyses = (
@@ -4414,6 +4411,19 @@ def _fit_model_context_lines_across_sources(
     selected_raw = [item[1] for item in selected]
     selected_rendered = [item[2] for item in selected]
     return selected_raw, selected_rendered, used_chars, len(selected) < len(lines)
+
+
+_DOCUMENT_INTENT_PATTERN = re.compile(
+    r"\\b(?:uploaded document|document|file|attachment|letter|pdf|"
+    r"discharge summary|discharge paperwork|care plan|clinic note|clinical note|"
+    r"referral letter|prescription|lab result|test result|scan report|medical record)\\b",
+    re.IGNORECASE,
+)
+
+
+def _is_document_question(user_text: str) -> bool:
+    """Recognize common names for care documents, not only the word 'document'."""
+    return bool(_DOCUMENT_INTENT_PATTERN.search(user_text or ""))
 
 
 def _caregiver_interaction_guidance(user_text: str) -> str:
@@ -5160,11 +5170,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Select context by the current question and, for referential follow-ups,
         # the recent dialogue. Keep source IDs aligned with records sent to Qwen.
-        document_question = bool(re.search(
-            r"\b(?:uploaded document|document|file|attachment|letter|pdf)\b",
-            user_text, re.IGNORECASE,
-        ))
-        event_context = _filter_context_lines_to_query(
+        document_question = _is_document_question(user_text)
             retrieval_query, _rank_context_lines(retrieval_query, event_context, 30)
         )
         assertion_context = _filter_context_lines_to_query(
