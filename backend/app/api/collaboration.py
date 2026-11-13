@@ -5201,11 +5201,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             caregiver_question_queue = shared_lcr_context.get("sources", {}).get(
                 "caregiver_question_queue", {}
             )
-            for queue_item in caregiver_question_queue.get("items", []):
-                shared_lcr_lines.append(
-                    "Approved caregiver question queue (ask only when relevant; respect intended answerer): "
-                    + json.dumps(queue_item, ensure_ascii=False, default=str)
-                )
+            caregiver_question_queue_lines = [
+                "Approved caregiver question queue (ask only when relevant; respect intended answerer): "
+                + json.dumps(queue_item, ensure_ascii=False, default=str)
+                for queue_item in caregiver_question_queue.get("items", [])
+            ]
             selected_source_counts: dict[str, int] = {}
             for selected_line in shared_lcr_lines:
                 try:
@@ -5436,7 +5436,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # The purpose-specific lists above remain available to deterministic
         # safety validators, but are not duplicated into the prompt.
         model_context_lines = [
-            *shared_lcr_lines, *freshness_context[:1], *aggregate_context_lines,
+            *caregiver_question_queue_lines,
+            *shared_lcr_lines,
+            *freshness_context[:1],
+            *aggregate_context_lines,
         ]
         if source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",
