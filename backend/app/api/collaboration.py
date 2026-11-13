@@ -4045,7 +4045,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "living_record", "evidence_observations", "facts", "assertions",
             "decisions", "decision_outcomes", "timeline", "uncertainties",
             "uncertainty_assessments", "missing_information", "open_questions",
-            "open_loop_records", "information_gaps", "follow_up_links",
+            "caregiver_question_queue", "open_loop_records", "information_gaps", "follow_up_links",
             "reconciliations", "conflicts", "provenance", "caregiver_observations",
             "caregiver_contexts", "caregiver_perspectives", "corrections",
         )
