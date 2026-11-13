@@ -4506,27 +4506,27 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     text = reply.strip()
     lowered = text.casefold()
     if "LOW-CAPACITY RESPONSE" in guidance:
-        sentences = [part for part in re.split(r"(?<=[.!?])\\s+", text) if part.strip()]
+        sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
         questions = text.count("?")
-        list_lines = re.findall(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", text)
+        list_lines = re.findall(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", text)
         if len(sentences) > 3 or questions > 1 or list_lines:
             return True
     if "CONTINUITY REPAIR" in guidance and re.search(
-        r"\\b(?:repeat (?:yourself|the story|that)|tell me (?:again|the whole story)|"
-        r"start (?:all )?over|what did you say before)\\b",
+        r"\b(?:repeat (?:yourself|the story|that)|tell me (?:again|the whole story)|"
+        r"start (?:all )?over|what did you say before)\b",
         lowered,
     ):
         return True
     if "CORRECTION HANDLING" in guidance and re.search(
-        r"\\b(?:i(?:'ve| have) (?:updated|changed|corrected|saved) (?:the )?(?:care )?record|"
-        r"the record (?:is|has been) updated)\\b",
+        r"\b(?:i(?:'ve| have) (?:updated|changed|corrected|saved) (?:the )?(?:care )?record|"
+        r"the record (?:is|has been) updated)\b",
         lowered,
     ):
         return True
     if "VAGUE CONCERN" in guidance and text.count("?") > 1:
         return True
     if "DISTRESS RESPONSE" in guidance and re.search(
-        r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+",
+        r"(?m)^\s*(?:[-*•]|\d+[.)])\s+",
         text,
     ):
         return True
