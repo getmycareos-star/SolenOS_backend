@@ -287,6 +287,7 @@ def prioritize_caregiver_questions(questions, ordinary_limit=2):
             " ".join((row.question or "").casefold().split()),
             row.subject_type,
             row.subject_id,
+            row.claim_id,
         )
         if key in seen:
             continue
