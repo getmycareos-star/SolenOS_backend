@@ -331,7 +331,7 @@ def _active_question(db: Session, person_id: str, source_id: str | None) -> tupl
     eligible = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == person_id,
         OpenQuestion.necessity == "necessary",
-        OpenQuestion.status.in_(sorted(OPEN_QUESTION_STATUSES)),
+        OpenQuestion.status.in_(("open", "unresolved")),
     ).all()
     eligible = [
         row for row in eligible
