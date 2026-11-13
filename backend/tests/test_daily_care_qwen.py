@@ -458,3 +458,38 @@ def test_companion_history_filter_keeps_semantic_paraphrases():
     ]
     selected = collaboration._filter_context_lines_to_query("sleep", lines)
     assert selected == [lines[0]]
+
+
+def test_daily_care_answer_reports_records_omitted_from_bounded_model_context(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Bounded history coverage caregiver")
+    for index in range(35):
+        add_event(
+            session,
+            f"Sleep history entry {index}",
+            f"Caregiver reported interrupted sleep on observation {index}.",
+            f"2026-10-{(index % 28) + 1:02d}T22:00:00Z",
+        )
+
+    monkeypatch.setattr(
+        daily_qwen,
+        "qwen_chat",
+        lambda *args, **kwargs: json.dumps({"answer": "The available records describe interrupted sleep.", "proposals": []}),
+    )
+    response = client.post(
+        "/api/v1/daily-care/intelligence/ask",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "person_id": session["person"]["id"],
+            "question": "Summarize the sleep history.",
+            "history_query": "sleep",
+            "prepare_lcr_proposals": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    scope = response.json()["history_scope"]
+    assert scope["records_retrieved"] >= 35
+    assert scope["records_sent_to_model"] == 30
+    assert scope["records_omitted_from_model"] >= 5
+    assert scope["selection_truncated"] is True
+    assert scope["prompt_context_truncated"] is True
