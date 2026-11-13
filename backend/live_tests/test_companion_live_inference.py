@@ -22,6 +22,8 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.core.database import SessionLocal as TestingSessionLocal
 from app.models.care import Caregiver, CareEvent, Evidence
+from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
+from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 
@@ -429,6 +431,44 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
                     created_by_caregiver_id=caregiver_id,
                     time_provenance="caregiver_reported",
                 ))
+            db.add(Caregiver(
+                id="journey-caregiver-b",
+                person_id=person_id,
+                name="Second caregiver",
+                relationship="family",
+            ))
+            db.flush()
+            db.add_all([
+                CaregiverProfile(
+                    id="journey-profile-a",
+                    person_id=person_id,
+                    session_caregiver_id=caregiver_id,
+                    name="First caregiver",
+                    relationship="family",
+                ),
+                CaregiverProfile(
+                    id="journey-profile-b",
+                    person_id=person_id,
+                    session_caregiver_id="journey-caregiver-b",
+                    name="Second caregiver",
+                    relationship="family",
+                ),
+            ])
+            db.flush()
+            db.add(CaregiverHandoff(
+                id="journey-sleep-handoff",
+                person_id=person_id,
+                from_caregiver_id="journey-profile-a",
+                to_caregiver_id="journey-profile-b",
+                responsibility_type="Sleep observations",
+                scope="Overnight waking history",
+                timestamp=now - timedelta(days=30),
+                effective_time=now - timedelta(days=30),
+                context="First caregiver handed over repeated overnight waking observations to the second caregiver.",
+                acceptance_status=HandoffAcceptanceStatus.ACCEPTED,
+                acceptance_evidence="Second caregiver accepted the handoff.",
+                is_completed=True,
+            ))
             db.commit()
         finally:
             db.close()
@@ -463,3 +503,15 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
         assert event_coverage.get("candidate_count", 0) >= 3, coverage
         assert event_coverage.get("selection_truncated") is False, coverage
         assert coverage.get("prompt_context_complete") is True, coverage
+
+        handoff_response = _ask(
+            client,
+            session,
+            "Give me the history of sleep handoffs over the last three months.",
+        )
+        assert handoff_response.status_code == 200, handoff_response.text
+        handoff_refs = {
+            (item.get("record_type"), item.get("record_id"))
+            for item in handoff_response.json().get("source_record_refs", [])
+        }
+        assert ("handoffs", "journey-sleep-handoff") in handoff_refs, handoff_refs
