@@ -271,6 +271,15 @@ def _history_bundle(
                 or item.get("reason") or item.get("resolution") or item.get("context")
                 or item.get("scope") or item.get("acceptance_evidence") or item.get("completion_evidence")
             )
+            if source_name == "handoffs":
+                text_value = " ".join(
+                    str(item.get(field)).strip()
+                    for field in (
+                        "responsibility_type", "scope", "context",
+                        "acceptance_evidence", "completion_evidence", "provenance",
+                    )
+                    if item.get(field) and str(item.get(field)).strip()
+                )
             if isinstance(text_value, (dict, list)):
                 text_value = json.dumps(text_value, ensure_ascii=False, default=str)
             row = {
