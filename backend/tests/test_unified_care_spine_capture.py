@@ -250,8 +250,13 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             daily_prompt = "\\n".join(
                 str(message.get("content", "")) for message in captured_prompts[-1]
             )
-            assert event_id in daily_prompt
-            assert evidence_id in daily_prompt
+            # Internal database IDs belong in response provenance metadata, not
+            # caregiver-facing model prose. Verify the exact saved report content
+            # and epistemic boundary are present in the prompt instead.
+            assert "Mum was unusually confused this afternoon and refused lunch." in daily_prompt
+            assert "caregiver_reported" in daily_prompt
+            assert event_id in companion_daily_body.get("source_event_ids", [])
+            assert evidence_id in companion_daily_body.get("source_evidence_ids", [])
 
             # The Companion document question must include this caregiver's
             # persisted document extraction and exclude a peer caregiver's
