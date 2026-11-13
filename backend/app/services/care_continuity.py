@@ -31,7 +31,9 @@ def _value_key(value: str) -> str:
 def has_valid_caregiver_necessity(
     question: Any, db: Optional[Session] = None, person_id: Optional[str] = None
 ) -> bool:
-    """Fail closed unless rationale, decision dependency and same-record evidence exist."""
+    """Fail closed unless necessity, rationale, decision dependency and same-record evidence exist."""
+    if getattr(question, "necessity", None) != "necessary":
+        return False
     evidence_ids = list(dict.fromkeys(
         str(value) for value in (getattr(question, "evidence_ids", None) or []) if value
     ))
