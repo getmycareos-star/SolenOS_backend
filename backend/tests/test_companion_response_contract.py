@@ -1196,6 +1196,6 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert "evidence-discharge" in selected[1]
     assert selected == [lines[0], lines[1]]
     assert len(rendered) == 2
-    assert used_chars == sum(map(len, rendered))
+    assert used_chars == sum(map(len, rendered)) + max(0, len(rendered) - 1)
     assert used_chars <= 1000
     assert truncated is True
