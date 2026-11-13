@@ -76,6 +76,26 @@ def _source_hedge_for_observation(quote: str, observation: str):
             eligible.append((abs(marker.start() - start), marker))
     return min(eligible, key=lambda item: item[0])[1] if eligible else None
 
+def _source_time_for_observation(quote: str, observation: str):
+    """Use only a time reference in the same clause as the extracted observation."""
+    observation_match = re.search(re.escape(observation), quote, re.IGNORECASE)
+    if observation_match is None:
+        return None
+    start, end = observation_match.span()
+    eligible = []
+    for marker in _TIME_REFERENCE.finditer(quote):
+        if marker.start() >= start and marker.end() <= end:
+            return marker
+        if marker.end() <= start:
+            gap = quote[marker.end():start]
+        elif marker.start() >= end:
+            gap = quote[end:marker.start()]
+        else:
+            gap = ""
+        if not _CLAUSE_BOUNDARY.search(gap):
+            eligible.append((abs(marker.start() - start), marker))
+    return min(eligible, key=lambda item: item[0])[1] if eligible else None
+
 
 def persist_source_grounded_daily_observations(
     db: Session,
@@ -134,15 +154,7 @@ def persist_source_grounded_daily_observations(
             continue
 
         hedge = _source_hedge_for_observation(quote, observation_text)
-        time_reference = _TIME_REFERENCE.search(observation)
-        if time_reference is None:
-            observation_start = quote.find(observation_text)
-            time_matches = list(_TIME_REFERENCE.finditer(quote))
-            if observation_start >= 0 and time_matches:
-                time_reference = min(
-                    time_matches,
-                    key=lambda match: abs(match.start() - observation_start),
-                )
+        time_reference = _source_time_for_observation(quote, observation_text)
         context_parts = [
             "Source-grounded extraction from a caregiver report; not independently verified as a clinical fact."
         ]
