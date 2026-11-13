@@ -979,6 +979,17 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
 
 
 
+
+def test_companion_never_asks_multiple_questions_in_one_reply():
+    assert collaboration._caregiver_response_needs_revision(
+        "What was recorded about sleep and lunch?",
+        "The caregiver reported poor sleep. What happened at lunch? Did she drink water?",
+    )
+    assert not collaboration._caregiver_response_needs_revision(
+        "What was recorded about sleep and lunch?",
+        "The caregiver reported poor sleep and that lunch was barely touched.",
+    )
+
 def test_companion_recognizes_common_care_document_names():
     assert collaboration._is_document_question("What does the discharge summary say about walking?")
     assert collaboration._is_document_question("Can you find the care plan?")
