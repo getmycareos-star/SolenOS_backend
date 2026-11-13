@@ -5726,8 +5726,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "Your previous answer did not pass source-grounding checks. Revise it. "
                             "Answer the caregiver's exact question using only the authorized records above. "
                             "Keep caregiver reports distinct from verified facts. Do not infer causes, diagnoses, "
-                            "medication changes, dates, trends, outcomes, or completed actions. Do not invent a "
-                            "question or task. If the records do not answer a part of the question, say that part "
+                            "medication changes, dates, trends, outcomes, or completed actions. Ask at most one "
+                            "focused question, and only if the caregiver_question_queue supplies a relevant question "
+                            "assigned to this caregiver. Do not invent a question or task. If the records do not answer "
+                            "a part of the question, say that part "
                             "is not recorded. Return only the corrected caregiver-facing answer."
                         ),
                     },
