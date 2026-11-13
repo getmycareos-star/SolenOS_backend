@@ -3591,7 +3591,11 @@ async def get_qwen_background_job(
         "source_notification_ids": (output.output_metadata or {}).get("source_notification_ids", []) if output else [],
         "source_freshness_assessment_ids": (output.output_metadata or {}).get("source_freshness_assessment_ids", []) if output else [],
         "claim_provenance": (output.output_metadata or {}).get("claim_provenance", {}) if output else {},
-        "review_required": job.status == "completed",
+        "review_required": (
+            bool(daily_capture_result.get("review_required"))
+            if job.workflow == "daily_capture_extraction" and daily_capture_result is not None
+            else job.status == "completed"
+        ),
         "persistence": "read_only_assistance",
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
