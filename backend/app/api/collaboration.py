@@ -2234,6 +2234,30 @@ def _rank_lcr_context_lines(query: str, lines: list[str], limit: int = 10) -> li
     return selected
 
 
+def _lcr_context_chronological_key(line: str) -> tuple[float, str]:
+    """Order selected care-source records by event/effective time, not retrieval time."""
+    try:
+        payload = json.loads(line[line.index("{"):])
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return (float("inf"), line)
+    for field in (
+        "occurred_at", "observed_at", "decided_at", "effective_at",
+        "scheduled_at", "event_time", "recorded_at", "uploaded_at", "created_at",
+    ):
+        value = record.get(field)
+        if not value:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return (parsed.timestamp(), str(payload.get("source_id") or ""))
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return (float("inf"), str(payload.get("source_id") or ""))
+
+
 def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
     """Remove unrelated records from model context after ranking, preserving broad queries."""
     query_terms = {
@@ -4682,6 +4706,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         }, ensure_ascii=False, default=str)
                     )
             shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
+            if care_journey_request:
+                shared_lcr_lines.sort(key=_lcr_context_chronological_key)
             source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
