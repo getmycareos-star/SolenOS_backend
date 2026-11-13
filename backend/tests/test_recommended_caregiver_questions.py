@@ -15,6 +15,7 @@ import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.uncertainty import OpenQuestion, InformationGap
 
 pytestmark = pytest.mark.session_security
@@ -57,6 +58,14 @@ def client_for(person_id):
         caregiver_id=caregiver.id,
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
         expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    ))
+    db.add(CaregiverAccessGrant(
+        person_id=person_id,
+        caregiver_id=caregiver.id,
+        role="primary",
+        access_scope="full_record",
+        status="active",
+        can_manage_members=True,
     ))
     db.commit()
     db.close()
