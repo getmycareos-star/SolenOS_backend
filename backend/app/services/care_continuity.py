@@ -43,7 +43,11 @@ def has_valid_caregiver_necessity(
     scoped_person_id = person_id or getattr(question, "person_id", None)
     # No caregiver-facing necessity decision is trusted without a database
     # session capable of proving the evidence and source still exist.
-    if db is None or not scoped_person_id:
+    if (
+        db is None
+        or not scoped_person_id
+        or str(getattr(question, "person_id", "")) != str(scoped_person_id)
+    ):
         return False
     if db is not None:
         found = {
