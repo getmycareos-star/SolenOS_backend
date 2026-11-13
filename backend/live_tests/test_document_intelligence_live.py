@@ -81,7 +81,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert data["analysis_id"] == analysis_id
         assert data["review_required"] is True
         assert data["written_to_lcr"] is False
-        assert data["intelligence_status"] == "completed"
+        assert data["intelligence_status"] == "available"
         assert data["processed_page_numbers"] == [1, 2, 3]
         assert data["unreadable_page_numbers"] == []
         candidates = data["observations"]
