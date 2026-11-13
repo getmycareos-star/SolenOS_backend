@@ -738,6 +738,37 @@ def get_situation(
     open_question_rows = [
         row for row in open_question_rows if has_valid_caregiver_necessity(row, db, person_id)
     ]
+    question_priority_weight = {
+        "critical": 5, "high": 4, "medium": 3,
+        "low": 2, "informational": 1,
+    }
+    open_question_rows.sort(key=lambda row: (
+        -question_priority_weight.get(str(getattr(row.priority, "value", row.priority)), 0),
+        row.asked_at.isoformat() if row.asked_at else "",
+        str(row.id),
+    ))
+    unique_open_questions = []
+    seen_open_questions = set()
+    for question in open_question_rows:
+        key = (
+            " ".join((question.question or "").casefold().split()),
+            question.subject_type,
+            question.subject_id,
+        )
+        if key in seen_open_questions:
+            continue
+        seen_open_questions.add(key)
+        unique_open_questions.append(question)
+    critical_open_questions = [
+        question for question in unique_open_questions
+        if str(getattr(question.priority, "value", question.priority)) == "critical"
+    ]
+    ordinary_open_questions = [
+        question for question in unique_open_questions
+        if str(getattr(question.priority, "value", question.priority)) != "critical"
+    ]
+    additional_open_question_count = max(0, len(ordinary_open_questions) - 2)
+    open_question_rows = critical_open_questions + ordinary_open_questions[:2]
     unresolved_conflict_rows = (
         db.query(ContradictionModel)
         .filter(
