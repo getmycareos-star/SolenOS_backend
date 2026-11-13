@@ -488,7 +488,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 # defeated the shared gateway's CPU budget and made routine reconciliation
 # consume the full 180-second request timeout. Truncation remains fail-closed
 # because the response must pass the complete JSON schema validator.
-            options={"temperature": 0, "num_ctx": 4096, "num_predict": 768},
+            options={"temperature": 0, "num_ctx": 4096, "num_predict": 384},
         )
     except HTTPException as exc:
         if exc.status_code == 504:
