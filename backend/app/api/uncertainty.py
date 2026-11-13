@@ -104,6 +104,7 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
             " ".join((row.question or "").casefold().split()),
             row.subject_type,
             row.subject_id,
+            row.claim_id,
         )
         for row in active if (row.question or "").strip()
     ]
