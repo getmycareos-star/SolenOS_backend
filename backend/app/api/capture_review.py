@@ -38,6 +38,44 @@ def _session_scope(request: Request, db: Session) -> tuple[str, str]:
     return str(session.person_id), str(session.caregiver_id)
 
 
+@router.get("/capture/analyses/{analysis_id}")
+def get_capture_analysis(
+    analysis_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Return only the authenticated caregiver's persisted extraction and review state."""
+    person_id, caregiver_id = _session_scope(request, db)
+    analysis = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.id == analysis_id,
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
+    ).first()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Capture analysis not found")
+    candidates = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+    observations = candidates.get("observations")
+    observations = observations if isinstance(observations, list) else []
+    reviewable = any(
+        isinstance(item, dict)
+        and item.get("review_status", "pending_review") in {
+            "pending_review", "corrected_pending_approval", "corrected_by_caregiver",
+        }
+        for item in observations
+    )
+    return {
+        "analysis_id": str(analysis.id),
+        "extraction_status": analysis.extraction_status,
+        "candidates": candidates,
+        "execution_status": analysis.execution_status or {},
+        "review_required": reviewable,
+        "written_to_lcr": any(
+            isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
+            for item in observations
+        ),
+    }
+
+
 @router.post("/capture/analyses/{analysis_id}/review")
 def review_capture_candidate(
     analysis_id: str,
