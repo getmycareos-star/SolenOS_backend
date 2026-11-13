@@ -306,6 +306,30 @@ def test_one_hundred_case_question_gate_benchmark():
             ))
             if index < 35:
                 expected_eligible.add(question_id)
+        duplicate_evidence_id = "benchmark-evidence-duplicate"
+        db.add(Evidence(
+            id=duplicate_evidence_id, person_id=person.id,
+            type="caregiver_report", source_text="Duplicate synthetic source",
+            uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+        ))
+        db.add(OpenQuestion(
+            id="benchmark-question-duplicate", person_id=person.id,
+            question="What is the source-backed status for synthetic case 34?",
+            subject_type="care", subject_id="benchmark-subject-034",
+            status="open", necessity="necessary",
+            necessity_rationale="A recorded care decision depends on this answer.",
+            priority=Priority.LOW, evidence_ids=[duplicate_evidence_id],
+            context=[{
+                "source_kind": "document_extraction",
+                "source_id": duplicate_evidence_id,
+                "source_record_refs": [{"record_type": "evidence", "record_id": duplicate_evidence_id}],
+                "necessity_assessment": {
+                    "necessity_rationale": "A recorded care decision depends on this answer.",
+                    "decision_dependency": "The next handoff step depends on this answer.",
+                    "evidence_ids": [duplicate_evidence_id],
+                },
+            }],
+        ))
         db.commit()
         db.close()
 
@@ -316,6 +340,7 @@ def test_one_hundred_case_question_gate_benchmark():
         result = response.json()
         assert set(result["eligible_question_ids"]) == expected_eligible
         assert len(result["eligible_question_ids"]) == 35
+        assert "benchmark-question-duplicate" not in result["eligible_question_ids"]
         assert result["critical_count"] == 10
         assert len(result["recommended_question_ids"]) == 12
         assert result["additional_ordinary_count"] == 23
