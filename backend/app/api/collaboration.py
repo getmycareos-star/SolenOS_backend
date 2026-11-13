@@ -5124,29 +5124,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         }, ensure_ascii=False, default=str)
                     )
             shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
-            existing_document_ids = set()
-            for line in shared_lcr_lines:
-                try:
-                    payload = json.loads(line[line.index("{"):])
-                    if payload.get("source_type") == "document_extractions" and payload.get("source_id"):
-                        existing_document_ids.add(str(payload["source_id"]))
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    continue
             document_question_for_fallback = bool(re.search(
                 r"\b(?:uploaded document|document|file|attachment|letter|pdf|discharge summary|medical record)\b",
                 user_text,
                 re.IGNORECASE,
             ))
-            if document_question_for_fallback:
-                for document_line in verified_document_context_lines:
-                    try:
-                        payload = json.loads(document_line[document_line.index("{"):])
-                        document_id = str(payload.get("source_id") or "")
-                    except (ValueError, TypeError, json.JSONDecodeError):
-                        continue
-                    if document_id and document_id not in existing_document_ids:
-                        shared_lcr_lines.append(document_line)
-                        existing_document_ids.add(document_id)
             if care_journey_request:
                 shared_lcr_lines.sort(key=_lcr_context_chronological_key)
             selected_source_counts: dict[str, int] = {}
@@ -5219,6 +5201,27 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ]))
         else:
             shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
+        # An explicit document question must not lose its verified upload because
+        # a lexical token filter fails to match a paraphrase (e.g. walking/walker).
+        # These records are already person-, caregiver-, upload-, and hash-verified.
+        if document_question_for_fallback:
+            existing_document_ids = set()
+            for line in shared_lcr_lines:
+                try:
+                    payload = json.loads(line[line.index("{"):])
+                    if payload.get("source_type") == "document_extractions" and payload.get("source_id"):
+                        existing_document_ids.add(str(payload["source_id"]))
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+            for document_line in verified_document_context_lines:
+                try:
+                    payload = json.loads(document_line[document_line.index("{"):])
+                    document_id = str(payload.get("source_id") or "")
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+                if document_id and document_id not in existing_document_ids:
+                    shared_lcr_lines.insert(0, document_line)
+                    existing_document_ids.add(document_id)
         source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
         source_event_ids = _context_record_ids(event_context, "event_id")
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
