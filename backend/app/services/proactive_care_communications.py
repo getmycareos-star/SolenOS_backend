@@ -428,8 +428,10 @@ def create_proactive_care_notifications(
 
     A change requires an active meaningful candidate and person-scoped evidence.
     A question requires a valid necessity rationale, decision dependency, and
-    same-recipient evidence. Closing or superseding a source closes its message
-    and cancels any push that has not yet been attempted.
+    same-recipient evidence. Only critical questions and the two highest-priority
+    ordinary questions generate notifications. Queue changes close obsolete
+    notifications; a previously surfaced question is not repeatedly notified
+    unless its underlying record is updated.
     """
     caregivers = db.query(Caregiver).filter(Caregiver.person_id == person_id).all()
     if not caregivers:
