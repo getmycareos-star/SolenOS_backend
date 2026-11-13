@@ -241,6 +241,7 @@ def _history_bundle(
         "assertions": "care_assertion",
         "decisions": "care_decision",
         "decision_outcomes": "decision_outcome",
+        "handoffs": "caregiver_handoff",
         "timeline": "care_timeline_entry",
         "uncertainties": "care_uncertainty",
         "missing_information": "missing_information",
@@ -268,6 +269,7 @@ def _history_bundle(
                 or item.get("asserted_value") or item.get("decision_text") or item.get("perspective_text")
                 or item.get("question") or item.get("source_text") or item.get("notes")
                 or item.get("reason") or item.get("resolution") or item.get("context")
+                or item.get("scope") or item.get("acceptance_evidence") or item.get("completion_evidence")
             )
             if isinstance(text_value, (dict, list)):
                 text_value = json.dumps(text_value, ensure_ascii=False, default=str)
@@ -276,15 +278,17 @@ def _history_bundle(
                 "source_id": source_id,
                 "title": item.get("title") or item.get("fact_type") or item.get("field")
                          or item.get("topic") or item.get("context_type") or item.get("entry_type")
-                         or item.get("target_type") or canonical_type.replace("_", " ").title(),
+                         or item.get("target_type") or item.get("responsibility_type")
+                         or canonical_type.replace("_", " ").title(),
                 "text": str(text_value or "")[:6000],
                 "occurred_at": item.get("occurred_at") or item.get("effective_at")
                                or item.get("observed_at") or item.get("decided_at")
+                               or item.get("effective_time") or item.get("timestamp")
                                or item.get("scheduled_at"),
                 "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
                 "status": item.get("status") or item.get("epistemic_status")
                           or item.get("assertion_status") or item.get("decision_status")
-                          or item.get("outcome_status"),
+                          or item.get("outcome_status") or item.get("acceptance_status"),
                 "evidence_ids": item.get("evidence_ids") or [],
                 "source_label": item.get("source_label") or item.get("source_type") or source_name,
                 "lcr_context_source": source_name,
