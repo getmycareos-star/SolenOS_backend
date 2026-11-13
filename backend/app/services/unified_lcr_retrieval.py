@@ -87,11 +87,11 @@ def _temporal_window(
         elif re.search(r"\\bsince\\s+20\\d{2}-\\d{2}-\\d{2}", text):
             start, end = selected, today
         elif re.search(r"\\bafter\\s+20\\d{2}-\\d{2}-\\d{2}", text):
-            start, end = selected + timedelta(days=1), today
+            start, end = selected + timedelta(days=1), date(9998, 12, 31)
         elif re.search(r"\\bbefore\\s+20\\d{2}-\\d{2}-\\d{2}", text):
-            if selected == date.min:
+            if selected <= date(2, 1, 1):
                 raise ValueError("The requested date range is outside the supported calendar.")
-            start, end = date.min, selected - timedelta(days=1)
+            start, end = date(2, 1, 1), selected - timedelta(days=1)
         if start is not None:
             return date_window(start, end)
 
