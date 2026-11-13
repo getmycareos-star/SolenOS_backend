@@ -2279,6 +2279,20 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
                 extract_exact_source_candidates,
             )
 
+        processing_history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=200&offset=0",
+            headers=headers,
+        )
+        assert processing_history.status_code == 200, processing_history.text
+        processing_by_event = {
+            row["source_id"]: row["capture_processing"]
+            for row in processing_history.json()["records"]
+            if row.get("source_id") in {receipt["id"] for receipt in receipts}
+        }
+        assert set(processing_by_event) == {receipt["id"] for receipt in receipts}
+        assert all(item["job_status"] == "completed" for item in processing_by_event.values())
+        assert all(item["execution_status"]["projection"] == "verified" for item in processing_by_event.values())
+
         db = TestingSessionLocal()
         try:
             events = [
