@@ -407,3 +407,45 @@ def test_daily_care_acceptance_rolls_back_when_shared_reconciliation_fails(monke
         assert analysis.review_history in (None, [])
     finally:
         db.close()
+
+
+def test_daily_care_history_search_finds_paraphrased_sleep_observations():
+    """A sleep query must retrieve reports phrased as waking/being awake."""
+    client = TestClient(app)
+    session = create_session(client, "Paraphrased history caregiver")
+    exact_id = add_event(
+        session,
+        "Sleep observation",
+        "Caregiver reported poor sleep during the night.",
+        "2026-10-01T22:00:00Z",
+    )
+    paraphrase_id = add_event(
+        session,
+        "Overnight restlessness",
+        "Caregiver reported she remained awake for several hours overnight.",
+        "2026-10-10T22:00:00Z",
+    )
+    db = TestSessionLocal()
+    try:
+        bundle = daily_qwen._history_bundle(
+            db,
+            session["person"]["id"],
+            session["caregiver"]["id"],
+            query="sleep",
+            context_query="sleep",
+        )
+    finally:
+        db.close()
+
+    retrieved_ids = {
+        str(record.get("source_id"))
+        for record in bundle["records"]
+        if record.get("source_type") == "care_event"
+    }
+    assert {exact_id, paraphrase_id}.issubset(retrieved_ids), {
+        "expected": [exact_id, paraphrase_id],
+        "retrieved": sorted(retrieved_ids),
+    }
+    event_coverage = bundle["lcr_context"]["sources"]["events"]
+    assert event_coverage["candidate_scan_complete"] is True
+    assert event_coverage["candidate_count"] >= 2
