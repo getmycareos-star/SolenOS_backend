@@ -1352,3 +1352,17 @@ def test_companion_revises_overloaded_answer_before_persisting(monkeypatch):
         assert "no more than three short sentences" in calls[1][0][-1]["content"]
     finally:
         teardown()
+
+
+def test_repeated_question_complaint_reuses_prior_caregiver_question_for_retrieval():
+    prior = [
+        SimpleNamespace(role="assistant", content="Maybe the sleep is changing."),
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="I can look into that."),
+    ]
+    query = collaboration._context_query_with_history(
+        "You keep asking me the same questions. I've already told you this.",
+        prior,
+    )
+    assert "Has Mum's sleep been getting worse?" in query
+    assert "Maybe the sleep is changing." not in query
