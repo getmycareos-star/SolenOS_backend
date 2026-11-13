@@ -293,7 +293,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
         teardown()
 
 def test_one_hundred_case_question_gate_benchmark():
-    """100 deterministic synthetic cases: 35 eligible, 65 must be withheld."""
+    """100 deterministic synthetic cases: 38 eligible, 62 must be withheld."""
     setup()
     try:
         db = SessionLocal()
@@ -334,7 +334,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 "necessity": "necessary" if necessary else "not_assessed",
                 "necessity_rationale": "A recorded care decision depends on this answer." if necessary else None,
                 "decision_dependency": "The next handoff step depends on this answer." if necessary else None,
-                "evidence_ids": [] if 35 <= index < 40 else [evidence_id],
+                "evidence_ids": [] if 38 <= index < 40 else [evidence_id],
             }
             if 35 <= index < 40:
                 event_id = f"benchmark-event-{index:03d}"
@@ -342,8 +342,8 @@ def test_one_hundred_case_question_gate_benchmark():
                     id=event_id, person_id=person.id,
                     event_type="daily_capture", status="recorded",
                     occurred_at=datetime.now(timezone.utc),
-                    title=f"Synthetic event {index}", description="No linked evidence.",
-                    evidence_ids=[], created_by_caregiver_id=caregiver.id,
+                    title=f"Synthetic event {index}", description="Synthetic daily-care observation.",
+                    evidence_ids=[] if 38 <= index < 40 else [evidence_id], created_by_caregiver_id=caregiver.id,
                 ))
                 source_context = {
                     "source_kind": "daily_capture_extraction",
@@ -373,7 +373,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 evidence_ids=[evidence_id],
                 context=context,
             ))
-            if index < 35:
+            if index < 38:
                 expected_eligible.add(question_id)
         duplicate_evidence_id = "benchmark-evidence-duplicate"
         db.add(Evidence(
@@ -432,11 +432,11 @@ def test_one_hundred_case_question_gate_benchmark():
         assert precision == 1.0
         assert recall == 1.0
         assert predicted_eligible == expected_eligible
-        assert len(result["eligible_question_ids"]) == 35
+        assert len(result["eligible_question_ids"]) == 38
         assert "benchmark-question-duplicate" not in result["eligible_question_ids"]
         assert result["critical_count"] == 10
         assert len(result["recommended_question_ids"]) == 12
-        assert result["additional_ordinary_count"] == 23
+        assert result["additional_ordinary_count"] == 26
         assert [item["priority"] for item in result["questions"]] == ["critical"] * 10 + ["high"] * 2
         assert all(item["id"] in expected_eligible for item in result["questions"])
     finally:
