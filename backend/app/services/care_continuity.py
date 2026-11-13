@@ -122,16 +122,19 @@ def has_valid_caregiver_necessity(
         if db is not None:
             source_record_exists = False
             if source_kind == "information_gap":
+                source_row = db.query(InformationGap).filter(
+                    InformationGap.id == source_id,
+                    InformationGap.person_id == scoped_person_id,
+                    InformationGap.lifecycle_status.in_([
+                        GapLifecycleStatus.OPEN,
+                        GapLifecycleStatus.REOPENED,
+                        GapLifecycleStatus.PARTIALLY_RESOLVED,
+                    ]),
+                ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
-                    isinstance(source_id, str) and db.query(InformationGap.id).filter(
-                        InformationGap.id == source_id,
-                        InformationGap.person_id == scoped_person_id,
-                        InformationGap.lifecycle_status.in_([
-                            GapLifecycleStatus.OPEN,
-                            GapLifecycleStatus.REOPENED,
-                            GapLifecycleStatus.PARTIALLY_RESOLVED,
-                        ]),
-                    ).first()
+                    source_row
+                    and source_row.subject_type == getattr(question, "subject_type", None)
+                    and source_row.subject_id == getattr(question, "subject_id", None)
                 )
             elif source_kind in {"daily_capture_extraction", "document_extraction"}:
                 source_refs = item.get("source_record_refs")
@@ -155,20 +158,26 @@ def has_valid_caregiver_necessity(
                     ).first():
                         source_record_exists = True
             elif source_kind == "contradiction":
+                source_row = db.query(Contradiction).filter(
+                    Contradiction.id == source_id,
+                    Contradiction.person_id == scoped_person_id,
+                    Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
+                ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
-                    isinstance(source_id, str) and db.query(Contradiction.id).filter(
-                        Contradiction.id == source_id,
-                        Contradiction.person_id == scoped_person_id,
-                        Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
-                    ).first()
+                    source_row
+                    and source_row.subject_type == getattr(question, "subject_type", None)
+                    and source_row.subject_id == getattr(question, "subject_id", None)
                 )
             elif source_kind == "stale_or_unreviewed_assertion":
+                source_row = db.query(CareAssertion).filter(
+                    CareAssertion.id == source_id,
+                    CareAssertion.person_id == scoped_person_id,
+                    CareAssertion.assertion_status.in_(("reported", "review_required", "accepted", "caregiver_reviewed")),
+                ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
-                    isinstance(source_id, str) and db.query(CareAssertion.id).filter(
-                        CareAssertion.id == source_id,
-                        CareAssertion.person_id == scoped_person_id,
-                        CareAssertion.assertion_status.in_(("reported", "review_required", "accepted", "caregiver_reviewed")),
-                    ).first()
+                    source_row
+                    and source_row.subject_type == getattr(question, "subject_type", None)
+                    and source_row.subject_id == getattr(question, "subject_id", None)
                 )
             elif source_kind == "registered_action":
                 source_record_exists = bool(
