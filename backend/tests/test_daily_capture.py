@@ -732,7 +732,7 @@ def test_readiness_rejects_incomplete_schema():
         incomplete_engine.dispose()
 
 
-def test_quick_daily_checkin_persists_uncertainty_without_inference():
+def test_quick_daily_checkin_persists_uncertainty_without_inference(monkeypatch):
     setup_db()
     try:
         seed_person_and_caregiver()
@@ -760,12 +760,27 @@ def test_quick_daily_checkin_persists_uncertainty_without_inference():
             },
         )
         assert response.status_code == 200, response.text
+        def unexpected_model_call(*args, **kwargs):
+            raise AssertionError("Quick check-ins must not invoke model extraction")
+
         process_daily_capture_job(
             response.json()["qwen_job_id"],
             monkeypatch,
-            exact_source_candidates,
+            unexpected_model_call,
         )
         db = TestingSessionLocal()
+        analysis = db.query(CaptureAnalysis).filter_by(
+            source_event_id=response.json()["id"],
+            person_id="person-daily-test",
+            caregiver_id="caregiver-daily-test",
+        ).one()
+        job = db.query(QwenBackgroundJob).filter_by(id=response.json()["qwen_job_id"]).one()
+        assert analysis.extraction_status == "not_applicable"
+        assert analysis.execution_status["extraction"] == "not_applicable"
+        assert analysis.execution_status["review"] == "not_required"
+        assert analysis.candidates == {"observations": [], "open_questions": []}
+        assert job.status == "completed"
+        assert '"capture_mode": "structured_quick_check_in"' in job.result_text
         event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
         detail = json.loads(event.description)
         assert detail["quick_check_in"]["kind"] == "uncertain"
