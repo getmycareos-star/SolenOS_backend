@@ -449,3 +449,12 @@ def test_daily_care_history_search_finds_paraphrased_sleep_observations():
     event_coverage = bundle["lcr_context"]["sources"]["events"]
     assert event_coverage["candidate_scan_complete"] is True
     assert event_coverage["candidate_count"] >= 2
+
+
+def test_companion_history_filter_keeps_semantic_paraphrases():
+    lines = [
+        'Shared LCR context: {"source_type":"events","source_id":"sleep-event","record":{"description":"Caregiver reported remaining awake for several hours overnight."}}',
+        'Shared LCR context: {"source_type":"events","source_id":"meal-event","record":{"description":"Caregiver recorded half a sandwich at lunch."}}',
+    ]
+    selected = collaboration._filter_context_lines_to_query("sleep", lines)
+    assert selected == [lines[0]]
