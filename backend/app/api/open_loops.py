@@ -461,8 +461,15 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
     query = db.query(OpenLoopRecord).filter(
         OpenLoopRecord.person_id == person_id, or_(OpenLoopRecord.caregiver_id == caregiver_id, OpenLoopRecord.assigned_caregiver_id == caregiver_id))
     if status:
-        if status not in ALL_STATES: raise HTTPException(status_code=422, detail="Invalid status filter")
-        query = query.filter(OpenLoopRecord.status == status)
+        if status not in ALL_STATES:
+            raise HTTPException(status_code=422, detail="Invalid status filter")
+        # "Open" is the caregiver-facing unresolved view, not the literal
+        # database state. Waiting, deferred, blocked and review-needed items
+        # are still outstanding commitments and must not disappear from it.
+        if status == "open":
+            query = query.filter(OpenLoopRecord.status.in_(OPEN_STATES))
+        else:
+            query = query.filter(OpenLoopRecord.status == status)
     if loop_type:
         if loop_type not in LOOP_TYPES: raise HTTPException(status_code=422, detail="Invalid loop type filter")
         query = query.filter(OpenLoopRecord.loop_type == loop_type)
