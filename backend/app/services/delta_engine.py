@@ -281,6 +281,18 @@ def _medication_change_is_explicit(item: dict[str, Any]) -> bool:
     return False
 
 
+def _apply_incomplete_baseline_guard(item: dict[str, Any], *, baseline_complete: bool) -> None:
+    """Prevent a truncated baseline from producing a confident state comparison."""
+    if baseline_complete:
+        return
+    item["certainty"] = "uncertain"
+    item["change_type"] = "uncertain"
+    item["baseline_incomplete"] = True
+    item["comparison_warning"] = (
+        "The prior-state assertion set was truncated. A complete comparison cannot be made."
+    )
+
+
 def _match_finding_evidence(persisted_evidence: list[dict[str, Any]], excerpt: str) -> list[dict[str, Any]]:
     """Match a finding to sufficiently specific text in persisted, person-scoped evidence.
 
@@ -614,6 +626,28 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             prior_values = list(dict.fromkeys(old["value"] for old in candidates))
             item["existing_assertions"] = [old["assertion_id"] for old in candidates]
             distinct_prior = list(dict.fromkeys(_normalise(value) for value in prior_values))
+            _apply_incomplete_baseline_guard(
+                item,
+                baseline_complete=active_assertions_total == len(active_state),
+            )
+            if item.get("baseline_incomplete"):
+                # Do not let the bounded in-memory subset overrule the guard.
+                computed.append({
+                    "domain": domain,
+                    "name": name,
+                    "field": item.get("field", expected_field),
+                    "change_type": "uncertain",
+                    "previous": item.get("previous"),
+                    "current": item.get("current"),
+                    "certainty": "uncertain",
+                    "evidence_supported": item.get("evidence_supported", False),
+                    "claim_supported": item.get("claim_supported"),
+                    "source_record_refs": list(item.get("source_record_refs") or []),
+                    "comparison_basis": "Incomplete prior assertion coverage; no reliable state comparison.",
+                    "baseline_assertion_ids": list(item.get("existing_assertions") or []),
+                    "baseline_values": list(item.get("prior_state_candidates") or []),
+                })
+                continue
             if domain != "symptoms" and len(distinct_prior) > 1:
                 item["change_type"] = "conflicting"
                 item["certainty"] = "uncertain"
