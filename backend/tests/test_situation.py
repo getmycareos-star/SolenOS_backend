@@ -635,8 +635,9 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         }
         assert threads["persisted-appetite-thread"]["linked_evidence_ids"] == [second_evidence_id]
         mobility_questions = threads["persisted-mobility-thread"]["openQuestions"]
-        # Only the source-grounded, explicitly necessary question is exposed;
-        # the unrelated unassessed question remains internal.
+        # Critical questions remain visible; only the two highest-priority
+        # ordinary questions are surfaced initially. The low-priority and
+        # unrelated unassessed questions remain internal.
         assert mobility_questions == [
             "Has the unsteadiness also happened indoors?",
             "Has the person needed more support when standing?",
