@@ -319,6 +319,18 @@ def _active_question(db: Session, person_id: str, source_id: str | None) -> tupl
         return False, "question_resolved"
     if not has_valid_caregiver_necessity(question, db, person_id):
         return False, "necessity_or_evidence_no_longer_valid"
+    eligible = db.query(OpenQuestion).filter(
+        OpenQuestion.person_id == person_id,
+        OpenQuestion.necessity == "necessary",
+        OpenQuestion.status.in_(sorted(OPEN_QUESTION_STATUSES)),
+    ).all()
+    eligible = [
+        row for row in eligible
+        if has_valid_caregiver_necessity(row, db, person_id)
+    ]
+    _, selected, _ = prioritize_caregiver_questions(eligible, ordinary_limit=2)
+    if question.id not in {row.id for row in selected}:
+        return False, "question_not_currently_prioritized"
     return True, ""
 
 
