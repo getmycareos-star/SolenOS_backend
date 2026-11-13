@@ -2222,7 +2222,7 @@ def test_longitudinal_history_is_fetched_in_batches_without_truncation(monkeypat
         import app.services.baseline as baseline_service
 
         # A tiny fetch batch proves the batch size is not a historical row cap.
-        monkeypatch.setattr(baseline_service, "MAX_LONGITUDINAL_EVENTS", 2)
+        monkeypatch.setattr(baseline_service, "LONGITUDINAL_FETCH_BATCH_SIZE", 2)
         db = TestingSessionLocal()
         person = Person(id="bounded-history-person", name="Bounded history test")
         caregiver = Caregiver(
@@ -2320,7 +2320,7 @@ def test_complete_baseline_history_can_identify_emergence_when_coverage_exists(m
         from app.services.change_detection import detect_event_changes
         import app.services.baseline as baseline_service
 
-        monkeypatch.setattr(baseline_service, "MAX_LONGITUDINAL_EVENTS", 2)
+        monkeypatch.setattr(baseline_service, "LONGITUDINAL_FETCH_BATCH_SIZE", 2)
         db = TestingSessionLocal()
         person = Person(id="bounded-emergence-person", name="Bounded emergence test")
         caregiver = Caregiver(
