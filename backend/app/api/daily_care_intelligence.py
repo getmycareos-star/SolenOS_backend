@@ -127,7 +127,9 @@ def _history_bundle(
 
     daily_event_ids = [
         str(event.id) for event in events
-        if event.event_type == "daily_care_entry"
+        if event.event_type in {
+            "daily_care_entry", "structured_daily_capture", "quick_daily_checkin",
+        }
         and str(event.created_by_caregiver_id) == str(caregiver_id)
     ]
     analysis_by_event: dict[str, CaptureAnalysis] = {}
@@ -167,18 +169,34 @@ def _history_bundle(
             extraction_status = analysis.extraction_status if analysis is not None else (
                 "failed" if job and job.status == "failed" else "queued"
             )
+            candidates = analysis.candidates if analysis is not None and isinstance(analysis.candidates, dict) else {}
+            observations = candidates.get("observations")
+            observations = observations if isinstance(observations, list) else []
+            review_required = any(
+                isinstance(item, dict)
+                and item.get("review_status", "pending_review") in {
+                    "pending_review", "corrected_pending_approval", "corrected_by_caregiver",
+                }
+                for item in observations
+            )
             capture_processing = {
+                "analysis_id": str(analysis.id) if analysis is not None else None,
                 "extraction_status": extraction_status,
                 "job_status": job.status if job is not None else (
                     "unavailable" if extraction_status == "unavailable" else None
                 ),
                 "job_id": job.id if job is not None else None,
+                "review_required": review_required,
                 "execution_status": analysis.execution_status if analysis is not None else {},
                 "message": (
                     "Your original report is saved, but its details could not be organized."
-                    if extraction_status in {"failed", "unavailable"}
+                    if extraction_status in {"failed", "unavailable"} or (job is not None and job.status in {"failed", "cancelled"})
                     else "SolenOS is organizing the details in the background."
                     if job is not None and job.status in {"queued", "processing"}
+                    else "Suggested details are ready for your review. They have not been added to the care record."
+                    if review_required
+                    else "Your structured check-in is saved. No AI extraction was needed."
+                    if extraction_status == "not_applicable"
                     else None
                 ),
             }
