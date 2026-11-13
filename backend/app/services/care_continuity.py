@@ -71,7 +71,11 @@ def has_valid_caregiver_necessity(
             ):
                 return False
             claim_evidence_ids = set(str(value) for value in (claim.evidence_ids or []) if value)
-            if not claim_evidence_ids.intersection(evidence_ids):
+            # A linked claim may legitimately lack its own evidence while the
+            # question is grounded in a new conflicting document. If the claim
+            # does carry evidence, require overlap rather than accepting an
+            # unrelated source bundle.
+            if claim_evidence_ids and not claim_evidence_ids.intersection(evidence_ids):
                 return False
     # The dependency must be tied to the same persisted source context that
     # grounds this question. Evidence attached elsewhere on the question must
