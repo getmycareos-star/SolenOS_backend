@@ -109,14 +109,26 @@ def has_valid_caregiver_necessity(
             for value in rationale_values
         )
         assessment_evidence_ids = nested.get("evidence_ids")
-        evidence_matches_context = (
-            not isinstance(assessment_evidence_ids, list)
-            or not assessment_evidence_ids
-            or bool(set(str(value) for value in assessment_evidence_ids).intersection(evidence_ids))
-        )
+        # The source-context assessment must explicitly name the evidence that
+        # grounds this exact decision dependency. An omitted evidence list is
+        # not proof of linkage, even when unrelated evidence is attached to
+        # the question elsewhere.
+        context_evidence_ids = {
+            str(value) for value in assessment_evidence_ids
+            if isinstance(value, str) and value.strip()
+        } if isinstance(assessment_evidence_ids, list) else set()
+        evidence_matches_context = bool(context_evidence_ids.intersection(evidence_ids))
+        source_record_exists = True
+        if db is not None and source_kind == "information_gap":
+            source_record_exists = bool(
+                isinstance(source_id, str) and db.query(InformationGap.id).filter(
+                    InformationGap.id == source_id,
+                    InformationGap.person_id == scoped_person_id,
+                ).first()
+            )
         if (
             has_dependency and has_source_reference and has_rationale
-            and evidence_matches_context
+            and evidence_matches_context and source_record_exists
         ):
             return True
     return False
