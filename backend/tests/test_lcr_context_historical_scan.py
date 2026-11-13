@@ -211,3 +211,74 @@ def test_prompt_budget_is_shared_across_sources_instead_of_starving_later_care_d
     assert "\n[events;" in prompt
     assert "\n[evidence;" in prompt
     assert "Context truncated" in prompt
+
+
+def test_temporal_retrieval_keeps_delayed_entries_when_either_event_or_recording_time_is_in_window():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _care_events_schema(engine)
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    window_start = now - timedelta(days=7)
+
+    rows = [
+        {
+            "id": "late-recorded-entry",
+            "person_id": "person-a",
+            "event_type": "daily_observation",
+            "status": "recorded",
+            "occurred_at": now - timedelta(days=20),
+            "recorded_at": now - timedelta(days=1),
+            "created_at": now - timedelta(days=1),
+            "title": "Delayed report",
+            "description": "A caregiver entered this event late.",
+        },
+        {
+            "id": "event-in-window",
+            "person_id": "person-a",
+            "event_type": "daily_observation",
+            "status": "recorded",
+            "occurred_at": now - timedelta(days=2),
+            "recorded_at": now - timedelta(days=2),
+            "created_at": now - timedelta(days=2),
+            "title": "Recent event",
+            "description": "An event happened during the requested period.",
+        },
+        {
+            "id": "outside-window",
+            "person_id": "person-a",
+            "event_type": "daily_observation",
+            "status": "recorded",
+            "occurred_at": now - timedelta(days=30),
+            "recorded_at": now - timedelta(days=25),
+            "created_at": now - timedelta(days=25),
+            "title": "Older event",
+            "description": "Both timestamps are outside the requested period.",
+        },
+    ]
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(events.insert(), rows)
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db,
+                "person-a",
+                limit_per_source=10,
+                temporal_window={
+                    "start": window_start.isoformat(),
+                    "end": now.isoformat(),
+                    "basis": "explicit_user_temporal_expression",
+                },
+            )
+
+        source = context["sources"]["events"]
+        returned_ids = {item["id"] for item in source["items"]}
+        assert source["candidate_scan_complete"] is True
+        assert source["candidate_count"] == 2
+        assert returned_ids == {"late-recorded-entry", "event-in-window"}
+        delayed = next(item for item in source["items"] if item["id"] == "late-recorded-entry")
+        assert delayed["occurred_at"] < window_start.isoformat()
+        assert delayed["recorded_at"] >= window_start.isoformat()
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
