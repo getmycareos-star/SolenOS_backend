@@ -459,6 +459,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             target_person_id = path.rsplit("/", 1)[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
+        # Caregiver access-management endpoints derive the care-record scope
+        # exclusively from the validated bearer session. They intentionally do
+        # not accept a client-supplied person_id in invitation/member payloads.
+        if path == "/api/v1/caregiver-access" or path.startswith("/api/v1/caregiver-access/"):
+            target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
