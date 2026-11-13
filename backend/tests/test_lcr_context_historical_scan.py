@@ -1,0 +1,125 @@
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import Column, DateTime, MetaData, String, Table, create_engine
+from sqlalchemy.orm import Session
+
+from app.services.lcr_context import _load_source_schema, build_lcr_context
+
+
+def _care_events_schema(engine):
+    metadata = MetaData()
+    events = Table(
+        "care_events",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("event_type", String),
+        Column("status", String),
+        Column("occurred_at", DateTime),
+        Column("recorded_at", DateTime),
+        Column("created_at", DateTime),
+        Column("title", String),
+        Column("description", String),
+        Column("evidence_ids", String),
+        Column("time_provenance", String),
+        Column("location_provenance", String),
+        Column("created_by_caregiver_id", String),
+        Column("significance_verdict", String),
+        Column("attention_candidate", String),
+        Column("follow_up_candidate", String),
+        Column("situation_id", String),
+    )
+    metadata.create_all(engine)
+    return events
+
+
+def test_query_retrieval_scans_beyond_old_250_candidate_ceiling_and_finds_older_direct_match():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _care_events_schema(engine)
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+
+    rows = []
+    for index in range(300):
+        happened = now - timedelta(days=index)
+        rows.append({
+            "id": f"recent-sleep-{index:03d}",
+            "person_id": "person-a",
+            "event_type": "daily_observation",
+            "status": "recorded",
+            "occurred_at": happened,
+            "recorded_at": happened,
+            "created_at": happened,
+            "title": "Sleep observation",
+            "description": "Caregiver reported poor sleep overnight.",
+        })
+    older = now - timedelta(days=190)
+    rows.append({
+        "id": "older-waking-event",
+        "person_id": "person-a",
+        "event_type": "daily_observation",
+        "status": "recorded",
+        "occurred_at": older,
+        "recorded_at": older,
+        "created_at": older,
+        "title": "Overnight waking",
+        "description": "Caregiver reported repeated waking during the night.",
+    })
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(events.insert(), rows)
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db, "person-a", limit_per_source=1, query="waking",
+            )
+
+        source = context["sources"]["events"]
+        assert source["candidate_scan_complete"] is True
+        assert source["candidate_count"] == 301
+        assert source["has_more"] is True
+        assert [item["id"] for item in source["items"]] == ["older-waking-event"]
+        assert context["history_coverage"] == "query_scanned_ranked_subset"
+        # The whole query scan can be complete while the overall LCR schema is
+        # partial. Those are deliberately separate claims.
+        assert context["retrieval_scan_complete"] is False
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
+
+def test_unqueried_current_care_projection_remains_explicitly_bounded():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _care_events_schema(engine)
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    rows = []
+    for index in range(5):
+        happened = now - timedelta(days=index)
+        rows.append({
+            "id": f"event-{index}",
+            "person_id": "person-a",
+            "event_type": "daily_observation",
+            "status": "recorded",
+            "occurred_at": happened,
+            "recorded_at": happened,
+            "created_at": happened,
+            "title": f"Observation {index}",
+            "description": "Caregiver observation.",
+        })
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(events.insert(), rows)
+        with Session(engine) as db:
+            context = build_lcr_context(db, "person-a", limit_per_source=2)
+
+        source = context["sources"]["events"]
+        assert source["returned_count"] == 2
+        assert source["candidate_scan_complete"] is False
+        assert source["has_more"] is True
+        assert context["history_coverage"] == "bounded_recent_subset"
+        assert context["retrieval_scan_complete"] is False
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
