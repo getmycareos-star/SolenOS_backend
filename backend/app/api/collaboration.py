@@ -5198,6 +5198,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ))
             if care_journey_request:
                 shared_lcr_lines.sort(key=_lcr_context_chronological_key)
+            caregiver_question_queue = shared_lcr_context.get("sources", {}).get(
+                "caregiver_question_queue", {}
+            )
+            for queue_item in caregiver_question_queue.get("items", []):
+                shared_lcr_lines.append(
+                    "Approved caregiver question queue (ask only when relevant; respect intended answerer): "
+                    + json.dumps(queue_item, ensure_ascii=False, default=str)
+                )
             selected_source_counts: dict[str, int] = {}
             for selected_line in shared_lcr_lines:
                 try:
