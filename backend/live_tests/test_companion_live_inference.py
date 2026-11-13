@@ -515,3 +515,57 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
             for item in handoff_response.json().get("source_record_refs", [])
         }
         assert ("handoffs", "journey-sleep-handoff") in handoff_refs, handoff_refs
+
+
+def test_live_qwen_companion_retrieves_a_paraphrased_event_from_the_second_history_page():
+    """A six-month-old paraphrased event must survive the 50-record page boundary."""
+    client = TestClient(app)
+    session = _create_session(client, "Six-month pagination caregiver")
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    now = datetime.now(timezone.utc)
+    oldest_event_id = "sleep-six-month-oldest"
+    db = TestingSessionLocal()
+    try:
+        db.add_all([
+            CareEvent(
+                id=f"sleep-six-month-{index:03d}",
+                person_id=person_id,
+                event_type="daily_observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=index * 3),
+                recorded_at=now,
+                created_at=now,
+                title=f"Sleep note {index}",
+                description=(
+                    "Caregiver reported remaining awake for several hours overnight."
+                    if index == 50
+                    else f"Caregiver recorded a sleep observation {index}."
+                ),
+                created_by_caregiver_id=caregiver_id,
+            )
+            for index in range(51)
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    response = _ask(
+        client,
+        session,
+        "Give me the history of sleep over the last six months, including older changes.",
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    coverage = result.get("lcr_context_coverage", {})
+    event_coverage = coverage.get("sources", {}).get("events", {})
+    assert coverage.get("pages_fetched") == 2, coverage
+    assert coverage.get("page_limit_reached") is False, coverage
+    assert event_coverage.get("candidate_count") == 51, event_coverage
+    assert event_coverage.get("returned_count") == 51, event_coverage
+    assert event_coverage.get("has_more") is False, event_coverage
+    assert oldest_event_id in set(result.get("source_event_ids", [])), result.get("source_event_ids")
+    assert any(
+        item.get("record_id") == oldest_event_id and item.get("record_type") == "events"
+        for item in result.get("source_record_refs", [])
+    ), result.get("source_record_refs")
