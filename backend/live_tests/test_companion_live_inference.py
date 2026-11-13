@@ -448,8 +448,9 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
             (item.get("record_type"), item.get("record_id"))
             for item in result.get("source_record_refs", [])
         }
-        assert all(("events", event_id) in source_refs for event_id in expected), source_refs
-        assert expected.issubset(cited), {
+        selected_event_refs = {record_id for record_type, record_id in source_refs if record_type == "events"}
+        assert selected_event_refs == expected, source_refs
+        assert cited == expected, {
             "expected_all_three_month_events": sorted(expected),
             "cited_event_ids": sorted(cited),
             "response": result,
