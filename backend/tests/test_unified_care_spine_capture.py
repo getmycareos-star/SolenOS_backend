@@ -260,6 +260,14 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 assert completed_analysis.execution_status["longitudinal_retrieval"] == "verified"
                 analysis_id = completed_analysis.id
 
+            job_status_response = client.get(
+                f"/api/v1/assistant/jobs/{job_id}", headers=headers
+            )
+            assert job_status_response.status_code == 200, job_status_response.text
+            assert job_status_response.json()["status"] == "completed"
+            assert job_status_response.json()["daily_capture"]["projection_status"] == "verified"
+            assert job_status_response.json()["review_required"] is True
+
             analysis_response = client.get(
                 f"/api/v1/capture/analyses/{analysis_id}", headers=headers
             )
