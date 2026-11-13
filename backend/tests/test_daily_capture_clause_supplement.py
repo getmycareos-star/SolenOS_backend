@@ -59,3 +59,21 @@ def test_daily_capture_supplement_is_idempotent():
     second = supplement_source_grounded_daily_observations(source, first)
 
     assert second["observations"] == first["observations"]
+
+
+def test_daily_capture_replaces_a_collapsed_whole_sentence_with_independent_clauses():
+    source = "Mum slept poorly last night and seemed more unsettled this morning."
+    result = supplement_source_grounded_daily_observations(source, {
+        "observations": [{
+            "subject": "Mum",
+            "observation": source,
+            "source_quote": source,
+        }],
+        "open_questions": [],
+    })
+
+    values = [item["observation"] for item in result["observations"]]
+    assert source not in values
+    assert any("slept poorly" in value for value in values)
+    assert any("unsettled" in value for value in values)
+    assert len(values) == 2
