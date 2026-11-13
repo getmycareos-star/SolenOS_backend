@@ -56,7 +56,6 @@ def add_caregiver_session(person_id, relationship="family caregiver"):
     from app.models.anonymous_session import AnonymousSession
     from app.models.care import Caregiver
     from app.models.caregiver_access import CaregiverAccessGrant
-    from app.models.caregiver_access import CaregiverAccessGrant
 
     caregiver_id = str(uuid.uuid4())
     token = "test-token-" + str(uuid.uuid4())
@@ -71,13 +70,6 @@ def add_caregiver_session(person_id, relationship="family caregiver"):
             timezone="UTC",
         ))
         db.flush()
-        db.add(CaregiverAccessGrant(
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            role="family",
-            status="active",
-            can_manage_members=False,
-        ))
         db.add(AnonymousSession(
             id=str(uuid.uuid4()),
             person_id=person_id,
