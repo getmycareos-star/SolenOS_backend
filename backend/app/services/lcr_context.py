@@ -358,6 +358,11 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 
 
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
+    if source_name == "facts" and item.get("superseded_by_fact_id"):
+        return (
+            "superseded_fact",
+            "This fact was replaced by a later record. Keep it in the history, but do not present it as current.",
+        )
     if source_name == "assertions":
         return assertion_information_status(item.get("epistemic_state"), item.get("assertion_status"))
     if source_name == "document_extractions":
@@ -479,15 +484,28 @@ def build_lcr_context(
         if source_name == "uncertainty_assessments" and "is_active" in table.c:
             statement = statement.where(table.c.is_active.is_(True))
         if source_name == "assertions" and "assertion_status" in table.c:
-            # Explicitly accepted assertions and caregiver-authored reports are
-            # eligible. A reported claim remains unverified; model-only proposals
-            # without caregiver attribution are excluded.
+            # Keep caregiver-attributed historical assertions so corrections and
+            # rejections remain explainable. Model-only proposals without
+            # caregiver attribution remain excluded.
             accepted_or_legacy = table.c.assertion_status.in_(("accepted", "caregiver_reviewed"))
+            caregiver_origin = (
+                table.c.created_by_caregiver_id.is_not(None)
+                if "created_by_caregiver_id" in table.c else None
+            )
             caregiver_report = and_(
                 table.c.assertion_status == "reported",
-                table.c.created_by_caregiver_id.is_not(None),
-            ) if "created_by_caregiver_id" in table.c else None
-            statement = statement.where(or_(accepted_or_legacy, caregiver_report) if caregiver_report is not None else accepted_or_legacy)
+                caregiver_origin,
+            ) if caregiver_origin is not None else None
+            historical_assertion = and_(
+                table.c.assertion_status.in_(("rejected", "superseded", "withdrawn")),
+                caregiver_origin,
+            ) if caregiver_origin is not None else None
+            eligible_assertions = [accepted_or_legacy]
+            if caregiver_report is not None:
+                eligible_assertions.append(caregiver_report)
+            if historical_assertion is not None:
+                eligible_assertions.append(historical_assertion)
+            statement = statement.where(or_(*eligible_assertions))
         if source_name == "document_extractions":
             if caregiver_id and "caregiver_id" in table.c:
                 statement = statement.where(table.c.caregiver_id == str(caregiver_id))
@@ -497,8 +515,6 @@ def build_lcr_context(
                 statement = statement.where(
                     table.c.candidates["kind"].as_string() == "document_extraction_v1"
                 )
-        if source_name == "facts" and "superseded_by_fact_id" in table.c:
-            statement = statement.where(table.c.superseded_by_fact_id.is_(None))
         if temporal_window:
             temporal_fields = {
                 "events": ("occurred_at", "recorded_at"),
