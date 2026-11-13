@@ -164,7 +164,12 @@ def test_full_care_journey_scan_does_not_require_lexical_match_and_reports_remai
         assert source["candidate_count"] == 60
         assert source["returned_count"] == 50
         assert source["has_more"] is True
+        assert source["returned_history_complete"] is False
         assert context["history_coverage"] == "complete_history_scan_ranked_subset"
+        assert context["retrieval_scan_complete"] is True
+        assert context["retrieval_projection_complete"] is False
+        prompt = format_lcr_context_for_prompt(context)
+        assert '"retrieval_projection_complete":false' in prompt
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
