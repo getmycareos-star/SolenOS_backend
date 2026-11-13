@@ -2184,6 +2184,10 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
 
 
 _LCR_CONTEXT_SOURCE_PRIORITY = (
+    # Raw source records must survive the prompt budget before derived
+    # summaries, gaps, and interpretations. These are the evidence the model
+    # must cite and distinguish from later analysis.
+    "events", "evidence", "document_extractions", "assertions",
     "conflicts", "reconciliations", "information_gaps", "missing_information",
     "uncertainties", "uncertainty_assessments", "open_questions",
     "decision_outcomes", "decisions", "handoffs", "corrections", "facts",
