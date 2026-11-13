@@ -374,7 +374,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             item for item in question_rows
             if has_valid_caregiver_necessity(item, db, person_id)
         ]
-        _, question_rows, additional_question_count = prioritize_caregiver_questions(
+        _, question_rows, _ = prioritize_caregiver_questions(
             eligible_questions, ordinary_limit=2
         )
         question_source_status = "available" if question_rows else "empty"
