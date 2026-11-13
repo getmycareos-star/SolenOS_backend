@@ -1168,3 +1168,34 @@ def test_companion_claim_source_trace_includes_event_reporter_and_original_docum
         assert saved_claim["source_references"][0]["record_id"] == "unsteadiness-care-entry"
     finally:
         teardown()
+
+
+
+def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
+    import json
+
+    def line(source_type, source_id, description):
+        return "Shared LCR context: " + json.dumps({
+            "source_type": source_type,
+            "source_id": source_id,
+            "record": {"description": description},
+        })
+
+    lines = [
+        line("events", "event-old", "E" * 700),
+        line("evidence", "evidence-discharge", "Discharge instructions retained as original source."),
+        line("events", "event-recent", "R" * 700),
+    ]
+
+    selected, rendered, used_chars, truncated = (
+        collaboration._fit_model_context_lines_across_sources(lines, 1000)
+    )
+
+    assert len(selected) == 2
+    assert "event-old" in selected[0]
+    assert "evidence-discharge" in selected[1]
+    assert selected == [lines[0], lines[1]]
+    assert len(rendered) == 2
+    assert used_chars == sum(map(len, rendered))
+    assert used_chars <= 1000
+    assert truncated is True
