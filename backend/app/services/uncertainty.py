@@ -957,8 +957,34 @@ class UncertaintyEngine:
             # the explicit status filter and answer-history route.
             query = query.filter(OpenQuestionModel.status.in_(["open", "unresolved"]))
         from app.services.care_continuity import has_valid_caregiver_necessity
-        rows = query.order_by(OpenQuestionModel.asked_at.desc()).all()
-        return [row for row in rows if has_valid_caregiver_necessity(row, self.db, scoped_person_id)]
+        rows = [
+            row for row in query.all()
+            if has_valid_caregiver_necessity(row, self.db, scoped_person_id)
+        ]
+        priority_weight = {
+            "critical": 5, "high": 4, "medium": 3,
+            "low": 2, "informational": 1,
+        }
+        rows.sort(key=lambda row: (
+            -priority_weight.get(str(getattr(row.priority, "value", row.priority)), 0),
+            row.asked_at.isoformat() if row.asked_at else "",
+            str(row.id),
+        ))
+        # The ordinary caregiver list and the recommended projection must
+        # agree on one source-backed task per exact question and care subject.
+        unique = []
+        seen = set()
+        for row in rows:
+            key = (
+                " ".join((row.question or "").casefold().split()),
+                row.subject_type,
+                row.subject_id,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        return unique
 
     def create_contradiction(self, contradiction: ContradictionCreate) -> ContradictionModel:
         from app.models.care import CareEvent, Evidence
