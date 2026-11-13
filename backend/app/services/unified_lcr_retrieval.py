@@ -71,48 +71,48 @@ def _temporal_window(
 
     start = end = None
     range_match = re.search(
-        r"\\b(?:between\\s+(20\\d{2}-\\d{2}-\\d{2})\\s+and\\s+(20\\d{2}-\\d{2}-\\d{2})|"
-        r"from\\s+(20\\d{2}-\\d{2}-\\d{2})\\s+to\\s+(20\\d{2}-\\d{2}-\\d{2}))\\b",
+        r"\b(?:between\s+(20\d{2}-\d{2}-\d{2})\s+and\s+(20\d{2}-\d{2}-\d{2})|"
+        r"from\s+(20\d{2}-\d{2}-\d{2})\s+to\s+(20\d{2}-\d{2}-\d{2}))\b",
         text,
     )
     if range_match:
         values = [value for value in range_match.groups() if value]
         return date_window(parsed_date(values[0]), parsed_date(values[1]))
 
-    date_match = re.search(r"\\b(20\\d{2}-\\d{2}-\\d{2})\\b", text)
+    date_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", text)
     if date_match:
         selected = parsed_date(date_match.group(1))
-        if re.search(r"\\b(?:on|for)\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+        if re.search(r"\b(?:on|for)\s+20\d{2}-\d{2}-\d{2}", text):
             start = end = selected
-        elif re.search(r"\\bsince\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+        elif re.search(r"\bsince\s+20\d{2}-\d{2}-\d{2}", text):
             start, end = selected, today
-        elif re.search(r"\\bafter\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+        elif re.search(r"\bafter\s+20\d{2}-\d{2}-\d{2}", text):
             start, end = selected + timedelta(days=1), date(9998, 12, 31)
-        elif re.search(r"\\bbefore\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+        elif re.search(r"\bbefore\s+20\d{2}-\d{2}-\d{2}", text):
             if selected <= date(2, 1, 1):
                 raise ValueError("The requested date range is outside the supported calendar.")
             start, end = date(2, 1, 1), selected - timedelta(days=1)
         if start is not None:
             return date_window(start, end)
 
-    if re.search(r"\\byesterday\\b", text):
+    if re.search(r"\byesterday\b", text):
         start = end = today - timedelta(days=1)
-    elif re.search(r"\\btoday\\b", text):
+    elif re.search(r"\btoday\b", text):
         start = end = today
-    elif re.search(r"\\b(?:last|past)\\s+(\\d{1,3})\\s+days?\\b", text):
-        days = int(re.search(r"\\b(?:last|past)\\s+(\\d{1,3})\\s+days?\\b", text).group(1))
+    elif re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text):
+        days = int(re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text).group(1))
         if days < 1:
             raise ValueError("A care-history day range must be at least one day.")
         days = min(days, 366)
         start, end = today - timedelta(days=days - 1), today
-    elif re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+weeks?\\b", text):
-        weeks = int(re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+weeks?\\b", text).group(1))
+    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text):
+        weeks = int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text).group(1))
         if weeks < 1:
             raise ValueError("A care-history week range must be at least one week.")
         weeks = min(weeks, 52)
         start, end = today - timedelta(days=weeks * 7 - 1), today
-    elif re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+months?\\b", text):
-        months = int(re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+months?\\b", text).group(1))
+    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text):
+        months = int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text).group(1))
         if months < 1:
             raise ValueError("A care-history month range must be at least one month.")
         months = min(months, 12)
@@ -121,16 +121,16 @@ def _temporal_window(
         start_month = start_month_zero + 1
         start_day = min(today.day, calendar.monthrange(start_year, start_month)[1])
         start, end = date(start_year, start_month, start_day), today
-    elif re.search(r"\\blast week\\b", text):
+    elif re.search(r"\blast week\b", text):
         monday = today - timedelta(days=today.weekday())
         start, end = monday - timedelta(days=7), monday - timedelta(days=1)
-    elif re.search(r"\\bthis week\\b", text):
+    elif re.search(r"\bthis week\b", text):
         start, end = today - timedelta(days=today.weekday()), today
-    elif re.search(r"\\blast month\\b", text):
+    elif re.search(r"\blast month\b", text):
         first_this_month = today.replace(day=1)
         last_month_end = first_this_month - timedelta(days=1)
         start, end = last_month_end.replace(day=1), last_month_end
-    elif re.search(r"\\bthis month\\b", text):
+    elif re.search(r"\bthis month\b", text):
         start, end = today.replace(day=1), today
 
     if start is None or end is None:
