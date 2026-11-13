@@ -71,11 +71,6 @@ from app.services.qwen_gateway import (
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
 
-def _build_unified_lcr_context_or_422(*args, **kwargs):
-    try:
-        return build_unified_lcr_context(*args, **kwargs)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 from app.services.lcr_context import _expanded_search_terms
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
@@ -84,6 +79,14 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 
 router = APIRouter(tags=["community and companion"])
+
+
+def _build_unified_lcr_context_or_422(*args, **kwargs):
+    try:
+        return build_unified_lcr_context(*args, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 class DocumentVersionLinkRequest(BaseModel):
     replacement_evidence_id: str = Field(min_length=1, max_length=128)
@@ -4782,7 +4785,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 user_text,
                 re.IGNORECASE,
             ))
-            shared_lcr_context = build_unified_lcr_context(
+            shared_lcr_context = _build_unified_lcr_context_or_422(
                 db, person_id, caregiver_id, limit_per_source=50, query=retrieval_query,
                 include_all_history=care_journey_request,
             )
