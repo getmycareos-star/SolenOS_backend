@@ -186,6 +186,8 @@ jobs:
         run: python -m pytest backend/tests/test_unified_lcr_retrieval.py -q
       - name: Run the 100-scenario longitudinal messy-care benchmark on PostgreSQL
         run: python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q
+      - name: Verify independent longitudinal corpus and historical retrieval regressions on PostgreSQL
+        run: python -m pytest backend/tests/test_lcr_reconciliation_scenario_corpus.py backend/tests/test_lcr_context_historical_scan.py -q
 
       - name: Verify privacy, sharing, audit, notification, reminder and handoff schema
         run: |
