@@ -71,13 +71,53 @@ def has_valid_caregiver_necessity(
             claim_evidence_ids = set(str(value) for value in (claim.evidence_ids or []) if value)
             if not claim_evidence_ids.intersection(evidence_ids):
                 return False
+    # The dependency must be tied to the same persisted source context that
+    # grounds this question. Evidence attached elsewhere on the question must
+    # not authorize an unrelated dependency in another context entry.
     for item in (getattr(question, "context", None) or []):
         if not isinstance(item, dict):
             continue
-        direct = item.get("decision_dependency")
         nested = item.get("necessity_assessment")
-        nested_value = nested.get("decision_dependency") if isinstance(nested, dict) else None
-        if any(isinstance(value, str) and value.strip() for value in (direct, nested_value)):
+        nested = nested if isinstance(nested, dict) else {}
+        dependency_values = (
+            item.get("decision_dependency"),
+            nested.get("decision_dependency"),
+        )
+        has_dependency = any(
+            isinstance(value, str) and value.strip()
+            for value in dependency_values
+        )
+        source_kind = item.get("source_kind")
+        source_id = item.get("source_id")
+        source_ids = item.get("source_ids")
+        has_source_reference = (
+            isinstance(source_kind, str) and bool(source_kind.strip())
+            and (
+                (isinstance(source_id, str) and bool(source_id.strip()))
+                or (
+                    isinstance(source_ids, list)
+                    and any(isinstance(value, str) and value.strip() for value in source_ids)
+                )
+            )
+        )
+        rationale_values = (
+            item.get("necessity_rationale"),
+            nested.get("necessity_rationale"),
+        )
+        has_rationale = any(
+            isinstance(value, str) and value.strip()
+            for value in rationale_values
+        )
+        assessment_evidence_ids = nested.get("evidence_ids")
+        evidence_matches_context = (
+            not isinstance(assessment_evidence_ids, list)
+            or not assessment_evidence_ids
+            or bool(set(str(value) for value in assessment_evidence_ids).intersection(evidence_ids))
+        )
+        if (
+            has_dependency and has_source_reference and has_rationale
+            and evidence_matches_context
+        ):
             return True
     return False
 
