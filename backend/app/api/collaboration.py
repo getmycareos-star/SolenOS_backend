@@ -5453,7 +5453,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _caregiver_response_needs_revision(user_text, reply)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
-        if invalid_reply and (greeting_only or caregiver_guidance):
+        if invalid_reply and caregiver_guidance:
             # Explicit caregiver-capacity and continuity constraints are part of
             # the response contract, not prompt suggestions. Ask the model to
             # repair a non-compliant answer; if it still fails, do not persist it.
