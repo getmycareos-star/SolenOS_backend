@@ -101,7 +101,11 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
     ).all()
     active = [row for row in rows if row.status in {"open", "unresolved"}]
     normalized = [
-        " ".join((row.question or "").casefold().split())
+        (
+            " ".join((row.question or "").casefold().split()),
+            row.subject_type,
+            row.subject_id,
+        )
         for row in active if (row.question or "").strip()
     ]
     frequencies = Counter(normalized)
