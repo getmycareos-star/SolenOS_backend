@@ -15,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 import app.main as main_module
 from app.main import app
-from app.models.care import Caregiver, Person
+from app.models.care import Caregiver, Evidence, Person
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
@@ -305,6 +305,7 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
 
     client = _client_for(uncertainty_api_db, "a")
     with uncertainty_api_db() as db:
+        db.add(Evidence(id="same-person-evidence-reference", person_id="benchmark-person-a", type="caregiver_report", source_text="The clinic follow-up is still awaiting confirmation.", uploaded_by_caregiver_id="benchmark-caregiver-a", source_type="caregiver_report"))
         db.add_all([
             OpenQuestion(
                 person_id="benchmark-person-a",
@@ -315,7 +316,7 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
                 necessity="necessary",
                 necessity_rationale="The follow-up is blocked until the clinic confirms the result.",
                 evidence_ids=["same-person-evidence-reference"],
-                context=[{"source_kind": "appointment_workspace_follow_up", "source_id": "loop-1"}],
+                context=[{"source_kind": "appointment_workspace_follow_up", "source_id": "loop-1", "necessity_assessment": {"necessity_rationale": "The follow-up is blocked until the clinic confirms the result.", "decision_dependency": "The appointment handoff cannot report the result until the clinic confirms it.", "evidence_ids": ["same-person-evidence-reference"]}}],
                 intended_answerer_role="professional",
             ),
             OpenQuestion(
