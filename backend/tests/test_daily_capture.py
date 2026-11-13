@@ -2183,6 +2183,24 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
         assert len({receipt["id"] for receipt in receipts}) == 4
         assert all(receipt["evidence_ids"] for receipt in receipts)
 
+        # A retry after a lost client acknowledgement must return the original
+        # event and evidence instead of creating a second care entry.
+        replay = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "scenario-01-report-1",
+                "notes": reports[0],
+            },
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+        assert replay.json()["id"] == receipts[0]["id"]
+        assert replay.json()["evidence_ids"] == receipts[0]["evidence_ids"]
+
         db = TestingSessionLocal()
         try:
             events = [
