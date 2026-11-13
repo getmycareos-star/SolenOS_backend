@@ -140,6 +140,15 @@ def has_valid_caregiver_necessity(
                     and source_row.subject_type == getattr(question, "subject_type", None)
                     and source_row.subject_id == getattr(question, "subject_id", None)
                 )
+            elif source_kind == "caregiver_report":
+                source_record_exists = bool(
+                    isinstance(source_id, str)
+                    and source_id in evidence_ids
+                    and db.query(Evidence.id).filter(
+                        Evidence.id == source_id,
+                        Evidence.person_id == scoped_person_id,
+                    ).first()
+                )
             elif source_kind in {"daily_capture_extraction", "document_extraction"}:
                 source_refs = item.get("source_record_refs")
                 normalized_refs = [
