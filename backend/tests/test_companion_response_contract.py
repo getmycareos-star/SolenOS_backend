@@ -1246,3 +1246,56 @@ def test_caregiver_interaction_guidance_does_not_trigger_on_neutral_care_questio
     assert collaboration._caregiver_interaction_guidance(
         "What happened at Mum's appointment last Tuesday?"
     ) == ""
+
+
+
+def test_companion_injects_low_capacity_guidance_into_real_inference_prompt(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "We can focus on the most important concern first. You do not need to work through everything at once."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "I'm exhausted. I don't know what to do anymore."},
+        )
+        assert response.status_code == 200, response.text
+        prompt = captured["messages"][0]["content"]
+        assert "LOW-CAPACITY RESPONSE" in prompt
+        assert "Do not produce a checklist" in prompt
+        assert "single most consequential next concern" in prompt
+    finally:
+        teardown()
+
+
+def test_companion_injects_continuity_repair_guidance_into_real_inference_prompt(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "I'll use the information available in the care record rather than asking you to start again."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "You keep asking me the same questions. I've already told you this."},
+        )
+        assert response.status_code == 200, response.text
+        prompt = captured["messages"][0]["content"]
+        assert "CONTINUITY REPAIR" in prompt
+        assert "retrieve the relevant authorized care record" in prompt
+        assert "Do not defend the system" in prompt
+    finally:
+        teardown()
