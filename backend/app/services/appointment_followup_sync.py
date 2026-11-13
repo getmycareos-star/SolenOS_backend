@@ -84,7 +84,25 @@ def sync_appointment_followups(
         if not isinstance(action, str) or not action.strip():
             continue
         title = " ".join(action.split())[:240]
-        stable_key = hashlib.sha256(title.casefold().encode("utf-8")).hexdigest()[:24]
+        raw_follow_up_id = item.get("id")
+        if raw_follow_up_id is not None:
+            if (
+                not isinstance(raw_follow_up_id, str)
+                or not raw_follow_up_id.strip()
+                or len(raw_follow_up_id.strip()) > 200
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Appointment follow-up IDs must be non-empty strings of at most 200 characters",
+                )
+            # The client-generated item ID is stable across workspace revisions.
+            # Hash it before embedding it in source_id; changing the action text
+            # must update the same commitment, not cancel it and create another.
+            identity_material = "follow-up-id:" + raw_follow_up_id.strip()
+        else:
+            # Preserve compatibility for older clients that did not send item IDs.
+            identity_material = "legacy-title:" + title.casefold()
+        stable_key = hashlib.sha256(identity_material.encode("utf-8")).hexdigest()[:24]
         source_id = f"{workspace_id}:{stable_key}"
         if source_id in current_source_ids:
             continue
