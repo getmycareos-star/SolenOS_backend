@@ -444,6 +444,11 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
         assert result.get("written_to_lcr") is False, result
         cited = set(result.get("source_event_ids", []))
         expected = {event[0] for event in events}
+        source_refs = {
+            (item.get("record_type"), item.get("record_id"))
+            for item in result.get("source_record_refs", [])
+        }
+        assert all(("events", event_id) in source_refs for event_id in expected), source_refs
         assert expected.issubset(cited), {
             "expected_all_three_month_events": sorted(expected),
             "cited_event_ids": sorted(cited),
