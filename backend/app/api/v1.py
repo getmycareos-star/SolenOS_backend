@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -16,6 +17,7 @@ from app.services.care_continuity_execution import execute_care_continuity_recon
 from app.services.lcr_context import build_lcr_context
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
+from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.models.collaboration import ConsentRecord, EvidenceUpload
 from app.models.care_continuity import (
     EvidenceFreshnessAssessment,
@@ -674,6 +676,12 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 .order_by(CaptureAnalysisModel.created_at.desc())
                 .first()
             )
+            existing_job = db.query(QwenBackgroundJob).filter(
+                QwenBackgroundJob.person_id == person_id,
+                QwenBackgroundJob.caregiver_id == caregiver_id,
+                QwenBackgroundJob.workflow == "daily_capture_extraction",
+                QwenBackgroundJob.source_event_ids_json == json.dumps([existing_event.id]),
+            ).order_by(QwenBackgroundJob.created_at.desc()).first()
             existing_observations = (
                 existing_analysis.candidates.get("observations", [])
                 if existing_analysis and isinstance(existing_analysis.candidates, dict)
@@ -714,9 +722,16 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 "recorded_at": existing_event.recorded_at,
                 "evidence_ids": linked_evidence_ids,
                 "idempotent_replay": True,
-                "qwen_extraction_status": existing_analysis.extraction_status if existing_analysis else "unavailable",
+                "qwen_extraction_status": existing_analysis.extraction_status if existing_analysis else (
+                    "queued" if existing_job and existing_job.status in {"queued", "processing"}
+                    else "available" if existing_job and existing_job.status == "completed"
+                    else "failed" if existing_job and existing_job.status == "failed"
+                    else "unavailable"
+                ),
                 "qwen_candidates": existing_analysis.candidates if existing_analysis else None,
                 "qwen_analysis_id": existing_analysis.id if existing_analysis else None,
+                "qwen_job_id": existing_job.id if existing_job else None,
+                "qwen_processing_status": existing_job.status if existing_job else "unavailable",
                 "qwen_review_required": bool(
                     existing_analysis
                     and existing_analysis.extraction_status == "available"
@@ -892,6 +907,9 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         tags=["daily_capture"],
     )
     db.add(event)
+    db.flush()
+    if evidence is not None:
+        event.evidence_ids = [evidence.id]
     db.commit()
     db.refresh(event)
     # The event is the primary user-requested write. Learning telemetry is
@@ -926,6 +944,133 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         else evidence.source_text if evidence is not None
         else (event.description or "")
     )[:12_000]
+    if natural_language_update and evidence is not None:
+        execution_status = {
+            "source_preservation": "verified",
+            "evidence": "verified",
+            "extraction": "queued",
+            "assessment": "pending",
+            "review": "not_required",
+            "reconciliation": "pending",
+            "longitudinal_retrieval": "not_verified",
+        }
+        queue_available = (
+            inspect(db.get_bind()).has_table("qwen_background_jobs")
+            and inspect(db.get_bind()).has_table("qwen_job_events")
+        )
+        if queue_available:
+            try:
+                analysis = persist_capture_analysis(
+                    db,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_event_id=event.id,
+                    source_evidence_id=evidence.id,
+                    source_text=source_text,
+                    extraction_status="queued",
+                    candidates={"observations": [], "open_questions": []},
+                    execution_status=execution_status,
+                    commit=False,
+                )
+                job = QwenBackgroundJob(
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    task_text="Extract source-grounded observations from the saved Daily Care report.",
+                    context_text="",
+                    evidence_ids_json=json.dumps([evidence.id]),
+                    workflow="daily_capture_extraction",
+                    status="queued",
+                    source_event_ids_json=json.dumps([event.id]),
+                    source_evidence_ids_json=json.dumps([evidence.id]),
+                )
+                db.add(job)
+                db.flush()
+                db.add(QwenJobEvent(
+                    job_id=job.id,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    event_type="job_queued",
+                    from_status=None,
+                    to_status="queued",
+                    metadata_json={
+                        "workflow": "daily_capture_extraction",
+                        "source_event_id": event.id,
+                        "source_evidence_id": evidence.id,
+                        "source_preserved": True,
+                        "written_to_lcr": False,
+                    },
+                ))
+                db.commit()
+                db.refresh(analysis)
+                db.refresh(job)
+                return {
+                    "success": True,
+                    "id": event.id,
+                    "change_intelligence_status": "pending",
+                    "care_continuity_execution": None,
+                    "execution_status": execution_status,
+                    "event_type": event.event_type,
+                    "recorded_at": event.recorded_at,
+                    "evidence_ids": list(event.evidence_ids or []),
+                    "idempotent_replay": False if capture_idempotency_key else None,
+                    "learning_pipeline_status": learning_pipeline_status,
+                    "qwen_extraction_status": "queued",
+                    "qwen_candidates": None,
+                    "qwen_analysis_id": analysis.id,
+                    "qwen_job_id": job.id,
+                    "qwen_processing_status": "queued",
+                    "qwen_review_required": False,
+                    "qwen_written_to_lcr": False,
+                }
+            except Exception:
+                db.rollback()
+                logger.exception("Could not queue Daily Care extraction for saved event %s", event.id)
+        # The source event and evidence are already committed. If the durable
+        # queue is unavailable, preserve the report and expose that extraction
+        # could not start rather than delaying or falsely confirming it.
+        execution_status.update({
+            "extraction": "unavailable",
+            "assessment": "not_applicable",
+            "reconciliation": "not_run",
+        })
+        try:
+            analysis = persist_capture_analysis(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_event_id=event.id,
+                source_evidence_id=evidence.id,
+                source_text=source_text,
+                extraction_status="unavailable",
+                candidates={"observations": [], "open_questions": []},
+                execution_status=execution_status,
+                commit=True,
+            )
+            analysis_id = analysis.id
+        except Exception:
+            db.rollback()
+            logger.exception("Could not persist unavailable Daily Care extraction state for event %s", event.id)
+            analysis_id = None
+        return {
+            "success": True,
+            "id": event.id,
+            "change_intelligence_status": "unavailable",
+            "care_continuity_execution": None,
+            "execution_status": execution_status,
+            "event_type": event.event_type,
+            "recorded_at": event.recorded_at,
+            "evidence_ids": list(event.evidence_ids or []),
+            "idempotent_replay": False if capture_idempotency_key else None,
+            "learning_pipeline_status": learning_pipeline_status,
+            "qwen_extraction_status": "unavailable",
+            "qwen_candidates": None,
+            "qwen_analysis_id": analysis_id,
+            "qwen_job_id": None,
+            "qwen_processing_status": "unavailable",
+            "qwen_review_required": False,
+            "qwen_written_to_lcr": False,
+        }
+
     qwen_status = "unavailable"
     qwen_candidates = None
     try:
