@@ -707,7 +707,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
         )
         prepared_sources.append({"section": section, "items": items, "next": 0})
 
-    base = header + "".join("\\n" + source["section"] for source in prepared_sources)
+    base = header + "".join("\n" + source["section"] for source in prepared_sources)
     truncation_notice = (
         "\\n[Context truncated because the safe prompt budget was reached. "
         "Some retrieved records were not included; consult the source coverage "
@@ -733,7 +733,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             index = source["next"]
             if index >= len(source["items"]):
                 continue
-            line = "\\n" + source["items"][index]
+            line = "\n" + source["items"][index]
             if current_length + len(line) > len(base) + item_budget:
                 omitted = True
                 continue
