@@ -3,7 +3,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import Column, DateTime, MetaData, String, Table, create_engine
 from sqlalchemy.orm import Session
 
-from app.services.lcr_context import _load_source_schema, build_lcr_context
+from app.services.lcr_context import (
+    _load_source_schema,
+    build_lcr_context,
+    format_lcr_context_for_prompt,
+)
 
 
 def _care_events_schema(engine):
@@ -164,3 +168,44 @@ def test_full_care_journey_scan_does_not_require_lexical_match_and_reports_remai
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
+
+
+
+def test_prompt_budget_is_shared_across_sources_instead_of_starving_later_care_domains():
+    """A large event section must not consume the prompt before evidence is represented."""
+    context = {
+        "schema_status": "complete",
+        "history_coverage": "complete_history_scan_ranked_subset",
+        "retrieval_scan_complete": True,
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "evidence_lineage": {"status": "assessed"},
+        "sources": {
+            "events": {
+                "status": "available",
+                "returned_count": 4,
+                "candidate_count": 4,
+                "candidate_scan_complete": True,
+                "has_more": False,
+                "items": [
+                    {"id": f"event-{index}", "description": "x" * 420}
+                    for index in range(4)
+                ],
+            },
+            "evidence": {
+                "status": "available",
+                "returned_count": 1,
+                "candidate_count": 1,
+                "candidate_scan_complete": True,
+                "has_more": False,
+                "items": [{"id": "source-evidence-1", "source_text": "Hospital discharge note"}],
+            },
+        },
+    }
+
+    prompt = format_lcr_context_for_prompt(context, max_chars=1500)
+
+    assert len(prompt) <= 1500
+    assert "event-0" in prompt
+    assert "source-evidence-1" in prompt
+    assert "Context truncated" in prompt
