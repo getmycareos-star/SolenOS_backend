@@ -370,6 +370,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 or_(CareAssertion.source_event_id.is_(None), CareAssertion.source_event_id != source_event_id),
             )
         )
+    active_assertions_total = active_assertions_query.count()
     active_assertions = active_assertions_query.order_by(CareAssertion.recorded_at.desc()).limit(250).all()
     active_state = [{
         "assertion_id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
@@ -388,12 +389,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         # Daily Capture may already have saved the event before invoking Delta.
         # Do not let the event being reconciled masquerade as historical baseline.
         prior_events_query = prior_events_query.filter(CareEvent.id != source_event_id)
+    prior_events_total = prior_events_query.count()
     prior_events = prior_events_query.order_by(CareEvent.occurred_at.desc()).limit(25).all()
     prior_evidence_query = db.query(Evidence).filter(Evidence.person_id == person_id)
     if evidence_ids:
         # These evidence rows belong to the incoming event; the new-event text is
         # supplied separately and must not be counted again as prior evidence.
         prior_evidence_query = prior_evidence_query.filter(~Evidence.id.in_(evidence_ids))
+    prior_evidence_total = prior_evidence_query.count()
     prior_evidence = prior_evidence_query.order_by(Evidence.uploaded_at.desc()).limit(25).all()
     existing_record_context = {
         "events": [{
@@ -406,13 +409,15 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             "type": item.type, "source_text": (item.source_text or "")[:1500],
         } for item in prior_evidence],
     }
-    open_gaps = db.query(InformationGap).filter(
+    open_gaps_query = db.query(InformationGap).filter(
         InformationGap.person_id == person_id,
         InformationGap.lifecycle_status.in_([
             GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED,
             GapLifecycleStatus.PARTIALLY_RESOLVED,
         ]),
-    ).order_by(InformationGap.created_at.desc()).limit(50).all()
+    )
+    open_gaps_total = open_gaps_query.count()
+    open_gaps = open_gaps_query.order_by(InformationGap.created_at.desc()).limit(50).all()
     open_questions = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == person_id, OpenQuestion.status == "open",
         OpenQuestion.necessity == "necessary",
@@ -421,10 +426,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         question for question in open_questions
         if has_valid_caregiver_necessity(question, db, person_id)
     ][:50]
-    unresolved_contradictions = db.query(Contradiction).filter(
+    unresolved_contradictions_query = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
         Contradiction.resolution_status.in_(["unresolved", "qualified"]),
-    ).order_by(Contradiction.created_at.desc()).limit(50).all()
+    )
+    unresolved_contradictions_total = unresolved_contradictions_query.count()
+    unresolved_contradictions = unresolved_contradictions_query.order_by(Contradiction.created_at.desc()).limit(50).all()
     existing_unresolved_care_loops = {
         "gaps": [{
             "id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
@@ -447,7 +454,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     base_url, model, timeout = _local_ollama_url()
     system_prompt = (
         "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. "
-        "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE, EXISTING_RECORD_CONTEXT, and EXISTING_UNRESOLVED_CARE_LOOPS; do not summarize the event in isolation. EXISTING_RECORD_CONTEXT contains prior persisted events/documents and is historical source material, not automatically verified current state. EXISTING_UNRESOLVED_CARE_LOOPS contains previously recorded gaps, questions, and unresolved contradictions that must be reconciled with the new event. Do not silently close a loop because the new event omits it; do not mark a loop verified complete based only on model inference. "
+        "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE, EXISTING_RECORD_CONTEXT, and EXISTING_UNRESOLVED_CARE_LOOPS; do not summarize the event in isolation. HISTORY_COVERAGE identifies records omitted by context bounds. If any category is incomplete, never claim omitted history contains no matching event, never label a state unchanged solely because no match appears in the supplied subset, and mark conclusions that depend on absence from omitted history as uncertain. A bounded context is not a complete care history. EXISTING_RECORD_CONTEXT contains prior persisted events/documents and is historical source material, not automatically verified current state. EXISTING_UNRESOLVED_CARE_LOOPS contains previously recorded gaps, questions, and unresolved contradictions that must be reconciled with the new event. Do not silently close a loop because the new event omits it; do not mark a loop verified complete based only on model inference. "
         "Return only one compact JSON object matching the supplied schema. Do not emit markdown or extra keys. "
         "Never invent a diagnosis, medication order, date, test result, follow-up completion, or causal explanation. "
         "Distinguish new information from a meaningful state change. Use unchanged only when the source supports it. "
@@ -465,6 +472,20 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "Never duplicate one observation as both a condition and a symptom; preserve the source observation in the event summary unless a distinct, explicitly documented clinical finding exists."
     )
     user_payload = {
+        "history_coverage": {
+            "active_assertions": {"available": len(active_state), "total": active_assertions_total, "omitted": max(0, active_assertions_total - len(active_state))},
+            "prior_events": {"available": len(prior_events), "total": prior_events_total, "omitted": max(0, prior_events_total - len(prior_events))},
+            "prior_evidence": {"available": len(prior_evidence), "total": prior_evidence_total, "omitted": max(0, prior_evidence_total - len(prior_evidence))},
+            "open_gaps": {"available": len(open_gaps), "total": open_gaps_total, "omitted": max(0, open_gaps_total - len(open_gaps))},
+            "unresolved_contradictions": {"available": len(unresolved_contradictions), "total": unresolved_contradictions_total, "omitted": max(0, unresolved_contradictions_total - len(unresolved_contradictions))},
+            "complete": all(total == available for total, available in (
+                (active_assertions_total, len(active_state)),
+                (prior_events_total, len(prior_events)),
+                (prior_evidence_total, len(prior_evidence)),
+                (open_gaps_total, len(open_gaps)),
+                (unresolved_contradictions_total, len(unresolved_contradictions)),
+            )),
+        },
         "existing_active_state": active_state,
         "existing_record_context": existing_record_context,
         "existing_unresolved_care_loops": existing_unresolved_care_loops,
