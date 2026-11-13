@@ -478,10 +478,17 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         assert "other-person-message" not in str(history)
         assert history[0]["information_status"] == "conversation_context_only"
         assert sources["document_extractions"]["items"][0]["information_status"] == "document_extracted_unreviewed"
+        active_reviewed_assertions = [
+            row for row in sources["assertions"]["items"]
+            if row["assertion_status"] in {"accepted", "caregiver_reviewed"}
+        ]
+        assert {row["id"] for row in active_reviewed_assertions} == {
+            "accepted-assertion", "caregiver-reviewed-assertion",
+        }
         assert all(
             item["information_status"] == "caregiver_reviewed_report"
             and item["epistemic_state"] == "reported"
-            for item in sources["assertions"]["items"]
+            for item in active_reviewed_assertions
         ), "caregiver acceptance/review must not upgrade a reported assertion to verified"
         assert context["retrieval_contract"]["retrieval_strategy"] == "hybrid_lexical_semantic_temporal"
         assert temporal_context["retrieval_contract"]["temporal_window"]["basis"] == "explicit_user_temporal_expression"
