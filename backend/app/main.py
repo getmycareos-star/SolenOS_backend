@@ -738,7 +738,7 @@ def get_situation(
     open_question_rows = [
         row for row in open_question_rows if has_valid_caregiver_necessity(row, db, person_id)
     ]
-    _, open_question_rows, additional_open_question_count = prioritize_caregiver_questions(
+    _, open_question_rows, _ = prioritize_caregiver_questions(
         open_question_rows, ordinary_limit=2
     )
     unresolved_conflict_rows = (
