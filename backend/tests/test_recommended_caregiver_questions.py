@@ -69,8 +69,9 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
         source_type="caregiver_report",
     ))
     context = [{
-        "source_kind": "caregiver_report",
+        "source_kind": "document_extraction",
         "source_id": evidence_id,
+        "source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}],
         "necessity_assessment": {
             "necessity": "necessary" if necessary else "not_assessed",
             "necessity_rationale": "A recorded care decision depends on this answer." if necessary else None,
@@ -209,7 +210,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 "evidence_ids": [] if 35 <= index < 40 else [evidence_id],
             }
             context = [{
-                **({"source_kind": "caregiver_report", "source_id": evidence_id} if source_bound else {}),
+                **({"source_kind": "document_extraction", "source_id": evidence_id, "source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}]} if source_bound else {}),
                 "necessity_assessment": assessment,
             }]
             priority = Priority.CRITICAL if index < 10 else Priority.HIGH
