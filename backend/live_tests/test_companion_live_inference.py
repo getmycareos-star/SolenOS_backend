@@ -529,7 +529,7 @@ def test_live_qwen_companion_retrieves_a_paraphrased_event_from_the_second_histo
     try:
         db.add_all([
             CareEvent(
-                id=f"sleep-six-month-{index:03d}",
+                id=oldest_event_id if index == 50 else f"sleep-six-month-{index:03d}",
                 person_id=person_id,
                 event_type="daily_observation",
                 status="recorded",
