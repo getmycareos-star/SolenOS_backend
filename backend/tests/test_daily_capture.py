@@ -2141,6 +2141,11 @@ def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatc
             },
         )
         assert response.status_code == 200, response.text
+        process_daily_capture_job(
+            response.json()["qwen_job_id"],
+            monkeypatch,
+            exact_source_candidates,
+        )
         db = TestingSessionLocal()
         try:
             observations = db.query(EvidenceObservation).filter_by(
