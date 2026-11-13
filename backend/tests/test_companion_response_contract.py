@@ -1432,7 +1432,7 @@ def test_companion_repairs_unsupported_care_claim_before_failing_closed(monkeypa
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
         assert response.json()["written_to_lcr"] is False
-        assert response.json()["reply"] == outputs.__reduce__()[1][0] if False else response.json()["reply"]
+        assert response.json()["reply"] == "The caregiver reported poor sleep and that lunch was barely eaten."
         assert len(calls) == 2
         assert "source-grounding checks" in calls[1][0][-1]["content"]
     finally:
