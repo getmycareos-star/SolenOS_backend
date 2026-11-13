@@ -500,6 +500,28 @@ def create_proactive_care_notifications(
             ).first()
             if exists:
                 continue
+            prior_notification = db.query(CareNotification).filter(
+                CareNotification.person_id == person_id,
+                CareNotification.caregiver_id == caregiver.id,
+                CareNotification.category == "care_attention",
+                CareNotification.source_event_id == question.id,
+                CareNotification.status != "active",
+            ).order_by(CareNotification.created_at.desc()).first()
+            if prior_notification:
+                question_updated_at = question.updated_at
+                prior_created_at = prior_notification.created_at
+                if question_updated_at is None or prior_created_at is None:
+                    continue
+                question_updated_value = (
+                    question_updated_at.replace(tzinfo=timezone.utc)
+                    if question_updated_at.tzinfo is None else question_updated_at
+                )
+                prior_created_value = (
+                    prior_created_at.replace(tzinfo=timezone.utc)
+                    if prior_created_at.tzinfo is None else prior_created_at
+                )
+                if question_updated_value <= prior_created_value:
+                    continue
             created += int(_create_active_notification(db, CareNotification(
                 id=str(uuid.uuid4()),
                 person_id=person_id,
