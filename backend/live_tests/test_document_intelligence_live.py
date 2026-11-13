@@ -81,10 +81,9 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert data["analysis_id"] == analysis_id
         assert data["review_required"] is True
         assert data["written_to_lcr"] is False
-        assert data["intelligence_status"] == "partial"
-        assert data["processed_page_numbers"] == [1, 2]
-        assert data["unreadable_page_numbers"] == [3]
-        assert any("Pages 3 have no readable extracted text" in note for note in data["open_questions"])
+        assert data["intelligence_status"] == "completed"
+        assert data["processed_page_numbers"] == [1, 2, 3]
+        assert data["unreadable_page_numbers"] == []
         candidates = data["observations"]
         assert len(candidates) >= 2, (
             "Live Qwen plus exact-source fallback did not preserve both explicit "
@@ -92,7 +91,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         )
         assert all(candidate["review_status"] == "pending_review" for candidate in candidates)
         assert all(candidate["source_quote"] in source for candidate in candidates)
-        assert all(candidate["page_number"] in {1, 2} for candidate in candidates)
+        assert all(candidate["page_number"] in {1, 2, 3} for candidate in candidates)
         assert all(candidate["observation"] in candidate["source_quote"] for candidate in candidates)
         assert all(candidate["subject"].casefold() in candidate["source_quote"].casefold() for candidate in candidates)
 
