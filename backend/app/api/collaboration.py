@@ -2673,13 +2673,18 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
     for line in lines:
         try:
             payload = json.loads(line[line.index("{"):])
-            record_id = payload.get("source_id")
             record_type = payload.get("source_type")
+            record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+            record_id = (
+                payload.get("source_id")
+                or record.get("id")
+                or record.get("event_id")
+                or record.get("evidence_id")
+            )
             if record_id is not None and record_type:
                 reference = {"record_type": str(record_type), "record_id": str(record_id)}
                 if reference not in references:
                     references.append(reference)
-                record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
                 linked_evidence_ids = []
                 source_evidence_id = record.get("source_evidence_id")
                 if source_evidence_id:
