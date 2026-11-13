@@ -511,6 +511,8 @@ def create_proactive_care_notifications(
                     if question.intended_answerer_role == "other_caregiver"
                     else "A care detail needs confirmation"
                     if question.intended_answerer_role == "person_receiving_care"
+                    else "A care detail needs the right person to confirm it"
+                    if question.intended_answerer_role == "not_known"
                     else "A care detail needs your input"
                 ),
                 body=_necessary_question_message(db, person_id, question),
