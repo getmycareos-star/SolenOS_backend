@@ -4993,6 +4993,22 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             context_chars,
             context_truncated,
         ) = _fit_model_context_lines_across_sources(model_context_lines, 16000)
+        prompt_source_counts: dict[str, int] = {}
+        for selected_line in included_model_context_lines:
+            brace = (selected_line or "").find("{")
+            if brace < 0:
+                continue
+            try:
+                selected_payload = json.loads(selected_line[brace:])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            selected_source = selected_payload.get("source_type") if isinstance(selected_payload, dict) else None
+            if isinstance(selected_source, str):
+                prompt_source_counts[selected_source] = prompt_source_counts.get(selected_source, 0) + 1
+        for source_name, source_coverage in (lcr_context_coverage.get("sources") or {}).items():
+            included_count = prompt_source_counts.get(source_name, 0)
+            source_coverage["selected_for_answer"] = included_count
+            source_coverage["selection_truncated"] = included_count < source_coverage.get("returned_count", 0)
         # Only expose source references for records actually supplied to Qwen.
         source_lcr_record_refs = _context_record_refs(included_model_context_lines)
         source_lcr_context_ids = _context_record_ids(included_model_context_lines, "source_id")
