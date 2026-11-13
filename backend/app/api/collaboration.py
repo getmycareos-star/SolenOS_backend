@@ -4738,6 +4738,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "has_more": source.get("has_more", False),
                     }
                     for name, source in shared_lcr_context.get("sources", {}).items()
+                    if name != "companion_conversation"
                 },
             }
 
