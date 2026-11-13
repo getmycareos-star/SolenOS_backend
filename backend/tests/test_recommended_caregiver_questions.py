@@ -59,14 +59,19 @@ def client_for(person_id):
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
         expires_at=datetime.now(timezone.utc) + timedelta(days=1),
     ))
-    db.add(CaregiverAccessGrant(
-        person_id=person_id,
-        caregiver_id=caregiver.id,
-        role="primary",
-        access_scope="full_record",
-        status="active",
-        can_manage_members=True,
-    ))
+    existing_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver.id,
+    ).first()
+    if existing_grant is None:
+        db.add(CaregiverAccessGrant(
+            person_id=person_id,
+            caregiver_id=caregiver.id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+        ))
     db.commit()
     db.close()
     client = TestClient(app)
