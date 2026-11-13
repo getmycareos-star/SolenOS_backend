@@ -254,6 +254,7 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                 context=[{
                     "source_kind": "document_extraction",
                     "source_id": evidence.id,
+                    "source_record_refs": [{"record_type": "evidence", "record_id": evidence.id}],
                     "necessity_assessment": {
                         "necessity_rationale": "The handoff decision depends on the active instruction.",
                         "decision_dependency": "The handoff cannot identify the active instruction without clarification.",
