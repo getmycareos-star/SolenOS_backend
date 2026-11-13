@@ -388,6 +388,8 @@ def test_proactive_question_notifications_preserve_critical_and_limit_ordinary()
                 subject_type="care", subject_id="current-plan",
                 status="open", necessity="necessary",
                 necessity_rationale=rationale, priority=priority,
+                intended_answerer_role="professional" if question_id == "notify-critical" else "caregiver",
+                intended_answerer_label="prescribing clinician" if question_id == "notify-critical" else None,
                 evidence_ids=[evidence.id],
                 context=[{
                     "source_kind": "caregiver_report",
@@ -414,6 +416,11 @@ def test_proactive_question_notifications_preserve_critical_and_limit_ordinary()
             "notify-critical", "notify-high", "notify-medium",
         }
         assert "notify-low" not in {row.source_event_id for row in notifications}
+        professional_notification = next(
+            row for row in notifications if row.source_event_id == "notify-critical"
+        )
+        assert "Best person to ask: prescribing clinician" in professional_notification.body
+        assert "If you're not sure, you can say so." not in professional_notification.body
 
         new_rationale = "The next transfer decision depends on confirming this additional support detail."
         db.add(OpenQuestion(
