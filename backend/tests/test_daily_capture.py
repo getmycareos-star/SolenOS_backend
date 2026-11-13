@@ -759,6 +759,11 @@ def test_quick_daily_checkin_persists_uncertainty_without_inference():
             },
         )
         assert response.status_code == 200, response.text
+        process_daily_capture_job(
+            response.json()["qwen_job_id"],
+            monkeypatch,
+            exact_source_candidates,
+        )
         db = TestingSessionLocal()
         event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
         detail = json.loads(event.description)
@@ -1716,7 +1721,6 @@ def test_current_medication_projection_uses_only_reviewed_unambiguous_lcr_assert
 
 
 def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extraction_failure(monkeypatch):
-    from app.api import v1 as api_v1
 
     setup_db()
     try:
@@ -1728,7 +1732,6 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
         def extraction_unavailable(*args, **kwargs):
             raise RuntimeError("injected extraction outage")
 
-        monkeypatch.setattr(api_v1, "extract_review_candidates", extraction_unavailable)
         payload = {
             "person_id": "person-daily-test",
             "caregiver_id": "caregiver-daily-test",
@@ -1742,9 +1745,15 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
         receipt = first.json()
         assert receipt["success"] is True
         assert receipt["event_type"] == "daily_care_entry"
-        assert receipt["qwen_extraction_status"] == "unavailable"
+        assert receipt["qwen_extraction_status"] == "queued"
         assert receipt["execution_status"]["source_preservation"] == "verified"
-        assert receipt["execution_status"]["extraction"] == "failed"
+        assert receipt["execution_status"]["extraction"] == "queued"
+        assert receipt["qwen_job_id"]
+
+        for attempt in range(3):
+            if attempt:
+                make_daily_capture_job_runnable(receipt["qwen_job_id"])
+            process_daily_capture_job(receipt["qwen_job_id"], monkeypatch, extraction_unavailable)
 
         db = TestingSessionLocal()
         try:
@@ -1759,6 +1768,11 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
             assert evidence.reported_by_caregiver_id == "caregiver-daily-test"
             assert event.created_by_caregiver_id == "caregiver-daily-test"
             assert event.evidence_ids == [evidence.id]
+            analysis = db.query(CaptureAnalysis).filter_by(source_event_id=event.id).one()
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            assert analysis.extraction_status == "failed"
+            assert analysis.execution_status["extraction"] == "failed"
+            assert job.status == "failed"
         finally:
             db.close()
 
@@ -1780,6 +1794,8 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
         assert replay.json()["id"] == receipt["id"]
         assert replay.json()["evidence_ids"] == receipt["evidence_ids"]
         assert replay.json()["idempotent_replay"] is True
+        assert replay.json()["qwen_job_id"] == receipt["qwen_job_id"]
+        assert replay.json()["qwen_extraction_status"] == "failed"
 
         changed = client.post(
             "/api/v1/daily-care/entries",
@@ -1803,7 +1819,6 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
 
 
 def test_natural_language_daily_entry_projects_only_source_grounded_observations_into_lcr(monkeypatch):
-    from app.api import v1 as api_v1
 
     setup_db()
     try:
@@ -1834,7 +1849,6 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
                 "open_questions": ["A generic question must not become a caregiver task."],
             }
 
-        monkeypatch.setattr(api_v1, "extract_review_candidates", exact_source_candidates)
         payload = {
             "person_id": "person-daily-test",
             "caregiver_id": "caregiver-daily-test",
@@ -1846,9 +1860,10 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         assert response.status_code == 200, response.text
         receipt = response.json()
         assert receipt["success"] is True
-        assert receipt["qwen_extraction_status"] == "available"
+        assert receipt["qwen_extraction_status"] == "queued"
+        assert receipt["qwen_job_id"]
+        process_daily_capture_job(receipt["qwen_job_id"], monkeypatch, exact_source_candidates)
         assert receipt["qwen_review_required"] is False
-        assert receipt["execution_status"]["assessment"] == "available"
 
         db = TestingSessionLocal()
         try:
@@ -1909,7 +1924,6 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         teardown_db()
 
 def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatch):
-    from app.api import v1 as api_v1
 
     setup_db()
     try:
@@ -1940,7 +1954,6 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
                 "open_questions": [],
             }
 
-        monkeypatch.setattr(api_v1, "extract_review_candidates", exact_source_candidates)
         response = client.post(
             "/api/v1/daily-care/entries",
             headers=headers,
@@ -1956,6 +1969,8 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
         receipt = response.json()
         assert receipt["success"] is True
         assert receipt["execution_status"]["source_preservation"] == "verified"
+        assert receipt["qwen_extraction_status"] == "queued"
+        process_daily_capture_job(receipt["qwen_job_id"], monkeypatch, exact_source_candidates)
 
         db = TestingSessionLocal()
         try:
@@ -2019,11 +2034,6 @@ def test_uncertain_medication_change_report_never_overwrites_reviewed_medication
         assert reviewed.json()["record_status"] == "caregiver_reviewed_current_report"
 
         original_report = "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose."
-        monkeypatch.setattr(
-            api_v1,
-            "extract_review_candidates",
-            lambda source_text, **kwargs: {"observations": [], "open_questions": []},
-        )
         response = client.post(
             "/api/v1/daily-care/entries",
             headers=headers,
@@ -2037,6 +2047,12 @@ def test_uncertain_medication_change_report_never_overwrites_reviewed_medication
         )
         assert response.status_code == 200, response.text
         assert response.json()["success"] is True
+        assert response.json()["qwen_extraction_status"] == "queued"
+        process_daily_capture_job(
+            response.json()["qwen_job_id"],
+            monkeypatch,
+            lambda source_text, **kwargs: {"observations": [], "open_questions": []},
+        )
 
         current = client.get("/api/v1/care-continuity/medications", headers=headers)
         assert current.status_code == 200, current.text
@@ -2084,7 +2100,6 @@ def test_source_time_reference_is_not_borrowed_from_a_separate_clause():
 
 
 def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatch):
-    from app.api import v1 as api_v1
 
     setup_db()
     try:
@@ -2115,7 +2130,6 @@ def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatc
                 "open_questions": [],
             }
 
-        monkeypatch.setattr(api_v1, "extract_review_candidates", exact_source_candidates)
         response = client.post(
             "/api/v1/daily-care/entries",
             headers=headers,
@@ -2147,7 +2161,6 @@ def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatc
 
 def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeypatch):
     """Reference scenario: preserve a full day without shifting recordkeeping work to the caregiver."""
-    from app.api import v1 as api_v1
 
     setup_db()
     try:
@@ -2191,7 +2204,6 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
                 })
             return {"observations": observations, "open_questions": []}
 
-        monkeypatch.setattr(api_v1, "extract_review_candidates", extract_exact_source_candidates)
         receipts = []
         for index, report in enumerate(reports, start=1):
             response = client.post(
@@ -2229,6 +2241,16 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
         assert replay.json()["idempotent_replay"] is True
         assert replay.json()["id"] == receipts[0]["id"]
         assert replay.json()["evidence_ids"] == receipts[0]["evidence_ids"]
+        assert replay.json()["qwen_job_id"] == receipts[0]["qwen_job_id"]
+
+        for receipt in receipts:
+            assert receipt["qwen_extraction_status"] == "queued"
+            assert receipt["qwen_job_id"]
+            process_daily_capture_job(
+                receipt["qwen_job_id"],
+                monkeypatch,
+                extract_exact_source_candidates,
+            )
 
         db = TestingSessionLocal()
         try:
