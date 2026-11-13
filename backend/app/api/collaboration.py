@@ -5101,15 +5101,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         existing_document_ids.add(str(payload["source_id"]))
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
-            for document_line in verified_document_context_lines:
-                try:
-                    payload = json.loads(document_line[document_line.index("{"):])
-                    document_id = str(payload.get("source_id") or "")
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    continue
-                if document_id and document_id not in existing_document_ids:
-                    shared_lcr_lines.append(document_line)
-                    existing_document_ids.add(document_id)
+            document_question_for_fallback = bool(re.search(
+                r"\b(?:uploaded document|document|file|attachment|letter|pdf)\b",
+                user_text,
+                re.IGNORECASE,
+            ))
+            if document_question_for_fallback:
+                for document_line in verified_document_context_lines:
+                    try:
+                        payload = json.loads(document_line[document_line.index("{"):])
+                        document_id = str(payload.get("source_id") or "")
+                    except (ValueError, TypeError, json.JSONDecodeError):
+                        continue
+                    if document_id and document_id not in existing_document_ids:
+                        shared_lcr_lines.append(document_line)
+                        existing_document_ids.add(document_id)
             if care_journey_request:
                 shared_lcr_lines.sort(key=_lcr_context_chronological_key)
             selected_source_counts: dict[str, int] = {}
