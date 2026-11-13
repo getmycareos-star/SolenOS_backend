@@ -270,7 +270,7 @@ def build_unified_lcr_context(
         "authoritative_record": "care_assertions_and_canonical_lcr_sources",
         "retrieval_is_bounded": True,
         "full_source_scan_requested": bool(include_all_history),
-        "source_offsets": source_context.get("source_offsets", {}),
+        "source_offsets": context.get("source_offsets", {}),
         "retrieval_strategy": "person_scoped_full_source_scan" if include_all_history else "hybrid_lexical_semantic_temporal",
         "temporal_window": temporal_window,
     }
