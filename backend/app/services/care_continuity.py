@@ -113,10 +113,10 @@ def has_valid_caregiver_necessity(
             for value in rationale_values
         )
         assessment_evidence_ids = nested.get("evidence_ids")
-        # The source-context assessment must explicitly name the evidence that
-        # grounds this exact decision dependency. An omitted evidence list is
-        # not proof of linkage, even when unrelated evidence is attached to
-        # the question elsewhere.
+        # Evidence must be linked either by the source-context assessment
+        # itself or by the persisted source record resolved below. Evidence
+        # attached only to the question, without a source-level relationship,
+        # cannot authorize the decision dependency.
         context_evidence_ids = {
             str(value) for value in assessment_evidence_ids
             if isinstance(value, str) and value.strip()
