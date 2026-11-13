@@ -9,11 +9,12 @@ from app.models.care import CareEvent
 from app.core.change_enums import PatternType, PatternStrength, ChangeDirection, ChangeType
 from app.services.observation_coverage import assess_observation_coverage
 
-MAX_PATTERN_SOURCE_EVENTS = 1000
-MAX_PATTERN_CHANGE_ASSESSMENTS = 500
-# Keep a bounded but genuinely longitudinal source window. Ninety days hid
-# otherwise valid recurrence across longer care histories.
-MAX_PATTERN_LOOKBACK_DAYS = 365
+MAX_PATTERN_SOURCE_EVENTS = 1000  # bounded cross-domain scan
+MAX_PATTERN_CHANGE_ASSESSMENTS = 500  # retained for legacy diagnostics
+# These values bound cursor fetch batches, not the history included in
+# same-domain longitudinal comparisons.
+PATTERN_SOURCE_FETCH_BATCH_SIZE = 500
+PATTERN_CHANGE_FETCH_BATCH_SIZE = 500
 # A recurrence is longitudinal only when source events span at least a full day.
 MIN_LONGITUDINAL_PATTERN_SPAN = timedelta(days=1)
 
@@ -39,7 +40,6 @@ def detect_patterns(
 ) -> List[Pattern]:
     """Detect recurrence from persisted source events, not repeated assessment rows."""
     now = _ensure_utc(datetime.now(timezone.utc) if reference_time is None else reference_time)
-    window_start = now - timedelta(days=MAX_PATTERN_LOOKBACK_DAYS)
     # Superseded assessments are historical observations, not disposable rows.
     # Include them in longitudinal analysis while excluding explicitly rejected
     # or inconclusive assessments from pattern evidence.
@@ -51,21 +51,18 @@ def detect_patterns(
     )
     if subject_id:
         changes_query = changes_query.filter(Change.subject_id == subject_id)
-    queried_changes = (
+    queried_changes = list(
         changes_query
         .order_by(Change.created_at.desc(), Change.id.asc())
-        .limit(MAX_PATTERN_CHANGE_ASSESSMENTS + 1)
-        .all()
+        .yield_per(PATTERN_CHANGE_FETCH_BATCH_SIZE)
     )
-    changes_truncated = len(queried_changes) > MAX_PATTERN_CHANGE_ASSESSMENTS
-    changes = queried_changes[:MAX_PATTERN_CHANGE_ASSESSMENTS]
-    changes.reverse()
+    changes_truncated = False
+    changes = list(reversed(queried_changes))
 
     event_query = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
         CareEvent.event_type == subject_type,
         CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
-        CareEvent.occurred_at >= window_start,
         CareEvent.occurred_at <= now,
     )
     if subject_id:
@@ -81,14 +78,12 @@ def detect_patterns(
         # the query empty so stale patterns can be retired when their evidence
         # was invalidated or no longer supports the assessment.
         event_query = event_query.filter(CareEvent.id.in_(linked_event_ids))
-    queried_events = (
+    source_events = list(
         event_query
         .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
-        .limit(MAX_PATTERN_SOURCE_EVENTS + 1)
-        .all()
+        .yield_per(PATTERN_SOURCE_FETCH_BATCH_SIZE)
     )
-    events_truncated = len(queried_events) > MAX_PATTERN_SOURCE_EVENTS
-    source_events = queried_events[:MAX_PATTERN_SOURCE_EVENTS]
+    events_truncated = False
     source_events.sort(key=lambda event: (_ensure_utc(event.occurred_at), event.id))
 
     canonical_events = []
