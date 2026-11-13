@@ -18,6 +18,7 @@ from app.main import app
 from app.models.care import Caregiver, Person
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 
 
 @pytest.fixture
@@ -71,6 +72,14 @@ def _client_for(TestingSessionLocal, suffix):
                 expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
             )
         )
+        db.add(CaregiverAccessGrant(
+            person_id=f"benchmark-person-{suffix}",
+            caregiver_id=f"benchmark-caregiver-{suffix}",
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+        ))
         db.commit()
     client = TestClient(app)
     client.headers.update({"Authorization": f"Bearer {token}"})
