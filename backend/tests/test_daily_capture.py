@@ -1777,6 +1777,20 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
         finally:
             db.close()
 
+        # The same persisted source and its terminal extraction failure remain
+        # visible after the caregiver leaves the capture surface.
+        processing_history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=200&offset=0",
+            headers=headers,
+        )
+        assert processing_history.status_code == 200, processing_history.text
+        failed_record = next(
+            row for row in processing_history.json()["records"]
+            if row.get("source_id") == receipt["id"]
+        )
+        assert failed_record["capture_processing"]["job_status"] == "failed"
+        assert "original report is saved" in failed_record["capture_processing"]["message"].lower()
+
         # The same persisted source is visible through history and the LCR even
         # when extraction is unavailable; failed understanding never erases it.
         history = client.get("/api/v1/events/person-daily-test", headers=headers)
