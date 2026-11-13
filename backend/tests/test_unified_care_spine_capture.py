@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import get_db
+from app.api.document_lifecycle import _verify_persisted_extraction
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Evidence, Person
@@ -447,9 +448,13 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 )
                 assert linked_document is not None, "caregiver-scoped document analysis/evidence join returned no row"
                 assert linked_document[1].type == "document"
-                assert db.query(EvidenceUpload).filter_by(
+                linked_upload = db.query(EvidenceUpload).filter_by(
                     evidence_id=linked_document[1].id
-                ).one_or_none() is not None
+                ).one_or_none()
+                assert linked_upload is not None
+                assert _verify_persisted_extraction(
+                    linked_document[0], linked_upload, db
+                ) == own_document_bytes
 
             # The Companion document question must include this caregiver's
             # persisted document extraction and exclude a peer caregiver's
@@ -467,6 +472,11 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             companion_document_body = companion_document.json()
             assert own_document_analysis_id in companion_document_body.get(
                 "source_document_analysis_ids", []
+            ), (
+                "verified document extraction was not cited in Companion response; "
+                f"source_ids={companion_document_body.get('source_document_analysis_ids')}, "
+                f"coverage={companion_document_body.get('lcr_context_coverage')}, "
+                f"prompt={captured_prompts[-1]}"
             )
             assert peer_document_analysis_id not in companion_document_body.get(
                 "source_document_analysis_ids", []
