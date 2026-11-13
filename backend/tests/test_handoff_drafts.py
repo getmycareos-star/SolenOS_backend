@@ -1375,7 +1375,14 @@ def test_handoff_includes_only_valid_necessary_open_questions(client):
                 necessity_rationale="The receiving caregiver needs the current support level to safely plan transfers.",
                 evidence_ids=[source.id],
                 context=[{
-                    "decision_dependency": "The receiving caregiver cannot prepare the transfer plan without the current support level."
+                    "source_kind": "document_extraction",
+                    "source_id": source.id,
+                    "source_record_refs": [{"record_type": "evidence", "record_id": source.id}],
+                    "necessity_assessment": {
+                        "necessity_rationale": "The receiving caregiver needs the current support level to safely plan transfers.",
+                        "decision_dependency": "The receiving caregiver cannot prepare the transfer plan without the current support level.",
+                        "evidence_ids": [source.id],
+                    },
                 }],
             ),
             OpenQuestion(
