@@ -364,10 +364,40 @@ def _epistemic_context(db: Session, person_id: str, subject_type: str, subject_i
     questions = db.query(OpenQuestionModel).filter(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.subject_type == subject_type,
-        OpenQuestionModel.status == "open",
+        OpenQuestionModel.status.in_(("open", "unresolved")),
         OpenQuestionModel.necessity == "necessary",
     ).all()
     questions = [question for question in questions if has_valid_caregiver_necessity(question, db, person_id)]
+    priority_weight = {
+        "critical": 5, "high": 4, "medium": 3,
+        "low": 2, "informational": 1,
+    }
+    questions.sort(key=lambda question: (
+        -priority_weight.get(str(getattr(question.priority, "value", question.priority)), 0),
+        question.asked_at.isoformat() if question.asked_at else "",
+        str(question.id),
+    ))
+    unique_questions = []
+    seen_questions = set()
+    for question in questions:
+        key = (
+            " ".join((question.question or "").casefold().split()),
+            question.subject_type,
+            question.subject_id,
+        )
+        if key in seen_questions:
+            continue
+        seen_questions.add(key)
+        unique_questions.append(question)
+    critical_questions = [
+        question for question in unique_questions
+        if str(getattr(question.priority, "value", question.priority)) == "critical"
+    ]
+    ordinary_questions = [
+        question for question in unique_questions
+        if str(getattr(question.priority, "value", question.priority)) != "critical"
+    ]
+    questions = critical_questions + ordinary_questions[:2]
 
     if contradictions:
         epistemic_state = "conflicting"
