@@ -2269,6 +2269,145 @@ def _lcr_context_chronological_key(line: str) -> tuple[float, str]:
     return (float("inf"), str(payload.get("source_id") or ""))
 
 
+def _collect_full_lcr_context_pages(
+    db: Session,
+    person_id: str,
+    caregiver_id: str,
+    query: str,
+    initial_context: dict[str, Any],
+    *,
+    limit_per_source: int = 50,
+    max_pages: int = 4,
+) -> dict[str, Any]:
+    """Collect deterministic per-source pages for a broad care-journey request.
+
+    Each page is a fresh person-scoped scan with a stable ranked offset. The
+    page ceiling is deliberate: if the available history exceeds it, coverage
+    remains partial and the caregiver is told so rather than receiving a
+    false complete-history answer.
+    """
+    merged = dict(initial_context)
+    merged_sources = {
+        name: {**source, "items": list(source.get("items", []))}
+        for name, source in initial_context.get("sources", {}).items()
+    }
+    page_count = 1
+    page_contexts: list[dict[str, Any]] = []
+    offsets = {
+        name: (
+            source.get("next_offset")
+            if source.get("has_more")
+            else int(source.get("candidate_count") or 0)
+        )
+        for name, source in merged_sources.items()
+        if name != "companion_conversation"
+    }
+
+    for _ in range(1, max_pages):
+        if not any(
+            source.get("has_more")
+            for name, source in merged_sources.items()
+            if name != "companion_conversation"
+        ):
+            break
+        page_context = build_unified_lcr_context(
+            db,
+            person_id,
+            caregiver_id,
+            limit_per_source=limit_per_source,
+            query=query,
+            conversation_limit=1,
+            include_all_history=True,
+            source_offsets=offsets,
+        )
+        page_contexts.append(page_context)
+        page_count += 1
+        page_sources = page_context.get("sources", {})
+        for name, source in merged_sources.items():
+            if name == "companion_conversation":
+                continue
+            page_source = page_sources.get(name, {})
+            existing_ids = {
+                str(item.get("id"))
+                for item in source.get("items", [])
+                if isinstance(item, dict) and item.get("id") is not None
+            }
+            for item in page_source.get("items", []):
+                item_id = str(item.get("id")) if isinstance(item, dict) else ""
+                if item_id and item_id in existing_ids:
+                    continue
+                source["items"].append(item)
+                if item_id:
+                    existing_ids.add(item_id)
+            source["candidate_count"] = page_source.get(
+                "candidate_count", source.get("candidate_count")
+            )
+            source["candidate_scan_complete"] = page_source.get(
+                "candidate_scan_complete", source.get("candidate_scan_complete", False)
+            )
+            source["has_more"] = page_source.get("has_more", False)
+            source["next_offset"] = page_source.get("next_offset")
+            source["returned_count"] = len(source["items"])
+            source["offset"] = 0
+            source["returned_history_complete"] = bool(
+                source.get("candidate_scan_complete")
+                and not source.get("has_more")
+                and source["returned_count"] >= int(source.get("candidate_count") or 0)
+            )
+            source["selection"] = "complete_history_ranked_pages"
+        offsets = {
+            name: (
+                source.get("next_offset")
+                if source.get("has_more")
+                else int(source.get("candidate_count") or 0)
+            )
+            for name, source in merged_sources.items()
+            if name != "companion_conversation"
+        }
+
+    merged["sources"] = merged_sources
+    merged["source_status"] = {
+        name: source.get("status", "unknown")
+        for name, source in merged_sources.items()
+    }
+    merged["source_offsets"] = {
+        name: source.get("next_offset")
+        for name, source in merged_sources.items()
+        if name != "companion_conversation" and source.get("has_more")
+    }
+    merged["retrieval_projection_complete"] = (
+        not merged.get("missing_required_sources")
+        and not merged.get("missing_optional_sources")
+        and all(
+            source.get("candidate_scan_complete") is True
+            and source.get("has_more") is False
+            and source.get("returned_count", 0) >= int(source.get("candidate_count") or 0)
+            for name, source in merged_sources.items()
+            if name != "companion_conversation"
+            and source.get("status") in {"available", "empty"}
+        )
+    )
+    merged["retrieval_contract"] = {
+        **merged.get("retrieval_contract", {}),
+        "pages_fetched": page_count,
+        "page_limit": max_pages,
+        "page_limit_reached": bool(merged["source_offsets"]),
+        "source_offsets": merged["source_offsets"],
+        "retrieval_projection_complete": merged["retrieval_projection_complete"],
+    }
+    if page_contexts:
+        lineage = dict(merged.get("evidence_lineage") or {})
+        lineage["scope_truncated"] = True
+        lineage["status"] = "assessed_bounded_subset"
+        lineage["interpretation_limit"] = (
+            str(lineage.get("interpretation_limit") or "")
+            + " Evidence lineage was assessed across only the first retrieved page; "
+            "relationships across later pages remain unknown."
+        ).strip()
+        merged["evidence_lineage"] = lineage
+    return merged
+
+
 def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
     """Remove unrelated records from model context after ranking, preserving broad queries."""
     query_tokens = [
