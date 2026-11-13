@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import Column, String, Table, create_engine
+from sqlalchemy import Column, DateTime, String, Table, Text, create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -40,6 +40,23 @@ def _postgres_conversation_db():
     connection.exec_driver_sql(f'SET search_path TO "{schema}"')
 
     metadata = ConversationSession.metadata
+    if "care_facts" not in metadata.tables:
+        Table(
+            "care_facts", metadata,
+            Column("id", String, primary_key=True),
+            Column("person_id", String, nullable=False),
+            Column("subject_type", String),
+            Column("subject_id", String),
+            Column("fact_type", String),
+            Column("fact_value", Text),
+            Column("epistemic_status", String),
+            Column("effective_at", DateTime(timezone=True)),
+            Column("recorded_at", DateTime(timezone=True)),
+            Column("created_at", DateTime(timezone=True)),
+            Column("superseded_by_fact_id", String),
+            Column("created_by_caregiver_id", String),
+            Column("review_notes", Text),
+        )
     if "situations" not in metadata.tables:
         Table("situations", metadata, Column("id", String, primary_key=True))
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
@@ -50,6 +67,7 @@ def _postgres_conversation_db():
             CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
             CaregiverProfile.__table__, CaregiverHandoff.__table__,
+            metadata.tables["care_facts"],
             QwenBackgroundJob.__table__, QwenModelOutput.__table__,
             AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
         ],
@@ -168,6 +186,28 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
                     evidence_ids_json="[]",
                 ),
             ])
+            db.execute(metadata.tables["care_facts"].insert(), [
+                {
+                    "id": "sleep-fact-old", "person_id": "person-a",
+                    "subject_type": "person", "subject_id": "person-a",
+                    "fact_type": "sleep_pattern", "fact_value": "Earlier sleep report described frequent waking.",
+                    "epistemic_status": "reported", "effective_at": datetime.now(UTC) - timedelta(days=45),
+                    "recorded_at": datetime.now(UTC) - timedelta(days=45),
+                    "created_at": datetime.now(UTC) - timedelta(days=45),
+                    "superseded_by_fact_id": "sleep-fact-current",
+                    "created_by_caregiver_id": "caregiver-a",
+                },
+                {
+                    "id": "sleep-fact-current", "person_id": "person-a",
+                    "subject_type": "person", "subject_id": "person-a",
+                    "fact_type": "sleep_pattern", "fact_value": "Recent sleep report described fewer interruptions.",
+                    "epistemic_status": "reported", "effective_at": datetime.now(UTC) - timedelta(days=6),
+                    "recorded_at": datetime.now(UTC) - timedelta(days=6),
+                    "created_at": datetime.now(UTC) - timedelta(days=6),
+                    "superseded_by_fact_id": None,
+                    "created_by_caregiver_id": "caregiver-a",
+                },
+            ])
             db.commit()
             result = _conversation_context(
                 db, person_id="person-a", caregiver_id="caregiver-a",
@@ -185,6 +225,9 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
         assert handoffs["candidate_scan_complete"] is True
         assert handoffs["candidate_count"] == 1
         assert [item["id"] for item in handoffs["items"]] == ["handoff-person-a"]
+        facts = {item["id"]: item["information_status"] for item in lcr_context["sources"]["facts"]["items"]}
+        assert facts["sleep-fact-old"] == "superseded_fact"
+        assert facts["sleep-fact-current"] != "superseded_fact"
         by_id = {item["id"]: item for item in result["items"]}
         assert set(by_id) == {"own-message", "assistant-message"}
         assert all(item["information_status"] == "conversation_context_only" for item in by_id.values())
