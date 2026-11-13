@@ -119,18 +119,74 @@ def has_valid_caregiver_necessity(
         } if isinstance(assessment_evidence_ids, list) else set()
         evidence_matches_context = bool(context_evidence_ids.intersection(evidence_ids))
         source_record_exists = True
-        if db is not None and source_kind == "information_gap":
-            source_record_exists = bool(
-                isinstance(source_id, str) and db.query(InformationGap.id).filter(
-                    InformationGap.id == source_id,
-                    InformationGap.person_id == scoped_person_id,
-                    InformationGap.lifecycle_status.in_([
-                        GapLifecycleStatus.OPEN,
-                        GapLifecycleStatus.REOPENED,
-                        GapLifecycleStatus.PARTIALLY_RESOLVED,
-                    ]),
-                ).first()
-            )
+        if db is not None:
+            source_record_exists = False
+            if source_kind == "information_gap":
+                source_record_exists = bool(
+                    isinstance(source_id, str) and db.query(InformationGap.id).filter(
+                        InformationGap.id == source_id,
+                        InformationGap.person_id == scoped_person_id,
+                        InformationGap.lifecycle_status.in_([
+                            GapLifecycleStatus.OPEN,
+                            GapLifecycleStatus.REOPENED,
+                            GapLifecycleStatus.PARTIALLY_RESOLVED,
+                        ]),
+                    ).first()
+                )
+            elif source_kind in {"daily_capture_extraction", "document_extraction"}:
+                source_refs = item.get("source_record_refs")
+                for source_ref in source_refs if isinstance(source_refs, list) else []:
+                    if not isinstance(source_ref, dict):
+                        continue
+                    record_type = source_ref.get("record_type")
+                    record_id = source_ref.get("record_id")
+                    if not isinstance(record_id, str) or not record_id.strip():
+                        continue
+                    if record_type == "evidence" and db.query(Evidence.id).filter(
+                        Evidence.id == record_id, Evidence.person_id == scoped_person_id
+                    ).first():
+                        source_record_exists = True
+                    elif record_type == "care_event" and db.query(CareEvent.id).filter(
+                        CareEvent.id == record_id, CareEvent.person_id == scoped_person_id
+                    ).first():
+                        source_record_exists = True
+            elif source_kind == "contradiction":
+                source_record_exists = bool(
+                    isinstance(source_id, str) and db.query(Contradiction.id).filter(
+                        Contradiction.id == source_id,
+                        Contradiction.person_id == scoped_person_id,
+                        Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
+                    ).first()
+                )
+            elif source_kind == "stale_or_unreviewed_assertion":
+                source_record_exists = bool(
+                    isinstance(source_id, str) and db.query(CareAssertion.id).filter(
+                        CareAssertion.id == source_id,
+                        CareAssertion.person_id == scoped_person_id,
+                        CareAssertion.assertion_status.in_(("reported", "review_required", "accepted", "caregiver_reviewed")),
+                    ).first()
+                )
+            elif source_kind == "registered_action":
+                source_record_exists = bool(
+                    isinstance(source_id, str) and db.query(Action.id).filter(
+                        Action.id == source_id,
+                        Action.person_id == scoped_person_id,
+                        Action.status.in_(("needs_clarification", "pending_confirmation")),
+                        Action.requires_confirmation.is_(True),
+                        Action.expired_at.is_(None),
+                        Action.cancelled_at.is_(None),
+                        Action.superseded_by_action_id.is_(None),
+                    ).first()
+                )
+            elif source_kind == "appointment_workspace_follow_up":
+                source_record_exists = bool(
+                    isinstance(source_id, str) and db.query(OpenLoopRecord.id).filter(
+                        OpenLoopRecord.id == source_id,
+                        OpenLoopRecord.person_id == scoped_person_id,
+                        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+                        OpenLoopRecord.status == "blocked",
+                    ).first()
+                )
         if (
             has_dependency and has_source_reference and has_rationale
             and evidence_matches_context and source_record_exists
