@@ -266,6 +266,45 @@ def has_valid_caregiver_necessity(
     return False
 
 
+
+def prioritize_caregiver_questions(questions, ordinary_limit=2):
+    """Return all unique eligible questions and the bounded caregiver-facing queue."""
+    priority_weight = {
+        "critical": 5, "high": 4, "medium": 3,
+        "low": 2, "informational": 1,
+    }
+    rows = list(questions or [])
+    rows.sort(key=lambda row: (
+        -priority_weight.get(str(getattr(row.priority, "value", row.priority)), 0),
+        row.asked_at.isoformat() if row.asked_at else "",
+        str(row.id),
+    ))
+
+    unique = []
+    seen = set()
+    for row in rows:
+        key = (
+            " ".join((row.question or "").casefold().split()),
+            row.subject_type,
+            row.subject_id,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+
+    critical = [
+        row for row in unique
+        if str(getattr(row.priority, "value", row.priority)) == "critical"
+    ]
+    ordinary = [
+        row for row in unique
+        if str(getattr(row.priority, "value", row.priority)) != "critical"
+    ]
+    limit = max(0, int(ordinary_limit))
+    visible = critical + ordinary[:limit]
+    return unique, visible, max(0, len(ordinary) - limit)
+
 def _open_question_state(question: OpenQuestion) -> Dict[str, Any]:
     return {
         "id": question.id,
