@@ -4845,12 +4845,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             model_context_lines.append(lineage_context_line)
         bounded_context: list[str] = []
         context_chars = 0
+        context_truncated = False
         for line in model_context_lines:
             rendered_line = _humanize_model_context_line(line)
             if context_chars + len(rendered_line) > 16000:
+                context_truncated = True
                 continue
             bounded_context.append(rendered_line)
             context_chars += len(rendered_line)
+        lcr_context_coverage["prompt_context_complete"] = not context_truncated
+        lcr_context_coverage["prompt_context_chars"] = context_chars
+        lcr_context_coverage["prompt_context_budget_chars"] = 16000
         model_messages.append({
             "role": "user",
             "content": (
@@ -4900,7 +4905,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 companion_request_id,
                 model,
                 model_messages,
-                {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
+                {"temperature": 0.25, "num_predict": 32 if greeting_only else 512},
                 retrieval_duration_ms,
             )
             logger.info(
