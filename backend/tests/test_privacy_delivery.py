@@ -55,6 +55,7 @@ def create_session(client, name):
 def add_caregiver_session(person_id, relationship="family caregiver"):
     from app.models.anonymous_session import AnonymousSession
     from app.models.care import Caregiver
+    from app.models.caregiver_access import CaregiverAccessGrant
 
     caregiver_id = str(uuid.uuid4())
     token = "test-token-" + str(uuid.uuid4())
@@ -76,6 +77,14 @@ def add_caregiver_session(person_id, relationship="family caregiver"):
             token_hash=hashlib.sha256(token.encode()).hexdigest(),
             expires_at=now + timedelta(hours=1),
             created_at=now,
+        ))
+        db.add(CaregiverAccessGrant(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            role="family",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=False,
         ))
         db.commit()
     finally:
