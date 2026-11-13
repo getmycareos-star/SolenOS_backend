@@ -5191,13 +5191,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         if document_question:
             relevant_shared_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
-            relevant_verified_documents = _rank_lcr_context_lines(
-                retrieval_query, verified_document_context_lines, 5
-            )
-            # A document request must retain verified source documents even when
-            # lexical filtering misses an inflected form (for example, sleep/slept).
+            # A document question is an explicit request for source material.
+            # Preserve the five most recent integrity-verified uploads ahead of
+            # lexical matches so inflected wording (sleep/slept) cannot erase
+            # the document or its public provenance references.
+            relevant_verified_documents = verified_document_context_lines[:5]
             shared_lcr_lines = list(dict.fromkeys([
-                *relevant_shared_lines, *relevant_verified_documents,
+                *relevant_verified_documents, *relevant_shared_lines,
             ]))
         else:
             shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
