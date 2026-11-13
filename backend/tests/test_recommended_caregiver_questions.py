@@ -344,6 +344,7 @@ def test_one_hundred_case_question_gate_benchmark():
         assert result["critical_count"] == 10
         assert len(result["recommended_question_ids"]) == 12
         assert result["additional_ordinary_count"] == 23
+        assert [item["priority"] for item in result["questions"]] == ["critical"] * 10 + ["high"] * 2
         assert all(item["id"] in expected_eligible for item in result["questions"])
     finally:
         teardown()
