@@ -64,6 +64,14 @@ def uncertainty_api_db():
 def _client_for(TestingSessionLocal, suffix):
     token = f"benchmark-token-{suffix}"
     with TestingSessionLocal() as db:
+        from app.models.caregiver_access import CaregiverAccessGrant
+        db.add(CaregiverAccessGrant(
+            person_id=f"benchmark-person-{suffix}",
+            caregiver_id=f"benchmark-caregiver-{suffix}",
+            role="primary",
+            status="active",
+            can_manage_members=True,
+        ))
         db.add(
             AnonymousSession(
                 person_id=f"benchmark-person-{suffix}",
