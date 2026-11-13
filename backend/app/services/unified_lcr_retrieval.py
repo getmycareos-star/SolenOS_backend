@@ -8,6 +8,7 @@ both person and caregiver through the persisted conversation-session relation.
 from __future__ import annotations
 
 import re
+import calendar
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -65,7 +66,14 @@ def _temporal_window(
         start, end = today - timedelta(days=max(0, weeks * 7 - 1)), today
     elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text):
         months = min(int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text).group(1)), 12)
-        start, end = today - timedelta(days=max(0, months * 30 - 1)), today
+        # Calendar months have different lengths. A fixed 30-day approximation
+        # shifts month-based care-history boundaries and can omit/include records
+        # around month ends. Subtract calendar months while clamping the day.
+        month_index = today.year * 12 + (today.month - 1) - months
+        start_year, start_month_zero = divmod(month_index, 12)
+        start_month = start_month_zero + 1
+        start_day = min(today.day, calendar.monthrange(start_year, start_month)[1])
+        start, end = date(start_year, start_month, start_day), today
     elif re.search(r"\blast week\b", text):
         monday = today - timedelta(days=today.weekday())
         start, end = monday - timedelta(days=7), monday - timedelta(days=1)
