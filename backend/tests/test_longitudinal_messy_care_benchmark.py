@@ -1777,3 +1777,29 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
             "omitted": 5,
         }
         assert coverage["complete"] is False
+
+def test_cross_domain_pattern_scan_includes_events_older_than_90_days():
+    from app.services.pattern_detection import detect_cross_domain_patterns
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "cross-domain-historical-window")
+        older = add_event(db, person, caregiver, "sleep", 180, "Sleep disruption recorded")
+        add_event(db, person, caregiver, "mobility", 177, "Mobility assistance recorded")
+        add_event(db, person, caregiver, "nutrition", 174, "Meal support recorded")
+
+        patterns = detect_cross_domain_patterns(db, person.id, reference_time=NOW)
+        db.flush()
+
+        assert len(patterns) == 1
+        pattern = patterns[0]
+        assert set(pattern.event_ids) == {older.id, *[
+            event.id for event in db.query(CareEvent).filter(
+                CareEvent.person_id == person.id,
+                CareEvent.id != older.id,
+            ).all()
+        ]}
+        assert pattern.pattern_metrics["source_history_truncated"] is False
+        assert pattern.pattern_metrics["analysis_window_start"] == (
+            NOW - timedelta(days=180)
+        ).isoformat()
+
