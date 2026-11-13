@@ -206,7 +206,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 "necessity": "necessary" if necessary else "not_assessed",
                 "necessity_rationale": "A recorded care decision depends on this answer." if necessary else None,
                 "decision_dependency": "The next handoff step depends on this answer." if necessary else None,
-                "evidence_ids": [evidence_id],
+                "evidence_ids": [] if 35 <= index < 40 else [evidence_id],
             }
             context = [{
                 **({"source_kind": "caregiver_report", "source_id": evidence_id} if source_bound else {}),
@@ -226,7 +226,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 evidence_ids=[evidence_id],
                 context=context,
             ))
-            if index < 40:
+            if index < 35:
                 expected_eligible.add(question_id)
         db.commit()
         db.close()
@@ -237,10 +237,10 @@ def test_one_hundred_case_question_gate_benchmark():
         assert response.status_code == 200, response.text
         result = response.json()
         assert set(result["eligible_question_ids"]) == expected_eligible
-        assert len(result["eligible_question_ids"]) == 40
+        assert len(result["eligible_question_ids"]) == 35
         assert result["critical_count"] == 10
         assert len(result["recommended_question_ids"]) == 12
-        assert result["additional_ordinary_count"] == 28
+        assert result["additional_ordinary_count"] == 23
         assert all(item["id"] in expected_eligible for item in result["questions"])
     finally:
         teardown()
