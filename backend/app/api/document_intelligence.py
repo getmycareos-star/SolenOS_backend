@@ -454,8 +454,22 @@ def _persist_medication_document_conflict_question(
         *(str(value) for value in (active_medication.get("evidence_ids") or [])),
         *(str(value) for value in (active_status_claim.evidence_ids or [])),
     ]))
+    necessity_rationale = (
+        "A source-grounded hospital document candidate conflicts with a current, caregiver-reviewed medication record. "
+        "The current instruction requires professional confirmation before any medication decision."
+    )
     context = [{
-        "source_kind": "document_candidate",
+        "source_kind": "document_extraction",
+        "source_id": evidence_id,
+        "source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}],
+        "necessity_assessment": {
+            "necessity_rationale": necessity_rationale,
+            "decision_dependency": (
+                "The current medication instruction cannot be represented accurately in the care record "
+                "until the prescribing clinician or pharmacist confirms whether the hospital document reflects a change."
+            ),
+            "evidence_ids": list(evidence_ids),
+        },
         "analysis_id": analysis_id,
         "document_evidence_id": evidence_id,
         "source_sha256": upload.sha256,
@@ -483,7 +497,7 @@ def _persist_medication_document_conflict_question(
         intended_answerer_role="professional",
         intended_answerer_label="Prescribing professional or pharmacist",
         necessity="necessary",
-        necessity_rationale="A source-grounded hospital document candidate conflicts with a current, caregiver-reviewed medication record. The current instruction requires professional confirmation before any medication decision.",
+        necessity_rationale=necessity_rationale,
         status="open",
         priority=Priority.HIGH,
         evidence_ids=evidence_ids,
