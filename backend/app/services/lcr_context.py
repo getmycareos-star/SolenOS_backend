@@ -669,7 +669,14 @@ def build_lcr_context(
 
 
 def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 14000) -> str:
-    """Serialize context as bounded labelled data, never as instruction-bearing messages."""
+    """Serialize bounded LCR context fairly across source types.
+
+    Source metadata is emitted before record details, then records are added in
+    round-robin order. A large event history therefore cannot consume the entire
+    prompt budget before evidence, corrections, conflicts, decisions, or open
+    loops are represented. Any records omitted by the prompt budget are disclosed.
+    """
+    max_chars = max(256, int(max_chars))
     header = (
         "LCR context metadata: "
         + json.dumps({
@@ -684,20 +691,63 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             }),
         }, ensure_ascii=False, separators=(",", ":"))
     )
-    chunks = [header]
-    current_length = len(header)
+
+    prepared_sources = []
     for source_name, source in context.get("sources", {}).items():
-        section = f"\n[{source_name}; status={source.get('status')}; returned={source.get('returned_count', 0)}; candidates={source.get('candidate_count', 'not_counted')}; scan_complete={source.get('candidate_scan_complete', False)}; has_more={source.get('has_more', False)}]"
-        if current_length + len(section) > max_chars:
-            chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
+        items = [
+            json.dumps(item, ensure_ascii=False, default=str, separators=(",", ":"))
+            for item in source.get("items", [])
+        ]
+        section = (
+            f"[{source_name}; status={source.get('status')}; "
+            f"returned={source.get('returned_count', 0)}; "
+            f"candidates={source.get('candidate_count', 'not_counted')}; "
+            f"scan_complete={source.get('candidate_scan_complete', False)}; "
+            f"has_more={source.get('has_more', False)}]"
+        )
+        prepared_sources.append({"section": section, "items": items, "next": 0})
+
+    base = header + "".join("\\n" + source["section"] for source in prepared_sources)
+    truncation_notice = (
+        "\\n[Context truncated because the safe prompt budget was reached. "
+        "Some retrieved records were not included; consult the source coverage "
+        "metadata and do not treat this prompt as a complete history.]"
+    )
+
+    # Keep the source coverage header even when a caller supplies an unusually
+    # small budget. The normal production budget is substantially larger.
+    if len(base) + len(truncation_notice) > max_chars:
+        shortened = header[: max(0, max_chars - len(truncation_notice))]
+        return shortened + truncation_notice[: max_chars - len(shortened)]
+
+    chunks = [base]
+    current_length = len(base)
+    item_budget = max_chars - len(base) - len(truncation_notice)
+    included_any = False
+    omitted = False
+
+    # Give each available source a chance to contribute before taking a second
+    # record from any source. Preserve each source's own item order.
+    while True:
+        made_progress = False
+        for source in prepared_sources:
+            index = source["next"]
+            if index >= len(source["items"]):
+                continue
+            line = "\\n" + source["items"][index]
+            if current_length + len(line) > len(base) + item_budget:
+                omitted = True
+                continue
+            chunks.append(line)
+            current_length += len(line)
+            source["next"] += 1
+            included_any = True
+            made_progress = True
+        if not made_progress:
             break
-        chunks.append(section)
-        current_length += len(section)
-        for item in source.get("items", []):
-            line = json.dumps(item, ensure_ascii=False, default=str, separators=(",", ":"))
-            if current_length + len(line) + 1 > max_chars:
-                chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
-                return "".join(chunks)
-            chunks.extend(["\n", line])
-            current_length += len(line) + 1
+
+    if any(source["next"] < len(source["items"]) for source in prepared_sources):
+        omitted = True
+    if omitted:
+        chunks.append(truncation_notice)
     return "".join(chunks)
