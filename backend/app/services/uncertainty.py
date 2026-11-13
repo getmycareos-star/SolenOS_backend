@@ -956,34 +956,17 @@ class UncertaintyEngine:
             # archive. Closed/superseded questions remain available through
             # the explicit status filter and answer-history route.
             query = query.filter(OpenQuestionModel.status.in_(["open", "unresolved"]))
-        from app.services.care_continuity import has_valid_caregiver_necessity
+        from app.services.care_continuity import (
+            has_valid_caregiver_necessity,
+            prioritize_caregiver_questions,
+        )
         rows = [
             row for row in query.all()
             if has_valid_caregiver_necessity(row, self.db, scoped_person_id)
         ]
-        priority_weight = {
-            "critical": 5, "high": 4, "medium": 3,
-            "low": 2, "informational": 1,
-        }
-        rows.sort(key=lambda row: (
-            -priority_weight.get(str(getattr(row.priority, "value", row.priority)), 0),
-            row.asked_at.isoformat() if row.asked_at else "",
-            str(row.id),
-        ))
-        # The ordinary caregiver list and the recommended projection must
-        # agree on one source-backed task per exact question and care subject.
-        unique = []
-        seen = set()
-        for row in rows:
-            key = (
-                " ".join((row.question or "").casefold().split()),
-                row.subject_type,
-                row.subject_id,
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(row)
+        # Return the full unique queue for on-demand review; the caregiver
+        # interface applies the shared critical-plus-two initial display cap.
+        unique, _, _ = prioritize_caregiver_questions(rows, ordinary_limit=2)
         return unique
 
     def create_contradiction(self, contradiction: ContradictionCreate) -> ContradictionModel:
