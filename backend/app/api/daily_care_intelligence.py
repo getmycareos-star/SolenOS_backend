@@ -324,6 +324,7 @@ def _history_bundle(
         "lcr_context": {
             "schema_status": lcr_context["schema_status"],
             "history_coverage": lcr_context["history_coverage"],
+            "retrieval_scan_complete": lcr_context.get("retrieval_scan_complete", False),
             "query_applied": lcr_context["query_applied"],
             "missing_required_sources": lcr_context["missing_required_sources"],
             "missing_optional_sources": lcr_context["missing_optional_sources"],
