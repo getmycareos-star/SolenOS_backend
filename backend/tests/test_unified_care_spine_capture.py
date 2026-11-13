@@ -452,7 +452,11 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             document_prompt = "\\n".join(
                 str(message.get("content", "")) for message in captured_prompts[-1]
             )
-            assert own_document_analysis_id in document_prompt
+            # Internal analysis IDs remain response provenance metadata;
+            # only the document's relevant source content enters model prose.
+            assert own_document_analysis_id in companion_document_body.get(
+                "source_document_analysis_ids", []
+            )
             assert "Care document reports interrupted sleep overnight." in document_prompt
             assert "PRIVATE_PEER_DOCUMENT" not in document_prompt
             assert companion_document_body["written_to_lcr"] is False
