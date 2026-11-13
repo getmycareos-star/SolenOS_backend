@@ -437,7 +437,9 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     open_questions = [
         question for question in open_questions
         if has_valid_caregiver_necessity(question, db, person_id)
-    ][:50]
+    ]
+    open_questions_total = len(open_questions)
+    open_questions = open_questions[:50]
     unresolved_contradictions_query = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
         Contradiction.resolution_status.in_(["unresolved", "qualified"]),
@@ -483,21 +485,19 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "A meal or fluid-intake observation is not itself a diagnosis or symptom: do not infer reduced appetite, dehydration, illness, or a cause from an amount eaten or drunk. "
         "Never duplicate one observation as both a condition and a symptom; preserve the source observation in the event summary unless a distinct, explicitly documented clinical finding exists."
     )
+    history_coverage = {
+        "active_assertions": {"available": len(active_state), "total": active_assertions_total, "omitted": max(0, active_assertions_total - len(active_state))},
+        "prior_events": {"available": len(prior_events), "total": prior_events_total, "omitted": max(0, prior_events_total - len(prior_events))},
+        "prior_evidence": {"available": len(prior_evidence), "total": prior_evidence_total, "omitted": max(0, prior_evidence_total - len(prior_evidence))},
+        "open_gaps": {"available": len(open_gaps), "total": open_gaps_total, "omitted": max(0, open_gaps_total - len(open_gaps))},
+        "open_questions": {"available": len(open_questions), "total": open_questions_total, "omitted": max(0, open_questions_total - len(open_questions))},
+        "unresolved_contradictions": {"available": len(unresolved_contradictions), "total": unresolved_contradictions_total, "omitted": max(0, unresolved_contradictions_total - len(unresolved_contradictions))},
+    }
+    history_coverage["complete"] = all(
+        category["omitted"] == 0 for category in history_coverage.values()
+    )
     user_payload = {
-        "history_coverage": {
-            "active_assertions": {"available": len(active_state), "total": active_assertions_total, "omitted": max(0, active_assertions_total - len(active_state))},
-            "prior_events": {"available": len(prior_events), "total": prior_events_total, "omitted": max(0, prior_events_total - len(prior_events))},
-            "prior_evidence": {"available": len(prior_evidence), "total": prior_evidence_total, "omitted": max(0, prior_evidence_total - len(prior_evidence))},
-            "open_gaps": {"available": len(open_gaps), "total": open_gaps_total, "omitted": max(0, open_gaps_total - len(open_gaps))},
-            "unresolved_contradictions": {"available": len(unresolved_contradictions), "total": unresolved_contradictions_total, "omitted": max(0, unresolved_contradictions_total - len(unresolved_contradictions))},
-            "complete": all(total == available for total, available in (
-                (active_assertions_total, len(active_state)),
-                (prior_events_total, len(prior_events)),
-                (prior_evidence_total, len(prior_evidence)),
-                (open_gaps_total, len(open_gaps)),
-                (unresolved_contradictions_total, len(unresolved_contradictions)),
-            )),
-        },
+        "history_coverage": history_coverage,
         "existing_active_state": active_state,
         "existing_record_context": existing_record_context,
         "existing_unresolved_care_loops": existing_unresolved_care_loops,
@@ -628,7 +628,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             distinct_prior = list(dict.fromkeys(_normalise(value) for value in prior_values))
             _apply_incomplete_baseline_guard(
                 item,
-                baseline_complete=active_assertions_total == len(active_state),
+                baseline_complete=history_coverage["complete"],
             )
             if item.get("baseline_incomplete"):
                 # Do not let the bounded in-memory subset overrule the guard.
