@@ -75,6 +75,18 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                 VALUES (:id, :name, 'family caregiver', :person_id, 'UTC')
             """), {"id": ids["caregiver"], "name": ids["caregiver_name"], "person_id": ids["person"]})
             connection.execute(text("""
+                INSERT INTO caregiver_access_grants
+                    (id, person_id, caregiver_id, role, access_scope, status,
+                     can_manage_members, granted_by_caregiver_id, granted_at)
+                VALUES (:id, :person_id, :caregiver_id, 'family', 'full_record',
+                        'active', true, :caregiver_id, :granted_at)
+            """), {
+                "id": str(uuid.uuid4()),
+                "person_id": ids["person"],
+                "caregiver_id": ids["caregiver"],
+                "granted_at": datetime(2026, 11, 10, 8, 0, tzinfo=timezone.utc),
+            })
+            connection.execute(text("""
                 INSERT INTO persons (id, name) VALUES (:id, :name)
             """), {"id": ids["other_person"], "name": ids["other_person_name"]})
             connection.execute(text("""
