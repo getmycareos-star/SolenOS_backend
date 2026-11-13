@@ -1199,3 +1199,50 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert used_chars == sum(map(len, rendered)) + max(0, len(rendered) - 1)
     assert used_chars <= 1000
     assert truncated is True
+
+
+def test_caregiver_interaction_guidance_prioritizes_frustration_repair_over_defense():
+    guidance = collaboration._caregiver_interaction_guidance(
+        "You keep asking me the same questions. I've already told you this."
+    )
+    assert "CONTINUITY REPAIR" in guidance
+    assert "retrieve the relevant authorized care record" in guidance
+    assert "Do not defend the system" in guidance
+    assert "Never claim the problem is fixed" in guidance
+
+
+def test_caregiver_interaction_guidance_reduces_work_for_overwhelmed_caregiver():
+    guidance = collaboration._caregiver_interaction_guidance(
+        "I'm exhausted. I don't know what to do anymore. Everything is too much."
+    )
+    assert "LOW-CAPACITY RESPONSE" in guidance
+    assert "Do not produce a checklist" in guidance
+    assert "single most consequential next concern" in guidance
+    assert "Do not diagnose caregiver burnout" in guidance
+
+
+def test_caregiver_interaction_guidance_handles_distress_without_forcing_workflow():
+    guidance = collaboration._caregiver_interaction_guidance(
+        "I'm angry and upset. I just want a break."
+    )
+    assert "DISTRESS RESPONSE" in guidance
+    assert "Do not force a care workflow" in guidance
+    assert "Immediate danger still takes precedence" in guidance
+
+
+def test_caregiver_interaction_guidance_preserves_correction_and_vague_concern_rules():
+    correction = collaboration._caregiver_interaction_guidance(
+        "No, that's not what happened. She was eating less."
+    )
+    assert "CORRECTION HANDLING" in correction
+    assert "preserve the difference between the earlier and corrected reports" in correction
+
+    vague = collaboration._caregiver_interaction_guidance("Something isn't right.")
+    assert "VAGUE CONCERN" in vague
+    assert "ask one open, plain-language question only" in vague
+
+
+def test_caregiver_interaction_guidance_does_not_trigger_on_neutral_care_question():
+    assert collaboration._caregiver_interaction_guidance(
+        "What happened at Mum's appointment last Tuesday?"
+    ) == ""
