@@ -109,10 +109,10 @@ _DAILY_CLAUSE_VERB = re.compile(
     re.IGNORECASE,
 )
 _DAILY_CLAUSE_SUBJECT = re.compile(
-    r"^\s*((?:the\s+)?(?:patient|caregiver|doctor|nurse|care staff)|"
-    r"(?:my\s+)?(?:mother|father)|mum|mom|dad|she|he|they|we|i|"
-    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b",
-    re.IGNORECASE,
+    r"^\s*((?:[Tt]he\s+)?(?:patient|caregiver|doctor|nurse|care staff)|"
+    r"(?:[Mm]y\s+)?(?:mother|father)|[Mm]um|[Mm]om|[Dd]ad|"
+    r"[Ss]he|[Hh]e|[Tt]hey|[Ww]e|[Ii]|"
+    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b"
 )
 
 
