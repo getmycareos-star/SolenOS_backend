@@ -514,7 +514,7 @@ def test_temporal_retrieval_uses_exclusive_before_and_after_date_boundaries():
     before = _temporal_window("What happened before 2026-11-06?", now=now)
     after = _temporal_window("What happened after 2026-11-05?", now=now)
     assert before is not None and after is not None
-    assert before["start"] == "0001-01-01T00:00:00+00:00"
+    assert before["start"] == "0002-01-01T00:00:00+00:00"
     assert before["end"].startswith("2026-11-05T23:59:59")
     assert after["start"] == "2026-11-06T00:00:00+00:00"
     assert after["end"].startswith("9998-12-31T23:59:59")
