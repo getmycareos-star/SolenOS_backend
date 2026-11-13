@@ -4600,9 +4600,15 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
 def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     """Fail closed when the model ignores explicit caregiver interaction constraints."""
     guidance = _caregiver_interaction_guidance(user_text)
-    if not guidance or not isinstance(reply, str) or not reply.strip():
+    if not isinstance(reply, str) or not reply.strip():
         return False
     text = reply.strip()
+    # Companion never needs to interrogate a caregiver with multiple questions.
+    # A second question is repaired through the same bounded grounding path.
+    if text.count("?") > 1:
+        return True
+    if not guidance:
+        return False
     lowered = text.casefold()
     if "LOW-CAPACITY RESPONSE" in guidance:
         sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
