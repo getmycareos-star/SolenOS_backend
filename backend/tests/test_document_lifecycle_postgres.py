@@ -776,6 +776,8 @@ def test_postgres_document_medication_conflict_creates_professional_question_wit
             assert question.necessity == "necessary"
             assert question.status == "open"
             assert question.priority.value == "high"
+            from app.services.care_continuity import has_valid_caregiver_necessity
+            assert has_valid_caregiver_necessity(question, db, person_id) is True
             assert uploaded["evidence_id"] in question.evidence_ids
             status = list_document_processing_status(_request(person_id, caregiver_id), 10, db)
             assert status["items"][0]["medication_conflict"] is True
