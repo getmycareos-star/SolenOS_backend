@@ -77,3 +77,23 @@ def test_daily_capture_replaces_a_collapsed_whole_sentence_with_independent_clau
     assert any("slept poorly" in value for value in values)
     assert any("unsettled" in value for value in values)
     assert len(values) == 2
+
+
+def test_daily_capture_preserves_repeated_similar_observations_from_different_sentences():
+    first = "Mum slept poorly last night and seemed unsettled."
+    second = "Mum slept poorly again this morning and seemed restless."
+    source = first + " " + second
+    result = supplement_source_grounded_daily_observations(source, {
+        "observations": [{
+            "subject": "Mum",
+            "observation": "slept poorly last night",
+            "source_quote": first,
+        }],
+        "open_questions": [],
+    })
+
+    values = [item["observation"] for item in result["observations"]]
+    assert any("slept poorly last night" in value for value in values)
+    assert any("seemed unsettled" in value for value in values)
+    assert any("slept poorly again this morning" in value for value in values)
+    assert any("seemed restless" in value for value in values)
