@@ -448,7 +448,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 assert linked_document is not None, "caregiver-scoped document analysis/evidence join returned no row"
                 assert linked_document[1].type == "document"
                 assert db.query(EvidenceUpload).filter_by(
-                    evidence_id=own_document_evidence.id
+                    evidence_id=linked_document[1].id
                 ).one_or_none() is not None
 
             # The Companion document question must include this caregiver's
