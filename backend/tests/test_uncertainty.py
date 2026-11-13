@@ -257,6 +257,7 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                     "necessity_assessment": {
                         "necessity_rationale": "The handoff decision depends on the active instruction.",
                         "decision_dependency": "The handoff cannot identify the active instruction without clarification.",
+                        "evidence_ids": [evidence.id],
                     },
                 }],
             ),
