@@ -403,6 +403,31 @@ def test_lcr_context_exposes_active_persisted_analysis_without_cross_person_leak
         Column("superseded_by_assessment_id", String),
         Column("is_active", Boolean),
     )
+    Table(
+        "contradictions",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("subject_type", String),
+        Column("subject_id", String),
+        Column("field", String),
+        Column("description", Text),
+        Column("event_id", String),
+        Column("context_key", String),
+        Column("effective_from", DateTime),
+        Column("effective_to", DateTime),
+        Column("matching_candidate_ids", Text),
+        Column("evidence_ids", Text),
+        Column("source_assertion_ids", Text),
+        Column("resolution_status", String),
+        Column("resolution_notes", Text),
+        Column("resolution_scope", Text),
+        Column("unresolved_remainder", Text),
+        Column("resolved_at", DateTime),
+        Column("resolved_by_caregiver_id", String),
+        Column("created_at", DateTime),
+        Column("updated_at", DateTime),
+    )
     metadata.create_all(engine)
     analysis = {
         "epistemic_state": "unknown",
