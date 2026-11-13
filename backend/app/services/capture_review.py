@@ -97,6 +97,95 @@ def _source_time_for_observation(quote: str, observation: str):
     return min(eligible, key=lambda item: item[0])[1] if eligible else None
 
 
+_DAILY_CLAUSE_VERB = re.compile(
+    r"\b(?:is|am|are|was|were|has|have|had|do|does|did|can|could|will|would|"
+    r"should|might|may|must|slept|sleep|woke|wake|ate|eat|drank|drink|took|take|"
+    r"refused|refuse|seemed|seem|felt|feel|fell|fall|walked|walk|uses|use|"
+    r"needed|need|became|become|stayed|stay|rested|rest|reported|report|"
+    r"noticed|notice|appeared|appear|looked|look|changed|change|started|start|"
+    r"stopped|stop|missed|miss|forgot|forget|remembered|remember|"
+    r"complained|complain|asked|ask|called|call|went|go|arrived|arrive)\b|"
+    r"\b\w+(?:ed|ing)\b",
+    re.IGNORECASE,
+)
+_DAILY_CLAUSE_SUBJECT = re.compile(
+    r"^\s*((?:the\s+)?(?:patient|caregiver|doctor|nurse|care staff)|"
+    r"(?:my\s+)?(?:mother|father)|mum|mom|dad|she|he|they|we|i|"
+    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b",
+    re.IGNORECASE,
+)
+
+
+def supplement_source_grounded_daily_observations(
+    source_text: str,
+    candidates: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Recover omitted independent 'and' clauses without inventing source wording.
+
+    The model remains useful for extraction, but it is not allowed to silently
+    collapse a sentence containing multiple independently stated actions into
+    one finding. Every supplemental observation is an exact source substring,
+    retains its complete sentence as provenance, and inherits only an explicit
+    subject already present in that sentence.
+    """
+    if not isinstance(candidates, dict):
+        return {"observations": [], "open_questions": []}
+    raw_observations = candidates.get("observations")
+    observations = [
+        dict(item) for item in raw_observations
+        if isinstance(item, dict)
+    ] if isinstance(raw_observations, list) else []
+    existing_values = {
+        str(item.get("observation") or "").strip().casefold()
+        for item in observations
+        if isinstance(item.get("observation"), str)
+    }
+
+    for match in re.finditer(r"[^.!?;\n]+(?:[.!?;]+|$)", source_text or ""):
+        sentence = match.group(0).strip()
+        clauses = [part.strip() for part in re.split(r"\s+and\s+", sentence, flags=re.IGNORECASE)]
+        if len(clauses) < 2 or not all(_DAILY_CLAUSE_VERB.search(part) for part in clauses):
+            continue
+
+        sentence_subject = _DAILY_CLAUSE_SUBJECT.match(clauses[0])
+        inherited_subject = sentence_subject.group(1).strip() if sentence_subject else None
+        if not inherited_subject:
+            continue
+
+        # A whole-sentence model candidate is less useful than the distinct,
+        # independently traceable clauses. Replace only that exact collapse.
+        observations = [
+            item for item in observations
+            if not (
+                str(item.get("observation") or "").strip().casefold() == sentence.casefold()
+                and str(item.get("source_quote") or "").strip() == sentence
+            )
+        ]
+        for clause in clauses:
+            subject_match = _DAILY_CLAUSE_SUBJECT.match(clause)
+            subject = subject_match.group(1).strip() if subject_match else inherited_subject
+            observation = clause.strip()
+            key = observation.casefold()
+            if key in existing_values:
+                continue
+            if observation not in sentence or subject.casefold() not in sentence.casefold():
+                continue
+            observations.append({
+                "subject": subject,
+                "observation": observation,
+                "source_quote": sentence,
+                "extraction_origin": "deterministic_exact_clause_supplement",
+            })
+            existing_values.add(key)
+            inherited_subject = subject
+
+    result = dict(candidates)
+    result["observations"] = observations[:12]
+    if not isinstance(result.get("open_questions"), list):
+        result["open_questions"] = []
+    return result
+
+
 def persist_source_grounded_daily_observations(
     db: Session,
     *,
