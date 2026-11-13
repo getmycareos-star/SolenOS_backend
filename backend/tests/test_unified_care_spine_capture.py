@@ -151,6 +151,35 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                     expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
                 ),
             ])
+            # Put a directly relevant historical event behind more than 250
+            # newer unrelated records. Companion must still retrieve it by query.
+            old_history_event = CareEvent(
+                person_id=person_id,
+                event_type="daily_capture",
+                status="recorded",
+                occurred_at=datetime.now(timezone.utc) - timedelta(days=500),
+                title="Night waking report from last year",
+                description="Caregiver reported repeated waking overnight for several nights.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+            )
+            db.add(old_history_event)
+            db.flush()
+            old_history_event_id = old_history_event.id
+            now = datetime.now(timezone.utc)
+            db.add_all([
+                CareEvent(
+                    person_id=person_id,
+                    event_type="daily_capture",
+                    status="recorded",
+                    occurred_at=now - timedelta(minutes=index + 1),
+                    title="Routine meal delivery",
+                    description="Caregiver recorded meal delivery; no other details.",
+                    evidence_ids=[],
+                    created_by_caregiver_id=caregiver_id,
+                )
+                for index in range(260)
+            ])
             db.commit()
 
         # Daily Care's history projection must apply the authenticated caregiver
@@ -335,6 +364,24 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             daily_prompt = "\\n".join(
                 str(message.get("content", "")) for message in captured_prompts[-1]
             )
+
+            historical_companion = client.post(
+                "/api/v1/conversation/message",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "text": "What was recorded about waking overnight?",
+                    "client_turn_id": "historical-companion-" + suffix,
+                },
+            )
+            assert historical_companion.status_code == 200, historical_companion.text
+            historical_body = historical_companion.json()
+            assert old_history_event_id in historical_body.get("source_event_ids", [])
+            historical_prompt = "\\n".join(
+                str(message.get("content", "")) for message in captured_prompts[-1]
+            )
+            assert old_history_event_id in historical_prompt
+            assert "repeated waking overnight" in historical_prompt
             # Internal database IDs belong in response provenance metadata, not
             # caregiver-facing model prose. Verify the exact saved report content
             # and epistemic boundary are present in the prompt instead.
