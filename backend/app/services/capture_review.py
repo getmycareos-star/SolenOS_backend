@@ -135,12 +135,6 @@ def supplement_source_grounded_daily_observations(
         dict(item) for item in raw_observations
         if isinstance(item, dict)
     ] if isinstance(raw_observations, list) else []
-    existing_values = {
-        str(item.get("observation") or "").strip().casefold()
-        for item in observations
-        if isinstance(item.get("observation"), str)
-    }
-
     for match in re.finditer(r"[^.!?;\n]+(?:[.!?;]+|$)", source_text or ""):
         sentence = match.group(0).strip()
         clauses = [part.strip() for part in re.split(r"\s+and\s+", sentence, flags=re.IGNORECASE)]
@@ -169,6 +163,11 @@ def supplement_source_grounded_daily_observations(
             str(item.get("observation") or "").strip().casefold()
             for item in observations
             if isinstance(item.get("observation"), str)
+            and isinstance(item.get("source_quote"), str)
+            and (
+                item["source_quote"].strip() in sentence
+                or sentence in item["source_quote"].strip()
+            )
         }
         for clause in valid_clauses:
             subject_match = _DAILY_CLAUSE_SUBJECT.match(clause)
