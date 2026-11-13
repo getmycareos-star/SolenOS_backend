@@ -18,7 +18,10 @@ from app.models.change import Change
 from app.models.notifications import CareNotification, CarePushDelivery
 from app.models.open_loop import OpenLoopRecord
 from app.models.uncertainty import OpenQuestion
-from app.services.care_continuity import has_valid_caregiver_necessity
+from app.services.care_continuity import (
+    has_valid_caregiver_necessity,
+    prioritize_caregiver_questions,
+)
 
 
 OPEN_QUESTION_STATUSES = {"open", "unanswered", "pending", "unresolved"}
@@ -457,9 +460,15 @@ def create_proactive_care_notifications(
         OpenQuestion.status.in_(sorted(OPEN_QUESTION_STATUSES)),
     ).order_by(OpenQuestion.asked_at.asc(), OpenQuestion.id.asc()).all()
 
-    for question in questions:
-        if not has_valid_caregiver_necessity(question, db, person_id):
-            continue
+    eligible_questions = [
+        question for question in questions
+        if has_valid_caregiver_necessity(question, db, person_id)
+    ]
+    _, questions_to_notify, _ = prioritize_caregiver_questions(
+        eligible_questions, ordinary_limit=2
+    )
+
+    for question in questions_to_notify:
         for caregiver in caregivers:
             exists = db.query(CareNotification.id).filter(
                 CareNotification.person_id == person_id,
