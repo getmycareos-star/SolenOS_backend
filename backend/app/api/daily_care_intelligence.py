@@ -319,7 +319,9 @@ def _history_bundle(
             "candidate_count": source.get("candidate_count"),
             "returned_count": source.get("returned_count", 0),
             "candidate_scan_complete": source.get("candidate_scan_complete", False),
+            "returned_history_complete": source.get("returned_history_complete", False),
             "has_more": source.get("has_more", False),
+            "selection": source.get("selection"),
             "limit": source.get("limit", 50),
         }
         for name, source in lcr_context["sources"].items()
@@ -338,6 +340,8 @@ def _history_bundle(
             "schema_status": lcr_context["schema_status"],
             "history_coverage": lcr_context["history_coverage"],
             "retrieval_scan_complete": lcr_context.get("retrieval_scan_complete", False),
+            "retrieval_projection_complete": lcr_context.get("retrieval_projection_complete", False),
+            "retrieval_strategy": lcr_context.get("retrieval_strategy"),
             "query_applied": lcr_context["query_applied"],
             "missing_required_sources": lcr_context["missing_required_sources"],
             "missing_optional_sources": lcr_context["missing_optional_sources"],
