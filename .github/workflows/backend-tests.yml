@@ -61,6 +61,7 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_test
+      SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_test:solenos_ci_only@localhost:5432/solenos_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -181,6 +182,10 @@ jobs:
 
       - name: Verify Daily Care to LCR retrieval on PostgreSQL
         run: python -m pytest backend/tests/test_unified_care_spine_capture.py -q
+      - name: Verify unified LCR retrieval and caregiver handoffs on PostgreSQL
+        run: python -m pytest backend/tests/test_unified_lcr_retrieval.py -q
+      - name: Run the 100-scenario longitudinal messy-care benchmark on PostgreSQL
+        run: python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q
 
       - name: Verify privacy, sharing, audit, notification, reminder and handoff schema
         run: |
