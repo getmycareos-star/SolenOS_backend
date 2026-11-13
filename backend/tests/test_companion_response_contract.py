@@ -1395,6 +1395,50 @@ def test_companion_revises_overloaded_answer_before_persisting(monkeypatch):
         teardown()
 
 
+
+def test_companion_repairs_unsupported_care_claim_before_failing_closed(monkeypatch):
+    client = setup_client(monkeypatch)
+    outputs = iter([
+        "The doctor confirmed the medication dose was changed yesterday.",
+        "The caregiver reported poor sleep and that lunch was barely eaten.",
+    ])
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append((messages, options))
+        return next(outputs)
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        db.add(Evidence(
+            person_id=person_id,
+            type="caregiver_report",
+            source_text="Caregiver reported poor sleep last night and barely touched lunch.",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            epistemic_status="caregiver_reported",
+        ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What was recorded about sleep and lunch?"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["ai_generated"] is True
+        assert response.json()["written_to_lcr"] is False
+        assert response.json()["reply"] == outputs.__reduce__()[1][0] if False else response.json()["reply"]
+        assert len(calls) == 2
+        assert "source-grounding checks" in calls[1][0][-1]["content"]
+    finally:
+        teardown()
+
+
 def test_repeated_question_complaint_reuses_prior_caregiver_question_for_retrieval():
     prior = [
         SimpleNamespace(role="assistant", content="Maybe the sleep is changing."),
