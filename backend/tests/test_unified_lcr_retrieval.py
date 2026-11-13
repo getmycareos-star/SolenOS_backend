@@ -187,7 +187,7 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
                     evidence_ids_json="[]",
                 ),
             ])
-            db.execute(metadata.tables["care_facts"].insert(), [
+            db.execute(schema.tables["care_facts"].insert(), [
                 {
                     "id": "sleep-fact-old", "person_id": "person-a",
                     "subject_type": "person", "subject_id": "person-a",
