@@ -490,3 +490,57 @@ def test_temporal_retrieval_uses_calendar_months_not_fixed_30_day_approximation(
     )
     assert leap_window is not None
     assert leap_window["start"] == "2024-02-29T00:00:00+00:00"
+
+def test_query_retrieval_scans_beyond_250_candidates_and_keeps_old_exact_match():
+    engine, connection = _sqlite_retrieval_db()
+    try:
+        now = datetime.now(UTC)
+        with connection.begin():
+            connection.execute(Person.__table__.insert(), {
+                "id": "person-wide-history", "name": "Care recipient"
+            })
+            connection.execute(Caregiver.__table__.insert(), {
+                "id": "caregiver-wide-history", "name": "Caregiver",
+                "relationship": "family", "person_id": "person-wide-history",
+            })
+            rows = [{
+                "id": f"sleep-history-{index:03d}",
+                "person_id": "person-wide-history",
+                "event_type": "daily_observation",
+                "status": "recorded",
+                "occurred_at": now - timedelta(days=index),
+                "title": "Sleep observation",
+                "description": f"Caregiver recorded sleep observation number {index}.",
+                "evidence_ids": [],
+                "created_by_caregiver_id": "caregiver-wide-history",
+            } for index in range(1, 301)]
+            rows.append({
+                "id": "old-exact-sleep-match",
+                "person_id": "person-wide-history",
+                "event_type": "daily_observation",
+                "status": "recorded",
+                "occurred_at": now - timedelta(days=500),
+                "title": "Sleep severe worsening",
+                "description": "Caregiver recorded severe worsening of sleep.",
+                "evidence_ids": [],
+                "created_by_caregiver_id": "caregiver-wide-history",
+            })
+            connection.execute(CareEvent.__table__.insert(), rows)
+
+        with Session(bind=connection) as db:
+            context = build_unified_lcr_context(
+                db, "person-wide-history", "caregiver-wide-history",
+                query="sleep severe worsening", limit_per_source=20,
+            )
+
+        events = context["sources"]["events"]
+        assert events["candidate_count"] == 301
+        assert events["candidate_scan_complete"] is True
+        assert events["has_more"] is True
+        assert "old-exact-sleep-match" in {
+            item["id"] for item in events["items"]
+        }
+    finally:
+        connection.close()
+        engine.dispose()
+
