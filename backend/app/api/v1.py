@@ -944,13 +944,16 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         else evidence.source_text if evidence is not None
         else (event.description or "")
     )[:12_000]
-    if natural_language_update and evidence is not None:
+    if evidence is not None:
+        # The caregiver-facing save ends after the event, evidence, analysis
+        # placeholder and durable work item commit. Extraction, clarification,
+        # Delta reconciliation and projection verification run in the worker.
         execution_status = {
             "source_preservation": "verified",
             "evidence": "verified",
             "extraction": "queued",
             "assessment": "pending",
-            "review": "not_required",
+            "review": "not_required" if natural_language_update else "required",
             "reconciliation": "pending",
             "longitudinal_retrieval": "not_verified",
         }
@@ -980,7 +983,10 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     person_id=person_id,
                     caregiver_id=caregiver_id,
                     task_text="Extract source-grounded observations from the saved Daily Care report.",
-                    context_text="",
+                    context_text=json.dumps({
+                        "capture_mode": "natural_language_update" if natural_language_update else "structured_capture",
+                        "event_type": event_type,
+                    }),
                     evidence_ids_json=json.dumps([evidence.id]),
                     workflow="daily_capture_extraction",
                     status="queued",
@@ -1001,6 +1007,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                         "source_event_id": event.id,
                         "source_evidence_id": evidence.id,
                         "source_preserved": True,
+                        "capture_mode": "natural_language_update" if natural_language_update else "structured_capture",
                         "written_to_lcr": False,
                     },
                 ))
@@ -1023,15 +1030,14 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     "qwen_analysis_id": analysis.id,
                     "qwen_job_id": job.id,
                     "qwen_processing_status": "queued",
-                    "qwen_review_required": False,
+                    "qwen_review_required": not natural_language_update,
                     "qwen_written_to_lcr": False,
                 }
             except Exception:
                 db.rollback()
-                logger.exception("Could not queue Daily Care extraction for saved event %s", event.id)
-        # The source event and evidence are already committed. If the durable
-        # queue is unavailable, preserve the report and expose that extraction
-        # could not start rather than delaying or falsely confirming it.
+                logger.exception("Could not queue Daily Care processing for saved event %s", event.id)
+        # Never fall back to synchronous model work after a queue failure. The
+        # source event/evidence are already committed and must remain usable.
         execution_status.update({
             "extraction": "unavailable",
             "assessment": "not_applicable",
@@ -1053,7 +1059,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             analysis_id = analysis.id
         except Exception:
             db.rollback()
-            logger.exception("Could not persist unavailable Daily Care extraction state for event %s", event.id)
+            logger.exception("Could not persist unavailable Daily Care processing state for event %s", event.id)
             analysis_id = None
         return {
             "success": True,
