@@ -228,6 +228,25 @@ def test_real_qwen_natural_language_daily_care_preserves_all_clauses_and_compani
             assert capture_result.get("reconciliation_status") == "completed", latest_job
             assert int(capture_result.get("source_grounded_observations_projected") or 0) >= 4, latest_job
 
+            analysis_id = capture_result.get("analysis_id")
+            assert analysis_id
+            analysis_response = client.get(
+                f"/api/v1/capture/analyses/{analysis_id}",
+                headers=headers,
+            )
+            assert analysis_response.status_code == 200, analysis_response.text
+            extracted = analysis_response.json().get("candidates", {}).get("observations", [])
+            assert any(
+                "unsettled" in item.get("observation", "").casefold()
+                and item.get("extraction_origin") == "deterministic_exact_clause_supplement"
+                for item in extracted
+            ), extracted
+            assert any(
+                "now resting" in item.get("observation", "").casefold()
+                and item.get("extraction_origin") == "deterministic_exact_clause_supplement"
+                for item in extracted
+            ), extracted
+
             lcr = client.get(
                 "/api/v1/care-continuity/current-care?limit_per_source=50",
                 headers=headers,
