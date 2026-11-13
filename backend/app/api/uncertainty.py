@@ -114,10 +114,13 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
             for item in (row.context or [])
         )
     ]
-    unassessed_source = [
-        row for row in source_active
-        if row.necessity != "necessary"
+    from app.services.care_continuity import has_valid_caregiver_necessity
+    validated_active = [
+        row for row in active
+        if row.necessity == "necessary"
+        and has_valid_caregiver_necessity(row, engine.db, engine.person_id)
     ]
+    unassessed_source = [row for row in source_active if row not in validated_active]
     auto_suppressed = [
         row for row in rows
         if row.status == "closed"
@@ -131,8 +134,8 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
     return {
         "person_id": engine.person_id,
         "active_questions": len(active),
-        "caregiver_actionable_questions": sum(1 for row in active if row.necessity == "necessary"),
-        "non_actionable_active_questions": sum(1 for row in active if row.necessity != "necessary"),
+        "caregiver_actionable_questions": len(validated_active),
+        "non_actionable_active_questions": len(active) - len(validated_active),
         "duplicate_question_groups": duplicate_groups,
         "duplicate_question_excess": duplicate_excess,
         "source_questions_awaiting_necessity_assessment": len(unassessed_source),
