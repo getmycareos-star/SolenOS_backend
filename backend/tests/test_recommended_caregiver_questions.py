@@ -161,3 +161,85 @@ def test_recommended_projection_is_person_scoped_and_empty_is_explicit():
         assert empty.json()["status"] == "nothing_to_ask"
     finally:
         teardown()
+
+
+def test_one_hundred_case_question_gate_benchmark():
+    """100 deterministic synthetic cases: 40 valid, 60 must be withheld."""
+    setup()
+    try:
+        db = SessionLocal()
+        person = Person(id="benchmark-person", name="Benchmark Person")
+        caregiver = Caregiver(
+            id="benchmark-caregiver", name="Benchmark Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        other = Person(id="benchmark-other", name="Other Person")
+        other_caregiver = Caregiver(
+            id="benchmark-other-caregiver", name="Other Caregiver", email=None,
+            relationship="Family", person_id=other.id,
+        )
+        db.add_all([person, caregiver, other, other_caregiver])
+        db.flush()
+
+        expected_eligible = set()
+        for index in range(100):
+            question_id = f"benchmark-question-{index:03d}"
+            evidence_id = f"benchmark-evidence-{index:03d}"
+            if index < 80:
+                evidence_person_id = person.id
+                evidence_uploader_id = caregiver.id
+            else:
+                evidence_person_id = other.id
+                evidence_uploader_id = other_caregiver.id
+            db.add(Evidence(
+                id=evidence_id,
+                person_id=evidence_person_id,
+                type="caregiver_report",
+                source_text=f"Synthetic source record {index}",
+                uploaded_by_caregiver_id=evidence_uploader_id,
+                source_type="caregiver_report",
+            ))
+            necessary = index < 40 or 60 <= index < 80
+            source_bound = index < 60 or index >= 80
+            assessment = {
+                "necessity": "necessary" if necessary else "not_assessed",
+                "necessity_rationale": "A recorded care decision depends on this answer." if necessary else None,
+                "decision_dependency": "The next handoff step depends on this answer." if necessary else None,
+                "evidence_ids": [evidence_id],
+            }
+            context = [{
+                **({"source_kind": "caregiver_report", "source_id": evidence_id} if source_bound else {}),
+                "necessity_assessment": assessment,
+            }]
+            priority = "critical" if index < 10 else "high"
+            db.add(OpenQuestion(
+                id=question_id,
+                person_id=person.id,
+                question=f"What is the source-backed status for synthetic case {index}?",
+                subject_type="care",
+                subject_id=f"benchmark-subject-{index}",
+                status="open",
+                necessity="necessary" if necessary else "not_assessed",
+                necessity_rationale=assessment["necessity_rationale"],
+                priority=priority,
+                evidence_ids=[evidence_id],
+                context=context,
+            ))
+            if index < 40:
+                expected_eligible.add(question_id)
+        db.commit()
+        db.close()
+
+        response = client_for("benchmark-person").get(
+            "/api/v1/uncertainty/questions/recommended/benchmark-person"
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert set(result["eligible_question_ids"]) == expected_eligible
+        assert len(result["eligible_question_ids"]) == 40
+        assert result["critical_count"] == 10
+        assert len(result["recommended_question_ids"]) == 12
+        assert result["additional_ordinary_count"] == 28
+        assert all(item["id"] in expected_eligible for item in result["questions"])
+    finally:
+        teardown()
