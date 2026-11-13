@@ -8,8 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.core.uncertainty_enums import Priority, GapLifecycleStatus, EpistemicState, GapReason
+import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence
 from app.models.anonymous_session import AnonymousSession
@@ -35,10 +36,12 @@ def override_db():
 def setup():
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
+    main_module.SessionLocal = SessionLocal
 
 
 def teardown():
     app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
     Base.metadata.drop_all(bind=engine)
 
 
