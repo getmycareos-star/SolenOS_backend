@@ -409,11 +409,13 @@ def build_lcr_context(
     limit_per_source: int = 20,
     query: str | None = None,
     temporal_window: dict[str, str] | None = None,
+    include_all_history: bool = False,
 ) -> dict[str, Any]:
-    """Return a bounded, person-scoped LCR projection and explicit schema coverage.
+    """Return a person-scoped LCR projection with explicit retrieval coverage.
 
-    When query is provided, each source is searched with bounded text terms before
-    applying its per-source limit; unavailable sources remain explicitly marked.
+    Query and care-journey reads scan every matching row in each available source,
+    then return a ranked per-source subset. Ordinary current-care reads remain
+    bounded to recent records. Unavailable sources are explicitly marked.
     """
     limit = max(1, min(int(limit_per_source), 50))
     direct_terms = [
@@ -527,7 +529,7 @@ def build_lcr_context(
         # This removes the former 250-row candidate ceiling that could hide an
         # older, more relevant event behind newer lexical matches. Non-query
         # current-care reads intentionally remain bounded recent projections.
-        query_scan = bool(terms or temporal_window)
+        query_scan = bool(terms or temporal_window or include_all_history)
         candidate_count = 0
         ranked_items: list[tuple[int, int, dict[str, Any]]] = []
         scan_statement = statement if query_scan else statement.limit(limit + 1)
@@ -651,10 +653,10 @@ def build_lcr_context(
         "person_id": str(person_id),
         "as_of": datetime.now().astimezone().isoformat(),
         "read_only": True,
-        "history_coverage": "query_scanned_ranked_subset" if terms or temporal_window else "bounded_recent_subset",
+        "history_coverage": "complete_history_scan_ranked_subset" if include_all_history else ("query_scanned_ranked_subset" if terms or temporal_window else "bounded_recent_subset"),
         "retrieval_scan_complete": bool(terms or temporal_window) and not missing_required and not missing_optional,
         "query_applied": bool(terms),
-        "retrieval_strategy": "hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history",
+        "retrieval_strategy": "person_scoped_full_source_scan" if include_all_history else ("hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history"),
         "temporal_window": temporal_window,
         "schema_status": schema_status,
         "missing_required_sources": missing_required,
