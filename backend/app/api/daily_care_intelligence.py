@@ -403,7 +403,9 @@ async def ask_daily_care_qwen(
 
     # Use full DB-side retrieval to find relevant history, then pass a transparent
     # bounded evidence set to Qwen. Preserve source IDs and dates for every item.
-    question_terms = set(re.findall(r"[\w'-]{3,}", payload.question.casefold()))
+    question_terms = set(_expanded_search_terms(
+        re.findall(r"[\\w'-]{3,}", payload.question.casefold())
+    ))
     scored = []
     for row in records:
         text = json.dumps(row, ensure_ascii=False).casefold()
@@ -417,6 +419,23 @@ async def ask_daily_care_qwen(
     while len(evidence_json) > 26000 and len(selected) > 1:
         selected.pop()
         evidence_json = json.dumps(selected, ensure_ascii=False)
+
+    records_omitted = max(0, len(records) - len(selected))
+    selection_truncated = records_omitted > 0 or any(
+        source.get("has_more") is True
+        for source in bundle.get("lcr_context", {}).get("sources", {}).values()
+    )
+    history_scope = {
+        **bundle["counts"],
+        "lcr_context": bundle.get("lcr_context", {}),
+        "records_retrieved": len(records),
+        "records_sent_to_model": len(selected),
+        "records_omitted_from_model": records_omitted,
+        "selection_truncated": selection_truncated,
+        "prompt_context_truncated": selection_truncated,
+        "oldest_record_at": bundle["oldest_record_at"],
+        "newest_record_at": bundle["newest_record_at"],
+    }
 
     schema = {
         "type": "object",
@@ -448,7 +467,8 @@ async def ask_daily_care_qwen(
         "their exact source IDs and dates. Distinguish caregiver reports, document text, corrections, appointment "
         "status, and your interpretation. If sources conflict, state the conflict without choosing a winner. Never "
         "infer diagnosis, cause, medication changes, or clinical certainty. Never say that anything has been saved. "
-        "The retrieved context includes explicit schema and bounded-history metadata. If a source is unavailable or the schema is partial, do not claim the information is absent. " 
+        "The retrieved context includes explicit schema and bounded-history metadata. If a source is unavailable or the schema is partial, do not claim the information is absent. "
+        "If records were omitted from the model context or any source reports more matching history, explicitly say the answer is based on a partial view and do not call it the complete history. "
         "Propose an LCR update only when it would improve longitudinal continuity; proposals are not facts and "
         "must retain source IDs and uncertainty. Do not propose a value that is unsupported by the supplied records. "
         "If there is no supported proposal, return an empty proposals array. Return only the required JSON."
@@ -464,6 +484,8 @@ async def ask_daily_care_qwen(
                     "retrieval_metadata": {
                         "matching_records_in_database": len(records),
                         "records_sent_to_model": len(selected),
+                        "records_omitted_from_model": records_omitted,
+                        "selection_truncated": selection_truncated,
                         "oldest_record_at": bundle["oldest_record_at"],
                         "newest_record_at": bundle["newest_record_at"],
                         "lcr_context": bundle.get("lcr_context", {}),
@@ -485,7 +507,7 @@ async def ask_daily_care_qwen(
                 "source_records": [],
                 "proposal_analysis_id": None,
                 "proposals": [],
-                "history_scope": bundle["counts"],
+                "history_scope": history_scope,
                 "review_required": True,
                 "written_to_lcr": False,
             }
@@ -550,13 +572,7 @@ async def ask_daily_care_qwen(
         ],
         "proposal_analysis_id": analysis_id,
         "proposals": proposals,
-        "history_scope": {
-            **bundle["counts"],
-            "lcr_context": bundle.get("lcr_context", {}),
-            "records_sent_to_model": len(selected),
-            "oldest_record_at": bundle["oldest_record_at"],
-            "newest_record_at": bundle["newest_record_at"],
-        },
+        "history_scope": history_scope,
         "review_required": True,
         "written_to_lcr": False,
         "notice": "Qwen's answer is assistance, not an LCR fact. Proposed changes remain pending until a caregiver reviews them.",
