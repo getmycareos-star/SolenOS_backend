@@ -28,7 +28,7 @@ from app.models.care_continuity import CareAssertion
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.qwen_gateway import qwen_chat
-from app.services.lcr_context import build_lcr_context
+from app.services.lcr_context import build_lcr_context, _expanded_search_terms
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ def _history_bundle(
     # conflicts, provenance, and records contributed by other authorised caregivers.
     events_q = db.query(CareEvent).filter(CareEvent.person_id == person_id)
     if query:
-        terms = [term for term in re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()) if term]
+        terms = _expanded_search_terms(re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()))[:24]
         if terms:
             clauses = []
             for term in terms[:8]:
@@ -113,7 +113,7 @@ def _history_bundle(
         EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
     )
     if query:
-        terms = [term for term in re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()) if term][:8]
+        terms = _expanded_search_terms(re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()))[:24]
         if terms:
             from sqlalchemy import or_
             evidence_q = evidence_q.filter(or_(*[
@@ -292,7 +292,7 @@ def _history_bundle(
             }
             if query or context_query:
                 search_text = json.dumps(row, ensure_ascii=False, default=str).casefold()
-                terms = re.findall(r"[A-Za-z0-9_-]{3,}", (context_query or query or "").casefold())[:8]
+                terms = _expanded_search_terms(re.findall(r"[A-Za-z0-9_-]{3,}", (context_query or query or "").casefold()))[:24]
                 if terms and not any(term in search_text for term in terms):
                     continue
             records.append(row)
@@ -303,7 +303,9 @@ def _history_bundle(
     source_summary = {
         name: {
             "status": source.get("status"),
+            "candidate_count": source.get("candidate_count"),
             "returned_count": source.get("returned_count", 0),
+            "candidate_scan_complete": source.get("candidate_scan_complete", False),
             "has_more": source.get("has_more", False),
             "limit": source.get("limit", 50),
         }
