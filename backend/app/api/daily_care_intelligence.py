@@ -23,6 +23,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence as EvidenceModel, Correction
 from app.models.time_location import Appointment
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.care_continuity import CareAssertion
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
@@ -58,8 +59,8 @@ def _iso(value: Any) -> str | None:
     return value.isoformat() if value else None
 
 
-def _event_json(event: CareEvent) -> dict:
-    return {
+def _event_json(event: CareEvent, capture_processing: dict | None = None) -> dict:
+    row = {
         "source_type": "care_event",
         "source_id": str(event.id),
         "event_type": event.event_type,
@@ -73,6 +74,9 @@ def _event_json(event: CareEvent) -> dict:
         "tags": event.tags or [],
         "created_by_caregiver_id": str(event.created_by_caregiver_id),
     }
+    if capture_processing is not None:
+        row["capture_processing"] = capture_processing
+    return row
 
 
 def _history_bundle(
@@ -121,7 +125,64 @@ def _history_bundle(
         Appointment.person_id == person_id
     ).order_by(Appointment.scheduled_at.desc()).all()
 
-    records: list[dict] = [_event_json(event) for event in events]
+    daily_event_ids = [
+        str(event.id) for event in events
+        if event.event_type == "daily_care_entry"
+        and str(event.created_by_caregiver_id) == str(caregiver_id)
+    ]
+    analysis_by_event: dict[str, CaptureAnalysis] = {}
+    job_by_event: dict[str, QwenBackgroundJob] = {}
+    if daily_event_ids:
+        analyses = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.caregiver_id == caregiver_id,
+            CaptureAnalysis.source_event_id.in_(daily_event_ids),
+        ).order_by(CaptureAnalysis.created_at.desc()).all()
+        for analysis in analyses:
+            analysis_by_event.setdefault(str(analysis.source_event_id), analysis)
+        jobs = db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.person_id == person_id,
+            QwenBackgroundJob.caregiver_id == caregiver_id,
+            QwenBackgroundJob.workflow == "daily_capture_extraction",
+            QwenBackgroundJob.source_event_ids_json.in_([
+                json.dumps([event_id]) for event_id in daily_event_ids
+            ]),
+        ).order_by(QwenBackgroundJob.created_at.desc()).all()
+        for job in jobs:
+            try:
+                job_event_ids = json.loads(job.source_event_ids_json or "[]")
+            except (TypeError, ValueError):
+                job_event_ids = []
+            for event_id in job_event_ids:
+                if str(event_id) in daily_event_ids:
+                    job_by_event.setdefault(str(event_id), job)
+
+    records: list[dict] = []
+    for event in events:
+        event_id = str(event.id)
+        analysis = analysis_by_event.get(event_id)
+        job = job_by_event.get(event_id)
+        capture_processing = None
+        if analysis is not None or job is not None:
+            extraction_status = analysis.extraction_status if analysis is not None else (
+                "failed" if job and job.status == "failed" else "queued"
+            )
+            capture_processing = {
+                "extraction_status": extraction_status,
+                "job_status": job.status if job is not None else (
+                    "unavailable" if extraction_status == "unavailable" else None
+                ),
+                "job_id": job.id if job is not None else None,
+                "execution_status": analysis.execution_status if analysis is not None else {},
+                "message": (
+                    "Your original report is saved, but its details could not be organized."
+                    if extraction_status in {"failed", "unavailable"}
+                    else "SolenOS is organizing the details in the background."
+                    if job is not None and job.status in {"queued", "processing"}
+                    else None
+                ),
+            }
+        records.append(_event_json(event, capture_processing))
     for correction in corrections:
         records.append({
             "source_type": "correction",
