@@ -709,7 +709,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
 
     base = header + "".join("\n" + source["section"] for source in prepared_sources)
     truncation_notice = (
-        "\\n[Context truncated because the safe prompt budget was reached. "
+        "\n[Context truncated because the safe prompt budget was reached. "
         "Some retrieved records were not included; consult the source coverage "
         "metadata and do not treat this prompt as a complete history.]"
     )
