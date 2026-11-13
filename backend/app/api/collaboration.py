@@ -2270,6 +2270,7 @@ def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
         "current", "recent", "exact", "about", "happened", "happen", "occurred", "occur",
         "more", "please", "actually", "today", "yesterday", "tomorrow", "last", "past",
         "week", "weeks", "month", "months", "year", "years", "day", "days",
+        "journey", "complete", "full", "whole", "timeline", "overview", "everything", "give", "me",
     }
     topic_terms = query_terms - generic_terms
     if not topic_terms:
