@@ -1814,3 +1814,23 @@ def test_cross_domain_pattern_scan_includes_events_older_than_90_days():
             NOW - timedelta(days=180)
         ).isoformat()
 
+def test_cross_domain_pattern_marks_bounded_source_history_as_truncated(monkeypatch):
+    from app.services import pattern_detection
+
+    monkeypatch.setattr(pattern_detection, "MAX_PATTERN_SOURCE_EVENTS", 3)
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "cross-domain-bounded-history")
+        add_event(db, person, caregiver, "sleep", 1, "Recent sleep report")
+        add_event(db, person, caregiver, "mobility", 2, "Recent mobility report")
+        add_event(db, person, caregiver, "nutrition", 3, "Recent meal report")
+        add_event(db, person, caregiver, "sleep", 4, "Older sleep report")
+
+        patterns = pattern_detection.detect_cross_domain_patterns(
+            db, person.id, reference_time=NOW
+        )
+        db.flush()
+
+        assert len(patterns) == 1
+        assert patterns[0].pattern_metrics["source_history_truncated"] is True
+        assert patterns[0].pattern_metrics["event_count"] == 3
+
