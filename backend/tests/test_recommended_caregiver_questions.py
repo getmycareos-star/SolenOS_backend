@@ -211,6 +211,22 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
                     },
                 }],
             ))
+        db.add(OpenQuestion(
+            id="question-gap-wrong-subject", person_id=person.id,
+            question="What is the source-backed status for the wrong subject?",
+            subject_type="care", subject_id="not-the-gap-subject", status="open",
+            necessity="necessary",
+            necessity_rationale="The next care decision depends on this missing detail.",
+            priority=Priority.HIGH, evidence_ids=["gap-evidence"],
+            context=[{
+                "source_kind": "information_gap", "source_id": "gap-open",
+                "necessity_assessment": {
+                    "necessity_rationale": "The next care decision depends on this missing detail.",
+                    "decision_dependency": "The handoff cannot be completed until this gap is clarified.",
+                    "evidence_ids": ["gap-evidence"],
+                },
+            }],
+        ))
         db.commit()
         db.close()
 
@@ -222,6 +238,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
         assert "question-gap-open" in ids
         assert "question-gap-reopened" in ids
         assert "question-gap-resolved" not in ids
+        assert "question-gap-wrong-subject" not in ids
     finally:
         teardown()
 
