@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.core.uncertainty_enums import Priority
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence
 from app.models.anonymous_session import AnonymousSession
@@ -86,7 +87,7 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
         status="open",
         necessity="necessary" if necessary else "not_assessed",
         necessity_rationale="A recorded care decision depends on this answer." if necessary else None,
-        priority=priority,
+        priority=Priority(priority),
         evidence_ids=[evidence_id],
         context=context,
     ))
@@ -211,7 +212,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 **({"source_kind": "caregiver_report", "source_id": evidence_id} if source_bound else {}),
                 "necessity_assessment": assessment,
             }]
-            priority = "critical" if index < 10 else "high"
+            priority = Priority.CRITICAL if index < 10 else Priority.HIGH
             db.add(OpenQuestion(
                 id=question_id,
                 person_id=person.id,
