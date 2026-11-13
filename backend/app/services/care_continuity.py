@@ -191,6 +191,10 @@ def has_valid_caregiver_necessity(
                     source_row
                     and source_row.subject_type == getattr(question, "subject_type", None)
                     and source_row.subject_id == getattr(question, "subject_id", None)
+                    and get_freshness(
+                        source_row,
+                        reviewed_at=_latest_assertion_review_at(db, source_row),
+                    )["status"] == "needs_confirmation"
                 )
             elif source_kind == "registered_action":
                 source_row = db.query(Action).filter(
