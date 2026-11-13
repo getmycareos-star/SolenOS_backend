@@ -4819,6 +4819,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "schema_status": shared_lcr_context["schema_status"],
                 "history_coverage": shared_lcr_context["history_coverage"],
                 "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
+                "retrieval_projection_complete": shared_lcr_context.get("retrieval_projection_complete", False),
                 "full_source_scan_requested": care_journey_request,
                 "query_applied": shared_lcr_context["query_applied"],
                 "missing_required_sources": shared_lcr_context["missing_required_sources"],
