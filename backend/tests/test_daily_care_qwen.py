@@ -107,6 +107,13 @@ def test_daily_care_history_is_paginated_and_scoped_to_authenticated_person():
     body1 = page1.json()
     assert body1["page"]["total_matching"] == 2
     assert body1["page"]["has_more"] is True
+    lcr_coverage = body1["history"]["lcr_context"]
+    assert "retrieval_projection_complete" in lcr_coverage
+    assert "retrieval_strategy" in lcr_coverage
+    event_coverage = lcr_coverage["sources"]["events"]
+    assert event_coverage["candidate_scan_complete"] is False
+    assert event_coverage["returned_history_complete"] is False
+    assert event_coverage["selection"] == "recent_records"
     assert "Foreign record" not in json.dumps(body1)
 
     page2 = client.get("/api/v1/daily-care/intelligence/history?person_id=" + first["person"]["id"] + "&limit=1&offset=1", headers=auth)
