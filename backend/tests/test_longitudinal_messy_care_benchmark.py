@@ -1716,3 +1716,64 @@ def test_delta_engine_fails_closed_when_prior_assertion_baseline_is_truncated():
         "certainty": "supported",
     }
 
+
+
+def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypatch):
+    """Delta must know when its 25-event baseline is only a subset of history."""
+    import json
+    from app.services import delta_engine
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "delta-history-coverage")
+        for index in range(30):
+            add_event(
+                db, person, caregiver, "sleep", 60 + index,
+                f"Historical sleep observation {index}",
+            )
+        incoming = add_event(
+            db, person, caregiver, "sleep", 0,
+            "New sleep observation",
+        )
+        captured = {}
+
+        monkeypatch.setattr(
+            delta_engine,
+            "_local_ollama_url",
+            lambda: ("http://127.0.0.1:11434", "coverage-test-model", 1.0),
+        )
+
+        def fake_qwen(messages, **kwargs):
+            captured["payload"] = json.loads(messages[1]["content"])
+            return json.dumps({
+                "event_summary": "New sleep report recorded.",
+                "medications": [],
+                "conditions": [],
+                "symptoms": [],
+                "tests": [],
+                "follow_ups": [],
+                "contradictions": [],
+                "clinical_gaps": [],
+                "caregiver_summary": "New sleep report was recorded.",
+                "clinician_summary": "Caregiver reported sleep disruption.",
+            })
+
+        monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen)
+        delta_engine.reconcile_event(
+            db,
+            person_id=person.id,
+            event_date=NOW,
+            source="caregiver report",
+            content="Caregiver reported interrupted sleep.",
+            source_event_id=incoming.id,
+            evidence_ids=[],
+            persist=False,
+            created_by_caregiver_id=caregiver.id,
+        )
+
+        coverage = captured["payload"]["history_coverage"]
+        assert coverage["prior_events"] == {
+            "available": 25,
+            "total": 30,
+            "omitted": 5,
+        }
+        assert coverage["complete"] is False
