@@ -220,6 +220,29 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 description="Caregiver recorded repeated waking during the night.",
                 evidence_ids=[], created_by_caregiver_id="caregiver-a",
             )
+            longitudinal_events = [
+                CareEvent(
+                    id="sleep-history-86d", person_id="person-a", event_type="daily_observation",
+                    status="recorded", occurred_at=now - timedelta(days=86),
+                    title="Night-time restlessness",
+                    description="Caregiver reported that she remained awake for long stretches.",
+                    evidence_ids=[], created_by_caregiver_id="caregiver-a",
+                ),
+                CareEvent(
+                    id="sleep-history-43d", person_id="person-a", event_type="daily_observation",
+                    status="recorded", occurred_at=now - timedelta(days=43),
+                    title="Repeated overnight waking",
+                    description="Caregiver recorded several episodes of waking during the night.",
+                    evidence_ids=[], created_by_caregiver_id="caregiver-a",
+                ),
+                CareEvent(
+                    id="sleep-history-6d", person_id="person-a", event_type="daily_observation",
+                    status="recorded", occurred_at=now - timedelta(days=6),
+                    title="Quieter night",
+                    description="Caregiver reported fewer interruptions during the overnight rest period.",
+                    evidence_ids=[], created_by_caregiver_id="caregiver-a",
+                ),
+            ]
             accepted = CareAssertion(
                 id="accepted-assertion", person_id="person-a", subject_type="person",
                 subject_id="person-a", field="sleep_pattern", assertion_kind="reported_state",
@@ -294,7 +317,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 id="other-caregiver-session", person_id="person-a", caregiver_id="caregiver-b", status="active"
             )
             db.add_all([
-                event, accepted, pending, rejected, caregiver_reviewed, extraction, other_caregiver_extraction,
+                event, *longitudinal_events, accepted, pending, rejected, caregiver_reviewed, extraction, other_caregiver_extraction,
                 failed_extraction, other_person_event, other_person_assertion,
                 other_person_extraction, prior_session, other_caregiver_session, other_person_session,
             ])
@@ -323,6 +346,10 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
             temporal_context = build_unified_lcr_context(
                 db, "person-a", "caregiver-a", query="sleep yesterday", limit_per_source=20,
             )
+            journey_context = build_unified_lcr_context(
+                db, "person-a", "caregiver-a", query="Give me the history of sleep",
+                limit_per_source=20, include_all_history=True,
+            )
 
         sources = context["sources"]
         assert {row["id"] for row in sources["events"]["items"]} >= {"daily-care-event"}
@@ -350,6 +377,14 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         assert context["retrieval_contract"]["retrieval_strategy"] == "hybrid_lexical_semantic_temporal"
         assert temporal_context["retrieval_contract"]["temporal_window"]["basis"] == "explicit_user_temporal_expression"
         assert "daily-care-event" in {row["id"] for row in temporal_context["sources"]["events"]["items"]}
+        journey_events = journey_context["sources"]["events"]
+        assert journey_context["history_coverage"] == "complete_history_scan_ranked_subset"
+        assert journey_events["candidate_scan_complete"] is True
+        assert journey_events["candidate_count"] == 4
+        assert journey_events["has_more"] is False
+        assert {row["id"] for row in journey_events["items"]} == {
+            "daily-care-event", "sleep-history-86d", "sleep-history-43d", "sleep-history-6d",
+        }
     finally:
         _close_postgres_conversation_db(engine, connection, schema)
 
