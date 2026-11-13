@@ -559,6 +559,7 @@ def test_only_responsible_caregiver_can_change_registered_action():
     from datetime import datetime, timedelta, timezone
     from app.models.anonymous_session import AnonymousSession
     from app.models.care import Caregiver
+    from app.models.caregiver_access import CaregiverAccessGrant
 
     client = TestClient(app)
     owner = create_session(client, "Shared care recipient")
@@ -585,6 +586,14 @@ def test_only_responsible_caregiver_can_change_registered_action():
             caregiver_id=second_caregiver.id,
             token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
             expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        ))
+        db.add(CaregiverAccessGrant(
+            person_id=owner["person"]["id"],
+            caregiver_id=second_caregiver.id,
+            role="family",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=False,
         ))
         db.commit()
     finally:
