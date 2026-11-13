@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,7 @@ from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight,
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
 from app.models.uncertainty import OpenQuestion
+from app.models.qwen_background_job import QwenBackgroundJob
 from app.services.learning import LearningEngine
 
 engine = create_engine(
@@ -24,6 +26,24 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def process_daily_capture_job(job_id, monkeypatch, extractor):
+    from app.services import qwen_background_worker
+
+    monkeypatch.setattr(qwen_background_worker, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(qwen_background_worker, "extract_review_candidates", extractor)
+    return asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
+
+
+def make_daily_capture_job_runnable(job_id):
+    db = TestingSessionLocal()
+    try:
+        job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        job.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
 
 
 def override_get_db():
