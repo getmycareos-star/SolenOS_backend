@@ -401,11 +401,15 @@ def test_one_hundred_case_question_gate_benchmark():
         db.commit()
         db.close()
 
-        response = client_for("benchmark-person").get(
+        client = client_for("benchmark-person")
+        response = client.get(
             "/api/v1/uncertainty/questions/recommended/benchmark-person"
         )
         assert response.status_code == 200, response.text
         result = response.json()
+        listed = client.get("/api/v1/uncertainty/questions/benchmark-person")
+        assert listed.status_code == 200, listed.text
+        assert {item["id"] for item in listed.json()} == expected_eligible
         assert set(result["eligible_question_ids"]) == expected_eligible
         assert len(result["eligible_question_ids"]) == 35
         assert "benchmark-question-duplicate" not in result["eligible_question_ids"]
