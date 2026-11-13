@@ -106,8 +106,10 @@ def has_valid_caregiver_necessity(
             item.get("necessity_rationale"),
             nested.get("necessity_rationale"),
         )
+        normalized_question_rationale = " ".join(rationale.casefold().split())
         has_rationale = any(
-            isinstance(value, str) and value.strip()
+            isinstance(value, str)
+            and " ".join(value.casefold().split()) == normalized_question_rationale
             for value in rationale_values
         )
         assessment_evidence_ids = nested.get("evidence_ids")
