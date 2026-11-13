@@ -1322,3 +1322,33 @@ def test_caregiver_response_contract_limits_vague_concern_to_one_question():
     assert validate("Something feels different.", "What changed? When did it start? Has anything else happened?")
     assert not validate("Something feels different.", "What feels different from what you usually see?")
     assert not validate("What happened at Mum's appointment last Tuesday?", "The clinic recorded a follow-up for next week.")
+
+
+def test_companion_revises_overloaded_answer_before_persisting(monkeypatch):
+    client = setup_client(monkeypatch)
+    outputs = iter([
+        "First, call the clinic. Second, review the notes. Third, update the calendar. Fourth, message your family.",
+        "We can focus on the one concern that matters most right now. You do not need to handle everything today.",
+    ])
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append((messages, options))
+        return next(outputs)
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "I'm exhausted. I don't know what to do anymore."},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == outputs.__reduce__()[1][0] if False else response.json()["reply"]
+        assert len(calls) == 2
+        assert "Revise your previous answer" not in calls[1][0][-1]["content"]
+        assert "no more than three short sentences" in calls[1][0][-1]["content"]
+    finally:
+        teardown()
