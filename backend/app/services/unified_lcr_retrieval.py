@@ -226,6 +226,7 @@ def build_unified_lcr_context(
     query: str | None = None,
     conversation_limit: int = MAX_CONVERSATION_CONTEXT_ITEMS,
     include_all_history: bool = False,
+    source_offsets: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Compose canonical care sources and authorized prior Companion dialogue.
 
@@ -246,7 +247,7 @@ def build_unified_lcr_context(
     context = build_lcr_context(
         db, str(person_id), caregiver_id=str(caregiver_id),
         limit_per_source=limit_per_source, query=query, temporal_window=temporal_window,
-        include_all_history=include_all_history,
+        include_all_history=include_all_history, source_offsets=source_offsets,
     )
     conversation = _conversation_context(
         db,
@@ -269,6 +270,7 @@ def build_unified_lcr_context(
         "authoritative_record": "care_assertions_and_canonical_lcr_sources",
         "retrieval_is_bounded": True,
         "full_source_scan_requested": bool(include_all_history),
+        "source_offsets": source_context.get("source_offsets", {}),
         "retrieval_strategy": "person_scoped_full_source_scan" if include_all_history else "hybrid_lexical_semantic_temporal",
         "temporal_window": temporal_window,
     }
