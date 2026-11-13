@@ -154,6 +154,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         grounded = companion.json()
         assert grounded.get("ai_generated") is True, grounded
         assert evidence_id in grounded.get("source_evidence_ids", []), grounded
+        assert analysis_id in grounded.get("source_document_analysis_ids", []), grounded
         assert any(
             term in grounded.get("reply", "").casefold()
             for term in ("20 metres", "20 meter", "frame", "walked 20")
