@@ -39,7 +39,7 @@ DELTA_JSON_CONTRACT = {
         "event_summary": {"type": "string", "maxLength": 140},
         "medications": {
             "type": "array",
-            "maxItems": 1,
+            "maxItems": 5,
             "items": {
                 "type": "object",
                 "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
@@ -55,7 +55,7 @@ DELTA_JSON_CONTRACT = {
         },
         "conditions": {
             "type": "array",
-            "maxItems": 1,
+            "maxItems": 5,
             "items": {
                 "type": "object",
                 "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
@@ -71,7 +71,7 @@ DELTA_JSON_CONTRACT = {
         },
         "symptoms": {
             "type": "array",
-            "maxItems": 1,
+            "maxItems": 5,
             "items": {
                 "type": "object",
                 "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
@@ -87,7 +87,7 @@ DELTA_JSON_CONTRACT = {
         },
         "tests": {
             "type": "array",
-            "maxItems": 1,
+            "maxItems": 5,
             "items": {
                 "type": "object",
                 "required": ["name", "status", "ordered_date", "result_present", "evidence_excerpt"],
@@ -102,7 +102,7 @@ DELTA_JSON_CONTRACT = {
         },
         "follow_ups": {
             "type": "array",
-            "maxItems": 1,
+            "maxItems": 5,
             "items": {
                 "type": "object",
                 "required": ["action", "status", "due_date", "owner", "evidence_excerpt"],
@@ -117,7 +117,7 @@ DELTA_JSON_CONTRACT = {
         },
         "contradictions": {
             "type": "array",
-            "maxItems": 1,
+            "maxItems": 5,
             "items": {
                 "type": "object",
                 "required": ["topic", "reports", "why_conflicting", "evidence_excerpts"],
@@ -131,7 +131,7 @@ DELTA_JSON_CONTRACT = {
         },
         "clinical_gaps": {
             "type": "array",
-            "maxItems": 1,
+            "maxItems": 5,
             "items": {
                 "type": "object",
                 "required": ["gap", "why_it_matters", "next_question", "evidence_excerpt"],
@@ -458,7 +458,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "Clinical gaps and follow-ups must be grounded in supplied text/state. caregiver_summary uses clear plain language; clinician_summary preserves exact clinical terms. "
         "Do not diagnose, recommend treatment, or replace a clinician. Evidence excerpts must be short verbatim snippets from NEW_CARE_EVENT, EXISTING_ACTIVE_STATE, or EXISTING_RECORD_CONTEXT. When citing historical context, do not claim it is current unless its date/status supports that interpretation. "
         "Keep event_summary, caregiver_summary, and clinician_summary to at most 10 words each. Keep evidence excerpts to the shortest exact quote that proves the finding. " +
-        "Return at most one finding in each array and only when a distinct, source-supported change exists; otherwise return an empty array. Never repeat one fact across arrays. "
+        "Return up to five distinct findings in each array when each is independently supported; return an empty array when none is supported. Do not collapse multiple medications, symptoms, tests, or follow-ups into one finding. Never repeat one fact across arrays. "
         "Do not speculate about medical risks or possible causes. An undocumented cause is unknown, not evidence of a risk. "
         "Do not create both a follow-up and a clinical gap for the same missing information; do not create either unless the source identifies a concrete unanswered care requirement or explicitly requests follow-up. "
         "A meal or fluid-intake observation is not itself a diagnosis or symptom: do not infer reduced appetite, dehydration, illness, or a cause from an amount eaten or drunk. "
@@ -488,7 +488,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 # defeated the shared gateway's CPU budget and made routine reconciliation
 # consume the full 180-second request timeout. Truncation remains fail-closed
 # because the response must pass the complete JSON schema validator.
-            options={"temperature": 0, "num_ctx": 4096, "num_predict": 384},
+            options={"temperature": 0, "num_ctx": 4096, "num_predict": 768},
         )
     except HTTPException as exc:
         if exc.status_code == 504:
