@@ -450,5 +450,8 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
             "response": result,
         }
         coverage = result.get("lcr_context_coverage") or {}
-        assert coverage.get("retrieval_scan_complete") is True, coverage
+        event_coverage = coverage.get("sources", {}).get("events", {})
+        assert event_coverage.get("candidate_scan_complete") is True, coverage
+        assert event_coverage.get("candidate_count", 0) >= 3, coverage
+        assert event_coverage.get("selection_truncated") is False, coverage
         assert coverage.get("prompt_context_complete") is True, coverage
