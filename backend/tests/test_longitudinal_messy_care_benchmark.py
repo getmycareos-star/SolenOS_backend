@@ -873,7 +873,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             source="synthetic discharge summary",
             content=content_text,
             source_event_id=source_event.id,
-            evidence_ids=[matching.id, unrelated.id],
+            evidence_ids=[matching.id, second_matching.id, unrelated.id],
             persist=True,
             created_by_caregiver_id=caregiver.id,
         )
