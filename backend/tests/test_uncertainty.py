@@ -282,6 +282,23 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                 context=[{"decision_dependency": "A current handoff depends on the dose."}],
             ),
         ])
+        # A same-person evidence ID and a decision dependency are not enough
+        # when the dependency is not tied to a persisted source reference.
+        db.add(OpenQuestion(
+            person_id=person.id,
+            question="Which older source applies to the current handoff?",
+            subject_type="person",
+            subject_id=person.id,
+            status="open",
+            necessity="necessary",
+            necessity_rationale="A handoff decision depends on the source.",
+            priority=Priority.HIGH,
+            evidence_ids=[evidence.id],
+            context=[{
+                "necessity_rationale": "A handoff decision depends on the source.",
+                "decision_dependency": "The handoff needs a confirmed source.",
+            }],
+        ))
         db.commit()
         db.close()
 
