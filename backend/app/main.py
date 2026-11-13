@@ -729,7 +729,7 @@ def get_situation(
         db.query(OpenQuestionModel)
         .filter(
             OpenQuestionModel.person_id == person_id,
-            OpenQuestionModel.status == "open",
+            OpenQuestionModel.status.in_(("open", "unresolved")),
             OpenQuestionModel.necessity == "necessary",
         )
         .order_by(OpenQuestionModel.asked_at.asc(), OpenQuestionModel.id.asc())
