@@ -4019,6 +4019,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             query=None if payload.workflow == "living_care_record" else (payload.text or "")[:1000],
             include_all_history=payload.workflow in full_history_workflows,
         )
+        shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
         context_lines.append(
             "Canonical LCR retrieval coverage: "
             + json.dumps({
@@ -5172,6 +5173,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     db, person_id, caregiver_id, retrieval_query, shared_lcr_context,
                     limit_per_source=50, max_pages=4,
                 )
+            shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
             for source_name, source in shared_lcr_context["sources"].items():
                 if source_name == "companion_conversation":
