@@ -4511,7 +4511,7 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
         sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
         questions = text.count("?")
         list_lines = re.findall(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", text)
-        if len(sentences) > 3 or questions > 1 or list_lines:
+        if len(sentences) > 3 or len(text.split()) > 80 or questions > 1 or list_lines:
             return True
     if "CONTINUITY REPAIR" in guidance and re.search(
         r"\b(?:repeat (?:yourself|the story|that)|tell me (?:again|the whole story)|"
