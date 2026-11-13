@@ -76,7 +76,11 @@ from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.schemas.care_continuity import CareAssertionCreate
-from app.services.care_continuity import create_assertion
+from app.services.care_continuity import (
+    create_assertion,
+    has_valid_caregiver_necessity,
+    prioritize_caregiver_questions,
+)
 
 router = APIRouter(tags=["community and companion"])
 
@@ -86,6 +90,67 @@ def _build_unified_lcr_context_or_422(*args, **kwargs):
         return build_unified_lcr_context(*args, **kwargs)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _attach_caregiver_question_queue(db: Session, person_id: str, context: dict) -> dict:
+    """Attach the only approved set of caregiver-facing questions to Companion context."""
+    rows = db.query(OpenQuestion).filter(
+        OpenQuestion.person_id == person_id,
+        OpenQuestion.necessity == "necessary",
+        OpenQuestion.status.in_(("open", "unresolved")),
+    ).all()
+    eligible = [
+        row for row in rows
+        if has_valid_caregiver_necessity(row, db, person_id)
+    ]
+    unique, visible, additional_count = prioritize_caregiver_questions(
+        eligible, ordinary_limit=2
+    )
+
+    def serialize_question(row: OpenQuestion) -> dict:
+        dependency = None
+        for entry in row.context or []:
+            if not isinstance(entry, dict):
+                continue
+            assessment = entry.get("necessity_assessment")
+            if isinstance(assessment, dict) and assessment.get("decision_dependency"):
+                dependency = str(assessment["decision_dependency"])
+                break
+            if entry.get("decision_dependency"):
+                dependency = str(entry["decision_dependency"])
+                break
+        return {
+            "id": str(row.id),
+            "question": row.question,
+            "subject_type": row.subject_type,
+            "subject_id": row.subject_id,
+            "claim_id": str(row.claim_id) if row.claim_id else None,
+            "priority": str(getattr(row.priority, "value", row.priority)),
+            "intended_answerer_role": row.intended_answerer_role or "not_known",
+            "intended_answerer_label": row.intended_answerer_label,
+            "necessity_rationale": row.necessity_rationale,
+            "decision_dependency": dependency,
+            "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
+            "status": row.status,
+            "asked_at": row.asked_at.isoformat() if row.asked_at else None,
+        }
+
+    queue = {
+        "status": "available" if visible else "empty",
+        "table": "open_questions",
+        "items": [serialize_question(row) for row in visible],
+        "candidate_count": len(unique),
+        "returned_count": len(visible),
+        "additional_ordinary_count": additional_count,
+        "selection": "source_validated_critical_plus_two",
+        "interpretation_limit": (
+            "Only these source-validated questions may be proactively asked now. "
+            "Respect each intended answerer; do not assign unknown or professional answers to the caregiver."
+        ),
+    }
+    context.setdefault("sources", {})["caregiver_question_queue"] = queue
+    context.setdefault("source_status", {})["caregiver_question_queue"] = queue["status"]
+    return context
 
 
 class DocumentVersionLinkRequest(BaseModel):
