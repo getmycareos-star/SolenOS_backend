@@ -222,8 +222,18 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         job_context.get("capture_mode")
         if isinstance(job_context, dict) else None
     )
-    natural_language_update = capture_mode == "natural_language_update"
     original_capture = evidence_payload.get("original_capture") if isinstance(evidence_payload, dict) else None
+    if capture_mode not in {"natural_language_update", "structured_capture"}:
+        legacy_capture_kind = (
+            original_capture.get("capture_kind")
+            if isinstance(original_capture, dict) else None
+        )
+        capture_mode = (
+            "natural_language_update"
+            if legacy_capture_kind == "natural_language_update"
+            else "structured_capture"
+        )
+    natural_language_update = capture_mode == "natural_language_update"
     if isinstance(original_capture, dict):
         source_text = original_capture.get("notes") if natural_language_update else json.dumps(
             original_capture, ensure_ascii=False, sort_keys=True, default=str
