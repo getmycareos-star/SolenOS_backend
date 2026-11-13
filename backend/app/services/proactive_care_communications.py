@@ -500,7 +500,11 @@ def create_proactive_care_notifications(
                 id=str(uuid.uuid4()),
                 person_id=person_id,
                 caregiver_id=caregiver.id,
-                title="A care detail needs your input",
+                title=(
+                    "A care detail needs care-team confirmation"
+                    if question.intended_answerer_role == "professional"
+                    else "A care detail needs your input"
+                ),
                 body=_necessary_question_message(db, person_id, question),
                 category="care_attention",
                 priority="normal",
