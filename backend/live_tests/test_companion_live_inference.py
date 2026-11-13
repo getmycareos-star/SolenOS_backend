@@ -569,3 +569,23 @@ def test_live_qwen_companion_retrieves_a_paraphrased_event_from_the_second_histo
         item.get("record_id") == oldest_event_id and item.get("record_type") == "events"
         for item in result.get("source_record_refs", [])
     ), result.get("source_record_refs")
+
+
+def test_live_qwen_respects_low_capacity_caregiver_response_contract():
+    """Real inference must stay concise and avoid turning exhaustion into a checklist."""
+    client = TestClient(app)
+    session = _create_session(client, "Low-capacity caregiver")
+    response = _ask(
+        client,
+        session,
+        "I'm exhausted. I don't know what to do anymore. Please tell me just one thing to focus on.",
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    reply = result.get("reply", "")
+    assert result.get("ai_generated") is True, result
+    assert result.get("written_to_lcr") is False, result
+    assert len(reply.split()) <= 80, reply
+    assert len([part for part in __import__("re").split(r"(?<=[.!?])\\s+", reply.strip()) if part]) <= 3, reply
+    assert reply.count("?") <= 1, reply
+    assert not __import__("re").search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", reply), reply
