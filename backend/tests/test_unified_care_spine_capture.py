@@ -19,6 +19,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 import app.api.daily_care_intelligence as daily_care_intelligence
+import app.api.collaboration as collaboration
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
 
@@ -76,14 +77,14 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             db.flush()
             own_document_analysis = CaptureAnalysis(
                 person_id=person_id, caregiver_id=caregiver_id,
-                source_text="Current caregiver's uploaded care document.",
+                source_text="Care document reports interrupted sleep overnight.",
                 extraction_status="available",
                 candidates={"kind": "document_extraction_v1", "filename": "own.pdf"},
                 review_history=[],
             )
             peer_document_analysis = CaptureAnalysis(
                 person_id=person_id, caregiver_id=same_person_peer_caregiver_id,
-                source_text="Another caregiver's separately scoped uploaded document.",
+                source_text="PRIVATE_PEER_DOCUMENT: another caregiver's separately scoped upload.",
                 extraction_status="available",
                 candidates={"kind": "document_extraction_v1", "filename": "peer.pdf"},
                 review_history=[],
@@ -212,6 +213,73 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             ]
             assert len(lcr_matches) == 1
             assert lcr_matches[0]["evidence_ids"] == [evidence_id]
+
+            # Exercise the actual Companion HTTP path, not only the retrieval
+            # helper. The saved Daily Care event and its linked evidence must be
+            # supplied to the model and cited in the response metadata.
+            captured_prompts = []
+
+            def fake_companion_inference(request_id, model, messages, options, retrieval_duration_ms):
+                captured_prompts.append(messages)
+                return "The care record contains the saved caregiver report."
+
+            monkeypatch.setattr(
+                collaboration,
+                "_run_companion_inference_with_metrics",
+                fake_companion_inference,
+            )
+            monkeypatch.setattr(
+                collaboration,
+                "_ollama_url",
+                lambda: ("http://ollama.test", "qwen-test"),
+            )
+            companion_daily = client.post(
+                "/api/v1/conversation/message",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "text": "What was recorded about confusion and lunch?",
+                    "client_turn_id": "daily-companion-" + suffix,
+                },
+            )
+            assert companion_daily.status_code == 200, companion_daily.text
+            companion_daily_body = companion_daily.json()
+            assert event_id in companion_daily_body.get("source_event_ids", [])
+            assert evidence_id in companion_daily_body.get("source_evidence_ids", [])
+            assert companion_daily_body["written_to_lcr"] is False
+            daily_prompt = "\\n".join(
+                str(message.get("content", "")) for message in captured_prompts[-1]
+            )
+            assert event_id in daily_prompt
+            assert evidence_id in daily_prompt
+
+            # The Companion document question must include this caregiver's
+            # persisted document extraction and exclude a peer caregiver's
+            # private document from the same person's account.
+            companion_document = client.post(
+                "/api/v1/conversation/message",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "text": "What does the uploaded care document say about sleep?",
+                    "client_turn_id": "document-companion-" + suffix,
+                },
+            )
+            assert companion_document.status_code == 200, companion_document.text
+            companion_document_body = companion_document.json()
+            assert own_document_analysis_id in companion_document_body.get(
+                "source_document_analysis_ids", []
+            )
+            assert peer_document_analysis_id not in companion_document_body.get(
+                "source_document_analysis_ids", []
+            )
+            document_prompt = "\\n".join(
+                str(message.get("content", "")) for message in captured_prompts[-1]
+            )
+            assert own_document_analysis_id in document_prompt
+            assert "Care document reports interrupted sleep overnight." in document_prompt
+            assert "PRIVATE_PEER_DOCUMENT" not in document_prompt
+            assert companion_document_body["written_to_lcr"] is False
 
             foreign_capture = client.post(
                 "/api/v1/daily/log",
