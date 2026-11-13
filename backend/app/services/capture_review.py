@@ -155,7 +155,8 @@ def supplement_source_grounded_daily_observations(
         observations = [
             item for item in observations
             if not (
-                str(item.get("observation") or "").strip().casefold() == sentence.casefold()
+                str(item.get("observation") or "").strip().rstrip(".!?;").casefold()
+                == sentence.rstrip(".!?;").casefold()
                 and str(item.get("source_quote") or "").strip() == sentence
             )
         ]
