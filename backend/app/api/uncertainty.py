@@ -1,5 +1,4 @@
 from collections import Counter
-from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
