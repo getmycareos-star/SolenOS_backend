@@ -4414,9 +4414,9 @@ def _fit_model_context_lines_across_sources(
 
 
 _DOCUMENT_INTENT_PATTERN = re.compile(
-    r"\\b(?:uploaded document|document|file|attachment|letter|pdf|"
+    r"\b(?:uploaded document|document|file|attachment|letter|pdf|"
     r"discharge summary|discharge paperwork|care plan|clinic note|clinical note|"
-    r"referral letter|prescription|lab result|test result|scan report|medical record)\\b",
+    r"referral letter|prescription|lab result|test result|scan report|medical record)\b",
     re.IGNORECASE,
 )
 
