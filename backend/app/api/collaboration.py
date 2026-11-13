@@ -2615,9 +2615,20 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
                 if reference not in references:
                     references.append(reference)
                 record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
-                evidence_id = record.get("source_evidence_id")
-                if record_type == "document_extractions" and evidence_id:
-                    evidence_reference = {"record_type": "care_evidence", "record_id": str(evidence_id)}
+                linked_evidence_ids = []
+                source_evidence_id = record.get("source_evidence_id")
+                if source_evidence_id:
+                    linked_evidence_ids.append(source_evidence_id)
+                record_evidence_ids = record.get("evidence_ids")
+                if isinstance(record_evidence_ids, (list, tuple)):
+                    linked_evidence_ids.extend(record_evidence_ids)
+                for evidence_id in linked_evidence_ids:
+                    if not evidence_id:
+                        continue
+                    evidence_reference = {
+                        "record_type": "care_evidence",
+                        "record_id": str(evidence_id),
+                    }
                     if evidence_reference not in references:
                         references.append(evidence_reference)
         except (ValueError, TypeError, json.JSONDecodeError):
