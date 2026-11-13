@@ -5501,7 +5501,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 if not invalid_reply:
                     break
-        if invalid_reply:
+        if invalid_reply and greeting_only and not caregiver_guidance:
+            # A greeting-only repair must never overwrite a failed caregiver-specific
+            # repair with a generic greeting instruction. If the caregiver response
+            # contract still fails, the request below fails closed without saving it.
             # Let Qwen revise its own output more than once when a small model
             # misses the brevity constraint. Every candidate remains model-
             # generated; if none passes validation, fail closed rather than
