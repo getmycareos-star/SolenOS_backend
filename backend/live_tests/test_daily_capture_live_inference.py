@@ -160,3 +160,136 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
+
+
+def test_real_qwen_natural_language_daily_care_preserves_all_clauses_and_companion_retrieves_them():
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_db():
+        db = test_session_local()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    suffix = uuid.uuid4().hex
+    note = (
+        "Mum slept poorly last night and seemed more unsettled this morning. "
+        "She ate a little more at dinner and is now resting."
+    )
+
+    try:
+        with TestClient(app) as client:
+            owner = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": "Synthetic natural-language Daily Care caregiver"},
+            )
+            assert owner.status_code == 201, owner.text
+            headers = {"Authorization": "Bearer " + owner.json()["access_token"]}
+            person_id = owner.json()["person"]["id"]
+            caregiver_id = owner.json()["caregiver"]["id"]
+
+            receipt = client.post(
+                "/api/v1/daily-care/entries",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_idempotency_key": f"live-natural-daily-care-{suffix}",
+                    "capture_kind": "natural_language_update",
+                    "notes": note,
+                },
+            )
+            assert receipt.status_code == 200, receipt.text
+            saved = receipt.json()
+            assert saved["success"] is True
+            assert saved["id"]
+            assert saved["qwen_job_id"]
+
+            deadline = time.monotonic() + 300
+            latest_job = None
+            while time.monotonic() < deadline:
+                job_response = client.get(
+                    f"/api/v1/assistant/jobs/{saved['qwen_job_id']}",
+                    headers=headers,
+                )
+                assert job_response.status_code == 200, job_response.text
+                latest_job = job_response.json()
+                if latest_job["status"] == "completed":
+                    break
+                assert latest_job["status"] not in {"failed", "cancelled"}, latest_job
+                time.sleep(1.5)
+            assert latest_job and latest_job["status"] == "completed", latest_job
+            capture_result = latest_job.get("daily_capture") or {}
+            assert capture_result.get("projection_status") == "verified", latest_job
+            assert capture_result.get("reconciliation_status") == "completed", latest_job
+            assert int(capture_result.get("source_grounded_observations_projected") or 0) >= 4, latest_job
+
+            lcr = client.get(
+                "/api/v1/care-continuity/current-care?limit_per_source=50",
+                headers=headers,
+            )
+            assert lcr.status_code == 200, lcr.text
+            event_row = next(
+                (item for item in lcr.json().get("items", []) if item.get("id") == saved["id"]),
+                None,
+            )
+            assert event_row is not None, "saved natural-language Daily Care entry is missing from LCR"
+            assert event_row.get("source_type") == "caregiver_report"
+            assert event_row.get("evidence_ids") == saved.get("evidence_ids")
+            observations = event_row.get("derived_observations") or []
+            expected = {
+                "poor_sleep": re.compile(r"slept poorly", re.IGNORECASE),
+                "unsettled": re.compile(r"unsettled", re.IGNORECASE),
+                "dinner": re.compile(r"ate a little more at dinner", re.IGNORECASE),
+                "resting": re.compile(r"now resting", re.IGNORECASE),
+            }
+            matched = {
+                name: next((item for item in observations if pattern.search(item.get("value_text", ""))), None)
+                for name, pattern in expected.items()
+            }
+            assert all(matched.values()), {
+                "missing": [name for name, item in matched.items() if item is None],
+                "observations": observations,
+            }
+            for name, item in matched.items():
+                assert item.get("source_passage") in note
+                assert note[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
+                assert item.get("value_text") in note
+            assert matched["unsettled"].get("epistemic_status") == "uncertain"
+            assert matched["unsettled"].get("hedge_marker") == "seemed"
+
+            companion = client.post(
+                "/api/v1/conversation/message",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "text": "What has the caregiver recorded about sleep, morning changes, dinner and resting?",
+                    "client_turn_id": f"live-natural-companion-{suffix}",
+                },
+            )
+            assert companion.status_code == 200, companion.text
+            answer = companion.json()
+            assert answer.get("ai_generated") is True, answer
+            assert saved["id"] in (answer.get("source_event_ids") or []), answer
+            assert saved["evidence_ids"][0] in (answer.get("source_evidence_ids") or []), answer
+            reply = (answer.get("reply") or "").casefold()
+            assert re.search(r"sleep|slept", reply), answer
+            assert re.search(r"unsettled|restless", reply), answer
+            assert "dinner" in reply or "ate" in reply, answer
+            assert "rest" in reply, answer
+
+            print("LIVE_QWEN_NATURAL_DAILY_CARE=" + json.dumps({
+                "status": "PASS",
+                "model_inference": "real_qwen",
+                "database": "disposable_postgresql",
+                "source_grounded_observations_projected": capture_result.get("source_grounded_observations_projected"),
+                "four_independent_source_clauses_persisted": True,
+                "uncertain_hedge_preserved": True,
+                "companion_retrieved_exact_event_and_evidence": True,
+            }, separators=(",", ":")))
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
