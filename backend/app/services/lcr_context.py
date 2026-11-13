@@ -522,31 +522,50 @@ def build_lcr_context(
             statement = statement.order_by(desc(table.c[order_field]))
         if "id" in table.c and order_field != "id":
             statement = statement.order_by(desc(table.c.id))
-        search_limit = min(max(limit * 5, limit + 1), 250) if terms else limit
-        rows = db.execute(statement.limit(search_limit + 1)).mappings().all()
-        has_more = len(rows) > limit
-        items = [
-            {key: _safe_value(value, key) for key, value in dict(row).items()}
-            for row in rows[:search_limit]
-        ]
-        for item in items:
+        # Query-driven retrieval scans every matching row in deterministic
+        # database batches, then retains only the best per-source results.
+        # This removes the former 250-row candidate ceiling that could hide an
+        # older, more relevant event behind newer lexical matches. Non-query
+        # current-care reads intentionally remain bounded recent projections.
+        query_scan = bool(terms or temporal_window)
+        candidate_count = 0
+        ranked_items: list[tuple[int, int, dict[str, Any]]] = []
+        scan_statement = statement if query_scan else statement.limit(limit)
+        result = db.execute(
+            scan_statement.execution_options(stream_results=True)
+        ).mappings().yield_per(500)
+        expanded_only = [term for term in terms if term not in direct_terms]
+        for row in result:
+            candidate_count += 1
+            item = {key: _safe_value(value, key) for key, value in dict(row).items()}
             information_status, interpretation_limit = _information_status(source_name, item)
             item["information_status"] = information_status
             item["interpretation_limit"] = interpretation_limit
-        if direct_terms:
-            expanded_only = [term for term in terms if term not in direct_terms]
-            items.sort(
-                key=lambda item: _retrieval_score(item, query or "", direct_terms, expanded_only),
-                reverse=True,
+            score = (
+                _retrieval_score(item, query or "", direct_terms, expanded_only)
+                if direct_terms else 0
             )
-        items = items[:limit]
+            # The SQL ordering is deterministic. Python's stable sort retains
+            # that order for ties while prioritising exact/direct query matches.
+            ranked_items.append((score, candidate_count, item))
+            if len(ranked_items) > limit:
+                ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+                del ranked_items[limit:]
+        ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+        items = [entry[2] for entry in ranked_items]
+        has_more = candidate_count > len(items)
         sources[source_name] = {
             "status": "available" if items else "empty",
             "table": table_name,
             "items": items,
             "returned_count": len(items),
+            "candidate_count": candidate_count,
+            "candidate_scan_complete": query_scan,
             "has_more": has_more,
             "limit": limit,
+            "selection": "ranked_query_matches" if query_scan and direct_terms else (
+                "complete_temporal_window" if temporal_window else "recent_records"
+            ),
         }
 
     evidence_lineage: dict[str, Any] = {
@@ -630,7 +649,8 @@ def build_lcr_context(
         "person_id": str(person_id),
         "as_of": datetime.now().astimezone().isoformat(),
         "read_only": True,
-        "history_coverage": "bounded_subset",
+        "history_coverage": "query_scanned_ranked_subset" if terms or temporal_window else "bounded_recent_subset",
+        "retrieval_scan_complete": bool(terms or temporal_window) and not missing_required and not missing_optional,
         "query_applied": bool(terms),
         "retrieval_strategy": "hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history",
         "temporal_window": temporal_window,
@@ -649,6 +669,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
         + json.dumps({
             "schema_status": context.get("schema_status"),
             "history_coverage": context.get("history_coverage"),
+            "retrieval_scan_complete": context.get("retrieval_scan_complete", False),
             "missing_required_sources": context.get("missing_required_sources", []),
             "missing_optional_sources": context.get("missing_optional_sources", []),
             "evidence_lineage": context.get("evidence_lineage", {
