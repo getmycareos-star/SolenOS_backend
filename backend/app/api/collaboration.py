@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
