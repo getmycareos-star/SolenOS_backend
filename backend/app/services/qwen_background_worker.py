@@ -234,6 +234,13 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             else "structured_capture"
         )
     natural_language_update = capture_mode == "natural_language_update"
+    # A quick check-in is already a structured caregiver report. Its selected
+    # areas and explicit uncertainty are the source record; running an LLM over
+    # them adds no reliable information and risks inventing status or questions.
+    quick_check_in_capture = (
+        event.event_type == "quick_daily_checkin"
+        and isinstance(evidence_payload.get("quick_check_in"), dict)
+    )
     if isinstance(original_capture, dict):
         source_text = original_capture.get("notes") if natural_language_update else json.dumps(
             original_capture, ensure_ascii=False, sort_keys=True, default=str
@@ -299,15 +306,20 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     db.commit()
     db.refresh(analysis)
 
-    candidates = await asyncio.to_thread(
-        extract_review_candidates,
-        source_text,
-        source_event_id=event_id,
-        source_evidence_id=evidence_id,
-    )
-    if not isinstance(candidates, dict) or not isinstance(candidates.get("observations"), list):
-        raise ValueError("daily_capture_extraction_invalid")
-    candidates = dict(candidates)
+    if quick_check_in_capture:
+        # The persisted event/evidence already contains the complete structured
+        # report. Do not infer observations or generate clarification work.
+        candidates = {"observations": [], "open_questions": []}
+    else:
+        candidates = await asyncio.to_thread(
+            extract_review_candidates,
+            source_text,
+            source_event_id=event_id,
+            source_evidence_id=evidence_id,
+        )
+        if not isinstance(candidates, dict) or not isinstance(candidates.get("observations"), list):
+            raise ValueError("daily_capture_extraction_invalid")
+        candidates = dict(candidates)
     candidates["observations"] = [
         {
             **item,
@@ -390,8 +402,11 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
                 evidence_ids=[evidence_id],
                 questions=questions,
             )
-    assessment_status = "available" if candidate_count else "not_applicable"
-    review_status = "not_required" if natural_language_update or not candidate_count else "required"
+    extraction_status = "not_applicable" if quick_check_in_capture else "available"
+    assessment_status = "not_applicable" if quick_check_in_capture else (
+        "available" if candidate_count else "not_applicable"
+    )
+    review_status = "not_required" if quick_check_in_capture or natural_language_update or not candidate_count else "required"
     reconciliation = execute_care_continuity_reconciliation(
         db,
         job.person_id,
@@ -401,7 +416,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         source_evidence_id=evidence_id,
         reconcile_lcr=True,
         stage_statuses={
-            "extraction": "available",
+            "extraction": extraction_status,
             "assessment": assessment_status,
             "review": review_status,
         },
@@ -428,11 +443,11 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     if analysis is None:
         raise RuntimeError("daily_capture_analysis_disappeared")
     analysis.candidates = candidates
-    analysis.extraction_status = "available"
+    analysis.extraction_status = extraction_status
     analysis.execution_status = {
         "source_preservation": "verified",
         "evidence": "verified",
-        "extraction": "available",
+        "extraction": extraction_status,
         "assessment": assessment_status,
         "review": review_status,
         "reconciliation": "completed",
@@ -445,11 +460,11 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "analysis_id": analysis.id,
         "source_event_id": event_id,
         "source_evidence_id": evidence_id,
-        "extraction_status": "available",
+        "extraction_status": extraction_status,
         "candidate_count": candidate_count,
         "observation_count": observation_count,
         "review_required": review_status == "required",
-        "capture_mode": capture_mode or "legacy_natural_language_update",
+        "capture_mode": "structured_quick_check_in" if quick_check_in_capture else (capture_mode or "legacy_natural_language_update"),
         "assessment_status": assessment_status,
         "reconciliation_status": "completed",
         "projection_status": projection_status,
@@ -473,7 +488,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "candidate_count": candidate_count,
             "observation_count": observation_count,
             "review_required": review_status == "required",
-            "capture_mode": capture_mode or "legacy_natural_language_update",
+            "capture_mode": "structured_quick_check_in" if quick_check_in_capture else (capture_mode or "legacy_natural_language_update"),
             "projection_status": projection_status,
             "model_output_written_to_lcr": False,
             "source_grounded_observations_projected": observation_count,
