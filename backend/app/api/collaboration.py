@@ -4501,7 +4501,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     ]),
                 )
                 .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
-                .limit(20)
                 .all()
             )
             for event in matching_events:
@@ -4550,7 +4549,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     )
                     for term in retrieval_terms
                 ]),
-            ).order_by(CareAssertion.recorded_at.desc()).limit(250).all()
+            ).order_by(CareAssertion.recorded_at.desc()).all()
             for assertion in _rank_source_rows(
                 retrieval_query, historical_assertions,
                 ("field", "asserted_value", "source_label", "source_text"), 12
@@ -4581,7 +4580,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     )
                     for term in retrieval_terms
                 ]),
-            ).order_by(Appointment.scheduled_at.desc()).limit(250).all()
+            ).order_by(Appointment.scheduled_at.desc()).all()
             for appointment in _rank_source_rows(
                 retrieval_query, historical_appointments,
                 ("title", "location", "provider", "healthcare_org", "status"), 12
@@ -4611,7 +4610,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     )
                     for term in retrieval_terms
                 ]),
-            ).order_by(EvidenceModel.uploaded_at.desc()).limit(250).all()
+            ).order_by(EvidenceModel.uploaded_at.desc()).all()
             for evidence in _rank_source_rows(
                 retrieval_query, historical_evidence,
                 ("source_text", "extra_metadata", "type"), 12
@@ -4649,7 +4648,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
             shared_lcr_context = build_unified_lcr_context(
-                db, person_id, caregiver_id, limit_per_source=20, query=retrieval_query
+                db, person_id, caregiver_id, limit_per_source=50, query=retrieval_query
             )
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
             for source_name, source in shared_lcr_context["sources"].items():
@@ -4667,14 +4666,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "record": item,
                         }, ensure_ascii=False, default=str)
                     )
-            shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 10)
+            shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 50)
             source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
                 "history_coverage": shared_lcr_context["history_coverage"],
+                "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
                 "query_applied": shared_lcr_context["query_applied"],
                 "missing_required_sources": shared_lcr_context["missing_required_sources"],
                 "missing_optional_sources": shared_lcr_context["missing_optional_sources"],
+                "sources": {
+                    name: {
+                        "status": source.get("status", "unknown"),
+                        "candidate_count": source.get("candidate_count"),
+                        "returned_count": source.get("returned_count", 0),
+                        "candidate_scan_complete": source.get("candidate_scan_complete", False),
+                        "has_more": source.get("has_more", False),
+                    }
+                    for name, source in shared_lcr_context.get("sources", {}).items()
+                },
             }
 
         # Select context by the current question and, for referential follow-ups,
@@ -4684,15 +4694,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text, re.IGNORECASE,
         ))
         event_context = _filter_context_lines_to_query(
-            retrieval_query, _rank_context_lines(retrieval_query, event_context, 5)
+            retrieval_query, _rank_context_lines(retrieval_query, event_context, 30)
         )
         assertion_context = _filter_context_lines_to_query(
-            retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 4)
+            retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 20)
         )
         appointment_context = _filter_context_lines_to_query(
-            retrieval_query, _rank_context_lines(retrieval_query, appointment_context, 3)
+            retrieval_query, _rank_context_lines(retrieval_query, appointment_context, 15)
         )
-        ranked_evidence_context = _rank_context_lines(retrieval_query, evidence_context, 4)
+        ranked_evidence_context = _rank_context_lines(retrieval_query, evidence_context, 20)
         evidence_context = (
             ranked_evidence_context
             if document_question
@@ -4826,7 +4836,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         model_context_lines = [
             *event_context, *assertion_context, *appointment_context, *evidence_context,
-            *freshness_context[:1], *shared_lcr_lines[:6], *aggregate_context_lines,
+            *freshness_context[:1], *shared_lcr_lines, *aggregate_context_lines,
         ]
         if source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",
@@ -4837,7 +4847,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         context_chars = 0
         for line in model_context_lines:
             rendered_line = _humanize_model_context_line(line)
-            if context_chars + len(rendered_line) > 2400:
+            if context_chars + len(rendered_line) > 16000:
                 continue
             bounded_context.append(rendered_line)
             context_chars += len(rendered_line)
@@ -4847,8 +4857,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 f"Caregiver question: {user_text}\n\n"
                 "Relevant authorized care context follows. Use only records relevant to the question. "
                 "Do not describe the context format or list unrelated records. If the context does not answer "
-                "the question, say the information is not recorded.\n"
-                + ("\n".join(bounded_context) if bounded_context else "No matching authorized care-record context was retrieved.")
+                "the question, say the information is not recorded. The retrieval coverage note describes whether "
+                "all matching database candidates were scanned; a ranked subset or has_more=true means the supplied "
+                "records are not the complete history. Never describe a partial result as the complete care journey.\n"
+                + ("\n".join([
+                    "Retrieval coverage: " + json.dumps(lcr_context_coverage, ensure_ascii=False, default=str),
+                    *bounded_context,
+                ]) if bounded_context else "No matching authorized care-record context was retrieved.")
             ),
         })
         greeting_only = _is_casual_greeting(user_text)
