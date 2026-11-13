@@ -3,6 +3,30 @@ set -Eeuo pipefail
 
 python -m pytest backend/tests -q
 
+python -m pytest backend/tests/test_recommended_caregiver_questions.py::test_one_hundred_case_question_gate_benchmark -q -s | tee /tmp/question-selection-benchmark.log
+python - <<'PY'
+import json
+from pathlib import Path
+
+output = Path("/tmp/question-selection-benchmark.log").read_text()
+marker = "QUESTION_SELECTION_BENCHMARK="
+reports = [line.split(marker, 1)[1] for line in output.splitlines() if marker in line]
+if not reports:
+    raise SystemExit("Caregiver question selection benchmark did not publish a measured report.")
+report = json.loads(reports[-1])
+print("QUESTION_SELECTION_BENCHMARK_REPORT=" + json.dumps(report, sort_keys=True))
+if report.get("cases_total") != 100:
+    raise SystemExit("Question selection benchmark did not execute all 100 scenarios.")
+if report.get("precision", 0) < 0.95 or report.get("recall", 0) < 0.95:
+    raise SystemExit("Question selection benchmark precision or recall fell below 95%.")
+if report.get("critical_preserved", 0) < 10:
+    raise SystemExit("A critical caregiver question was hidden.")
+if report.get("ordinary_initial_limit") != 2:
+    raise SystemExit("The initial ordinary-question burden exceeded the two-question limit.")
+if not report.get("duplicate_suppressed") or not report.get("cross_person_evidence_rejected"):
+    raise SystemExit("Duplicate suppression or cross-person evidence isolation failed.")
+PY
+
 python -m pytest backend/tests/test_uncertainty_benchmark.py -q --junitxml=/tmp/uncertainty-benchmark.xml
 python - <<'PY'
 import xml.etree.ElementTree as ET
