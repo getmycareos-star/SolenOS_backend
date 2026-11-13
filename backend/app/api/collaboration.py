@@ -5192,7 +5192,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if document_question
             else _filter_context_lines_to_query(retrieval_query, ranked_evidence_context)
         )
-        shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
+        if document_question:
+            relevant_shared_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
+            relevant_verified_documents = _rank_lcr_context_lines(
+                retrieval_query, verified_document_context_lines, 5
+            )
+            # A document request must retain verified source documents even when
+            # lexical filtering misses an inflected form (for example, sleep/slept).
+            shared_lcr_lines = list(dict.fromkeys([
+                *relevant_shared_lines, *relevant_verified_documents,
+            ]))
+        else:
+            shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
         source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
         source_event_ids = _context_record_ids(event_context, "event_id")
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
