@@ -394,7 +394,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 json={
                     "person_id": person_id,
                     "text": "What was recorded about waking overnight?",
-                    "client_turn_id": "historical-companion-" + suffix,
+                    "client_turn_id": str(uuid.uuid4()),
                 },
             )
             assert historical_companion.status_code == 200, historical_companion.text
