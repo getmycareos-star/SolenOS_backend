@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,6 +17,7 @@ from app.services.care_continuity_execution import execute_care_continuity_recon
 from app.services.lcr_context import build_lcr_context
 
 router = APIRouter(tags=["capture review"])
+logger = logging.getLogger(__name__)
 
 
 def _session_scope(request: Request, db: Session) -> tuple[str, str]:
@@ -98,6 +100,12 @@ def review_capture_candidate(
         # Do not disclose whether another care record or caregiver owns this analysis.
         raise HTTPException(status_code=404, detail="Capture analysis not found")
     if analysis.extraction_status != "available" or not isinstance(analysis.candidates, dict):
+        logger.warning(
+            "Capture analysis review unavailable: analysis_id=%s extraction_status=%s candidates_type=%s",
+            analysis.id,
+            analysis.extraction_status,
+            type(analysis.candidates).__name__,
+        )
         raise HTTPException(status_code=409, detail="No reviewable extraction candidates are available")
 
     candidates_payload = copy.deepcopy(analysis.candidates)
