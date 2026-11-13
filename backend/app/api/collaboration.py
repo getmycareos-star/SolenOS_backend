@@ -5705,6 +5705,52 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 if not invalid_reply:
                     break
+        if invalid_reply and not caregiver_guidance and not greeting_only:
+            # A normal care-history question still gets one bounded grounding
+            # repair when the small model adds an unsupported detail. This is
+            # not a canned answer: the model must regenerate from the same
+            # authorized context and pass every validator before persistence.
+            for revision_attempt in range(2):
+                retry_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": str(reply or "")},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous answer did not pass source-grounding checks. Revise it. "
+                            "Answer the caregiver's exact question using only the authorized records above. "
+                            "Keep caregiver reports distinct from verified facts. Do not infer causes, diagnoses, "
+                            "medication changes, dates, trends, outcomes, or completed actions. Do not invent a "
+                            "question or task. If the records do not answer a part of the question, say that part "
+                            "is not recorded. Return only the corrected caregiver-facing answer."
+                        ),
+                    },
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat,
+                        base,
+                        model,
+                        retry_messages,
+                        {"temperature": 0.1, "num_predict": 128},
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                    ) from exc
+                invalid_reply = (
+                    not isinstance(reply, str)
+                    or not reply.strip()
+                    or _companion_message_needs_revision(reply)
+                    or _contains_unrequested_saba(reply, validation_source)
+                    or _contains_unsupported_care_claim(reply, validation_source)
+                    or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+                    or _contains_unsupported_record_reference(reply, validation_source)
+                    or _caregiver_response_needs_revision(user_text, reply)
+                )
+                if not invalid_reply:
+                    break
         if invalid_reply and greeting_only and not caregiver_guidance:
             # A greeting-only repair must never overwrite a failed caregiver-specific
             # repair with a generic greeting instruction. If the caregiver response
@@ -5754,6 +5800,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 if not invalid_reply:
                     break
         if invalid_reply:
+            failed_rules = []
+            if not isinstance(reply, str) or not reply.strip():
+                failed_rules.append("empty_response")
+            if _companion_message_needs_revision(reply):
+                failed_rules.append("message_format")
+            if _contains_unrequested_saba(reply, validation_source):
+                failed_rules.append("unrequested_saba")
+            if _contains_unsupported_care_claim(reply, validation_source):
+                failed_rules.append("unsupported_care_claim")
+            if _contains_unsupported_operational_claim(reply, validation_source, source_context):
+                failed_rules.append("unsupported_operational_claim")
+            if _contains_unsupported_record_reference(reply, validation_source):
+                failed_rules.append("unsupported_record_reference")
+            if _caregiver_response_needs_revision(user_text, reply):
+                failed_rules.append("caregiver_interaction_contract")
+            logger.warning(
+                "Companion response rejected after bounded repairs: rules=%s",
+                ",".join(dict.fromkeys(failed_rules)) or "unknown",
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Companion could not produce a clear, sufficiently grounded response. No reply was saved; please clarify or retry.",
