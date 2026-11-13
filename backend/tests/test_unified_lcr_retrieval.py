@@ -471,3 +471,22 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
     finally:
         connection.close()
         engine.dispose()
+
+
+def test_temporal_retrieval_uses_calendar_months_not_fixed_30_day_approximation():
+    # March 31 minus one calendar month clamps to February 28 in 2026.
+    window = _temporal_window(
+        "What happened in the last 1 month?",
+        now=datetime(2026, 3, 31, 12, tzinfo=UTC),
+    )
+    assert window is not None
+    assert window["start"] == "2026-02-28T00:00:00+00:00"
+    assert window["end"].startswith("2026-03-31T23:59:59")
+
+    # Leap-year February retains its final valid day.
+    leap_window = _temporal_window(
+        "What happened in the last 1 month?",
+        now=datetime(2024, 3, 31, 12, tzinfo=UTC),
+    )
+    assert leap_window is not None
+    assert leap_window["start"] == "2024-02-29T00:00:00+00:00"
