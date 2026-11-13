@@ -239,7 +239,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 json={
                     "person_id": person_id,
                     "text": "What was recorded about confusion and lunch?",
-                    "client_turn_id": "daily-companion-" + suffix,
+                    "client_turn_id": str(uuid.uuid4()),
                 },
             )
             assert companion_daily.status_code == 200, companion_daily.text
