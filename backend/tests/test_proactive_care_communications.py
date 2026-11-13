@@ -419,6 +419,7 @@ def test_proactive_question_notifications_preserve_critical_and_limit_ordinary()
         professional_notification = next(
             row for row in notifications if row.source_event_id == "notify-critical"
         )
+        assert professional_notification.title == "A care detail needs care-team confirmation"
         assert "Best person to ask: prescribing clinician" in professional_notification.body
         assert "If you're not sure, you can say so." not in professional_notification.body
 
