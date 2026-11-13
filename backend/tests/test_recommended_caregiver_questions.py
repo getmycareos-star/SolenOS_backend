@@ -1,5 +1,6 @@
 """API tests for the evidence-validated caregiver question projection."""
 import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -42,7 +43,7 @@ def teardown():
 
 
 def client_for(person_id):
-    token = f"question-projection-{person_id}"
+    token = f"question-projection-{person_id}-{uuid.uuid4()}"
     db = SessionLocal()
     caregiver = db.query(Caregiver).filter(Caregiver.person_id == person_id).first()
     db.add(AnonymousSession(
