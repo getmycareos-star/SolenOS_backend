@@ -2176,7 +2176,7 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
 _LCR_CONTEXT_SOURCE_PRIORITY = (
     "conflicts", "reconciliations", "information_gaps", "missing_information",
     "uncertainties", "uncertainty_assessments", "open_questions",
-    "decision_outcomes", "decisions", "corrections", "facts",
+    "decision_outcomes", "decisions", "handoffs", "corrections", "facts",
     "evidence_observations", "caregiver_observations", "timeline",
     "provenance", "follow_up_links", "open_loop_records",
     "caregiver_contexts", "caregiver_perspectives",
