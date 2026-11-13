@@ -723,7 +723,6 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
     chunks = [base]
     current_length = len(base)
     item_budget = max_chars - len(base) - len(truncation_notice)
-    included_any = False
     omitted = False
 
     # Give each available source a chance to contribute before taking a second
@@ -741,7 +740,6 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             chunks.append(line)
             current_length += len(line)
             source["next"] += 1
-            included_any = True
             made_progress = True
         if not made_progress:
             break
