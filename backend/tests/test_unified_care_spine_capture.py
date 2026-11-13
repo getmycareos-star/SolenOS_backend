@@ -280,6 +280,19 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             )
             assert foreign_analysis_response.status_code == 404
 
+            history_response = client.get(
+                "/api/v1/daily-care/intelligence/history?limit=200&offset=0",
+                headers=headers,
+            )
+            assert history_response.status_code == 200, history_response.text
+            history_capture = next(
+                row for row in history_response.json()["records"]
+                if row.get("source_id") == event_id
+            )
+            assert history_capture["capture_processing"]["analysis_id"] == analysis_id
+            assert history_capture["capture_processing"]["extraction_status"] == "available"
+            assert history_capture["capture_processing"]["review_required"] is True
+
             retry = client.post(
                 "/api/v1/daily/log",
                 headers=headers,
