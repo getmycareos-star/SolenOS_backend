@@ -1748,7 +1748,14 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
                 "event_summary": "New sleep report recorded.",
                 "medications": [],
                 "conditions": [],
-                "symptoms": [],
+                "symptoms": [{
+                    "change_type": "new",
+                    "name": "sleep",
+                    "previous": None,
+                    "current": "interrupted sleep",
+                    "evidence_excerpt": "Caregiver reported interrupted sleep.",
+                    "certainty": "supported",
+                }],
                 "tests": [],
                 "follow_ups": [],
                 "contradictions": [],
@@ -1758,7 +1765,7 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
             })
 
         monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen)
-        delta_engine.reconcile_event(
+        result = delta_engine.reconcile_event(
             db,
             person_id=person.id,
             event_date=NOW,
@@ -1777,6 +1784,10 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
             "omitted": 5,
         }
         assert coverage["complete"] is False
+        assert result["symptoms"][0]["change_type"] == "uncertain"
+        assert result["symptoms"][0]["certainty"] == "uncertain"
+        assert result["symptoms"][0]["baseline_incomplete"] is True
+        assert result["computed_changes"][0]["certainty"] == "uncertain"
 
 def test_cross_domain_pattern_scan_includes_events_older_than_90_days():
     from app.services.pattern_detection import detect_cross_domain_patterns
