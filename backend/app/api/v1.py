@@ -954,10 +954,14 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             "reconciliation": "pending",
             "longitudinal_retrieval": "not_verified",
         }
-        queue_available = (
-            inspect(db.get_bind()).has_table("qwen_background_jobs")
-            and inspect(db.get_bind()).has_table("qwen_job_events")
-        )
+        try:
+            queue_available = (
+                inspect(db.get_bind()).has_table("qwen_background_jobs")
+                and inspect(db.get_bind()).has_table("qwen_job_events")
+            )
+        except Exception:
+            logger.exception("Could not verify the Daily Care background queue for saved event %s", event.id)
+            queue_available = False
         if queue_available:
             try:
                 analysis = persist_capture_analysis(
