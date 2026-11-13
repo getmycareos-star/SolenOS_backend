@@ -426,9 +426,14 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     necessity="necessary",
                     necessity_rationale="A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
                     context=[{
+                        "source_kind": "caregiver_report",
+                        "source_id": first_evidence_id,
                         "caregiver_attention_required": True,
-                        "necessity_rationale": "A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
-                        "decision_dependency": "The current mobility handoff cannot accurately describe the observed mobility concern without this clarification.",
+                        "necessity_assessment": {
+                            "necessity_rationale": "A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
+                            "decision_dependency": "The current mobility handoff cannot accurately describe the observed mobility concern without this clarification.",
+                            "evidence_ids": [first_evidence_id],
+                        },
                     }],
                 ),
                 OpenQuestion(
