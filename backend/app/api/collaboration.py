@@ -5012,12 +5012,20 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Only expose source references for records actually supplied to Qwen.
         source_lcr_record_refs = _context_record_refs(included_model_context_lines)
         source_lcr_context_ids = _context_record_ids(included_model_context_lines, "source_id")
+        selected_ids_by_type: dict[str, list[str]] = {}
+        for reference in source_lcr_record_refs:
+            record_type = reference.get("record_type")
+            record_id = reference.get("record_id")
+            if record_type and record_id:
+                selected_ids_by_type.setdefault(record_type, []).append(record_id)
+        # Public source-ID fields must describe only records actually supplied
+        # to the model, never the larger pre-ranking candidate pools.
+        source_event_ids = list(dict.fromkeys(selected_ids_by_type.get("events", [])))
+        source_appointment_ids = list(dict.fromkeys(selected_ids_by_type.get("appointments", [])))
+        source_assertion_ids = list(dict.fromkeys(selected_ids_by_type.get("assertions", [])))
         source_evidence_ids = list(dict.fromkeys([
-            *source_evidence_ids,
-            *(
-                reference["record_id"] for reference in source_lcr_record_refs
-                if reference.get("record_type") == "care_evidence"
-            ),
+            *selected_ids_by_type.get("evidence", []),
+            *selected_ids_by_type.get("care_evidence", []),
         ]))
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
