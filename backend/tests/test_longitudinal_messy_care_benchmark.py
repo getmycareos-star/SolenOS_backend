@@ -787,7 +787,8 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
     with TestingSessionLocal() as db:
         person, caregiver = make_person(db, "delta-finding-provenance")
         excerpt = "The prescriber started amlodipine 5 mg daily."
-        content_text = f"The discharge summary states: {excerpt}"
+        second_excerpt = "The prescriber also started metformin 500 mg twice daily."
+        content_text = f"The discharge summary states: {excerpt} {second_excerpt}"
         source_event = CareEvent(
             id="ev-delta-provenance-source",
             person_id=person.id,
@@ -807,6 +808,13 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             source_text=excerpt,
             uploaded_by_caregiver_id=caregiver.id,
         )
+        second_matching = Evidence(
+            id="evidence-delta-second-medication",
+            person_id=person.id,
+            type="document",
+            source_text=second_excerpt,
+            uploaded_by_caregiver_id=caregiver.id,
+        )
         unrelated = Evidence(
             id="evidence-delta-unrelated",
             person_id=person.id,
@@ -814,19 +822,29 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             source_text="Sleep was poor on the previous night.",
             uploaded_by_caregiver_id=caregiver.id,
         )
-        db.add_all([source_event, matching, unrelated])
+        db.add_all([source_event, matching, second_matching, unrelated])
         db.flush()
 
         model_result = {
             "event_summary": "A discharge medication list mentions amlodipine.",
-            "medications": [{
-                "change_type": "new",
-                "name": "Amlodipine",
-                "previous": None,
-                "current": "5 mg daily",
-                "evidence_excerpt": excerpt,
-                "certainty": "supported",
-            }],
+            "medications": [
+                {
+                    "change_type": "new",
+                    "name": "Amlodipine",
+                    "previous": None,
+                    "current": "5 mg daily",
+                    "evidence_excerpt": excerpt,
+                    "certainty": "supported",
+                },
+                {
+                    "change_type": "new",
+                    "name": "Metformin",
+                    "previous": None,
+                    "current": "500 mg twice daily",
+                    "evidence_excerpt": second_excerpt,
+                    "certainty": "supported",
+                },
+            ],
             "conditions": [],
             "symptoms": [],
             "tests": [],
@@ -861,17 +879,20 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
         )
 
         assert qwen_call_options
-        assert qwen_call_options[0].get("num_predict") == 384
+        assert qwen_call_options[0].get("num_predict") == 768
         assert qwen_call_options[0].get("num_ctx") == 4096
 
-        assertion = db.query(CareAssertion).filter(
+        assertions = db.query(CareAssertion).filter(
             CareAssertion.person_id == person.id,
             CareAssertion.subject_type == "medication",
-            CareAssertion.subject_id == "amlodipine",
-        ).one()
-        assert assertion.source_event_id == source_event.id
-        assert assertion.evidence_ids == [matching.id]
-        assert unrelated.id not in assertion.evidence_ids
+        ).all()
+        assert {item.subject_id for item in assertions} == {"amlodipine", "metformin"}
+        by_subject = {item.subject_id: item for item in assertions}
+        assert by_subject["amlodipine"].source_event_id == source_event.id
+        assert by_subject["amlodipine"].evidence_ids == [matching.id]
+        assert by_subject["metformin"].source_event_id == source_event.id
+        assert by_subject["metformin"].evidence_ids == [second_matching.id]
+        assert all(unrelated.id not in item.evidence_ids for item in assertions)
 
         # A second document that merely lists a different dose must remain a
         # reported mention; it must not create a new current medication assertion.
