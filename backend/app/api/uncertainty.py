@@ -208,6 +208,8 @@ def recommended_caregiver_questions(
     return {
         "person_id": person_id,
         "questions": [OpenQuestion.model_validate(row).model_dump(mode="json") for row in visible],
+        "eligible_question_ids": [row.id for row in unique],
+        "recommended_question_ids": [row.id for row in visible],
         "critical_count": len(critical),
         "ordinary_visible_count": min(2, len(ordinary)),
         "additional_ordinary_count": hidden_count,
