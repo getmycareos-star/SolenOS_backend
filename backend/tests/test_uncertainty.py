@@ -184,6 +184,12 @@ def test_create_information_gap():
             person_id="person-1", necessity="necessary"
         ).one()
         assert "finding6-producer-evidence" in necessary_question.evidence_ids
+        gap_context = next(
+            item for item in necessary_question.context
+            if item.get("source_kind") == "information_gap"
+        )
+        assert gap_context["source_id"] == grounded.json()["id"]
+        assert gap_context["necessity_assessment"]["evidence_ids"] == ["finding6-producer-evidence"]
         assert necessary_question.status == "open"
 
         # Updating the structured necessity assessment must suppress the
