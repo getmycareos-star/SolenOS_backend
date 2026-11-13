@@ -68,5 +68,5 @@ jobs:
       - name: Apply the complete Alembic migration chain
         working-directory: backend
         run: alembic upgrade head
-      - name: Run longitudinal messy-care benchmark on migrated PostgreSQL
+      - name: Run complete backend test suite on migrated PostgreSQL
         run: python -m pytest -q backend/tests
