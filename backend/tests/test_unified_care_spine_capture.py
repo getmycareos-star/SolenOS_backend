@@ -416,7 +416,10 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             historical_prompt = "\\n".join(
                 str(message.get("content", "")) for message in captured_prompts[-1]
             )
-            assert old_history_event_id in historical_prompt
+            # Internal IDs belong in response provenance metadata, not
+            # caregiver-facing prompt prose. The old event's source content
+            # must be present in the model context.
+            assert old_history_event_id in historical_body.get("source_event_ids", [])
             assert "repeated waking overnight" in historical_prompt
             # Internal database IDs belong in response provenance metadata, not
             # caregiver-facing model prose. Verify the exact saved report content
