@@ -121,7 +121,7 @@ def has_valid_caregiver_necessity(
             str(value) for value in assessment_evidence_ids
             if isinstance(value, str) and value.strip()
         } if isinstance(assessment_evidence_ids, list) else set()
-        evidence_matches_context = bool(context_evidence_ids.intersection(evidence_ids))
+        source_record_evidence_ids = set()
         source_record_exists = True
         if db is not None:
             source_record_exists = False
@@ -140,6 +140,8 @@ def has_valid_caregiver_necessity(
                     and source_row.subject_type == getattr(question, "subject_type", None)
                     and source_row.subject_id == getattr(question, "subject_id", None)
                 )
+                if source_row:
+                    source_record_evidence_ids.update(str(value) for value in (source_row.evidence_ids or []) if value)
             elif source_kind == "caregiver_report":
                 source_record_exists = bool(
                     isinstance(source_id, str)
@@ -166,10 +168,14 @@ def has_valid_caregiver_necessity(
                         Evidence.id == record_id, Evidence.person_id == scoped_person_id
                     ).first():
                         source_record_exists = True
-                    elif record_type == "care_event" and db.query(CareEvent.id).filter(
-                        CareEvent.id == record_id, CareEvent.person_id == scoped_person_id
-                    ).first():
-                        source_record_exists = True
+                        source_record_evidence_ids.add(str(record_id))
+                    elif record_type == "care_event":
+                        event_row = db.query(CareEvent).filter(
+                            CareEvent.id == record_id, CareEvent.person_id == scoped_person_id
+                        ).first()
+                        if event_row:
+                            source_record_exists = True
+                            source_record_evidence_ids.update(str(value) for value in (event_row.evidence_ids or []) if value)
             elif source_kind == "contradiction":
                 source_row = db.query(Contradiction).filter(
                     Contradiction.id == source_id,
@@ -181,6 +187,8 @@ def has_valid_caregiver_necessity(
                     and source_row.subject_type == getattr(question, "subject_type", None)
                     and source_row.subject_id == getattr(question, "subject_id", None)
                 )
+                if source_row:
+                    source_record_evidence_ids.update(str(value) for value in (source_row.evidence_ids or []) if value)
             elif source_kind == "stale_or_unreviewed_assertion":
                 source_row = db.query(CareAssertion).filter(
                     CareAssertion.id == source_id,
@@ -196,6 +204,8 @@ def has_valid_caregiver_necessity(
                         reviewed_at=_latest_assertion_review_at(db, source_row),
                     )["status"] == "needs_confirmation"
                 )
+                if source_row:
+                    source_record_evidence_ids.update(str(value) for value in (source_row.evidence_ids or []) if value)
             elif source_kind == "registered_action":
                 source_row = db.query(Action).filter(
                     Action.id == source_id,
@@ -211,6 +221,10 @@ def has_valid_caregiver_necessity(
                     and str(source_row.subject_type or "patient") == getattr(question, "subject_type", None)
                     and str(source_row.subject_id or scoped_person_id) == getattr(question, "subject_id", None)
                 )
+                if source_row:
+                    source_record_evidence_ids.update(str(value) for value in (
+                        [source_row.source_evidence_id] + list(source_row.source_evidence_ids or [])
+                    ) if value)
             elif source_kind == "appointment_workspace_follow_up":
                 source_row = db.query(OpenLoopRecord).filter(
                     OpenLoopRecord.id == source_id,
@@ -223,6 +237,17 @@ def has_valid_caregiver_necessity(
                     and getattr(question, "subject_type", None) == "appointment_follow_up"
                     and getattr(question, "subject_id", None) == str(source_row.id)
                 )
+                if source_row:
+                    for evidence_item in (source_row.evidence or []):
+                        if not isinstance(evidence_item, dict):
+                            continue
+                        assessment = evidence_item.get("clarification_assessment")
+                        if isinstance(assessment, dict):
+                            source_record_evidence_ids.update(str(value) for value in (assessment.get("evidence_ids") or []) if value)
+                        source_record_evidence_ids.update(str(value) for value in (evidence_item.get("evidence_ids") or []) if value)
+        evidence_matches_context = bool(
+            (context_evidence_ids | source_record_evidence_ids).intersection(evidence_ids)
+        )
         if (
             has_dependency and has_source_reference and has_rationale
             and evidence_matches_context and source_record_exists
