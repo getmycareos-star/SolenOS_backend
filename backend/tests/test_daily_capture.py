@@ -2142,7 +2142,9 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
                 ("barely touched her lunch today", "reported"),
                 ("drank some water", "reported"),
             ],
-            reports[2]: [],
+            reports[2]: [
+                ("changed Mum's medication yesterday", "uncertain"),
+            ],
             reports[3]: [
                 ("was calmer this evening", "reported"),
                 ("ate a little more at dinner", "reported"),
@@ -2230,6 +2232,7 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
                 "seemed more unsettled this morning",
                 "barely touched her lunch today",
                 "drank some water",
+                "changed Mum's medication yesterday",
                 "was calmer this evening",
                 "ate a little more at dinner",
                 "is now resting",
@@ -2238,10 +2241,13 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
             assert by_value["seemed more unsettled this morning"].epistemic_status == "uncertain"
             assert by_value["seemed more unsettled this morning"].hedge_marker == "seemed"
             assert by_value["drank some water"].epistemic_status == "reported"
+            assert by_value["changed Mum's medication yesterday"].epistemic_status == "uncertain"
+            assert by_value["changed Mum's medication yesterday"].hedge_marker == "I think"
             assert by_value["was calmer this evening"].epistemic_status == "reported"
             assert "last night" in by_value["slept poorly last night"].context
             assert "this morning" in by_value["seemed more unsettled this morning"].context
             assert "today" in by_value["barely touched her lunch today"].context
+            assert "yesterday" in by_value["changed Mum's medication yesterday"].context
             assert "this evening" in by_value["was calmer this evening"].context
             assert "now" in by_value["is now resting"].context
             assert all(row.observed_at is None and row.occurred_at is None for row in all_observations)
