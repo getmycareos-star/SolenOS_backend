@@ -270,8 +270,12 @@ def _necessary_question_message(db: Session, person_id: str, question: OpenQuest
     elif question.intended_answerer_role == "other_caregiver":
         answerer = question.intended_answerer_label or "the other caregiver"
         answer_guidance = f" Best person to ask: {answerer}. Add what they share when available."
+    elif question.intended_answerer_role == "person_receiving_care":
+        answer_guidance = " If the person can share, record their own words or response. Do not guess for them."
+    elif question.intended_answerer_role == "reporting_caregiver":
+        answer_guidance = " Record what you personally observed or reported. If you're not sure, say so."
     else:
-        answer_guidance = " If you're not sure, you can say so."
+        answer_guidance = " The right person to answer is not clear yet. Do not guess; leave this open until someone can confirm."
     return f"{question.question}{source_sentence}{answer_guidance}{conflict_sentence}"
 
 
@@ -503,6 +507,10 @@ def create_proactive_care_notifications(
                 title=(
                     "A care detail needs care-team confirmation"
                     if question.intended_answerer_role == "professional"
+                    else "A care detail needs another caregiver's confirmation"
+                    if question.intended_answerer_role == "other_caregiver"
+                    else "A care detail needs confirmation"
+                    if question.intended_answerer_role == "person_receiving_care"
                     else "A care detail needs your input"
                 ),
                 body=_necessary_question_message(db, person_id, question),
