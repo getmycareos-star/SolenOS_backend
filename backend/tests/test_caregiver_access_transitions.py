@@ -297,14 +297,16 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
     assert transfer.status_code == 201, transfer.text
     transfer_id = transfer.json()["id"]
 
-    # The original owner remains assigned until James explicitly accepts.
+    # The pending transfer is visible to James, but the linked follow-up is
+    # not assigned to him until he explicitly accepts the responsibility.
+    pending_inbox = client.get("/api/v1/caregiver-access/responsibility-transfers", headers=james_headers)
+    assert pending_inbox.status_code == 200, pending_inbox.text
+    pending_transfer = next(item for item in pending_inbox.json() if item["id"] == transfer_id)
+    assert pending_transfer["status"] == "pending"
+    assert pending_transfer["related_record_id"] == existing_loop_id
     inherited_loops = client.get("/api/v1/open-loops", headers=james_headers)
     assert inherited_loops.status_code == 200, inherited_loops.text
-    inherited_item = next(item for item in inherited_loops.json()["items"] if item["id"] == existing_loop_id)
-    assert inherited_item["assigned_caregiver_id"] == james["caregiver_id"]
-    assert inherited_item["caregiver_id"] == primary["caregiver"]["id"]
-    assert inherited_item["owner_label"] == "James"
-    assert len([item for item in inherited_loops.json()["items"] if item["title"] == "Confirm Margaret's clinic appointment"]) == 1
+    assert not any(item["id"] == existing_loop_id for item in inherited_loops.json()["items"])
 
     db = TestSessionLocal()
     try:
@@ -321,6 +323,16 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["accepted"] is True
     assert accepted.json()["related_record_id"] == existing_loop_id
+
+    # Acceptance moves the follow-up assignment; the original creator remains
+    # recorded separately for provenance.
+    inherited_loops = client.get("/api/v1/open-loops", headers=james_headers)
+    assert inherited_loops.status_code == 200, inherited_loops.text
+    inherited_item = next(item for item in inherited_loops.json()["items"] if item["id"] == existing_loop_id)
+    assert inherited_item["assigned_caregiver_id"] == james["caregiver_id"]
+    assert inherited_item["caregiver_id"] == primary["caregiver"]["id"]
+    assert inherited_item["owner_label"] == "James"
+    assert len([item for item in inherited_loops.json()["items"] if item["title"] == "Confirm Margaret's clinic appointment"]) == 1
 
     db = TestSessionLocal()
     try:
