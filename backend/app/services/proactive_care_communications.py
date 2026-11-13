@@ -24,7 +24,7 @@ from app.services.care_continuity import (
 )
 
 
-OPEN_QUESTION_STATUSES = {"open", "unanswered", "pending", "unresolved"}
+OPEN_QUESTION_STATUSES = {"open", "unresolved"}
 OPEN_LOOP_DUE_WINDOW = timedelta(hours=24)
 OPEN_LOOP_OVERDUE_WINDOW = timedelta(hours=24)
 OPEN_LOOP_PUSH_WINDOW = timedelta(hours=6)
