@@ -239,7 +239,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
                     "necessity_assessment": {
                         "necessity_rationale": "The next care decision depends on this missing detail.",
                         "decision_dependency": "The handoff cannot be completed until this gap is clarified.",
-                        "evidence_ids": ["gap-evidence"],
+                        "evidence_ids": [] if gap_id == "gap-open" else ["gap-evidence"],
                     },
                 }],
             ))
