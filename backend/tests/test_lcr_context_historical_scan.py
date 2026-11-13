@@ -123,3 +123,44 @@ def test_unqueried_current_care_projection_remains_explicitly_bounded():
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
+
+
+def test_full_care_journey_scan_does_not_require_lexical_match_and_reports_remaining_history():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _care_events_schema(engine)
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    rows = []
+    for index in range(60):
+        happened = now - timedelta(days=index)
+        rows.append({
+            "id": f"journey-event-{index:03d}",
+            "person_id": "person-a",
+            "event_type": "daily_observation",
+            "status": "recorded",
+            "occurred_at": happened,
+            "recorded_at": happened,
+            "created_at": happened,
+            "title": f"Care entry {index}",
+            "description": f"Recorded care detail {index}.",
+        })
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(events.insert(), rows)
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db, "person-a", limit_per_source=50,
+                query="tell me the complete care journey",
+                include_all_history=True,
+            )
+
+        source = context["sources"]["events"]
+        assert source["candidate_scan_complete"] is True
+        assert source["candidate_count"] == 60
+        assert source["returned_count"] == 50
+        assert source["has_more"] is True
+        assert context["history_coverage"] == "complete_history_scan_ranked_subset"
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
