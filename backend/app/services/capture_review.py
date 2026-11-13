@@ -165,6 +165,11 @@ def supplement_source_grounded_daily_observations(
                 and str(item.get("source_quote") or "").strip() == sentence
             )
         ]
+        existing_values = {
+            str(item.get("observation") or "").strip().casefold()
+            for item in observations
+            if isinstance(item.get("observation"), str)
+        }
         for clause in valid_clauses:
             subject_match = _DAILY_CLAUSE_SUBJECT.match(clause)
             subject = subject_match.group(1).strip() if subject_match else inherited_subject
