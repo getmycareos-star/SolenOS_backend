@@ -1073,9 +1073,21 @@ def _reopen_due_deferred_loops(db: Session, now: datetime) -> int:
     """Wake deferred work at its persisted review time after any process restart."""
     rows = db.query(OpenLoopRecord).filter(
         OpenLoopRecord.status == "deferred",
-        OpenLoopRecord.review_at.is_not(None),
-        OpenLoopRecord.review_at <= now,
-    ).order_by(OpenLoopRecord.review_at.asc(), OpenLoopRecord.id.asc()).with_for_update().all()
+        or_(
+            and_(
+                OpenLoopRecord.review_at.is_not(None),
+                OpenLoopRecord.review_at <= now,
+            ),
+            and_(
+                OpenLoopRecord.deadline_at.is_not(None),
+                OpenLoopRecord.deadline_at <= now,
+            ),
+        ),
+    ).order_by(
+        OpenLoopRecord.deadline_at.asc().nullslast(),
+        OpenLoopRecord.review_at.asc().nullslast(),
+        OpenLoopRecord.id.asc(),
+    ).with_for_update().all()
     reopened = 0
     for loop in rows:
         before = _snapshot(loop)
@@ -1090,6 +1102,14 @@ def _reopen_due_deferred_loops(db: Session, now: datetime) -> int:
             db, loop, "deferred_review_due", before,
             [{
                 "review_due_at": before.get("review_at"),
+                "deadline_due": bool(
+                    loop.deadline_at
+                    and (
+                        loop.deadline_at.replace(tzinfo=timezone.utc)
+                        if loop.deadline_at.tzinfo is None
+                        else loop.deadline_at
+                    ) <= now
+                ),
                 "reopened_at": now.isoformat(),
                 "deferred_reason_retained": bool(loop.deferred_reason),
                 "completion_inferred": False,
