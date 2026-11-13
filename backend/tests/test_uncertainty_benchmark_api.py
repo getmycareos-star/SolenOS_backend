@@ -322,7 +322,7 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
             OpenQuestion(
                 person_id="benchmark-person-a",
                 subject_type="appointment",
-                subject_id="appointment-2",
+                subject_id="appointment-1",
                 question="Confirm the clinic result",
                 status="open",
                 necessity="not_assessed",
