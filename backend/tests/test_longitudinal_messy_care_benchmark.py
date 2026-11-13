@@ -1689,3 +1689,30 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
         assert getattr(question.priority, "value", question.priority) == "high"
         assert "prescribing clinician or pharmacist" in question.question
         assert set(question.evidence_ids or []) == {saved_ids[1]}
+
+def test_delta_engine_fails_closed_when_prior_assertion_baseline_is_truncated():
+    from app.services.delta_engine import _apply_incomplete_baseline_guard
+
+    finding = {
+        "change_type": "unchanged",
+        "certainty": "supported",
+        "previous": "stable",
+        "current": "stable",
+    }
+    _apply_incomplete_baseline_guard(finding, baseline_complete=False)
+
+    assert finding["change_type"] == "uncertain"
+    assert finding["certainty"] == "uncertain"
+    assert finding["baseline_incomplete"] is True
+    assert "truncated" in finding["comparison_warning"].lower()
+
+    complete_finding = {
+        "change_type": "unchanged",
+        "certainty": "supported",
+    }
+    _apply_incomplete_baseline_guard(complete_finding, baseline_complete=True)
+    assert complete_finding == {
+        "change_type": "unchanged",
+        "certainty": "supported",
+    }
+
