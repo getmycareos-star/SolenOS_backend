@@ -553,6 +553,7 @@ def test_postgres_appointment_callback_promise_survives_session_refresh_and_retr
                 "payload": {
                     "visitPurpose": "Specialist follow-up recommended at discharge.",
                     "followUps": [{
+                        "id": "specialist-follow-up-" + suffix,
                         "action": "Arrange specialist follow-up within two weeks",
                         "owner": "Sarah",
                         "owner_role": "caregiver",
@@ -570,6 +571,32 @@ def test_postgres_appointment_callback_promise_survives_session_refresh_and_retr
             )
             assert revised.status_code == 200, revised.text
 
+            # Editing wording in a later workspace revision must update the
+            # original follow-up rather than cancel/recreate it as a new task.
+            edited_payload = {
+                "expected_version": 2,
+                "status": "follow_up_pending",
+                "payload": {
+                    "visitPurpose": "Specialist follow-up recommended at discharge.",
+                    "followUps": [{
+                        "id": "specialist-follow-up-" + suffix,
+                        "action": "Confirm the specialist appointment date",
+                        "owner": "Sarah",
+                        "owner_role": "caregiver",
+                        "due": "2026-11-27T12:00:00+00:00",
+                        "status": "open",
+                    }],
+                },
+                "change_reason": "Clarify the same outstanding follow-up without replacing its identity",
+                "idempotency_key": "callback-workspace-followup-edit-" + suffix,
+            }
+            edited = client.patch(
+                f"/api/v1/appointment-workspaces/{workspace_id}",
+                headers=headers,
+                json=edited_payload,
+            )
+            assert edited.status_code == 200, edited.text
+
             listed = client.get("/api/v1/open-loops?limit=100", headers=headers)
             assert listed.status_code == 200, listed.text
             matches = [
@@ -579,9 +606,9 @@ def test_postgres_appointment_callback_promise_survives_session_refresh_and_retr
             ]
             assert len(matches) == 1, "the appointment recommendation must create exactly one linked follow-up"
             loop_id = matches[0]["id"]
+            assert matches[0]["title"] == "Confirm the specialist appointment date"
             original_title = matches[0]["title"]
             original_deadline = matches[0]["deadline_at"]
-            assert "specialist follow-up" in original_title.lower()
             assert original_deadline is not None
 
             callback_payload = {
@@ -641,6 +668,10 @@ def test_postgres_appointment_callback_promise_survives_session_refresh_and_retr
             )
             assert history.status_code == 200, history.text
             events = history.json()
+            event_types = {event.get("event_type") for event in events}
+            assert "created_from_appointment_follow_up" in event_types
+            assert "source_reconciled" in event_types, "wording edit must be an audited update to the original commitment"
+            assert "source_follow_up_removed" not in event_types, "wording edit must not cancel the original commitment"
             callback_events = [
                 event for event in events
                 if event.get("event_type") in {"response_recorded", "response_received"}
