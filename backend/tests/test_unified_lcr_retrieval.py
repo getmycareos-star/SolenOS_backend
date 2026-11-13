@@ -517,7 +517,7 @@ def test_temporal_retrieval_uses_exclusive_before_and_after_date_boundaries():
     assert before["start"] == "0001-01-01T00:00:00+00:00"
     assert before["end"].startswith("2026-11-05T23:59:59")
     assert after["start"] == "2026-11-06T00:00:00+00:00"
-    assert after["end"].startswith("2026-11-06T23:59:59")
+    assert after["end"].startswith("9998-12-31T23:59:59")
 
 
 def test_temporal_retrieval_resolves_explicit_relative_windows():
