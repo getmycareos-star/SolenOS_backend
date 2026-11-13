@@ -135,12 +135,17 @@ def has_valid_caregiver_necessity(
                 )
             elif source_kind in {"daily_capture_extraction", "document_extraction"}:
                 source_refs = item.get("source_record_refs")
-                for source_ref in source_refs if isinstance(source_refs, list) else []:
-                    if not isinstance(source_ref, dict):
-                        continue
+                normalized_refs = [
+                    source_ref for source_ref in source_refs
+                    if isinstance(source_ref, dict)
+                    and isinstance(source_ref.get("record_id"), str)
+                    and source_ref.get("record_id").strip()
+                ] if isinstance(source_refs, list) else []
+                source_reference_ids = {source_ref["record_id"] for source_ref in normalized_refs}
+                for source_ref in normalized_refs:
                     record_type = source_ref.get("record_type")
                     record_id = source_ref.get("record_id")
-                    if not isinstance(record_id, str) or not record_id.strip():
+                    if record_id != source_id:
                         continue
                     if record_type == "evidence" and db.query(Evidence.id).filter(
                         Evidence.id == record_id, Evidence.person_id == scoped_person_id
