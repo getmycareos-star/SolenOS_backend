@@ -99,6 +99,31 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
             time_provenance="caregiver_reported",
         )
         db.add_all([event, evidence])
+        db.flush()
+        question_rationale = "The next care review depends on confirming whether this sleep pattern continued."
+        db.add(OpenQuestion(
+            id="companion-approved-question",
+            person_id=person_id,
+            question="Did the restless sleep continue on another night?",
+            subject_type="sleep",
+            subject_id=person_id,
+            status="open",
+            necessity="necessary",
+            necessity_rationale=question_rationale,
+            priority=Priority.HIGH,
+            intended_answerer_role="professional",
+            intended_answerer_label="the care professional",
+            evidence_ids=[evidence.id],
+            context=[{
+                "source_kind": "caregiver_report",
+                "source_id": evidence.id,
+                "necessity_assessment": {
+                    "necessity_rationale": question_rationale,
+                    "decision_dependency": "The care team cannot review whether a sleep pattern exists without another dated observation.",
+                    "evidence_ids": [evidence.id],
+                },
+            }],
+        ))
         db.commit()
         event_id = event.id
         db.close()
@@ -142,6 +167,10 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert "reported date: 2026-10-26T08:15:00" in user_payload
         assert "collected date: 2026-10-26T08:20:00" in user_payload
         assert "reported by: Daughter" in user_payload
+        assert "Did the restless sleep continue on another night?" in user_payload
+        assert "intended_answerer_role" in user_payload
+        assert "ask no more than one focused question" in system_prompt
+        assert "Did the restless sleep continue on another night?" not in data["reply"]
         assert captured["options"]["num_predict"] > 32
 
         db = TestingSessionLocal()
