@@ -5023,6 +5023,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_event_ids = list(dict.fromkeys(selected_ids_by_type.get("events", [])))
         source_appointment_ids = list(dict.fromkeys(selected_ids_by_type.get("appointments", [])))
         source_assertion_ids = list(dict.fromkeys(selected_ids_by_type.get("assertions", [])))
+        source_document_analysis_ids = list(dict.fromkeys(selected_ids_by_type.get("document_extractions", [])))
         source_evidence_ids = list(dict.fromkeys([
             *selected_ids_by_type.get("evidence", []),
             *selected_ids_by_type.get("care_evidence", []),
