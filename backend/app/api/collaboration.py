@@ -4608,6 +4608,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     event_context: list[str] = []
     appointment_context: list[str] = []
     evidence_context: list[str] = []
+    verified_document_context_lines: list[str] = []
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
     source_document_analysis_ids: list[str] = []
@@ -4836,17 +4837,34 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 continue
             extraction_metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
             source_document_analysis_ids.append(str(analysis.id))
+            extraction_context = {
+                "document_extraction_id": str(analysis.id),
+                "source_evidence_id": str(evidence.id),
+                "filename": extraction_metadata.get("filename"),
+                "extraction_status": analysis.extraction_status,
+                "extraction_method": extraction_metadata.get("extraction_method"),
+                "source_text": (analysis.source_text or "")[:1800],
+                "source_text_sha256": extraction_metadata.get("source_text_sha256"),
+                "information_status": "document_extracted_unreviewed",
+                "interpretation_limit": "Server-extracted source text from the preserved original upload; not an accepted LCR assertion or independent clinical verification.",
+            }
             evidence_context.append(
                 "Persisted server-extracted document evidence: "
+                + json.dumps(extraction_context, ensure_ascii=False)
+            )
+            # Companion's canonical retrieval projection is preferred. Keep a
+            # caregiver-scoped, integrity-verified fallback record so a relevant
+            # document cannot disappear merely because the projection's lexical
+            # selector omits its extraction row.
+            verified_document_context_lines.append(
+                "Shared LCR context (source-attributed; verified original upload): "
                 + json.dumps({
-                    "document_extraction_id": str(analysis.id),
-                    "source_evidence_id": str(evidence.id),
-                    "filename": extraction_metadata.get("filename"),
-                    "extraction_status": analysis.extraction_status,
-                    "extraction_method": extraction_metadata.get("extraction_method"),
-                    "source_text": (analysis.source_text or "")[:1800],
-                    "source_text_sha256": extraction_metadata.get("source_text_sha256"),
-                    "interpretation_limit": "Server-extracted source text from the preserved original upload; not an accepted LCR assertion or independent clinical verification.",
+                    "source_type": "document_extractions",
+                    "source_id": str(analysis.id),
+                    "record": {
+                        **extraction_context,
+                        "id": str(analysis.id),
+                    },
                 }, ensure_ascii=False)
             )
         source_context.extend(evidence_context)
@@ -5075,6 +5093,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         }, ensure_ascii=False, default=str)
                     )
             shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
+            existing_document_ids = set()
+            for line in shared_lcr_lines:
+                try:
+                    payload = json.loads(line[line.index("{"):])
+                    if payload.get("source_type") == "document_extractions" and payload.get("source_id"):
+                        existing_document_ids.add(str(payload["source_id"]))
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+            for document_line in verified_document_context_lines:
+                try:
+                    payload = json.loads(document_line[document_line.index("{"):])
+                    document_id = str(payload.get("source_id") or "")
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+                if document_id and document_id not in existing_document_ids:
+                    shared_lcr_lines.append(document_line)
+                    existing_document_ids.add(document_id)
             if care_journey_request:
                 shared_lcr_lines.sort(key=_lcr_context_chronological_key)
             selected_source_counts: dict[str, int] = {}
