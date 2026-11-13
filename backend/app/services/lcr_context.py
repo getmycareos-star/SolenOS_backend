@@ -515,7 +515,7 @@ def build_lcr_context(
             else:
                 # Undated sources cannot satisfy an explicit temporal query.
                 statement = statement.where(false())
-        if terms:
+        if terms and not include_all_history:
             search_predicates = _text_search_predicates(table, source_name, terms)
             if search_predicates:
                 statement = statement.where(or_(*search_predicates))
