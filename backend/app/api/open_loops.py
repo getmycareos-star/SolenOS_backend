@@ -250,9 +250,11 @@ def _get_scoped(db, person_id, caregiver_id, loop_id, *, for_update=False):
     return loop
 
 
-def _reassess(db, loop):
+def _reassess(db, loop, *, now: datetime | None = None):
     reasons = []
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     deadline = loop.deadline_at
     if deadline and deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)
@@ -1082,7 +1084,7 @@ def _reopen_due_deferred_loops(db: Session, now: datetime) -> int:
         # Recompute priority against the current clock and persisted commitments.
         # A deadline may have elapsed while this item was deferred; carrying the
         # pre-deferral priority forward would hide newly overdue work.
-        _reassess(db, loop)
+        _reassess(db, loop, now=now)
         loop.updated_at = now
         _audit(
             db, loop, "deferred_review_due", before,
