@@ -735,7 +735,7 @@ def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
         deadline_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
         deadline_source="explicit_user",
     )
-    review_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    review_at = datetime.now(timezone.utc) + timedelta(days=4)
     deferred = client.patch(
         f"/api/v1/open-loops/{loop['id']}",
         headers=headers,
@@ -769,6 +769,7 @@ def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
         assert event.before_state["status"] == "deferred"
         assert event.after_state["status"] == "open"
         assert event.evidence[0]["completion_inferred"] is False
+        assert event.evidence[0]["deadline_due"] is True
     finally:
         db.close()
 
