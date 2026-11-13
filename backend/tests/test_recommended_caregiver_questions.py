@@ -1,5 +1,6 @@
 """API tests for the evidence-validated caregiver question projection."""
 import hashlib
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -414,6 +415,20 @@ def test_one_hundred_case_question_gate_benchmark():
         true_positives = len(predicted_eligible.intersection(expected_eligible))
         precision = true_positives / max(1, len(predicted_eligible))
         recall = true_positives / max(1, len(expected_eligible))
+        print("QUESTION_SELECTION_BENCHMARK=" + json.dumps({
+            "cases_total": 100,
+            "expected_eligible": len(expected_eligible),
+            "predicted_eligible": len(predicted_eligible),
+            "precision": precision,
+            "recall": recall,
+            "critical_preserved": result["critical_count"],
+            "ordinary_initial_limit": result["ordinary_visible_count"],
+            "duplicate_suppressed": "benchmark-question-duplicate" not in result["eligible_question_ids"],
+            "cross_person_evidence_rejected": all(
+                f"benchmark-question-{index:03d}" not in predicted_eligible
+                for index in range(80, 100)
+            ),
+        }, sort_keys=True))
         assert precision == 1.0
         assert recall == 1.0
         assert predicted_eligible == expected_eligible
