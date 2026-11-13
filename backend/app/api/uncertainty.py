@@ -178,7 +178,7 @@ def recommended_caregiver_questions(
     }
     eligible.sort(key=lambda row: (
         -priority_weight.get(str(getattr(row.priority, "value", row.priority)), 0),
-        row.asked_at or datetime.min,
+        row.asked_at.isoformat() if row.asked_at else "",
         str(row.id),
     ))
     # Exact normalized duplicates are one caregiver task; preserve the
