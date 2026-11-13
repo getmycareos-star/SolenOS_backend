@@ -4498,6 +4498,41 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
     return " ".join(guidance)
 
 
+def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
+    """Fail closed when the model ignores explicit caregiver interaction constraints."""
+    guidance = _caregiver_interaction_guidance(user_text)
+    if not guidance or not isinstance(reply, str) or not reply.strip():
+        return False
+    text = reply.strip()
+    lowered = text.casefold()
+    if "LOW-CAPACITY RESPONSE" in guidance:
+        sentences = [part for part in re.split(r"(?<=[.!?])\\s+", text) if part.strip()]
+        questions = text.count("?")
+        list_lines = re.findall(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", text)
+        if len(sentences) > 3 or questions > 1 or list_lines:
+            return True
+    if "CONTINUITY REPAIR" in guidance and re.search(
+        r"\\b(?:repeat (?:yourself|the story|that)|tell me (?:again|the whole story)|"
+        r"start (?:all )?over|what did you say before)\\b",
+        lowered,
+    ):
+        return True
+    if "CORRECTION HANDLING" in guidance and re.search(
+        r"\\b(?:i(?:'ve| have) (?:updated|changed|corrected|saved) (?:the )?(?:care )?record|"
+        r"the record (?:is|has been) updated)\\b",
+        lowered,
+    ):
+        return True
+    if "VAGUE CONCERN" in guidance and text.count("?") > 1:
+        return True
+    if "DISTRESS RESPONSE" in guidance and re.search(
+        r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+",
+        text,
+    ):
+        return True
+    return False
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -5413,9 +5448,60 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unsupported_care_claim(reply, validation_source)
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
+            or _caregiver_response_needs_revision(user_text, reply)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
-        if invalid_reply and greeting_only:
+        if invalid_reply and (greeting_only or caregiver_guidance):
+            # Explicit caregiver-capacity and continuity constraints are part of
+            # the response contract, not prompt suggestions. Ask the model to
+            # repair a non-compliant answer; if it still fails, do not persist it.
+            for revision_attempt in range(2 if caregiver_guidance else 3):
+                retry_instruction = (
+                    "Revise your previous answer to obey the caregiver interaction constraints. "
+                    "Keep the answer grounded only in the authorized records. Do not ask the caregiver "
+                    "to repeat information already provided. For an overwhelmed caregiver, use no more "
+                    "than three short sentences, no list, and at most one question. For a vague concern, "
+                    "ask at most one focused open question. Do not claim a record was changed or an action "
+                    "was completed unless the backend confirmed it. Return only the revised caregiver-facing answer."
+                    if caregiver_guidance else
+                    "Revise your previous response for the current greeting. "
+                    "Return only one natural sentence of at most 8 words. "
+                    "Do not ask a question, mention caregiving, introduce a topic, "
+                    "or describe your capabilities. Respond directly to the user's "
+                    "actual greeting. Do not explain these instructions."
+                )
+                retry_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": str(reply or "")},
+                    {"role": "user", "content": retry_instruction},
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat,
+                        base,
+                        model,
+                        retry_messages,
+                        {"temperature": 0.1, "num_predict": 128 if caregiver_guidance else 16},
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                    ) from exc
+                invalid_reply = (
+                    not isinstance(reply, str)
+                    or not reply.strip()
+                    or _companion_message_needs_revision(reply)
+                    or _contains_unrequested_saba(reply, validation_source)
+                    or _contains_unsupported_care_claim(reply, validation_source)
+                    or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+                    or _contains_unsupported_record_reference(reply, validation_source)
+                    or _caregiver_response_needs_revision(user_text, reply)
+                    or (greeting_only and _greeting_reply_needs_revision(reply))
+                )
+                if not invalid_reply:
+                    break
+        if invalid_reply:
             # Let Qwen revise its own output more than once when a small model
             # misses the brevity constraint. Every candidate remains model-
             # generated; if none passes validation, fail closed rather than
