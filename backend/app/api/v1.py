@@ -944,6 +944,15 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         else evidence.source_text if evidence is not None
         else (event.description or "")
     )[:12_000]
+    # Some legacy capture paths populate the event's evidence_ids but leave the
+    # local Evidence object unset. Resolve the persisted source before deciding
+    # whether background processing can be queued; never fall through to
+    # synchronous model inference after the caregiver's save has committed.
+    if evidence is None and event.evidence_ids:
+        evidence = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id == str(event.evidence_ids[0]),
+        ).first()
     if evidence is not None:
         # The caregiver-facing save ends after the event, evidence, analysis
         # placeholder and durable work item commit. Extraction, clarification,
