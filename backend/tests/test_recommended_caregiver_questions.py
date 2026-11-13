@@ -12,7 +12,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.core.uncertainty_enums import Priority, GapLifecycleStatus, EpistemicState, GapReason
 import app.main as main_module
 from app.main import app
-from app.models.care import Person, Caregiver, Evidence
+from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.anonymous_session import AnonymousSession
 from app.models.uncertainty import OpenQuestion, InformationGap
 
@@ -318,10 +318,29 @@ def test_one_hundred_case_question_gate_benchmark():
                 "decision_dependency": "The next handoff step depends on this answer." if necessary else None,
                 "evidence_ids": [] if 35 <= index < 40 else [evidence_id],
             }
-            context = [{
-                **({"source_kind": "document_extraction", "source_id": evidence_id, "source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}]} if source_bound else {}),
-                "necessity_assessment": assessment,
-            }]
+            if 35 <= index < 40:
+                event_id = f"benchmark-event-{index:03d}"
+                db.add(CareEvent(
+                    id=event_id, person_id=person.id,
+                    event_type="daily_capture", status="recorded",
+                    occurred_at=datetime.now(timezone.utc),
+                    title=f"Synthetic event {index}", description="No linked evidence.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver.id,
+                ))
+                source_context = {
+                    "source_kind": "daily_capture_extraction",
+                    "source_id": event_id,
+                    "source_record_refs": [{"record_type": "care_event", "record_id": event_id}],
+                }
+            elif source_bound:
+                source_context = {
+                    "source_kind": "document_extraction",
+                    "source_id": evidence_id,
+                    "source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}],
+                }
+            else:
+                source_context = {}
+            context = [{**source_context, "necessity_assessment": assessment}]
             priority = Priority.CRITICAL if index < 10 else Priority.HIGH
             db.add(OpenQuestion(
                 id=question_id,
