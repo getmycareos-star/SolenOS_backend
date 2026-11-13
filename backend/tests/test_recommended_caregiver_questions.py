@@ -8,11 +8,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.core.uncertainty_enums import Priority
+from app.core.uncertainty_enums import Priority, GapLifecycleStatus, EpistemicState, GapReason
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence
 from app.models.anonymous_session import AnonymousSession
-from app.models.uncertainty import OpenQuestion
+from app.models.uncertainty import OpenQuestion, InformationGap
 
 
 engine = create_engine(
@@ -164,6 +164,66 @@ def test_recommended_projection_is_person_scoped_and_empty_is_explicit():
     finally:
         teardown()
 
+
+
+def test_recommended_projection_reassesses_gap_lifecycle_before_showing_questions():
+    setup()
+    try:
+        db = SessionLocal()
+        person = Person(id="gap-person", name="Gap Person")
+        caregiver = Caregiver(
+            id="gap-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        evidence = Evidence(
+            id="gap-evidence", person_id=person.id, type="caregiver_report",
+            source_text="A current care decision is waiting on this detail.",
+            uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+        )
+        db.add_all([person, caregiver, evidence])
+        db.flush()
+        for gap_id, lifecycle in (
+            ("gap-open", GapLifecycleStatus.OPEN),
+            ("gap-resolved", GapLifecycleStatus.RESOLVED),
+            ("gap-reopened", GapLifecycleStatus.REOPENED),
+        ):
+            db.add(InformationGap(
+                id=gap_id, person_id=person.id, subject_type="care",
+                subject_id=gap_id, field="follow_up_status",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.NOT_DOCUMENTED,
+                priority=Priority.HIGH, lifecycle_status=lifecycle,
+                evidence_ids=["gap-evidence"],
+            ))
+            db.add(OpenQuestion(
+                id=f"question-{gap_id}", person_id=person.id,
+                question=f"What is the source-backed status for {gap_id}?",
+                subject_type="care", subject_id=gap_id, status="open",
+                necessity="necessary",
+                necessity_rationale="The next care decision depends on this missing detail.",
+                priority=Priority.HIGH, evidence_ids=["gap-evidence"],
+                context=[{
+                    "source_kind": "information_gap", "source_id": gap_id,
+                    "necessity_assessment": {
+                        "necessity_rationale": "The next care decision depends on this missing detail.",
+                        "decision_dependency": "The handoff cannot be completed until this gap is clarified.",
+                        "evidence_ids": ["gap-evidence"],
+                    },
+                }],
+            ))
+        db.commit()
+        db.close()
+
+        response = client_for("gap-person").get(
+            "/api/v1/uncertainty/questions/recommended/gap-person"
+        )
+        assert response.status_code == 200, response.text
+        ids = {item["id"] for item in response.json()["questions"]}
+        assert "question-gap-open" in ids
+        assert "question-gap-reopened" in ids
+        assert "question-gap-resolved" not in ids
+    finally:
+        teardown()
 
 def test_one_hundred_case_question_gate_benchmark():
     """100 deterministic synthetic cases: 40 valid, 60 must be withheld."""
