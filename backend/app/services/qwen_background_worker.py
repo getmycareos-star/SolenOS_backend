@@ -427,13 +427,41 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         caregiver_id=job.caregiver_id,
         limit_per_source=10,
     )
+    # build_lcr_context returns named source collections under "sources";
+    # checking a nonexistent top-level "events" key would make every queued
+    # Daily Care job fail its projection gate after the LCR write had succeeded.
+    projected_sources = lcr_context.get("sources", {})
+    projected_event_rows = (
+        projected_sources.get("events", {}).get("items", [])
+        if isinstance(projected_sources, dict) else []
+    )
+    projected_evidence_rows = (
+        projected_sources.get("evidence", {}).get("items", [])
+        if isinstance(projected_sources, dict) else []
+    )
+    projected_event = next(
+        (row for row in projected_event_rows if str(row.get("id")) == str(event_id)),
+        None,
+    )
+    projected_evidence = next(
+        (row for row in projected_evidence_rows if str(row.get("id")) == str(evidence_id)),
+        None,
+    )
+    event_links_evidence = bool(
+        projected_event
+        and str(evidence_id) in {str(value) for value in (projected_event.get("evidence_ids") or [])}
+    )
+    evidence_has_correct_author = bool(
+        projected_evidence
+        and str(projected_evidence.get("uploaded_by_caregiver_id")) == str(job.caregiver_id)
+    )
     projection_status = (
         "verified"
-        if any(str(row.get("id")) == str(event_id) for row in lcr_context.get("events", []))
+        if projected_event and projected_evidence and event_links_evidence and evidence_has_correct_author
         else "not_verified"
     )
     if projection_status != "verified":
-        raise RuntimeError("daily_capture_lcr_projection_not_verified")
+        raise RuntimeError("daily_capture_lcr_projection_or_evidence_lineage_not_verified")
 
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis.id,
@@ -451,7 +479,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "assessment": assessment_status,
         "review": review_status,
         "reconciliation": "completed",
-        "longitudinal_retrieval": "not_verified",
+        "longitudinal_retrieval": "verified" if projection_status == "verified" else "not_verified",
         "projection": projection_status,
         "reconciliation_run_id": reconciliation.get("run_id"),
     }
