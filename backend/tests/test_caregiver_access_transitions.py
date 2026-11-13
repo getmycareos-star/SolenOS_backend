@@ -489,6 +489,21 @@ def test_paperwork_only_scope_restricts_existing_sessions_without_erasing_histor
         },
     ).json()
     james_headers = {"Authorization": f"Bearer {james['access_token']}"}
+    person_id = sarah["person"]["id"]
+    original_note = client.post(
+        f"/api/v1/evidence?person_id={person_id}",
+        headers=sarah_headers,
+        json={
+            "person_id": person_id,
+            "uploaded_by_caregiver_id": sarah["caregiver"]["id"],
+            "type": "note",
+            "evidence_kind": "caregiver_report",
+            "epistemic_status": "unverified",
+            "source_text": "Sarah: The appointment letter arrived.",
+        },
+    )
+    assert original_note.status_code in {200, 201}, original_note.text
+    original_note_id = original_note.json()["id"]
     primary_transfer = client.post(
         "/api/v1/caregiver-access/primary-transfers",
         headers=sarah_headers,
@@ -506,6 +521,31 @@ def test_paperwork_only_scope_restricts_existing_sessions_without_erasing_histor
         json={"access_scope": "documents_only"},
     )
     assert narrowed.status_code == 200, narrowed.text
+
+    # Documents remain available; non-document uploads and downloads do not.
+    document_bytes = b"Clinic letter: appointment confirmed."
+    uploaded_document = client.post(
+        "/api/v1/upload",
+        headers=sarah_headers,
+        data={"person_id": person_id, "caregiver_id": sarah["caregiver"]["id"], "evidence_type": "document"},
+        files={"file": ("clinic-letter.txt", document_bytes, "text/plain")},
+    )
+    assert uploaded_document.status_code == 201, uploaded_document.text
+    document_id = uploaded_document.json()["evidence_id"]
+    blocked_upload = client.post(
+        "/api/v1/upload",
+        headers=sarah_headers,
+        data={"person_id": person_id, "caregiver_id": sarah["caregiver"]["id"], "evidence_type": "note"},
+        files={"file": ("care-note.txt", b"Care update.", "text/plain")},
+    )
+    assert blocked_upload.status_code == 403, blocked_upload.text
+    visible_evidence = client.get(f"/api/v1/evidence/{person_id}", headers=sarah_headers)
+    assert visible_evidence.status_code == 200, visible_evidence.text
+    assert {item["id"] for item in visible_evidence.json()} == {document_id}
+    assert client.get(f"/api/v1/upload/{original_note_id}", headers=sarah_headers).status_code == 404
+    downloaded_document = client.get(f"/api/v1/upload/{document_id}", headers=sarah_headers)
+    assert downloaded_document.status_code == 200, downloaded_document.text
+    assert downloaded_document.content == document_bytes
 
     # Existing bearer sessions observe the new scope on the next request.
     care_record_denied = client.get(
