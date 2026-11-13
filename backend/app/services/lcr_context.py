@@ -111,7 +111,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
             "context", "acceptance_status", "acceptance_evidence",
             "completion_evidence", "is_completed", "provenance", "created_at",
         ],
-        "order": ["effective_time", "timestamp", "created_at"],
+        "order": ["timestamp", "effective_time", "created_at"],
     },
     "timeline": {
         "table": "care_timeline_entries",
