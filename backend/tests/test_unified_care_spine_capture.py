@@ -3,6 +3,7 @@
 This test intentionally runs only against the migrated PostgreSQL service. It
 must not silently fall back to SQLite or a mocked persistence layer.
 """
+import asyncio
 import hashlib
 import os
 import uuid
@@ -18,8 +19,12 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.collaboration import EvidenceUpload
+from app.models.qwen_background_job import QwenBackgroundJob
 import app.api.daily_care_intelligence as daily_care_intelligence
 import app.api.collaboration as collaboration
+import app.services.qwen_background_worker as qwen_background_worker
+import app.services.care_continuity_execution as care_continuity_execution
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
 
@@ -75,21 +80,62 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 ),
             ])
             db.flush()
+            own_document_text = "Care document reports interrupted sleep overnight."
+            peer_document_text = "PRIVATE_PEER_DOCUMENT: another caregiver's separately scoped upload."
+            own_document_bytes = b"CI document fixture: own caregiver upload"
+            peer_document_bytes = b"CI document fixture: peer caregiver upload"
+            own_document_evidence = Evidence(
+                person_id=person_id, type="document", source_text=own_document_text,
+                uploaded_by_caregiver_id=caregiver_id,
+                reported_by_caregiver_id=caregiver_id,
+                epistemic_status="caregiver_reported", evidence_kind="caregiver_report",
+            )
+            peer_document_evidence = Evidence(
+                person_id=person_id, type="document", source_text=peer_document_text,
+                uploaded_by_caregiver_id=same_person_peer_caregiver_id,
+                reported_by_caregiver_id=same_person_peer_caregiver_id,
+                epistemic_status="caregiver_reported", evidence_kind="caregiver_report",
+            )
+            db.add_all([own_document_evidence, peer_document_evidence])
+            db.flush()
             own_document_analysis = CaptureAnalysis(
                 person_id=person_id, caregiver_id=caregiver_id,
-                source_text="Care document reports interrupted sleep overnight.",
-                extraction_status="available",
-                candidates={"kind": "document_extraction_v1", "filename": "own.pdf"},
+                source_evidence_id=own_document_evidence.id,
+                source_text=own_document_text, extraction_status="available",
+                candidates={
+                    "kind": "document_extraction_v1", "filename": "own.pdf",
+                    "binary_sha256": hashlib.sha256(own_document_bytes).hexdigest(),
+                    "source_text_sha256": hashlib.sha256(own_document_text.encode()).hexdigest(),
+                },
                 review_history=[],
             )
             peer_document_analysis = CaptureAnalysis(
                 person_id=person_id, caregiver_id=same_person_peer_caregiver_id,
-                source_text="PRIVATE_PEER_DOCUMENT: another caregiver's separately scoped upload.",
-                extraction_status="available",
-                candidates={"kind": "document_extraction_v1", "filename": "peer.pdf"},
+                source_evidence_id=peer_document_evidence.id,
+                source_text=peer_document_text, extraction_status="available",
+                candidates={
+                    "kind": "document_extraction_v1", "filename": "peer.pdf",
+                    "binary_sha256": hashlib.sha256(peer_document_bytes).hexdigest(),
+                    "source_text_sha256": hashlib.sha256(peer_document_text.encode()).hexdigest(),
+                },
                 review_history=[],
             )
             db.add_all([own_document_analysis, peer_document_analysis])
+            db.flush()
+            db.add_all([
+                EvidenceUpload(
+                    evidence_id=own_document_evidence.id, filename="own.pdf",
+                    mime_type="application/pdf", content=own_document_bytes,
+                    size_bytes=len(own_document_bytes),
+                    sha256=hashlib.sha256(own_document_bytes).hexdigest(),
+                ),
+                EvidenceUpload(
+                    evidence_id=peer_document_evidence.id, filename="peer.pdf",
+                    mime_type="application/pdf", content=peer_document_bytes,
+                    size_bytes=len(peer_document_bytes),
+                    sha256=hashlib.sha256(peer_document_bytes).hexdigest(),
+                ),
+            ])
             db.flush()
             own_document_analysis_id = own_document_analysis.id
             peer_document_analysis_id = peer_document_analysis.id
@@ -140,8 +186,47 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             receipt = response.json()
             assert receipt["success"] is True
             assert len(receipt["evidence_ids"]) == 1
+            assert receipt["qwen_processing_status"] == "queued"
+            assert receipt["qwen_extraction_status"] == "queued"
             event_id = receipt["id"]
             evidence_id = receipt["evidence_ids"][0]
+            job_id = receipt["qwen_job_id"]
+            assert job_id
+
+            # The caregiver-facing receipt must not wait for extraction or
+            # longitudinal reconciliation. Complete the durable work separately.
+            def fake_capture_extraction(source_text, *, source_event_id, source_evidence_id):
+                assert "Mum was unusually confused this afternoon and refused lunch." in source_text
+                return {
+                    "observations": [{
+                        "source_quote": "Mum was unusually confused this afternoon and refused lunch.",
+                        "observation": "Caregiver reported confusion and refused lunch.",
+                        "review_status": "pending_review",
+                    }],
+                    "open_questions": [],
+                }
+
+            monkeypatch.setattr(
+                qwen_background_worker, "extract_review_candidates", fake_capture_extraction
+            )
+            monkeypatch.setattr(
+                care_continuity_execution,
+                "execute_care_continuity_reconciliation",
+                lambda *args, **kwargs: {"run_id": "ci-reconciliation"},
+            )
+            assert asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id)) is True
+            with SessionLocal() as db:
+                completed_job = db.query(QwenBackgroundJob).filter_by(
+                    id=job_id, person_id=person_id, caregiver_id=caregiver_id
+                ).one()
+                completed_analysis = db.query(CaptureAnalysis).filter_by(
+                    person_id=person_id, caregiver_id=caregiver_id,
+                    source_event_id=event_id, source_evidence_id=evidence_id,
+                ).one()
+                assert completed_job.status == "completed"
+                assert completed_analysis.extraction_status == "available"
+                assert completed_analysis.candidates["observations"][0]["review_status"] == "pending_review"
+                assert completed_analysis.execution_status["review"] == "required"
 
             retry = client.post(
                 "/api/v1/daily/log",
