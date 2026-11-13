@@ -1079,8 +1079,11 @@ def _reopen_due_deferred_loops(db: Session, now: datetime) -> int:
         before = _snapshot(loop)
         loop.status = "open"
         loop.review_at = None
+        # Recompute priority against the current clock and persisted commitments.
+        # A deadline may have elapsed while this item was deferred; carrying the
+        # pre-deferral priority forward would hide newly overdue work.
+        _reassess(db, loop)
         loop.updated_at = now
-        loop.version = (loop.version or 0) + 1
         _audit(
             db, loop, "deferred_review_due", before,
             [{
