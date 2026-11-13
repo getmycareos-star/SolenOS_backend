@@ -316,7 +316,7 @@ def test_question_quality_metrics_measure_duplicates_unassessed_and_suppressed_w
                 necessity="necessary",
                 necessity_rationale="The follow-up is blocked until the clinic confirms the result.",
                 evidence_ids=["same-person-evidence-reference"],
-                context=[{"source_kind": "appointment_workspace_follow_up", "source_id": "loop-1", "necessity_assessment": {"necessity_rationale": "The follow-up is blocked until the clinic confirms the result.", "decision_dependency": "The appointment handoff cannot report the result until the clinic confirms it.", "evidence_ids": ["same-person-evidence-reference"]}}],
+                context=[{"source_kind": "document_extraction", "source_id": "same-person-evidence-reference", "source_record_refs": [{"record_type": "evidence", "record_id": "same-person-evidence-reference"}], "necessity_assessment": {"necessity_rationale": "The follow-up is blocked until the clinic confirms the result.", "decision_dependency": "The appointment handoff cannot report the result until the clinic confirms it.", "evidence_ids": ["same-person-evidence-reference"]}}],
                 intended_answerer_role="professional",
             ),
             OpenQuestion(
