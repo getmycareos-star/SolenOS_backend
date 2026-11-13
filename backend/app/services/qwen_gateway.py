@@ -216,6 +216,10 @@ def extract_review_candidates(
                 "medication changes, or facts not stated. Every source_quote must be copied exactly from the source, " +
                 "and the observation and subject must themselves be verbatim substrings of that source_quote. " +
                 "Do not paraphrase, summarize, normalize, or add details. "
+                "For each source_quote, retain the complete local clause or sentence needed to preserve the observation's "
+                "meaning, including nearby time wording, negation, and uncertainty or hedge words. Do not clip away "
+                "qualifiers such as 'seemed', 'I think', 'yesterday', or 'last night', and do not join separate clauses "
+                "when they describe distinct observations. "
                 "If there are no supported observations, return an empty observations array. Ask at most three short "
                 "clarifying questions. Never treat greetings or small talk as care observations."
             ),
