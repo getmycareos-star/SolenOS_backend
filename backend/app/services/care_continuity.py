@@ -141,7 +141,6 @@ def has_valid_caregiver_necessity(
                     and isinstance(source_ref.get("record_id"), str)
                     and source_ref.get("record_id").strip()
                 ] if isinstance(source_refs, list) else []
-                source_reference_ids = {source_ref["record_id"] for source_ref in normalized_refs}
                 for source_ref in normalized_refs:
                     record_type = source_ref.get("record_type")
                     record_id = source_ref.get("record_id")
