@@ -148,6 +148,76 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
     }
 
 
+@router.get("/questions/recommended/{person_id}")
+def recommended_caregiver_questions(
+    person_id: str,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    """Return a small, evidence-validated caregiver question queue.
+
+    This is a projection over the existing LCR question records, not a second
+    question store. Non-necessary, stale, cross-record, or unsupported items
+    are excluded. Critical items are never hidden by the ordinary display cap.
+    """
+    _require_person_scope(engine, person_id)
+    from app.services.care_continuity import has_valid_caregiver_necessity
+
+    rows = engine.db.query(OpenQuestionModel).filter(
+        OpenQuestionModel.person_id == person_id,
+        OpenQuestionModel.status.in_(["open", "unresolved"]),
+    ).all()
+    eligible = [
+        row for row in rows
+        if row.necessity == "necessary"
+        and has_valid_caregiver_necessity(row, engine.db, person_id)
+    ]
+    priority_weight = {
+        "critical": 5, "high": 4, "medium": 3,
+        "low": 2, "informational": 1,
+    }
+    eligible.sort(key=lambda row: (
+        -priority_weight.get(str(getattr(row.priority, "value", row.priority)), 0),
+        row.asked_at or datetime.min,
+        str(row.id),
+    ))
+    # Exact normalized duplicates are one caregiver task; preserve the
+    # highest-priority, oldest persisted question and never merge answer history.
+    unique = []
+    seen = set()
+    for row in eligible:
+        key = (
+            " ".join((row.question or "").casefold().split()),
+            row.subject_type,
+            row.subject_id,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    critical = [
+        row for row in unique
+        if str(getattr(row.priority, "value", row.priority)) == "critical"
+    ]
+    ordinary = [
+        row for row in unique
+        if str(getattr(row.priority, "value", row.priority)) != "critical"
+    ]
+    visible = critical + ordinary[:2]
+    hidden_count = max(0, len(ordinary) - 2)
+    return {
+        "person_id": person_id,
+        "questions": [OpenQuestion.model_validate(row).model_dump(mode="json") for row in visible],
+        "critical_count": len(critical),
+        "ordinary_visible_count": min(2, len(ordinary)),
+        "additional_ordinary_count": hidden_count,
+        "status": "questions_to_review" if visible else "nothing_to_ask",
+        "interpretation_limit": (
+            "These are source-backed questions whose stored assessment says an answer "
+            "is necessary for a care decision. This does not establish clinical urgency."
+        ),
+    }
+
+
 @router.get("/questions/{person_id}", response_model=List[OpenQuestion])
 def list_questions(
     person_id: str,
