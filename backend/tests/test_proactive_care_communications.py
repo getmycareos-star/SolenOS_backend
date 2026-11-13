@@ -348,3 +348,74 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+def test_proactive_question_notifications_preserve_critical_and_limit_ordinary():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+    try:
+        person = Person(id="notify-limit-person", name="Care recipient")
+        caregiver = Caregiver(
+            id="notify-limit-caregiver", name="Caregiver",
+            relationship="daughter", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        evidence = Evidence(
+            id="notify-limit-evidence", person_id=person.id,
+            type="caregiver_report",
+            source_text="A caregiver report linked to the current care decision.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        db.add(evidence)
+        db.flush()
+
+        cases = [
+            ("notify-critical", Priority.CRITICAL),
+            ("notify-high", Priority.HIGH),
+            ("notify-medium", Priority.MEDIUM),
+            ("notify-low", Priority.LOW),
+        ]
+        for question_id, priority in cases:
+            rationale = f"The next care decision depends on the answer to {question_id}."
+            db.add(OpenQuestion(
+                id=question_id, person_id=person.id,
+                question=f"What should the care team know about {question_id}?",
+                subject_type="care", subject_id="current-plan",
+                status="open", necessity="necessary",
+                necessity_rationale=rationale, priority=priority,
+                evidence_ids=[evidence.id],
+                context=[{
+                    "source_kind": "caregiver_report",
+                    "source_id": evidence.id,
+                    "necessity_assessment": {
+                        "necessity_rationale": rationale,
+                        "decision_dependency": f"The current handoff cannot be completed accurately without {question_id}.",
+                        "evidence_ids": [evidence.id],
+                    },
+                }],
+            ))
+        db.commit()
+
+        created = create_proactive_care_notifications(
+            db, person.id, now=datetime(2026, 11, 13, tzinfo=timezone.utc)
+        )
+        db.commit()
+        notifications = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_attention",
+        ).all()
+        assert created == 3
+        assert {row.source_event_id for row in notifications} == {
+            "notify-critical", "notify-high", "notify-medium",
+        }
+        assert "notify-low" not in {row.source_event_id for row in notifications}
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
