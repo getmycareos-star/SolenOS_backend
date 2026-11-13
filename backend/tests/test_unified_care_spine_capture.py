@@ -256,6 +256,8 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 assert completed_analysis.extraction_status == "available"
                 assert completed_analysis.candidates["observations"][0]["review_status"] == "pending_review"
                 assert completed_analysis.execution_status["review"] == "required"
+                assert completed_analysis.execution_status["projection"] == "verified"
+                assert completed_analysis.execution_status["longitudinal_retrieval"] == "verified"
 
             retry = client.post(
                 "/api/v1/daily/log",
