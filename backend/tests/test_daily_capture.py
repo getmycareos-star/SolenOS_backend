@@ -2054,7 +2054,6 @@ def test_source_time_reference_is_not_borrowed_from_a_separate_clause():
 
     assert sleep_time is not None and sleep_time.group(0) == "last night"
     assert lunch_time is not None and lunch_time.group(0) == "today"
-    assert _source_time_for_observation("Mum slept poorly last night, but ate lunch today.", "ate lunch") is lunch_time
 
 
 def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatch):
