@@ -414,6 +414,45 @@ def test_proactive_question_notifications_preserve_critical_and_limit_ordinary()
             "notify-critical", "notify-high", "notify-medium",
         }
         assert "notify-low" not in {row.source_event_id for row in notifications}
+
+        new_rationale = "The next transfer decision depends on confirming this additional support detail."
+        db.add(OpenQuestion(
+            id="notify-new-high", person_id=person.id,
+            question="Has the person needed another form of support during transfers?",
+            subject_type="care", subject_id="current-plan",
+            status="open", necessity="necessary",
+            necessity_rationale=new_rationale, priority=Priority.HIGH,
+            evidence_ids=[evidence.id],
+            context=[{
+                "source_kind": "caregiver_report",
+                "source_id": evidence.id,
+                "necessity_assessment": {
+                    "necessity_rationale": new_rationale,
+                    "decision_dependency": "The transfer handoff cannot describe the current support needs without this detail.",
+                    "evidence_ids": [evidence.id],
+                },
+            }],
+        ))
+        db.commit()
+        created_again = create_proactive_care_notifications(
+            db, person.id, now=datetime(2026, 11, 13, 1, tzinfo=timezone.utc)
+        )
+        db.commit()
+        active_notifications = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.category == "care_attention",
+            CareNotification.status == "active",
+        ).all()
+        assert created_again == 1
+        assert {row.source_event_id for row in active_notifications} == {
+            "notify-critical", "notify-high", "notify-new-high",
+        }
+        medium_notification = db.query(CareNotification).filter(
+            CareNotification.person_id == person.id,
+            CareNotification.source_event_id == "notify-medium",
+        ).one()
+        assert medium_notification.status == "resolved"
+        assert medium_notification.resolution_reason == "question_not_currently_prioritized"
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
