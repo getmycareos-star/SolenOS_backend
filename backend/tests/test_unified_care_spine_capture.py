@@ -429,6 +429,28 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             assert event_id in companion_daily_body.get("source_event_ids", [])
             assert evidence_id in companion_daily_body.get("source_evidence_ids", [])
 
+            # Prove the exact join used by Companion can see the upload,
+            # analysis, and uploader identity before exercising the HTTP path.
+            with SessionLocal() as db:
+                linked_document = (
+                    db.query(CaptureAnalysis, Evidence)
+                    .join(Evidence, Evidence.id == CaptureAnalysis.source_evidence_id)
+                    .filter(
+                        CaptureAnalysis.id == own_document_analysis_id,
+                        CaptureAnalysis.person_id == person_id,
+                        CaptureAnalysis.caregiver_id == caregiver_id,
+                        CaptureAnalysis.extraction_status == "available",
+                        Evidence.person_id == person_id,
+                        Evidence.uploaded_by_caregiver_id == caregiver_id,
+                    )
+                    .one_or_none()
+                )
+                assert linked_document is not None, "caregiver-scoped document analysis/evidence join returned no row"
+                assert linked_document[1].type == "document"
+                assert db.query(EvidenceUpload).filter_by(
+                    evidence_id=own_document_evidence.id
+                ).one_or_none() is not None
+
             # The Companion document question must include this caregiver's
             # persisted document extraction and exclude a peer caregiver's
             # private document from the same person's account.
