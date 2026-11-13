@@ -208,4 +208,6 @@ def test_prompt_budget_is_shared_across_sources_instead_of_starving_later_care_d
     assert len(prompt) <= 1500
     assert "event-0" in prompt
     assert "source-evidence-1" in prompt
+    assert "\\n[events;" in prompt
+    assert "\\n[evidence;" in prompt
     assert "Context truncated" in prompt
