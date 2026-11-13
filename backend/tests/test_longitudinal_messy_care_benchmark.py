@@ -879,7 +879,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
         )
 
         assert qwen_call_options
-        assert qwen_call_options[0].get("num_predict") == 768
+        assert qwen_call_options[0].get("num_predict") == 384
         assert qwen_call_options[0].get("num_ctx") == 4096
 
         assertions = db.query(CareAssertion).filter(
