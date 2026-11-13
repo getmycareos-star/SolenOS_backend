@@ -38,7 +38,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
     source = (
         "[Page 1]\nDischarge summary. Patient walked 20 metres with a frame on 12 October.\n\n"
         "[Page 2]\nThe patient ate half of lunch during the observation period.\n\n"
-        "[Page 3 OCR]\n[No readable text detected on this page]"
+        "[Page 3]\nThe caregiver reported that the patient slept for six uninterrupted hours on 14 October."
     )
     try:
         created = client.post(
