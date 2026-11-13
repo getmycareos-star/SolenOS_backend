@@ -3871,6 +3871,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 
     document_query_text = (payload.text or "").casefold()
     document_context_requested = payload.workflow in appointment_workflows or _is_document_question(payload.text)
+    if document_context_requested:
         source_document_status = "empty"
         try:
             document_analyses = (
@@ -5171,6 +5172,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Select context by the current question and, for referential follow-ups,
         # the recent dialogue. Keep source IDs aligned with records sent to Qwen.
         document_question = _is_document_question(user_text)
+        event_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, event_context, 30)
         )
         assertion_context = _filter_context_lines_to_query(
