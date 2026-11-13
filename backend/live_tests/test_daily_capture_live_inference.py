@@ -236,16 +236,24 @@ def test_real_qwen_natural_language_daily_care_preserves_all_clauses_and_compani
             )
             assert analysis_response.status_code == 200, analysis_response.text
             extracted = analysis_response.json().get("candidates", {}).get("observations", [])
-            assert any(
-                "unsettled" in item.get("observation", "").casefold()
+            unsettled_candidate = next((
+                item for item in extracted
+                if "unsettled" in item.get("observation", "").casefold()
                 and item.get("extraction_origin") == "deterministic_exact_clause_supplement"
-                for item in extracted
-            ), extracted
-            assert any(
-                "now resting" in item.get("observation", "").casefold()
+            ), None)
+            resting_candidate = next((
+                item for item in extracted
+                if "now resting" in item.get("observation", "").casefold()
                 and item.get("extraction_origin") == "deterministic_exact_clause_supplement"
-                for item in extracted
-            ), extracted
+            ), None)
+            assert unsettled_candidate is not None, extracted
+            assert resting_candidate is not None, extracted
+            assert unsettled_candidate.get("source_quote") == (
+                "Mum slept poorly last night and seemed more unsettled this morning."
+            )
+            assert resting_candidate.get("source_quote") == (
+                "She ate a little more at dinner and is now resting."
+            )
 
             lcr = client.get(
                 "/api/v1/care-continuity/current-care?limit_per_source=50",
