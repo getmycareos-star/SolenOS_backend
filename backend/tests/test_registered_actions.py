@@ -582,13 +582,6 @@ def test_only_responsible_caregiver_can_change_registered_action():
         db.add(second_caregiver)
         db.flush()
         from app.models.caregiver_access import CaregiverAccessGrant
-        db.add(CaregiverAccessGrant(
-            person_id=owner["person"]["id"],
-            caregiver_id=second_caregiver.id,
-            role="family",
-            status="active",
-            can_manage_members=False,
-        ))
         db.add(AnonymousSession(
             person_id=owner["person"]["id"],
             caregiver_id=second_caregiver.id,
