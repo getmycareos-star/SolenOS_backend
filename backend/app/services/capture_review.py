@@ -166,7 +166,7 @@ def supplement_source_grounded_daily_observations(
             subject = subject_match.group(1).strip() if subject_match else inherited_subject
             observation = clause.strip()
             key = observation.casefold()
-            if key in existing_values:
+            if any(existing and (existing in key or key in existing) for existing in existing_values):
                 continue
             if observation not in sentence or subject.casefold() not in sentence.casefold():
                 continue
