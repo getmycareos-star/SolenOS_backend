@@ -425,7 +425,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         db,
         job.person_id,
         caregiver_id=job.caregiver_id,
-        limit_per_source=10,
+        query=(f"{event.title or ''} {event.description or ''}")[:1000],
+        limit_per_source=50,
     )
     # build_lcr_context returns named source collections under "sources";
     # checking a nonexistent top-level "events" key would make every queued
