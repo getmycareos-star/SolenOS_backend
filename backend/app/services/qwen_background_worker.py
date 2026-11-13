@@ -729,6 +729,27 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                         current.available_at = datetime.now(timezone.utc) + timedelta(seconds=15 * current.attempt_count)
                     else:
                         current.status = "failed"
+                    if current.workflow == "daily_capture_extraction":
+                        from app.models.capture_analysis import CaptureAnalysis
+                        try:
+                            source_event_ids = json.loads(current.source_event_ids_json or "[]")
+                        except (TypeError, ValueError, json.JSONDecodeError):
+                            source_event_ids = []
+                        analysis = db.query(CaptureAnalysis).filter(
+                            CaptureAnalysis.person_id == current.person_id,
+                            CaptureAnalysis.caregiver_id == current.caregiver_id,
+                            CaptureAnalysis.source_event_id.in_(source_event_ids or ["__none__"]),
+                        ).order_by(CaptureAnalysis.created_at.desc()).first()
+                        if analysis is not None:
+                            terminal_failure = current.status == "failed"
+                            analysis.extraction_status = "failed" if terminal_failure else "queued"
+                            analysis.execution_status = {
+                                **(analysis.execution_status or {}),
+                                "extraction": "failed" if terminal_failure else "queued",
+                                "assessment": "failed" if terminal_failure else "pending",
+                                "reconciliation": "not_completed" if terminal_failure else "pending",
+                                "projection": "not_verified",
+                            }
                     db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count}))
                     db.commit()
             except Exception:
