@@ -519,7 +519,7 @@ async def ask_daily_care_qwen(
             "source_records": [],
             "proposal_analysis_id": None,
             "proposals": [],
-            "history_scope": bundle["counts"],
+            "history_scope": history_scope,
             "review_required": True,
             "written_to_lcr": False,
         }
