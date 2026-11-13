@@ -436,7 +436,7 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
         response = _ask(
             client,
             session,
-            "How has her sleep been over the last three months? Explain what changed over time.",
+            "Give me the history of her sleep and explain what changed over the last three months.",
         )
         assert response.status_code == 200, response.text
         result = response.json()
@@ -450,6 +450,7 @@ def test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_event
             "response": result,
         }
         coverage = result.get("lcr_context_coverage") or {}
+        assert coverage.get("full_source_scan_requested") is True, coverage
         event_coverage = coverage.get("sources", {}).get("events", {})
         assert event_coverage.get("candidate_scan_complete") is True, coverage
         assert event_coverage.get("candidate_count", 0) >= 3, coverage
