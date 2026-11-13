@@ -898,6 +898,7 @@ def next_best_questions(
                     "necessity": clean.get("necessity", "not_assessed"),
                     "necessity_rationale": clean.get("necessity_rationale"),
                     "decision_dependency": clean.get("decision_dependency"),
+                    "evidence_ids": list(clean.get("evidence_ids") or []),
                 },
             }
             if prior_terminal_question is not None:
