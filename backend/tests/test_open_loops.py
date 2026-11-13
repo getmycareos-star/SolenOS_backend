@@ -728,7 +728,13 @@ def test_situation_assessment_preserves_saved_deferral_and_review_context_per_pe
 def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
     client = TestClient(app)
     _, headers = session(client, "Deferred recovery recipient")
-    loop = create_loop(client, headers, loop_type="follow_up")
+    loop = create_loop(
+        client,
+        headers,
+        loop_type="follow_up",
+        deadline_at=(datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        deadline_source="explicit_user",
+    )
     review_at = datetime.now(timezone.utc) - timedelta(minutes=5)
     deferred = client.patch(
         f"/api/v1/open-loops/{loop['id']}",
@@ -744,13 +750,18 @@ def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
 
     db = TestSessionLocal()
     try:
-        recovered = open_loop_api._reopen_due_deferred_loops(db, datetime.now(timezone.utc))
+        # Simulate a process being down until after the persisted deadline.
+        recovered = open_loop_api._reopen_due_deferred_loops(
+            db, datetime.now(timezone.utc) + timedelta(days=3)
+        )
         db.commit()
         row = db.query(open_loop_api.OpenLoopRecord).filter_by(id=loop["id"]).one()
         assert recovered == 1
         assert row.status == "open"
         assert row.review_at is None
         assert row.deferred_reason == "Waiting for the clinic to return the call."
+        assert row.priority == "high"
+        assert "Persisted deadline has passed" in row.priority_reasons
         event = db.query(open_loop_api.OpenLoopEvent).filter_by(
             loop_id=loop["id"], event_type="deferred_review_due"
         ).one()
