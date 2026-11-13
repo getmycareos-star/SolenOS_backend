@@ -2478,9 +2478,32 @@ def main():
             "GET", f"/api/v1/uncertainty/questions/{continuity_person_id}?status=open",
             token=continuity_login_token,
         )
-        require(restored_question_status == 200 and any(
-            item.get("id") == continuity_question_id for item in restored_questions
-        ), "open clarification question did not restore after account login")
+        restored_question_ids = {
+            item.get("id") for item in restored_questions
+            if isinstance(item, dict)
+        } if isinstance(restored_questions, list) else set()
+        if restored_question_status != 200 or continuity_question_id not in restored_question_ids:
+            from app.models.uncertainty import OpenQuestion
+            from app.services.care_continuity import has_valid_caregiver_necessity
+            with SessionLocal() as diagnostic_db:
+                diagnostic_question = diagnostic_db.query(OpenQuestion).filter_by(
+                    id=continuity_question_id,
+                    person_id=continuity_person_id,
+                ).first()
+                diagnostic = None if diagnostic_question is None else {
+                    "status": diagnostic_question.status,
+                    "necessity": diagnostic_question.necessity,
+                    "evidence_ids": list(diagnostic_question.evidence_ids or []),
+                    "context": list(diagnostic_question.context or []),
+                    "necessity_valid": has_valid_caregiver_necessity(
+                        diagnostic_question, diagnostic_db, continuity_person_id
+                    ),
+                }
+            raise AssertionError(
+                "open clarification question did not restore after account login: "
+                f"http={restored_question_status}, response={restored_questions}, "
+                f"persisted_question={diagnostic}"
+            )
         restored_answer_history_status, restored_answer_history = request(
             "GET", f"/api/v1/uncertainty/questions/{answer_question_id}/answer-history",
             token=continuity_login_token,
