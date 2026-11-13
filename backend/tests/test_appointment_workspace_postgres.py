@@ -502,3 +502,150 @@ def test_postgres_daily_capture_http_write_latency_idempotency_and_isolation(mon
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
+
+
+
+def test_postgres_appointment_callback_promise_survives_session_refresh_and_retrieval(monkeypatch):
+    """An appointment recommendation stays open when the clinic only promises a callback.
+
+    The test uses disposable PostgreSQL, real API routes, a fresh authenticated
+    session after the write, and the persisted Open Loop audit history.
+    """
+    database_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_db():
+        db = test_session_local()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", test_session_local)
+    suffix = uuid.uuid4().hex
+    try:
+        with TestClient(app) as client:
+            owner = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": "Synthetic callback-promise caregiver"},
+            )
+            assert owner.status_code == 201, owner.text
+            headers = {"Authorization": "Bearer " + owner.json()["access_token"]}
+
+            workspace = client.post(
+                "/api/v1/appointment-workspaces",
+                headers=headers,
+                json={
+                    "status": "preparation",
+                    "payload": {"visitPurpose": "Specialist follow-up recommended at discharge."},
+                    "change_reason": "Synthetic discharge follow-up recommendation",
+                    "idempotency_key": "callback-workspace-create-" + suffix,
+                },
+            )
+            assert workspace.status_code == 201, workspace.text
+            workspace_id = workspace.json()["id"]
+
+            revised_payload = {
+                "expected_version": 1,
+                "status": "follow_up_pending",
+                "payload": {
+                    "visitPurpose": "Specialist follow-up recommended at discharge.",
+                    "followUps": [{
+                        "action": "Arrange specialist follow-up within two weeks",
+                        "owner": "Sarah",
+                        "owner_role": "caregiver",
+                        "due": "2026-11-27T12:00:00+00:00",
+                        "status": "open",
+                    }],
+                },
+                "change_reason": "Preserve original specialist recommendation as an open commitment",
+                "idempotency_key": "callback-workspace-followup-" + suffix,
+            }
+            revised = client.patch(
+                f"/api/v1/appointment-workspaces/{workspace_id}",
+                headers=headers,
+                json=revised_payload,
+            )
+            assert revised.status_code == 200, revised.text
+
+            listed = client.get("/api/v1/open-loops?limit=100", headers=headers)
+            assert listed.status_code == 200, listed.text
+            matches = [
+                item for item in listed.json()["items"]
+                if item.get("source_type") == "appointment_workspace_follow_up"
+                and item.get("source_id", "").startswith(workspace_id + ":")
+            ]
+            assert len(matches) == 1, "the appointment recommendation must create exactly one linked follow-up"
+            loop_id = matches[0]["id"]
+            original_title = matches[0]["title"]
+            original_deadline = matches[0]["deadline_at"]
+            assert "specialist follow-up" in original_title.lower()
+            assert original_deadline is not None
+
+            callback_payload = {
+                "text": "Sarah reports the clinic promised to call back. No appointment date has been confirmed.",
+                "response_outcome": "callback_promised",
+                "evidence": [{
+                    "kind": "caregiver_recorded",
+                    "text": "Sarah's report of the clinic conversation; not independently verified.",
+                }],
+                "idempotency_key": "callback-promised-" + suffix,
+            }
+            callback = client.post(
+                f"/api/v1/open-loops/{loop_id}/responses",
+                headers=headers,
+                json=callback_payload,
+            )
+            assert callback.status_code == 200, callback.text
+            assert callback.json()["status"] == "waiting"
+            assert callback.json()["outcome_status"] == "outcome_unknown"
+            assert callback.json()["title"] == original_title
+            assert callback.json()["deadline_at"] == original_deadline
+            assert callback.json()["response_evidence"][-1]["response_outcome"] == "callback_promised"
+            assert callback.json()["response_evidence"][-1]["independently_verified"] is False
+
+            replay = client.post(
+                f"/api/v1/open-loops/{loop_id}/responses",
+                headers=headers,
+                json=callback_payload,
+            )
+            assert replay.status_code == 200, replay.text
+            assert len(replay.json()["response_evidence"]) == 1
+
+            refreshed = client.post("/api/v1/sessions/refresh", headers=headers)
+            assert refreshed.status_code == 200, refreshed.text
+            fresh_headers = {"Authorization": "Bearer " + refreshed.json()["access_token"]}
+
+        # A new client instance and a refreshed token must retrieve the same
+        # outstanding commitment and its append-only response history.
+        with TestClient(app) as restarted_client:
+            restored = restarted_client.get(
+                f"/api/v1/open-loops/{loop_id}",
+                headers=fresh_headers,
+            )
+            assert restored.status_code == 200, restored.text
+            restored_loop = restored.json()["loop"]
+            assert restored_loop["status"] == "waiting"
+            assert restored_loop["outcome_status"] == "outcome_unknown"
+            assert restored_loop["title"] == original_title
+            assert restored_loop["deadline_at"] == original_deadline
+            assert restored_loop["response_evidence"][-1]["response_outcome"] == "callback_promised"
+            assert restored_loop["response_evidence"][-1]["reported_by"] == "session_caregiver"
+            assert restored_loop["response_evidence"][-1]["independently_verified"] is False
+
+            history = restarted_client.get(
+                f"/api/v1/open-loops/{loop_id}/history?limit=100",
+                headers=fresh_headers,
+            )
+            assert history.status_code == 200, history.text
+            events = history.json()
+            callback_events = [
+                event for event in events
+                if event.get("event_type") in {"response_recorded", "response_received"}
+            ]
+            assert len(callback_events) == 1, "callback promise must be persisted once in the audit history"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
