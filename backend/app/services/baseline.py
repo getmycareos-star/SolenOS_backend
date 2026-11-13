@@ -93,13 +93,15 @@ def get_longitudinal_event_counts(
                 "history_truncated": False,
             }
         query = query.filter(CareEvent.id.in_(linked_event_ids))
-    queried_events = (
+    # Read the complete eligible history using bounded fetch batches. The batch
+    # size controls database cursor memory, not the number of care events that
+    # participate in longitudinal comparison. A hard row cap silently discards
+    # older evidence and can turn an incomplete baseline into a false change.
+    queried_events = list(
         query.order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
-        .limit(MAX_LONGITUDINAL_EVENTS + 1)
-        .all()
+        .yield_per(MAX_LONGITUDINAL_EVENTS)
     )
-    history_truncated = len(queried_events) > MAX_LONGITUDINAL_EVENTS
-    queried_events = queried_events[:MAX_LONGITUDINAL_EVENTS]
+    history_truncated = False
     queried_events.sort(key=lambda event: (_ensure_utc(event.occurred_at), event.id))
     # A copied event is only deduplicated when the same source evidence anchors
     # the same occurrence time. Reusing one document to describe multiple events
@@ -252,10 +254,7 @@ def build_baseline(
         history_completeness="truncated" if history_truncated else "complete",
         analysis_version=BASELINE_ANALYSIS_VERSION,
         documentation_bias_flag=not baseline_complete,
-        state_value=(
-            f"Historical event query was bounded to the most recent {MAX_LONGITUDINAL_EVENTS} eligible records; earlier history may be omitted."
-            if history_truncated else None
-        ),
+        state_value=None,
         evidence_ids=evidence_ids,
     )
     db.add(baseline)
