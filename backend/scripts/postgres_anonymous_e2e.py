@@ -2275,7 +2275,16 @@ def main():
                 "necessity": "necessary",
                 "necessity_rationale": "The caregiver needs this answer to decide whether the reported evening routine change requires a follow-up.",
                 "evidence_ids": [continuity_evidence_id],
-                "context": [{"decision_dependency": "Determine whether to request a routine review from the care team."}],
+                "context": [{
+                    "source_kind": "caregiver_report",
+                    "source_id": continuity_evidence_id,
+                    "necessity_rationale": "The caregiver needs this answer to decide whether the reported evening routine change requires a follow-up.",
+                    "necessity_assessment": {
+                        "decision_dependency": "Determine whether to request a routine review from the care team.",
+                        "necessity_rationale": "The caregiver needs this answer to decide whether the reported evening routine change requires a follow-up.",
+                        "evidence_ids": [continuity_evidence_id],
+                    },
+                }],
             },
         )
         require(continuity_question_status == 200 and continuity_question.get("id"),
