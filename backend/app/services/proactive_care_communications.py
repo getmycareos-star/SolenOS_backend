@@ -264,10 +264,15 @@ def _necessary_question_message(db: Session, person_id: str, question: OpenQuest
         " The reports remain separate; SolenOS has not selected one as correct."
         if has_conflict else ""
     )
-    return (
-        f"{question.question}{source_sentence} If you're not sure, you can say so."
-        f"{conflict_sentence}"
-    )
+    if question.intended_answerer_role == "professional":
+        answerer = question.intended_answerer_label or "your care professional"
+        answer_guidance = f" Best person to ask: {answerer}. Add what they confirm when you have it; do not guess."
+    elif question.intended_answerer_role == "other_caregiver":
+        answerer = question.intended_answerer_label or "the other caregiver"
+        answer_guidance = f" Best person to ask: {answerer}. Add what they share when available."
+    else:
+        answer_guidance = " If you're not sure, you can say so."
+    return f"{question.question}{source_sentence}{answer_guidance}{conflict_sentence}"
 
 
 
