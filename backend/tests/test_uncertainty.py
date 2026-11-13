@@ -252,7 +252,12 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                 priority=Priority.HIGH,
                 evidence_ids=[evidence.id],
                 context=[{
-                    "decision_dependency": "The handoff cannot identify the active instruction without clarification."
+                    "source_kind": "document_extraction",
+                    "source_id": evidence.id,
+                    "necessity_assessment": {
+                        "necessity_rationale": "The active instruction is required for the current handoff.",
+                        "decision_dependency": "The handoff cannot identify the active instruction without clarification.",
+                    },
                 }],
             ),
             OpenQuestion(
