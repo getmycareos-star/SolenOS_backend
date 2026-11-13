@@ -25,6 +25,7 @@ from app.core.database import SessionLocal
 from app.core.change_enums import SituationType, SituationState
 from app.models.change import Situation as SituationModel
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion
 
@@ -1237,6 +1238,26 @@ def main():
         # Exercise the caregiver review lifecycle against this real PostgreSQL
         # Daily Care event. Candidate generation is seeded as a persisted extraction
         # so this test does not depend on an external Qwen model being available.
+        # Stop any queued extraction for this event before seeding the fixture: the
+        # background worker is allowed to replace a processing analysis, and must
+        # not race the deterministic review-lifecycle assertions below.
+        source_db = SessionLocal()
+        try:
+            pending_jobs = source_db.query(QwenBackgroundJob).filter(
+                QwenBackgroundJob.person_id == person_a,
+                QwenBackgroundJob.caregiver_id == caregiver_a,
+                QwenBackgroundJob.workflow == "daily_capture_extraction",
+                QwenBackgroundJob.source_event_ids_json == json.dumps([daily_event_id]),
+                QwenBackgroundJob.status.in_(("queued", "processing")),
+            ).with_for_update().all()
+            for pending_job in pending_jobs:
+                pending_job.status = "cancelled"
+                pending_job.error_code = "ci_review_fixture_seeded"
+                pending_job.locked_at = None
+            source_db.commit()
+        finally:
+            source_db.close()
+
         source_db = SessionLocal()
         try:
             source_event = source_db.query(CareEvent).filter_by(id=daily_event_id, person_id=person_a).one()
