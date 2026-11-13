@@ -30,7 +30,7 @@ jobs:
       - name: Compile backend and benchmark
         run: python -m compileall -q backend/app backend/tests
       - name: Run longitudinal messy-care benchmark
-        run: python -m pytest -q backend/tests/test_longitudinal_messy_care_benchmark.py backend/tests/test_unified_lcr_retrieval.py
+        run: python -m pytest -q backend/tests/test_longitudinal_messy_care_benchmark.py backend/tests/test_unified_lcr_retrieval.py backend/tests/test_lcr_reconciliation_scenario_corpus.py
 
   postgres-benchmark:
     name: Longitudinal benchmark (PostgreSQL)
@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_DB: solenos_test
           POSTGRES_USER: solenos
