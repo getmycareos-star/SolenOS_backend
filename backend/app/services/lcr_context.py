@@ -429,6 +429,7 @@ def build_lcr_context(
     query: str | None = None,
     temporal_window: dict[str, str] | None = None,
     include_all_history: bool = False,
+    source_offsets: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Return a person-scoped LCR projection with explicit retrieval coverage.
 
@@ -449,7 +450,9 @@ def build_lcr_context(
     missing_required: list[str] = []
     missing_optional: list[str] = []
 
+    source_offsets = source_offsets or {}
     for source_name, spec in SOURCE_SPECS.items():
+        source_offset = max(0, int(source_offsets.get(source_name, 0) or 0))
         table_name = spec["table"]
         if table_name not in available_tables:
             (missing_required if spec["required"] else missing_optional).append(source_name)
@@ -568,9 +571,10 @@ def build_lcr_context(
         # This removes the former 250-row candidate ceiling that could hide an
         # older, more relevant event behind newer lexical matches. Non-query
         # current-care reads intentionally remain bounded recent projections.
-        query_scan = bool(terms or temporal_window or include_all_history)
+        query_scan = bool(terms or temporal_window or include_all_history or source_offset > 0)
         candidate_count = 0
         ranked_items: list[tuple[int, int, dict[str, Any]]] = []
+        ranked_limit = source_offset + limit
         scan_statement = statement if query_scan else statement.limit(limit + 1)
         result = db.execute(
             scan_statement.execution_options(stream_results=True)
@@ -591,12 +595,15 @@ def build_lcr_context(
             # The SQL ordering is deterministic. Python's stable sort retains
             # that order for ties while prioritising exact/direct query matches.
             ranked_items.append((score, candidate_count, item))
-            if len(ranked_items) > limit:
+            if len(ranked_items) > ranked_limit:
                 ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
-                del ranked_items[limit:]
+                del ranked_items[ranked_limit:]
         ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
-        items = [entry[2] for entry in ranked_items]
-        has_more = candidate_count > len(items)
+        items = [
+            entry[2] for entry in ranked_items[source_offset:source_offset + limit]
+        ]
+        has_more = candidate_count > source_offset + len(items)
+        next_offset = source_offset + len(items) if has_more else None
         sources[source_name] = {
             "status": "available" if items else "empty",
             "table": table_name,
@@ -604,12 +611,17 @@ def build_lcr_context(
             "returned_count": len(items),
             "candidate_count": candidate_count,
             "candidate_scan_complete": query_scan,
-            # A completed database scan may still return only a ranked subset.
-            "returned_history_complete": bool(query_scan and not has_more),
+            # A completed database scan may still return only a ranked page.
+            "returned_history_complete": bool(query_scan and source_offset == 0 and not has_more),
             "has_more": has_more,
             "limit": limit,
-            "selection": "ranked_query_matches" if query_scan and direct_terms else (
-                "complete_temporal_window" if temporal_window else "recent_records"
+            "offset": source_offset,
+            "next_offset": next_offset,
+            "selection": (
+                "full_history_ranked_page" if include_all_history and direct_terms else
+                "ranked_query_matches_page" if query_scan and direct_terms else
+                "complete_temporal_window_page" if temporal_window else
+                "recent_records_page"
             ),
         }
 
@@ -694,7 +706,16 @@ def build_lcr_context(
         "person_id": str(person_id),
         "as_of": datetime.now().astimezone().isoformat(),
         "read_only": True,
-        "history_coverage": "complete_history_scan_ranked_subset" if include_all_history else ("query_scanned_ranked_subset" if terms or temporal_window else "bounded_recent_subset"),
+        "history_coverage": (
+            "paginated_history_page" if any(source.get("offset", 0) > 0 for source in sources.values())
+            else "complete_history_scan_ranked_subset" if include_all_history
+            else "query_scanned_ranked_subset" if terms or temporal_window
+            else "bounded_recent_subset"
+        ),
+        "source_offsets": {
+            name: source.get("offset", 0) for name, source in sources.items()
+            if source.get("offset", 0) > 0
+        },
         "retrieval_scan_complete": bool(terms or temporal_window or include_all_history) and not missing_required and not missing_optional,
         "retrieval_projection_complete": (
             bool(terms or temporal_window or include_all_history)
@@ -702,6 +723,7 @@ def build_lcr_context(
             and not missing_optional
             and all(
                 source.get("candidate_scan_complete") is True
+                and source.get("offset", 0) == 0
                 and source.get("has_more") is False
                 for source in sources.values()
                 if source.get("status") in {"available", "empty"}
