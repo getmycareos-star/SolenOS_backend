@@ -760,6 +760,11 @@ async def upload_evidence(
     ingestion_key: str = Form(""),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
+    if (
+        getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
+        and str(evidence_type).lower() != "document"
+    ):
+        raise HTTPException(status_code=403, detail="This caregiver can upload documents, not other care updates.")
     if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
         raise HTTPException(status_code=403, detail="Upload identity does not match this care-record session")
 
@@ -1769,6 +1774,11 @@ def download_evidence(evidence_id: str, request: Request, db: Session = Depends(
     evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
     if not evidence or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Evidence not found")
+    if (
+        getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
+        and str(evidence.type).lower() != "document"
+    ):
+        raise HTTPException(status_code=404, detail="Document not found")
     blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
     if not blob:
         raise HTTPException(status_code=404, detail="Original upload is unavailable")
