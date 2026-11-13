@@ -392,7 +392,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "assessment_status": assessment_status,
         "reconciliation_status": "completed",
         "projection_status": projection_status,
-        "written_to_lcr": False,
+        "model_output_written_to_lcr": False,
+        "source_grounded_observations_projected": observation_count,
     }, ensure_ascii=False, sort_keys=True)
     current_job.completed_at = datetime.now(timezone.utc)
     current_job.locked_at = None
@@ -411,7 +412,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "candidate_count": candidate_count,
             "observation_count": observation_count,
             "projection_status": projection_status,
-            "written_to_lcr": False,
+            "model_output_written_to_lcr": False,
+            "source_grounded_observations_projected": observation_count,
         },
     ))
     db.commit()
