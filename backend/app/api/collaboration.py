@@ -4681,8 +4681,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
             care_journey_request = bool(re.search(
-                r"\b(?:care journey|full (?:care )?history|complete (?:care )?history|whole (?:care )?history|"
-                r"timeline of (?:the )?care|everything that happened|what has been happening throughout)\b",
+                r"\b(?:care journey|(?:full|complete|whole|entire) (?:care )?history|history of (?:her|his|their|the person's|this person's)? ?"
+                r"(?:care|sleep|appetite|mobility|medication|incidents|appointments)|timeline of (?:the )?care|"
+                r"everything that happened|what has been happening throughout|reconstruct (?:the )?care)\b",
                 user_text,
                 re.IGNORECASE,
             ))
