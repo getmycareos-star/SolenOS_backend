@@ -2243,6 +2243,36 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
         assert len(lcr_rows) == 4
         assert all(row["source_type"] == "caregiver_report" for row in lcr_rows)
         assert all(row["epistemic_status"] == "caregiver_reported" for row in lcr_rows)
+
+        # Every source-grounded extraction must travel with its parent report
+        # into the existing LCR projection; four parent events alone are not
+        # sufficient evidence that the extracted details were transferred.
+        projected_observations = [
+            observation
+            for row in lcr_rows
+            for observation in row.get("derived_observations", [])
+        ]
+        projected_by_value = {
+            observation["value_text"]: observation
+            for observation in projected_observations
+        }
+        assert set(projected_by_value) == expected_values
+        assert len(projected_observations) == len(expected_values)
+        assert projected_by_value["seemed more unsettled this morning"]["epistemic_status"] == "uncertain"
+        assert projected_by_value["seemed more unsettled this morning"]["hedge_marker"] == "seemed"
+        assert projected_by_value["drank some water"]["epistemic_status"] == "reported"
+        for value, time_wording in (
+            ("slept poorly last night", "last night"),
+            ("seemed more unsettled this morning", "this morning"),
+            ("barely touched her lunch today", "today"),
+            ("was calmer this evening", "this evening"),
+            ("is now resting", "now"),
+        ):
+            projected = projected_by_value[value]
+            assert time_wording in projected["context"]
+            assert projected["source_passage"]
+            assert projected["source_span_start"] is not None
+            assert projected["source_span_end"] is not None
     finally:
         teardown_db()
 
