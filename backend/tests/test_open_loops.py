@@ -798,6 +798,40 @@ def test_follow_up_callback_promise_remains_waiting_and_unverified():
     assert len(replay.json()["response_evidence"]) == 1
 
 
+def test_open_filter_includes_waiting_callback_promises_as_unresolved():
+    client = TestClient(app)
+    _, headers = session(client, "Open unresolved follow-up filter recipient")
+    ordinary = create_loop(
+        client, headers, "follow_up",
+        title="Confirm specialist appointment",
+    )
+    waiting = create_loop(
+        client, headers, "follow_up",
+        title="Wait for clinic callback",
+    )
+    callback = client.post(
+        f"/api/v1/open-loops/{waiting['id']}/responses",
+        headers=headers,
+        json={
+            "text": "Caregiver reports that the clinic promised a callback; no appointment is confirmed.",
+            "response_outcome": "callback_promised",
+            "idempotency_key": "open-filter-callback-promise",
+        },
+    )
+    assert callback.status_code == 200, callback.text
+    assert callback.json()["status"] == "waiting"
+
+    unresolved = client.get("/api/v1/open-loops?status=open&limit=100", headers=headers)
+    assert unresolved.status_code == 200, unresolved.text
+    unresolved_ids = {item["id"] for item in unresolved.json()["items"]}
+    assert ordinary["id"] in unresolved_ids
+    assert waiting["id"] in unresolved_ids, "a promised callback remains an unresolved commitment"
+
+    waiting_only = client.get("/api/v1/open-loops?status=waiting&limit=100", headers=headers)
+    assert waiting_only.status_code == 200, waiting_only.text
+    assert {item["id"] for item in waiting_only.json()["items"]} == {waiting["id"]}
+
+
 def test_follow_up_rejects_unknown_response_outcome():
     client = TestClient(app)
     _, headers = session(client, "Invalid callback outcome recipient")
