@@ -586,6 +586,6 @@ def test_live_qwen_respects_low_capacity_caregiver_response_contract():
     assert result.get("ai_generated") is True, result
     assert result.get("written_to_lcr") is False, result
     assert len(reply.split()) <= 80, reply
-    assert len([part for part in __import__("re").split(r"(?<=[.!?])\\s+", reply.strip()) if part]) <= 3, reply
+    assert len([part for part in __import__("re").split(r"(?<=[.!?])\s+", reply.strip()) if part]) <= 3, reply
     assert reply.count("?") <= 1, reply
-    assert not __import__("re").search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", reply), reply
+    assert not __import__("re").search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", reply), reply
