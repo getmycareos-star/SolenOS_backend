@@ -1299,3 +1299,26 @@ def test_companion_injects_continuity_repair_guidance_into_real_inference_prompt
         assert "Do not defend the system" in prompt
     finally:
         teardown()
+
+
+def test_caregiver_response_contract_rejects_overloaded_checklists_and_long_answers():
+    validate = collaboration._caregiver_response_needs_revision
+    prompt = "I'm exhausted. I don't know what to do anymore."
+    assert validate(prompt, "First, call the clinic. Second, check the medication. Third, update the calendar. Fourth, message your family.")
+    assert validate(prompt, "1. Call the clinic.\n2. Check the medication.")
+    assert not validate(prompt, "We can focus on the most urgent concern first. You do not need to solve everything today.")
+
+
+def test_caregiver_response_contract_rejects_reasking_and_unverified_record_changes():
+    validate = collaboration._caregiver_response_needs_revision
+    assert validate("You keep asking me the same questions.", "Please tell me the whole story again.")
+    assert not validate("You keep asking me the same questions.", "I’ll use the relevant details already in the care record.")
+    assert validate("No, that's not what happened.", "I've updated the care record with your correction.")
+    assert not validate("No, that's not what happened.", "Thank you for correcting that. I’ll keep the earlier report distinct from what you’ve clarified.")
+
+
+def test_caregiver_response_contract_limits_vague_concern_to_one_question():
+    validate = collaboration._caregiver_response_needs_revision
+    assert validate("Something feels different.", "What changed? When did it start? Has anything else happened?")
+    assert not validate("Something feels different.", "What feels different from what you usually see?")
+    assert not validate("What happened at Mum's appointment last Tuesday?", "The clinic recorded a follow-up for next week.")
