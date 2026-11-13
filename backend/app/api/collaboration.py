@@ -69,6 +69,13 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
+
+
+def _build_unified_lcr_context_or_422(*args, **kwargs):
+    try:
+        return build_unified_lcr_context(*args, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 from app.services.lcr_context import _expanded_search_terms
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
@@ -3778,7 +3785,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "professional_summary", "handoff", "after_appointment",
             "two_week_review", "decision_outcome", "care_situation_change", "delta_engine",
         }
-        shared_lcr_context = build_unified_lcr_context(
+        shared_lcr_context = _build_unified_lcr_context_or_422(
             db,
             person_id,
             caregiver_id,
