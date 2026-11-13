@@ -36,7 +36,11 @@ def _temporal_window(
     now: datetime | None = None,
     timezone_name: str = "UTC",
 ) -> dict[str, str] | None:
-    """Resolve explicit date/range language in the caregiver's local timezone."""
+    """Resolve explicit date/range language in the caregiver's local timezone.
+
+    Invalid or reversed explicit dates fail closed instead of silently falling
+    back to an unrestricted history search.
+    """
     text = (query or "").casefold()
     try:
         local_timezone = ZoneInfo(timezone_name or "UTC")
@@ -48,59 +52,90 @@ def _temporal_window(
     else:
         current = current.astimezone(local_timezone)
     today = current.date()
-    start = end = None
 
-    date_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", text)
-    if date_match and re.search(r"\b(?:on|for)\s+20\d{2}-\d{2}-\d{2}", text):
-        selected = datetime.fromisoformat(date_match.group(1)).date()
-        start, end = selected, selected
-    elif re.search(r"\byesterday\b", text):
+    def parsed_date(value: str) -> date:
+        try:
+            return date.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid calendar date in care-history question: {value}") from exc
+
+    def date_window(start_date: date, end_date: date) -> dict[str, str]:
+        if start_date > end_date:
+            raise ValueError("The start date is after the end date in the care-history question.")
+        return {
+            "start": datetime.combine(start_date, datetime.min.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+            "end": datetime.combine(end_date, datetime.max.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+            "timezone": str(local_timezone),
+            "basis": "explicit_user_temporal_expression",
+        }
+
+    start = end = None
+    range_match = re.search(
+        r"\\b(?:between\\s+(20\\d{2}-\\d{2}-\\d{2})\\s+and\\s+(20\\d{2}-\\d{2}-\\d{2})|"
+        r"from\\s+(20\\d{2}-\\d{2}-\\d{2})\\s+to\\s+(20\\d{2}-\\d{2}-\\d{2}))\\b",
+        text,
+    )
+    if range_match:
+        values = [value for value in range_match.groups() if value]
+        return date_window(parsed_date(values[0]), parsed_date(values[1]))
+
+    date_match = re.search(r"\\b(20\\d{2}-\\d{2}-\\d{2})\\b", text)
+    if date_match:
+        selected = parsed_date(date_match.group(1))
+        if re.search(r"\\b(?:on|for)\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+            start = end = selected
+        elif re.search(r"\\bsince\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+            start, end = selected, today
+        elif re.search(r"\\bafter\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+            start, end = selected + timedelta(days=1), today
+        elif re.search(r"\\bbefore\\s+20\\d{2}-\\d{2}-\\d{2}", text):
+            if selected == date.min:
+                raise ValueError("The requested date range is outside the supported calendar.")
+            start, end = date.min, selected - timedelta(days=1)
+        if start is not None:
+            return date_window(start, end)
+
+    if re.search(r"\\byesterday\\b", text):
         start = end = today - timedelta(days=1)
-    elif re.search(r"\btoday\b", text):
+    elif re.search(r"\\btoday\\b", text):
         start = end = today
-    elif re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text):
-        days = min(int(re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text).group(1)), 366)
-        start, end = today - timedelta(days=max(0, days - 1)), today
-    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text):
-        weeks = min(int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text).group(1)), 52)
-        start, end = today - timedelta(days=max(0, weeks * 7 - 1)), today
-    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text):
-        months = min(int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text).group(1)), 12)
-        # Calendar months have different lengths. A fixed 30-day approximation
-        # shifts month-based care-history boundaries and can omit/include records
-        # around month ends. Subtract calendar months while clamping the day.
+    elif re.search(r"\\b(?:last|past)\\s+(\\d{1,3})\\s+days?\\b", text):
+        days = int(re.search(r"\\b(?:last|past)\\s+(\\d{1,3})\\s+days?\\b", text).group(1))
+        if days < 1:
+            raise ValueError("A care-history day range must be at least one day.")
+        days = min(days, 366)
+        start, end = today - timedelta(days=days - 1), today
+    elif re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+weeks?\\b", text):
+        weeks = int(re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+weeks?\\b", text).group(1))
+        if weeks < 1:
+            raise ValueError("A care-history week range must be at least one week.")
+        weeks = min(weeks, 52)
+        start, end = today - timedelta(days=weeks * 7 - 1), today
+    elif re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+months?\\b", text):
+        months = int(re.search(r"\\b(?:last|past)\\s+(\\d{1,2})\\s+months?\\b", text).group(1))
+        if months < 1:
+            raise ValueError("A care-history month range must be at least one month.")
+        months = min(months, 12)
         month_index = today.year * 12 + (today.month - 1) - months
         start_year, start_month_zero = divmod(month_index, 12)
         start_month = start_month_zero + 1
         start_day = min(today.day, calendar.monthrange(start_year, start_month)[1])
         start, end = date(start_year, start_month, start_day), today
-    elif re.search(r"\blast week\b", text):
+    elif re.search(r"\\blast week\\b", text):
         monday = today - timedelta(days=today.weekday())
         start, end = monday - timedelta(days=7), monday - timedelta(days=1)
-    elif re.search(r"\bthis week\b", text):
+    elif re.search(r"\\bthis week\\b", text):
         start, end = today - timedelta(days=today.weekday()), today
-    elif re.search(r"\blast month\b", text):
+    elif re.search(r"\\blast month\\b", text):
         first_this_month = today.replace(day=1)
         last_month_end = first_this_month - timedelta(days=1)
         start, end = last_month_end.replace(day=1), last_month_end
-    elif re.search(r"\bthis month\b", text):
+    elif re.search(r"\\bthis month\\b", text):
         start, end = today.replace(day=1), today
-    elif re.search(r"\bbetween\s+20\d{2}-\d{2}-\d{2}\s+and\s+20\d{2}-\d{2}-\d{2}", text) or re.search(r"\bfrom\s+20\d{2}-\d{2}-\d{2}\s+to\s+20\d{2}-\d{2}-\d{2}", text):
-        dates = re.findall(r"20\d{2}-\d{2}-\d{2}", text)
-        start, end = datetime.fromisoformat(dates[0]).date(), datetime.fromisoformat(dates[1]).date()
-    elif date_match and re.search(r"\b(?:since|after)\s+20\d{2}-\d{2}-\d{2}", text):
-        start, end = datetime.fromisoformat(date_match.group(1)).date(), today
-    elif date_match and re.search(r"\bbefore\s+20\d{2}-\d{2}-\d{2}", text):
-        start, end = date(2000, 1, 1), datetime.fromisoformat(date_match.group(1)).date()
+
     if start is None or end is None:
         return None
-    return {
-        "start": datetime.combine(start, datetime.min.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
-        "end": datetime.combine(end, datetime.max.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
-        "timezone": str(local_timezone),
-        "basis": "explicit_user_temporal_expression",
-    }
-
+    return date_window(start, end)
 
 
 def _conversation_context(
