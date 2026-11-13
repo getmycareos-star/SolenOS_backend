@@ -35,7 +35,7 @@ from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
-from app.services.care_continuity import has_valid_caregiver_necessity
+from app.services.care_continuity import has_valid_caregiver_necessity, prioritize_caregiver_questions
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
@@ -738,37 +738,9 @@ def get_situation(
     open_question_rows = [
         row for row in open_question_rows if has_valid_caregiver_necessity(row, db, person_id)
     ]
-    question_priority_weight = {
-        "critical": 5, "high": 4, "medium": 3,
-        "low": 2, "informational": 1,
-    }
-    open_question_rows.sort(key=lambda row: (
-        -question_priority_weight.get(str(getattr(row.priority, "value", row.priority)), 0),
-        row.asked_at.isoformat() if row.asked_at else "",
-        str(row.id),
-    ))
-    unique_open_questions = []
-    seen_open_questions = set()
-    for question in open_question_rows:
-        key = (
-            " ".join((question.question or "").casefold().split()),
-            question.subject_type,
-            question.subject_id,
-        )
-        if key in seen_open_questions:
-            continue
-        seen_open_questions.add(key)
-        unique_open_questions.append(question)
-    critical_open_questions = [
-        question for question in unique_open_questions
-        if str(getattr(question.priority, "value", question.priority)) == "critical"
-    ]
-    ordinary_open_questions = [
-        question for question in unique_open_questions
-        if str(getattr(question.priority, "value", question.priority)) != "critical"
-    ]
-    additional_open_question_count = max(0, len(ordinary_open_questions) - 2)
-    open_question_rows = critical_open_questions + ordinary_open_questions[:2]
+    _, open_question_rows, additional_open_question_count = prioritize_caregiver_questions(
+        open_question_rows, ordinary_limit=2
+    )
     unresolved_conflict_rows = (
         db.query(ContradictionModel)
         .filter(
