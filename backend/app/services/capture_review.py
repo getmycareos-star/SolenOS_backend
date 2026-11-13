@@ -144,13 +144,14 @@ def supplement_source_grounded_daily_observations(
     for match in re.finditer(r"[^.!?;\n]+(?:[.!?;]+|$)", source_text or ""):
         sentence = match.group(0).strip()
         clauses = [part.strip() for part in re.split(r"\s+and\s+", sentence, flags=re.IGNORECASE)]
-        if len(clauses) < 2 or not all(
-            len(re.findall(r"[A-Za-z0-9']+", part)) >= 2 and _DAILY_CLAUSE_VERB.search(part)
-            for part in clauses
-        ):
+        valid_clauses = [
+            part for part in clauses
+            if len(re.findall(r"[A-Za-z0-9']+", part)) >= 2 and _DAILY_CLAUSE_VERB.search(part)
+        ]
+        if len(valid_clauses) < 2:
             continue
 
-        sentence_subject = _DAILY_CLAUSE_SUBJECT.match(clauses[0])
+        sentence_subject = _DAILY_CLAUSE_SUBJECT.match(valid_clauses[0])
         inherited_subject = sentence_subject.group(1).strip() if sentence_subject else None
         if not inherited_subject:
             continue
@@ -164,7 +165,7 @@ def supplement_source_grounded_daily_observations(
                 and str(item.get("source_quote") or "").strip() == sentence
             )
         ]
-        for clause in clauses:
+        for clause in valid_clauses:
             subject_match = _DAILY_CLAUSE_SUBJECT.match(clause)
             subject = subject_match.group(1).strip() if subject_match else inherited_subject
             observation = clause.strip()
