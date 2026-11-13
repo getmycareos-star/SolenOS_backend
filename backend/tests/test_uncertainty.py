@@ -252,7 +252,12 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                 priority=Priority.HIGH,
                 evidence_ids=[evidence.id],
                 context=[{
-                    "decision_dependency": "The handoff cannot identify the active instruction without clarification."
+                    "source_kind": "document_extraction",
+                    "source_id": evidence.id,
+                    "necessity_assessment": {
+                        "necessity_rationale": "The handoff decision depends on the active instruction.",
+                        "decision_dependency": "The handoff cannot identify the active instruction without clarification.",
+                    },
                 }],
             ),
             OpenQuestion(
@@ -263,6 +268,25 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                 status="open",
                 necessity="not_assessed",
                 priority=Priority.INFORMATIONAL,
+            ),
+            OpenQuestion(
+                person_id=person.id,
+                question="Which older source should be used for the handoff?",
+                subject_type="person",
+                subject_id=person.id,
+                status="open",
+                necessity="necessary",
+                necessity_rationale="The handoff decision depends on the source.",
+                priority=Priority.HIGH,
+                evidence_ids=[evidence.id],
+                # Evidence exists on the question, but the decision dependency
+                # is not linked to a persisted source context.
+                context=[{
+                    "necessity_assessment": {
+                        "necessity_rationale": "The handoff decision depends on the source.",
+                        "decision_dependency": "The handoff needs a confirmed source.",
+                    }
+                }],
             ),
             OpenQuestion(
                 person_id=person.id,
@@ -287,6 +311,10 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
         assert [item["question"] for item in questions] == [
             "Which discharge instruction applies to the current handoff?"
         ]
+        assert all(
+            item["question"] != "Which older source should be used for the handoff?"
+            for item in questions
+        ), "A decision dependency without a source-bound context must not reach the caregiver."
     finally:
         teardown_db()
 
