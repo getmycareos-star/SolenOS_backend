@@ -4200,6 +4200,65 @@ def _stored_claim_provenance(row: ConversationMessage) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _fit_model_context_lines_across_sources(
+    lines: list[str], max_chars: int
+) -> tuple[list[str], list[str], int, bool]:
+    """Fit prompt context fairly across source types without losing source order.
+
+    Selection is round-robin by source type so a long event stream cannot crowd
+    evidence, conflicts, corrections, decisions, or open loops out of the prompt.
+    Selected lines are returned in their original order, preserving chronology
+    for care-journey requests.
+    """
+    grouped: dict[str, list[tuple[int, str, str]]] = {}
+    for index, line in enumerate(lines):
+        brace = (line or "").find("{")
+        source_type = "__other__"
+        if brace >= 0:
+            try:
+                payload = json.loads(line[brace:])
+                if isinstance(payload, dict):
+                    candidate = payload.get("source_type")
+                    if isinstance(candidate, str) and candidate.strip():
+                        source_type = candidate.strip()
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+        grouped.setdefault(source_type, []).append(
+            (index, line, _humanize_model_context_line(line))
+        )
+
+    ordered_types = [
+        name for name in _LCR_CONTEXT_SOURCE_PRIORITY if name in grouped
+    ]
+    ordered_types.extend(name for name in grouped if name not in ordered_types)
+
+    selected: list[tuple[int, str, str]] = []
+    used_chars = 0
+    cursors = {name: 0 for name in ordered_types}
+    while True:
+        made_progress = False
+        for source_type in ordered_types:
+            candidates = grouped[source_type]
+            cursor = cursors[source_type]
+            while cursor < len(candidates):
+                candidate = candidates[cursor]
+                cursor += 1
+                rendered_length = len(candidate[2])
+                if used_chars + rendered_length <= max(0, int(max_chars)):
+                    selected.append(candidate)
+                    used_chars += rendered_length
+                    made_progress = True
+                    break
+            cursors[source_type] = cursor
+        if not made_progress:
+            break
+
+    selected.sort(key=lambda item: item[0])
+    selected_raw = [item[1] for item in selected]
+    selected_rendered = [item[2] for item in selected]
+    return selected_raw, selected_rendered, used_chars, len(selected) < len(lines)
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -4928,18 +4987,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text, re.IGNORECASE,
         ):
             model_context_lines.append(lineage_context_line)
-        bounded_context: list[str] = []
-        included_model_context_lines: list[str] = []
-        context_chars = 0
-        context_truncated = False
-        for line in model_context_lines:
-            rendered_line = _humanize_model_context_line(line)
-            if context_chars + len(rendered_line) > 16000:
-                context_truncated = True
-                continue
-            bounded_context.append(rendered_line)
-            included_model_context_lines.append(line)
-            context_chars += len(rendered_line)
+        (
+            included_model_context_lines,
+            bounded_context,
+            context_chars,
+            context_truncated,
+        ) = _fit_model_context_lines_across_sources(model_context_lines, 16000)
         # Only expose source references for records actually supplied to Qwen.
         source_lcr_record_refs = _context_record_refs(included_model_context_lines)
         source_lcr_context_ids = _context_record_ids(included_model_context_lines, "source_id")
