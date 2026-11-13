@@ -275,7 +275,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
         teardown()
 
 def test_one_hundred_case_question_gate_benchmark():
-    """100 deterministic synthetic cases: 40 valid, 60 must be withheld."""
+    """100 deterministic synthetic cases: 35 eligible, 65 must be withheld."""
     setup()
     try:
         db = SessionLocal()
