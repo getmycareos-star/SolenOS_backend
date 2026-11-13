@@ -478,7 +478,7 @@ def create_proactive_care_notifications(
     questions = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == person_id,
         OpenQuestion.necessity == "necessary",
-        OpenQuestion.status.in_(sorted(OPEN_QUESTION_STATUSES)),
+        OpenQuestion.status.in_(("open", "unresolved")),
     ).order_by(OpenQuestion.asked_at.asc(), OpenQuestion.id.asc()).all()
 
     eligible_questions = [
