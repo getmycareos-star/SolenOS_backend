@@ -4901,6 +4901,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ):
             model_context_lines.append(lineage_context_line)
         bounded_context: list[str] = []
+        included_model_context_lines: list[str] = []
         context_chars = 0
         context_truncated = False
         for line in model_context_lines:
@@ -4909,7 +4910,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 context_truncated = True
                 continue
             bounded_context.append(rendered_line)
+            included_model_context_lines.append(line)
             context_chars += len(rendered_line)
+        # Only expose source references for records actually supplied to Qwen.
+        source_lcr_record_refs = _context_record_refs(included_model_context_lines)
+        source_lcr_context_ids = _context_record_ids(included_model_context_lines, "source_id")
+        source_evidence_ids = list(dict.fromkeys([
+            *source_evidence_ids,
+            *(
+                reference["record_id"] for reference in source_lcr_record_refs
+                if reference.get("record_type") == "care_evidence"
+            ),
+        ]))
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
         lcr_context_coverage["prompt_context_budget_chars"] = 16000
