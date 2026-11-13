@@ -3771,12 +3771,18 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # evidence, appointments or document text already loaded above.
     shared_lcr_workflows = (event_workflows | appointment_workflows) - {"medication_day"}
     if payload.workflow in shared_lcr_workflows:
+        full_history_workflows = {
+            "living_care_record", "care_history_search", "returning_caregiver",
+            "professional_summary", "handoff", "after_appointment",
+            "two_week_review", "decision_outcome", "care_situation_change", "delta_engine",
+        }
         shared_lcr_context = build_unified_lcr_context(
             db,
             person_id,
             caregiver_id,
-            limit_per_source=8,
+            limit_per_source=50,
             query=None if payload.workflow == "living_care_record" else (payload.text or "")[:1000],
+            include_all_history=payload.workflow in full_history_workflows,
         )
         context_lines.append(
             "Canonical LCR retrieval coverage: "
@@ -3785,6 +3791,17 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 "history_coverage": shared_lcr_context.get("history_coverage"),
                 "missing_required_sources": shared_lcr_context.get("missing_required_sources", []),
                 "missing_optional_sources": shared_lcr_context.get("missing_optional_sources", []),
+                "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
+                "sources": {
+                    name: {
+                        "status": source.get("status"),
+                        "candidate_count": source.get("candidate_count"),
+                        "returned_count": source.get("returned_count", 0),
+                        "candidate_scan_complete": source.get("candidate_scan_complete", False),
+                        "has_more": source.get("has_more", False),
+                    }
+                    for name, source in shared_lcr_context.get("sources", {}).items()
+                },
                 "retrieval_contract": shared_lcr_context.get("retrieval_contract", {}),
             }, ensure_ascii=False, default=str)
         )
@@ -3798,21 +3815,31 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         )
         shared_items_added = 0
         shared_chars_added = 0
+        shared_context_truncated = False
         for source_name in canonical_sources:
             source = shared_lcr_context.get("sources", {}).get(source_name, {})
-            for item in source.get("items", [])[:8]:
+            for item in source.get("items", []):
                 line = (
                     f"Canonical LCR source ({source_name}; "
                     f"information_status={item.get('information_status', 'unknown')}): "
                     + json.dumps(item, ensure_ascii=False, default=str)
                 )
-                if shared_items_added >= 32 or shared_chars_added + len(line) > 10000:
+                if shared_items_added >= 200 or shared_chars_added + len(line) > 16000:
+                    shared_context_truncated = True
                     break
                 context_lines.append(line)
                 shared_items_added += 1
                 shared_chars_added += len(line)
-            if shared_items_added >= 32 or shared_chars_added >= 10000:
+            if shared_context_truncated:
                 break
+        context_lines.append(
+            "Canonical LCR prompt coverage: "
+            + json.dumps({
+                "selected_records": shared_items_added,
+                "selected_chars": shared_chars_added,
+                "selection_truncated": shared_context_truncated,
+            })
+        )
 
     if payload.workflow in {"handoff", "care_coordination", "care_transition"}:
         handoffs = db.query(CaregiverHandoff).filter(
