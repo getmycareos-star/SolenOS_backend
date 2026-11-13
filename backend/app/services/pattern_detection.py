@@ -941,13 +941,13 @@ def detect_cross_domain_patterns(
 ) -> List[Pattern]:
     """Persist co-occurring recorded events across domains without inferring causation."""
     now = _ensure_utc(reference_time or _utc_now())
-    window_start = now - timedelta(days=90)
+    # Scan the person's full available event history. The hard row bound is
+    # explicit in pattern_metrics; a 90-day cutoff silently hid older clusters.
     queried = (
         db.query(CareEvent)
         .filter(
             CareEvent.person_id == person_id,
             CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
-            CareEvent.occurred_at >= window_start,
             CareEvent.occurred_at <= now,
         )
         .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
@@ -1033,7 +1033,7 @@ def detect_cross_domain_patterns(
             pattern_metrics={
                 "metric_version": "cross-domain-co-occurrence-v1",
                 "window_days": cluster_days,
-                "analysis_window_start": window_start.isoformat(),
+                "analysis_window_start": min(_ensure_utc(event.occurred_at) for event in events).isoformat() if events else now.isoformat(),
                 "analysis_window_end": now.isoformat(),
                 "cluster_start": cluster_start.isoformat(),
                 "cluster_end": cluster_end.isoformat(),
