@@ -2284,6 +2284,9 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
         assert len(projected_observations) == len(expected_values)
         assert projected_by_value["seemed more unsettled this morning"]["epistemic_status"] == "uncertain"
         assert projected_by_value["seemed more unsettled this morning"]["hedge_marker"] == "seemed"
+        assert projected_by_value["changed Mum's medication yesterday"]["epistemic_status"] == "uncertain"
+        assert projected_by_value["changed Mum's medication yesterday"]["hedge_marker"] == "I think"
+        assert "yesterday" in projected_by_value["changed Mum's medication yesterday"]["context"]
         assert projected_by_value["drank some water"]["epistemic_status"] == "reported"
         for value, time_wording in (
             ("slept poorly last night", "last night"),
