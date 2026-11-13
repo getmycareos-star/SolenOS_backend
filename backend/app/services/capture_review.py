@@ -144,7 +144,10 @@ def supplement_source_grounded_daily_observations(
     for match in re.finditer(r"[^.!?;\n]+(?:[.!?;]+|$)", source_text or ""):
         sentence = match.group(0).strip()
         clauses = [part.strip() for part in re.split(r"\s+and\s+", sentence, flags=re.IGNORECASE)]
-        if len(clauses) < 2 or not all(_DAILY_CLAUSE_VERB.search(part) for part in clauses):
+        if len(clauses) < 2 or not all(
+            len(re.findall(r"[A-Za-z0-9']+", part)) >= 2 and _DAILY_CLAUSE_VERB.search(part)
+            for part in clauses
+        ):
             continue
 
         sentence_subject = _DAILY_CLAUSE_SUBJECT.match(clauses[0])
