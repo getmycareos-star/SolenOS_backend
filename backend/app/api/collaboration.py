@@ -5204,7 +5204,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
             caregiver_question_queue_lines = [
                 "Approved caregiver question queue (ask only when relevant; respect intended answerer): "
-                + json.dumps(queue_item, ensure_ascii=False, default=str)
+                + json.dumps({
+                    "source_type": "caregiver_question_queue",
+                    "source_id": str(queue_item.get("id") or ""),
+                    "record": queue_item,
+                }, ensure_ascii=False, default=str)
                 for queue_item in caregiver_question_queue.get("items", [])
             ]
             selected_source_counts: dict[str, int] = {}
