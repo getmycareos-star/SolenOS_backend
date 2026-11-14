@@ -349,6 +349,7 @@ def persist_source_clarification_questions(
                 priority=priority,
                 necessity=necessity,
                 necessity_rationale=necessity_rationale,
+                intended_answerer_role="reporting_caregiver" if matched_gap else "not_known",
                 evidence_ids=assessed_evidence_ids or None,
                 context=contexts_to_add,
                 created_by_caregiver_id=caregiver_id,
@@ -377,6 +378,7 @@ def persist_source_clarification_questions(
                     existing.necessity = necessity
                     existing.necessity_rationale = necessity_rationale
                     existing.priority = priority
+                    existing.intended_answerer_role = "reporting_caregiver"
                 contexts = list(existing.context or [])
                 for new_context in contexts_to_add:
                     context_key = (new_context.get("source_kind"), new_context.get("source_id"))
