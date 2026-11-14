@@ -397,8 +397,13 @@ def test_duplicate_candidate_merge_preserves_the_selected_source_evidence_and_an
         assert question.intended_answerer_role == "professional"
         assert set(question.evidence_ids) == {first_evidence.id, second_evidence.id}
         assert len(question.context) == 1
+        selected_source_id = question.context[0]["source_id"]
+        selected_source = db.query(Contradiction).filter_by(id=selected_source_id).one()
         assessment_evidence_ids = question.context[0]["necessity_assessment"]["evidence_ids"]
-        assert assessment_evidence_ids == [first_evidence.id]
+        assert assessment_evidence_ids == selected_source.evidence_ids
+        assert set(question.context[0]["source_ids"]) == {
+            "dedupe-medication-conflict-a", "dedupe-medication-conflict-b",
+        }
         assert has_valid_caregiver_necessity(question, db, person.id) is True
         assert sum(1 for item in candidates if item.get("persisted_question_id") == question.id) == 1
         db.rollback()
