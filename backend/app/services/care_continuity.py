@@ -1003,16 +1003,28 @@ def next_best_questions(
         prior = deduplicated[key]
         prior["evidence_ids"] = list(dict.fromkeys(prior["evidence_ids"] + item["evidence_ids"]))
         prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + (item.get("source_ids") or [item["source_id"]])))
-        if item.get("necessity") == "necessary" and prior.get("necessity") != "necessary":
+        item_is_necessary = item.get("necessity") == "necessary"
+        prior_is_necessary = prior.get("necessity") == "necessary"
+        if item_is_necessary and not prior_is_necessary:
+            # The necessary assessment owns the source and answerer. A higher
+            # priority but unassessed duplicate must never replace that lineage.
             prior["necessity"] = "necessary"
             prior["necessity_rationale"] = item.get("necessity_rationale")
             prior["decision_dependency"] = item.get("decision_dependency")
+            prior["source_kind"] = item.get("source_kind")
+            prior["source_id"] = item.get("source_id")
+            prior["intended_answerer_role"] = item.get("intended_answerer_role")
+            prior["reason"] = item.get("reason")
+        elif item_is_necessary == prior_is_necessary and item["_weight"] > prior["_weight"]:
+            # When assessment state is equal, use the stronger source candidate
+            # and keep its answerer attached to that exact source.
+            prior["source_kind"] = item.get("source_kind")
+            prior["source_id"] = item.get("source_id")
+            prior["intended_answerer_role"] = item.get("intended_answerer_role")
+            prior["reason"] = item.get("reason")
         if item["_weight"] > prior["_weight"]:
             prior["priority"] = item["priority"]
             prior["_weight"] = item["_weight"]
-            prior["reason"] = item["reason"]
-            prior["source_kind"] = item["source_kind"]
-            prior["source_id"] = item["source_id"]
     candidates = list(deduplicated.values())
     candidates.sort(key=lambda item: (-item["_weight"], item["question"].casefold(), item["source_id"]))
     output = []
