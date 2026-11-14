@@ -2988,7 +2988,12 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         for comparison in (previous_comparison, current_comparison):
             care_attention = comparison.get("care_attention")
             if isinstance(care_attention, dict):
-                care_attention.pop("as_of", None)
+                # current_comparison is a shallow copy; replace the nested
+                # mapping instead of mutating the response assessment itself.
+                comparison["care_attention"] = {
+                    key: value for key, value in care_attention.items()
+                    if key != "as_of"
+                }
         previous_records = {
             (str(item.get("source", "")), str(item.get("id", ""))): item
             for item in (previous_assessment.get("current_care_reality", {}).get("records", []) if isinstance(previous_assessment, dict) else [])
