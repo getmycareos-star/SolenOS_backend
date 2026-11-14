@@ -336,13 +336,13 @@ def test_live_qwen_lcr_orientation_distinguishes_new_and_returning_caregivers_wi
         assert new_body.get("written_to_lcr") is False, new_body
         new_reply = new_body.get("reply", "")
         assert 1 <= len(new_reply.split()) <= 40, new_reply
-        assert len([part for part in re.split(r"(?<=[.!?])\\s+", new_reply.strip()) if part]) <= 2, new_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\s+", new_reply.strip()) if part]) <= 2, new_reply
         assert not re.search(
-            r"\\b(?:welcome back|your previous updates|as we discussed|i remember everything)\\b",
+            r"\b(?:welcome back|your previous updates|as we discussed|i remember everything)\b",
             new_reply,
             re.IGNORECASE,
         ), new_reply
-        assert not re.search(r"\\bhow can i help\\b", new_reply, re.IGNORECASE), new_reply
+        assert not re.search(r"\bhow can i help\b", new_reply, re.IGNORECASE), new_reply
 
         returning_response = client.post(
             "/api/lcr/orientation",
@@ -356,9 +356,9 @@ def test_live_qwen_lcr_orientation_distinguishes_new_and_returning_caregivers_wi
         assert returning_body.get("written_to_lcr") is False, returning_body
         returning_reply = returning_body.get("reply", "")
         assert 1 <= len(returning_reply.split()) <= 40, returning_reply
-        assert len([part for part in re.split(r"(?<=[.!?])\\s+", returning_reply.strip()) if part]) <= 2, returning_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\s+", returning_reply.strip()) if part]) <= 2, returning_reply
         assert not re.search(
-            r"\\b(?:first time here|new caregiver|starting from scratch)\\b",
+            r"\b(?:first time here|new caregiver|starting from scratch)\b",
             returning_reply,
             re.IGNORECASE,
         ), returning_reply
