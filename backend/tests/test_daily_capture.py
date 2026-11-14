@@ -37,7 +37,17 @@ def process_daily_capture_job(job_id, monkeypatch, extractor):
     make_daily_capture_job_runnable(job_id)
     monkeypatch.setattr(qwen_background_worker, "SessionLocal", TestingSessionLocal)
     monkeypatch.setattr(qwen_background_worker, "extract_review_candidates", extractor)
-    return asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
+    processed = asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
+    db = TestingSessionLocal()
+    try:
+        job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        assert job.status == "completed", (
+            f"Daily Care extraction job did not complete: status={job.status!r}, "
+            f"error_code={job.error_code!r}, result_text={job.result_text!r}"
+        )
+    finally:
+        db.close()
+    return processed
 
 
 def make_daily_capture_job_runnable(job_id):
