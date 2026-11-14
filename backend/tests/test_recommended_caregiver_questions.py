@@ -574,6 +574,11 @@ def test_one_hundred_case_question_gate_benchmark():
                     "source_id": event_id,
                     "source_record_refs": [{"record_type": "care_event", "record_id": event_id}],
                 }
+            elif 30 <= index < 35:
+                source_context = {
+                    "source_kind": "caregiver_report",
+                    "source_id": evidence_id,
+                }
             elif source_bound:
                 source_context = {
                     "source_kind": "document_extraction",
@@ -592,7 +597,12 @@ def test_one_hundred_case_question_gate_benchmark():
                 subject_id=f"benchmark-subject-{index}",
                 status="open",
                 necessity="necessary" if necessary else "not_assessed",
-                intended_answerer_role="reporting_caregiver",
+                intended_answerer_role=(
+                    "professional" if index < 10 else
+                    "other_caregiver" if index < 20 else
+                    "person_receiving_care" if index < 30 else
+                    "reporting_caregiver"
+                ),
                 necessity_rationale=assessment["necessity_rationale"],
                 priority=priority,
                 evidence_ids=[evidence_id],
@@ -637,6 +647,12 @@ def test_one_hundred_case_question_gate_benchmark():
         listed = client.get("/api/v1/uncertainty/questions/benchmark-person")
         assert listed.status_code == 200, listed.text
         assert [item["id"] for item in listed.json()] == result["eligible_question_ids"]
+        assert {
+            item["intended_answerer_role"] for item in listed.json()
+        } == {
+            "professional", "other_caregiver",
+            "person_receiving_care", "reporting_caregiver",
+        }
         predicted_eligible = set(result["eligible_question_ids"])
         true_positives = len(predicted_eligible.intersection(expected_eligible))
         precision = true_positives / max(1, len(predicted_eligible))
