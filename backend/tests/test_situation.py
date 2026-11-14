@@ -534,6 +534,20 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     evidence_ids=[first_evidence_id],
                     context=[],
                 ),
+                InformationGap(
+                    id="actionable-mobility-information-gap",
+                    person_id=person_id,
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    field="current_transfer_support",
+                    description="The current transfer support needs confirmation.",
+                    evidence_ids=[first_evidence_id],
+                    context=[{
+                        "caregiver_attention_required": True,
+                        "necessity_rationale": "The next mobility handoff depends on this detail.",
+                        "decision_dependency": "The receiving caregiver cannot safely follow the handoff without the current transfer support.",
+                    }],
+                ),
             ])
             db.commit()
 
@@ -675,6 +689,9 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         assert "Has the unsteadiness also happened indoors?" in body["return_continuity"]["important_unresolved"]
         assert not any(
             item.startswith("Information needed: usual_walking_distance")
+            for item in body["return_continuity"]["important_unresolved"]
+        )        assert any(
+            item.startswith("Information needed: current_transfer_support")
             for item in body["return_continuity"]["important_unresolved"]
         )
         assert any(
