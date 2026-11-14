@@ -293,3 +293,37 @@ def test_free_text_events_are_not_grouped_as_structured_change_patterns():
         open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
     )
     assert result["important_to_address"] == []
+
+
+
+def test_duplicate_projections_of_one_source_do_not_create_repeated_pattern():
+    result = build_care_attention_assessment(
+        records=[
+            {"id": "projection-a", "source": "evidence_observations", "epistemic_status": "reported",
+             "subject_id": "person-12", "attribute": "sleep", "observed_value": "awake",
+             "occurred_at": NOW - timedelta(days=2), "evidence_ids": ["same-source"]},
+            {"id": "projection-b", "source": "evidence_observations", "epistemic_status": "reported",
+             "subject_id": "person-12", "attribute": "sleep", "observed_value": "slept",
+             "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["same-source"]},
+        ],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert result["important_to_address"] == []
+
+
+def test_baseline_and_current_observation_from_same_source_do_not_create_change():
+    result = build_care_attention_assessment(
+        records=[{
+            "id": "current-same-source", "source": "evidence_observations", "epistemic_status": "reported",
+            "subject_id": "person-13", "attribute": "orientation", "observed_value": "confused",
+            "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["same-source"],
+        }],
+        baseline_items=[{
+            "id": "baseline-same-source", "source": "evidence_observations", "epistemic_status": "reported",
+            "baseline_basis": "explicit_persisted_baseline_marker",
+            "subject_id": "person-13", "attribute": "orientation", "observed_value": "usually oriented",
+            "evidence_ids": ["same-source"],
+        }],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert result["important_to_address"] == []
