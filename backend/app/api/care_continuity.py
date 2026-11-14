@@ -2424,6 +2424,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             summary_item["ambiguity_note"] = item.get("ambiguity_note")
             summary_item["extraction_method"] = item.get("extraction_method")
             summary_item["extraction_version"] = item.get("extraction_version")
+        if source == "facts":
+            # Normalize typed facts into the comparison contract and retain supersession.
+            summary_item["attribute"] = item.get("fact_type")
+            summary_item["observed_value"] = item.get("fact_value")
+            summary_item["superseded_by_fact_id"] = item.get("superseded_by_fact_id")
         if uncertainty_analysis is not None:
             summary_item["uncertainty_analysis"] = uncertainty_analysis
         baseline_marker = (
