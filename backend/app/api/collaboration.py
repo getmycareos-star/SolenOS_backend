@@ -2265,7 +2265,7 @@ _LCR_CONTEXT_SOURCE_PRIORITY = (
 
 
 def _rank_lcr_context_lines(query: str, lines: list[str], limit: int = 10) -> list[str]:
-    """Select relevant LCR context without allowing one source table to crowd out all others."""
+    """Select relevant LCR context and retain linked source records for provenance."""
     if limit <= 0 or not lines:
         return []
 
@@ -2287,11 +2287,47 @@ def _rank_lcr_context_lines(query: str, lines: list[str], limit: int = 10) -> li
             continue
         grouped.setdefault(source_type, []).append(line)
 
+    candidates_by_type: dict[str, list[str]] = {}
+    matching_evidence_ids: set[str] = set()
+    for source_type, source_lines in grouped.items():
+        candidates = _filter_context_lines_to_query(query, source_lines)
+        candidates_by_type[source_type] = candidates
+        if source_type == "evidence":
+            for line in candidates:
+                try:
+                    payload = json.loads(line[line.index("{"):])
+                    record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+                    evidence_id = payload.get("source_id") or record.get("id")
+                    if evidence_id:
+                        matching_evidence_ids.add(str(evidence_id))
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+
+    # Event descriptions can be generic ("Daily Care entry") while the linked
+    # evidence contains the caregiver's actual words. Preserve the event when
+    # its linked evidence matched the question, so the response can cite both
+    # the evidence and the durable event that owns it.
+    if matching_evidence_ids:
+        linked_events = list(candidates_by_type.get("events", []))
+        for line in grouped.get("events", []):
+            try:
+                payload = json.loads(line[line.index("{"):])
+                record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+                linked_ids = {
+                    str(value) for value in (record.get("evidence_ids") or [])
+                    if value is not None
+                }
+            except (ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if linked_ids.intersection(matching_evidence_ids) and line not in linked_events:
+                linked_events.append(line)
+        candidates_by_type["events"] = linked_events
+
     ordered_types = [name for name in _LCR_CONTEXT_SOURCE_PRIORITY if name in grouped]
     ordered_types.extend(name for name in grouped if name not in _LCR_CONTEXT_SOURCE_PRIORITY)
     ranked_groups: list[list[str]] = []
     for source_type in ordered_types:
-        candidates = _filter_context_lines_to_query(query, grouped[source_type])
+        candidates = candidates_by_type.get(source_type, [])
         if candidates:
             ranked_groups.append(_rank_context_lines(query, candidates, limit))
 
@@ -2303,14 +2339,14 @@ def _rank_lcr_context_lines(query: str, lines: list[str], limit: int = 10) -> li
     selected: list[str] = []
     depth = 0
     while len(selected) < limit:
-        added = False
+        made_progress = False
         for group in ranked_groups:
             if depth < len(group):
                 selected.append(group[depth])
-                added = True
+                made_progress = True
                 if len(selected) >= limit:
                     break
-        if not added:
+        if not made_progress:
             break
         depth += 1
     return selected
