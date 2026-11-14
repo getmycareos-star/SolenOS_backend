@@ -6208,7 +6208,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         if (
             care_history_extractive_answer
-            and not (unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
+            and not (emergency or unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
             and (
                 not isinstance(reply, str)
                 or not reply.strip()
