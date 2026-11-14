@@ -958,7 +958,7 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
             captured["base"] = base
             captured["model"] = model
             captured["messages"] = messages
-            return "The record notes poor sleep last night. What has changed since then?"
+            return "Welcome back to SolenOS. Your care record notes poor sleep last night; what has changed today?"
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
 
         response = client.post(
@@ -968,7 +968,7 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["reply"] == "The record notes poor sleep last night. What has changed since then?"
+        assert body["reply"] == "Welcome back to SolenOS. Your care record notes poor sleep last night; what has changed today?"
         assert body["ai_generated"] is True
         assert body["care_record_unchanged"] is True
         assert body["companion_history_unchanged"] is True
@@ -1041,7 +1041,7 @@ def test_lcr_orientation_recognizes_existing_open_question_as_returning_history(
 
         def fake_qwen(base, model, messages, options=None):
             captured["prompt"] = messages[0]["content"]
-            return "Your care record already has an open sleep question. We can continue with the update that matters today."
+            return "Welcome back to SolenOS. Your care record has an open sleep question; we can continue with today’s update."
 
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
         response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
@@ -1099,7 +1099,7 @@ def test_lcr_orientation_retries_once_when_qwen_exceeds_greeting_limits(monkeypa
             calls.append(messages)
             if len(calls) == 1:
                 return " ".join(["This is an unnecessarily long greeting"] * 12)
-            return "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+            return "Welcome to SolenOS. Your care story can start with whatever is happening today."
 
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
         response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
@@ -1155,7 +1155,7 @@ def test_lcr_orientation_recognizes_punctuated_greeting_variants(monkeypatch, gr
 
         def fake_qwen(base, model, messages, options=None):
             captured["prompt"] = messages[0]["content"]
-            return "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+            return "Welcome to SolenOS. Your care story can start with whatever is happening today."
 
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
         response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": greeting})
