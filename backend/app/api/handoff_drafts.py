@@ -442,6 +442,8 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "evidence_lineage": snapshot.get("evidence_lineage", {}),
         "care_continuity_execution": getattr(draft, "care_continuity_execution", None),
         "limitations": snapshot.get("limitations", []),
+        "retrieval_complete": snapshot.get("retrieval_complete", False),
+        "partial_sources": snapshot.get("partial_sources", []),
         "warning": "This is a caregiver-reviewed handoff draft, not an independent clinical assessment. Missing information is not a negative finding. Verify source status and timestamps before sharing.",
     }
 
@@ -2090,5 +2092,7 @@ def prepare_handoff_draft(
         ],
         "evidence_lineage": evidence_lineage,
         "limitations": gaps,
-        "warning": "This is a draft from the listed saved records only. Unavailable sources were not read. Verify every item and resolve uncertainty before sharing.",
+        "retrieval_complete": not gaps,
+        "partial_sources": partial_sources,
+        "warning": "This is a draft from the listed saved records only. Unavailable or partially retrieved sources were not fully read. Verify every item and resolve uncertainty before sharing.",
     }
