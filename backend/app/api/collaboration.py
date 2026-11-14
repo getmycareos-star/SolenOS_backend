@@ -2945,7 +2945,7 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
 
     now = datetime.now(timezone.utc)
     earliest = now - timedelta(days=period_days) if period_days else None
-    matched_records: dict[str, datetime] = {}
+    matched_records: dict[str, tuple[datetime, str]] = {}
     for line in context_lines or []:
         brace = line.find("{")
         if brace < 0:
@@ -2960,11 +2960,19 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         searchable = json.dumps(record, ensure_ascii=False, default=str).casefold()
         if not any(term in searchable for term in topic_terms):
             continue
+        record_type = (
+            "care_event" if record.get("event_id")
+            else "care_assertion" if record.get("assertion_id")
+            else "care_evidence" if record.get("evidence_id")
+            else str(payload.get("record_type") or record.get("record_type") or "")
+        )
         record_id = (
             record.get("event_id") or record.get("assertion_id") or record.get("evidence_id")
             or payload.get("source_id") or record.get("id")
         )
         if not record_id:
+            continue
+        if record_type not in {"care_event", "care_assertion", "care_evidence"}:
             continue
         raw_time = (
             record.get("occurred_at") or record.get("observed_at") or record.get("event_date")
@@ -2984,9 +2992,9 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
             continue
         if earliest and observed_at < earliest:
             continue
-        matched_records[str(record_id)] = observed_at
+        matched_records[str(record_id)] = (observed_at, record_type)
 
-    distinct_days = {value.date() for value in matched_records.values()}
+    distinct_days = {value[0].date() for value in matched_records.values()}
     direction = "getting worse" if re.search(r"\b(?:worse|worsen|declin)\w*\b", query) else (
         "improving" if re.search(r"\b(?:better|improv)\w*\b", query) else "changing"
     )
@@ -2997,6 +3005,10 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         "distinct_days": len(distinct_days),
         "sufficient": len(distinct_days) >= 2,
         "direction": direction,
+        "source_records": [
+            {"record_type": record_type, "record_id": record_id}
+            for record_id, (_, record_type) in sorted(matched_records.items())
+        ],
     }
 
 
@@ -5554,6 +5566,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             *selected_ids_by_type.get("care_evidence", []),
             *selected_verified_document_evidence_ids,
         ]))
+        # Deterministic trend guards also inspect dated records outside the
+        # model's ranked prompt subset. Keep those exact records in provenance
+        # because they are what justify withholding an unsupported trend claim.
+        if trend_assessment and not trend_assessment.get("sufficient"):
+            for reference in trend_assessment.get("source_records", []):
+                record_id = str(reference.get("record_id") or "").strip()
+                if not record_id:
+                    continue
+                record_type = reference.get("record_type")
+                if record_type == "care_event":
+                    source_event_ids = list(dict.fromkeys([*source_event_ids, record_id]))
+                elif record_type == "care_assertion":
+                    source_assertion_ids = list(dict.fromkeys([*source_assertion_ids, record_id]))
+                elif record_type == "care_evidence":
+                    source_evidence_ids = list(dict.fromkeys([*source_evidence_ids, record_id]))
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
         lcr_context_coverage["prompt_context_budget_chars"] = 16000
