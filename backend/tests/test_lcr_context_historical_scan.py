@@ -92,6 +92,89 @@ def test_query_retrieval_scans_beyond_old_250_candidate_ceiling_and_finds_older_
         engine.dispose()
 
 
+def _open_questions_schema(engine):
+    metadata = MetaData()
+    questions = Table(
+        "open_questions",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("question", String),
+        Column("subject_type", String),
+        Column("subject_id", String),
+        Column("claim_id", String),
+        Column("intended_answerer_role", String),
+        Column("intended_answerer_label", String),
+        Column("necessity", String),
+        Column("necessity_rationale", String),
+        Column("status", String),
+        Column("priority", String),
+        Column("evidence_ids", String),
+        Column("asked_at", DateTime),
+        Column("answered_at", DateTime),
+        Column("answer", String),
+        Column("answer_provenance", String),
+        Column("closed_at", DateTime),
+        Column("closed_reason", String),
+        Column("created_by_caregiver_id", String),
+    )
+    metadata.create_all(engine)
+    return questions
+
+def test_query_retrieval_finds_older_answered_question_over_newer_related_history():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    questions = _open_questions_schema(engine)
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    rows = []
+    for index in range(300):
+        asked = now - timedelta(days=index)
+        rows.append({
+            "id": f"recent-sleep-question-{index:03d}",
+            "person_id": "person-a",
+            "question": f"How was sleep on day {index}?",
+            "subject_type": "sleep",
+            "subject_id": "person-a",
+            "status": "answered",
+            "priority": "low",
+            "asked_at": asked,
+            "answered_at": asked + timedelta(hours=1),
+            "answer": "The caregiver recorded that sleep was usual.",
+        })
+    older = now - timedelta(days=500)
+    rows.append({
+        "id": "older-restless-sleep-answer",
+        "person_id": "person-a",
+        "question": "Did restless sleep continue after the medication change?",
+        "subject_type": "sleep",
+        "subject_id": "person-a",
+        "status": "answered",
+        "priority": "high",
+        "asked_at": older,
+        "answered_at": older + timedelta(hours=1),
+        "answer": "The caregiver recorded repeated waking on two nights.",
+        "answer_provenance": "Daughter reported the answer after speaking with the care team.",
+    })
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(questions.insert(), rows)
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db, "person-a", limit_per_source=1, query="restless sleep",
+            )
+        source = context["sources"]["open_questions"]
+        assert source["candidate_scan_complete"] is True
+        assert source["candidate_count"] == 301
+        assert source["has_more"] is True
+        assert [item["id"] for item in source["items"]] == ["older-restless-sleep-answer"]
+        assert source["items"][0]["status"] == "answered"
+        assert "repeated waking on two nights" in source["items"][0]["answer"]
+        assert context["history_coverage"] == "query_scanned_ranked_subset"
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
 def test_unqueried_current_care_projection_remains_explicitly_bounded():
     _load_source_schema.cache_clear()
     engine = create_engine("sqlite:///:memory:")
