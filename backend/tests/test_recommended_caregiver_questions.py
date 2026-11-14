@@ -313,6 +313,7 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         add_question(db, person.id, caregiver.id, "other-caregiver-question", "medium")
         add_question(db, person.id, caregiver.id, "reporting-caregiver-question", "low")
         add_question(db, person.id, caregiver.id, "care-recipient-question", "high")
+        add_question(db, person.id, caregiver.id, "mismatched-assessment-question", "high")
         add_question(db, person.id, caregiver.id, "mislinked-evidence-question", "high", evidence_id="mislinked-source-evidence")
         db.add(Evidence(
             id="unrelated-same-person-evidence", person_id=person.id,
@@ -320,6 +321,14 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
             uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
         ))
         db.flush()
+        mismatched = db.query(OpenQuestion).filter_by(id="mismatched-assessment-question").one()
+        mismatched.context = [{
+            **mismatched.context[0],
+            "necessity_assessment": {
+                **mismatched.context[0]["necessity_assessment"],
+                "necessity": "not_assessed",
+            },
+        }]
         mislinked = db.query(OpenQuestion).filter_by(id="mislinked-evidence-question").one()
         mislinked.context = [{
             **mislinked.context[0],
@@ -343,12 +352,13 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         ids = set(response.json()["eligible_question_ids"])
         assert ids == {"professional-question", "other-caregiver-question", "reporting-caregiver-question", "care-recipient-question"}
         assert "unknown-answerer-question" not in ids
+        assert "mismatched-assessment-question" not in ids
         assert "mislinked-evidence-question" not in ids
         metrics = client_for("answerer-person").get("/api/v1/uncertainty/question-quality")
         assert metrics.status_code == 200, metrics.text
         assert metrics.json()["caregiver_actionable_questions"] == 4
         assert metrics.json()["questions_awaiting_answerer_assignment"] == 1
-        assert metrics.json()["non_actionable_active_questions"] == 2
+        assert metrics.json()["non_actionable_active_questions"] == 3
         listed = client_for("answerer-person").get("/api/v1/uncertainty/questions/answerer-person")
         assert listed.status_code == 200, listed.text
         assert {item["id"] for item in listed.json()} == ids
