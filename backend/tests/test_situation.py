@@ -643,9 +643,9 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         # ordinary questions are surfaced initially. The low-priority and
         # unrelated unassessed questions remain internal.
         assert mobility_questions == [
-            "Has the unsteadiness also happened indoors?",
-            "Has the person needed more support when standing?",
-            "Has the person avoided any usual walking route?",
+            "Your observation: Has the unsteadiness also happened indoors?",
+            "Your observation: Has the person needed more support when standing?",
+            "Your observation: Has the person avoided any usual walking route?",
         ]
         assert "Would a different time of day make walking easier?" not in body["return_continuity"]["important_unresolved"]
         assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
