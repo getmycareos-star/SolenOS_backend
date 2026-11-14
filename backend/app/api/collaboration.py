@@ -5664,15 +5664,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 selected_verified_document_evidence_ids.append(str(linked_evidence_id))
         # Public source-ID fields must describe only records actually supplied
         # to the model, never the larger pre-ranking candidate pools.
-        source_event_ids = list(dict.fromkeys(selected_ids_by_type.get("events", [])))
-        source_appointment_ids = list(dict.fromkeys(selected_ids_by_type.get("appointments", [])))
-        source_assertion_ids = list(dict.fromkeys(selected_ids_by_type.get("assertions", [])))
+        # _context_record_refs normalizes source collection names into the
+        # canonical provenance vocabulary. Read the same canonical keys here;
+        # otherwise IDs silently disappear from the public response even though
+        # the corresponding source lines were supplied to the model.
+        source_event_ids = list(dict.fromkeys(selected_ids_by_type.get("care_event", [])))
+        source_appointment_ids = list(dict.fromkeys(selected_ids_by_type.get("appointment", [])))
+        source_assertion_ids = list(dict.fromkeys(selected_ids_by_type.get("care_assertion", [])))
         source_document_analysis_ids = list(dict.fromkeys([
-            *selected_ids_by_type.get("document_extractions", []),
+            *selected_ids_by_type.get("document_extraction", []),
             *selected_verified_document_ids,
         ]))
         source_evidence_ids = list(dict.fromkeys([
-            *selected_ids_by_type.get("evidence", []),
             *selected_ids_by_type.get("care_evidence", []),
             *selected_verified_document_evidence_ids,
         ]))
