@@ -4,6 +4,7 @@ import json
 import pytest
 from fastapi import HTTPException
 
+from app.services import delta_engine
 from app.services.delta_engine import DELTA_JSON_CONTRACT, _match_source_references, _parse_model_json
 
 
@@ -102,6 +103,28 @@ def test_delta_json_parser_accepts_one_valid_object_after_model_preamble():
     parsed = _parse_model_json("Structured result:\\n" + json.dumps(payload))
     assert parsed == payload
 
+
+def test_delta_generation_retries_once_after_incomplete_json(monkeypatch):
+    payload = {
+        "event_summary": "Caregiver observation recorded.",
+        "medications": [], "conditions": [], "symptoms": [], "tests": [],
+        "follow_ups": [], "contradictions": [], "clinical_gaps": [],
+        "caregiver_summary": "Review the recorded observation.",
+        "clinician_summary": "Caregiver-reported observation; not independently verified.",
+    }
+    calls = []
+    def fake_qwen(messages, **kwargs):
+        calls.append({"messages": messages, **kwargs})
+        return '{"event_summary":"unfinished"' if len(calls) == 1 else json.dumps(payload)
+    monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen)
+    result = delta_engine._request_delta_json(
+        [{"role": "system", "content": "Return the Delta object."}], timeout=180
+    )
+    assert result == payload
+    assert len(calls) == 2
+    assert [call["timeout"] for call in calls] == [120, 30]
+    assert [call["options"]["num_predict"] for call in calls] == [384, 512]
+    assert "previous response was incomplete" in calls[1]["messages"][-1]["content"]
 
 def test_delta_json_parser_rejects_truncated_output_without_persisting():
     with pytest.raises(HTTPException) as exc:
