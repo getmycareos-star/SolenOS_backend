@@ -4674,7 +4674,7 @@ def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim(
             Contradiction.subject_id == person.id,
             Contradiction.field == "mobility_support",
         ).one()
-        assert conflict.resolution_status == "qualified"
+        assert conflict.resolution_status == "unresolved"  # One dated source cannot qualify a conflict against an undated source.
         assert set(conflict.source_assertion_ids) == {existing.id, document.id}
         assert set(conflict.evidence_ids) == {first.id, second.id}
         assert db.query(CareAssertion).filter(
