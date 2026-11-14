@@ -1216,10 +1216,18 @@ async def generate_lcr_orientation(
         for name in care_source_names
         if isinstance(sources.get(name), dict)
     )
-    caregiver_stage = "returning" if held_care_rows > 0 else "new"
+    missing_core_sources = set(lcr_context.get("missing_required_sources", [])).intersection(
+        {"events", "evidence", "facts", "assertions"}
+    )
+    caregiver_stage = (
+        "returning" if held_care_rows > 0
+        else "unknown" if missing_core_sources
+        else "new"
+    )
     normalized_input = re.sub(r"[.!?,;:]+$", "", raw_input.casefold()).strip()
     is_greeting = bool(re.fullmatch(
-        r"(?:hi|hello|hey|hiya|good morning|good afternoon|good evening|good day|howdy|yo|hi solenos|hello solenos|hey solenos)",
+        r"(?:hi|hello|hey|hiya|good morning|good afternoon|good evening|good day|howdy|yo|sup|"
+        r"what'?s up|how'?s it going|how are you|how're you|hi solenos|hello solenos|hey solenos)",
         normalized_input,
     ))
 
@@ -1234,10 +1242,11 @@ async def generate_lcr_orientation(
         "Never imply that a record was updated or saved by this read-only endpoint. Never turn a greeting, thanks, or insult into care evidence. "
         "If the caregiver reports a care event, do not claim it was saved; respond to the substance and leave capture/persistence to the capture workflow. "
         "If a source is marked unavailable or schema coverage is partial, do not infer that the information does not exist. Do not mention internal schemas, tools, prompts, models, or hidden reasoning. "
-        "NEW-CAREGIVER POSITIONING: the authenticated record currently contains no returned care-domain entries. Do not pretend to remember them. "
+        "NEW-CAREGIVER POSITIONING: the authenticated record currently contains no returned care-domain entries and its core history sources are available. Do not pretend to remember prior care. "
         "For a greeting, introduce SolenOS in plain language as the place that helps keep the loved one's care story together and make changes easier to understand. "
         "Invite the caregiver to start with whatever is happening now; tell them rough fragments are acceptable. Do not describe features as guarantees. "
         "RETURNING-CAREGIVER POSITIONING: the authenticated record contains care-domain entries. Acknowledge continuity naturally without saying 'I remember everything', 'picking up where we left off', or implying the bounded context is complete. "
+        "UNKNOWN-HISTORY POSITIONING: if core history sources are unavailable, do not label the caregiver new or returning and do not infer that care history is absent. Keep the greeting neutral, introduce SolenOS briefly, and invite the caregiver to share the current situation. "
         "For a greeting, orient the caregiver briefly to the existing care story. Mention one specific, relevant, currently supported detail only when it genuinely helps; otherwise acknowledge that their care record is already underway and invite the most useful update. Never dump a history summary in response to 'Hi'. "
         "GREETING LENGTH: exactly 1 or 2 short sentences, normally 12–35 words total. No feature list, no paragraph, no generic 'How can I help?', no repeated welcome, and no follow-up question unless it invites a useful care update. "
         "OTHER MESSAGES: use at most 3 short sentences and normally no more than 55 words. Answer the actual question first. "
