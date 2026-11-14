@@ -5208,7 +5208,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "interpretation_limit": "No lineage assessment was supplied; this does not establish source independence.",
         }
         document_question_for_fallback = bool(re.search(
-            r"\\b(?:uploaded document|document|file|attachment|letter|pdf|discharge summary|medical record)\\b",
+            r"\b(?:uploaded document|document|file|attachment|letter|pdf|discharge summary|medical record)\b",
             user_text,
             re.IGNORECASE,
         ))
