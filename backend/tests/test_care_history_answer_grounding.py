@@ -56,10 +56,15 @@ def test_history_fallback_refuses_to_summarize_when_a_requested_topic_is_missing
         _event_line("lunch-event", "Mum barely touched her lunch today."),
     ]
 
-    assert _care_history_extractive_answer(
+    answer = _care_history_extractive_answer(
         "What has the caregiver recorded about sleep, lunch and dinner?",
         context,
-    ) is None
+    )
+
+    assert answer is not None
+    assert "Mum slept poorly last night" in answer
+    assert "Mum barely touched her lunch today" in answer
+    assert "I couldn't confirm dinner" in answer
 
 
 def test_history_topic_coverage_does_not_accept_generic_care_advice():
@@ -101,10 +106,16 @@ def test_history_fallback_excludes_pending_and_unattributed_events():
         ),
     ]
 
-    assert _care_history_extractive_answer(
+    answer = _care_history_extractive_answer(
         "What has the caregiver recorded about sleep, lunch and dinner?",
         context,
-    ) is None
+    )
+
+    assert answer is not None
+    assert "Mum ate more at dinner" in answer
+    assert "I couldn't confirm sleep and lunch" in answer
+    assert "Mum slept poorly last night" not in answer
+    assert "Mum barely touched her lunch today" not in answer
 
 
 def test_history_fallback_is_limited_to_explicit_record_retrieval_questions():
