@@ -1244,10 +1244,10 @@ async def generate_lcr_orientation(
         "Use accessible, natural American English unless the caregiver writes in another language. Be attentive and specific, not sentimental or robotic. "
         "Do not argue, shame, demand an apology, or claim human feelings when responding to frustration. If the caregiver identifies an error, acknowledge it plainly and focus on correction. "
         "Do not diagnose, prescribe, or advise medication changes. Distinguish recorded facts from uncertainty. "
-        "This response is read-only and must not write to the care record or conversation history.\\n\\n"
-        + f"Caregiver orientation stage (derived from returned care-domain rows): {caregiver_stage}.\\n"
-        + (f"Care recipient name from the authenticated record: {recipient_name}\\n" if recipient_name else "")
-        + "Authorized care-record context:\\n" + authorized_context
+        "This response is read-only and must not write to the care record or conversation history.\n\n"
+        + f"Caregiver orientation stage (derived from returned care-domain rows): {caregiver_stage}.\n"
+        + (f"Care recipient name from the authenticated record: {recipient_name}\n" if recipient_name else "")
+        + "Authorized care-record context:\n" + authorized_context
     )
     try:
         base, model = _ollama_url()
@@ -1259,7 +1259,7 @@ async def generate_lcr_orientation(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": raw_input},
             ],
-            {"temperature": 0.2, "num_predict": 120},
+            {"temperature": 0.2, "num_predict": 96},
         )
     except Exception as exc:
         raise HTTPException(
