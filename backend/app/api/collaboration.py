@@ -2952,13 +2952,12 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
     worsening_source_signal = re.compile(
         r"\b(?:worse|worsen\w*|declin\w*|decreas\w*|increas\w*|"
         r"more often|more frequent\w*|more than (?:before|usual|last time)|"
-        r"compared with (?:before|last time)|compared to (?:before|last time))\b",
+        r"more than (?:before|usual|last time))\b",
         re.IGNORECASE,
     )
     improving_source_signal = re.compile(
         r"\b(?:better|improv\w*|less often|less frequent\w*|"
-        r"less than (?:before|usual|last time)|compared with (?:before|last time)|"
-        r"compared to (?:before|last time))\b",
+        r"less than (?:before|usual|last time))\b",
         re.IGNORECASE,
     )
     for line in context_lines or []:
