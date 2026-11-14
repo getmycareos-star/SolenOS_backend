@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "backend/**"
+      - "ci/**"
       - "Dockerfile"
       - "start-with-qwen.sh"
       - "railway.json"
