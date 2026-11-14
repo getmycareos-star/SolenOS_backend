@@ -490,6 +490,9 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "questions": [{
             "id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
             "question": item.question, "status": item.status, "priority": item.priority.value if hasattr(item.priority, "value") else str(item.priority),
+            "intended_answerer_role": item.intended_answerer_role or "not_known",
+            "intended_answerer_label": item.intended_answerer_label,
+            "necessity_rationale": item.necessity_rationale,
             "evidence_ids": item.evidence_ids or [],
         } for item in open_questions],
         "contradictions": [{
