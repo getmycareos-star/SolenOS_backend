@@ -116,11 +116,15 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
     return immediate, important, deferred, clarification
 
 def _observation_value(item: dict[str, Any]) -> str:
+    value = ""
     for key in ("observed_value", "normalized_value", "value_text", "asserted_value", "current_state", "title"):
         value = _text(item.get(key))
         if value:
-            return value
-    return ""
+            break
+    if not value:
+        return ""
+    units = _text(item.get("units"))
+    return f"{value} [{units}]" if units else value
 
 
 def _subject_key(item: dict[str, Any]) -> str:
@@ -128,12 +132,33 @@ def _subject_key(item: dict[str, Any]) -> str:
 
 
 def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+    # A correction points from the newer observation to the older observation.
+    # Exclude the superseded row, not the correcting row.
+    superseded_ids = {
+        str(item.get("supersedes_observation_id"))
+        for item in records
+        if item.get("source") == "evidence_observations" and item.get("supersedes_observation_id")
+    }
     eligible = []
     for item in records:
-        if item.get("source") not in {"evidence_observations", "caregiver_observations", "events", "facts"}:
+        source = item.get("source")
+        if source not in {"evidence_observations", "caregiver_observations", "events", "facts"}:
             continue
-        if item.get("negated") is True or item.get("supersedes_observation_id"):
+        if item.get("negated") is True:
             continue
+        if source == "evidence_observations":
+            epistemic = _text(item.get("epistemic_status") or item.get("epistemic_state"))
+            # Only directly reported, observed, or verified records can form
+            # a change pattern. Inference, uncertainty, and conflict are not
+            # promoted into apparent facts by aggregation.
+            if epistemic not in {"reported", "observed", "verified"}:
+                continue
+            if str(item.get("id") or "") in superseded_ids:
+                continue
+            if _text(item.get("assertion_status")) in {"rejected", "superseded", "retracted"}:
+                continue
+            if item.get("hedge_marker") or item.get("ambiguity_note"):
+                continue
         if _text(item.get("status") or item.get("lifecycle_status")) in CLOSED_STATUSES:
             continue
         attribute = _text(item.get("attribute") or item.get("event_type") or item.get("fact_type"))
@@ -152,10 +177,18 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
     baseline_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     baseline_ids = set()
     for baseline in baseline_items:
+        # A baseline must be explicitly marked by the persisted LCR projection
+        # and itself be a source-attributed, non-inferred record.
+        if baseline.get("baseline_basis") != "explicit_persisted_baseline_marker":
+            continue
+        if _text(baseline.get("epistemic_status") or baseline.get("epistemic_state")) not in {"reported", "observed", "verified"}:
+            continue
+        if baseline.get("negated") is True or baseline.get("hedge_marker") or baseline.get("ambiguity_note"):
+            continue
         subject = _subject_key(baseline)
         attribute = _text(baseline.get("attribute") or baseline.get("event_type") or baseline.get("fact_type"))
         value = _observation_value(baseline)
-        if subject and attribute and value:
+        if subject and attribute and value and _evidence_ids(baseline):
             baseline_by_key[(subject, attribute)].append(baseline)
             if baseline.get("id"):
                 baseline_ids.add(str(baseline["id"]))
@@ -235,6 +268,27 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
             **_record_ref(item), "category": "needs_clarification",
             "reason": "A saved uncertainty, conflict, or information gap remains unresolved. The missing or competing information may change what should happen next.",
         })
+    # Keep ambiguous or explicitly uncertain observations visible, but do not
+    # let them contribute to a change pattern or escalation.
+    for item in records:
+        if item.get("source") != "evidence_observations":
+            continue
+        epistemic = _text(item.get("epistemic_status") or item.get("epistemic_state"))
+        if epistemic not in {"uncertain", "conflicting", "missing", "inferred"} and not item.get("hedge_marker") and not item.get("ambiguity_note"):
+            continue
+        if _text(item.get("status") or item.get("lifecycle_status")) in CLOSED_STATUSES:
+            continue
+        clarification.append({
+            **_record_ref(item), "category": "needs_clarification",
+            "reason": "This observation is marked uncertain, inferred, or ambiguous in the saved record. Check its meaning before treating it as a change in the person's condition.",
+        })
+    # One source record may appear in more than one uncertainty projection.
+    clarification_by_record = {}
+    for item in clarification:
+        key = (str(item.get("source") or ""), str(item.get("record_id") or ""))
+        if key not in clarification_by_record:
+            clarification_by_record[key] = item
+    clarification = list(clarification_by_record.values())
     immediate.sort(key=lambda item: (0 if item.get("due_at") else 1, str(item.get("due_at") or ""), item["source"], item["record_id"]))
     important.sort(key=lambda item: (str(item.get("last_observed_at") or item.get("due_at") or ""), item.get("source", ""), item.get("record_id", item.get("id", ""))))
     deferred.sort(key=lambda item: (str(item.get("review_at") or ""), item["source"], item["record_id"]))
