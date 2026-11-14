@@ -29,7 +29,7 @@ engine = create_engine(
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def process_daily_capture_job(job_id, monkeypatch, extractor):
+def process_daily_capture_job(job_id, monkeypatch, extractor, *, expected_status="completed"):
     from app.services import qwen_background_worker
 
     # Queue delays are intentional in production. Tests advance the persisted job
@@ -45,11 +45,12 @@ def process_daily_capture_job(job_id, monkeypatch, extractor):
             job_id=job_id, event_type="job_failed_or_requeued"
         ).order_by(QwenJobEvent.created_at.desc()).first()
         failure_metadata = failure_event.metadata_json if failure_event is not None else {}
-        assert job.status == "completed", (
-            f"Daily Care extraction job did not complete: status={job.status!r}, "
-            f"error_code={job.error_code!r}, failure_metadata={failure_metadata!r}, "
-            f"result_text={job.result_text!r}"
-        )
+        if expected_status is not None:
+            assert job.status == expected_status, (
+                f"Daily Care extraction job status mismatch: status={job.status!r}, "
+                f"expected_status={expected_status!r}, error_code={job.error_code!r}, "
+                f"failure_metadata={failure_metadata!r}, result_text={job.result_text!r}"
+            )
     finally:
         db.close()
     return processed
@@ -1787,7 +1788,10 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
         for attempt in range(3):
             if attempt:
                 make_daily_capture_job_runnable(receipt["qwen_job_id"])
-            process_daily_capture_job(receipt["qwen_job_id"], monkeypatch, extraction_unavailable)
+            process_daily_capture_job(
+                receipt["qwen_job_id"], monkeypatch, extraction_unavailable,
+                expected_status=None,
+            )
 
         db = TestingSessionLocal()
         try:
