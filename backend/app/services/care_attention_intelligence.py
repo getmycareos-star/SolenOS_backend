@@ -200,10 +200,15 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
         baseline_rows = baseline_by_key.get((subject, attribute), [])
         current_entries = [(when, item) for when, item in entries if str(item.get("id") or "") not in baseline_ids]
         baseline_values = {_observation_value(item) for item in baseline_rows if _observation_value(item)}
+        baseline_evidence_ids = {
+            evidence_id for baseline in baseline_rows for evidence_id in _evidence_ids(baseline)
+        }
         changed_entries = [
             (when, item) for when, item in current_entries
             if _observation_value(item) and baseline_values
             and _observation_value(item) not in baseline_values
+            # Repeated projections of one source note do not establish a new change.
+            and bool(set(_evidence_ids(item)) - baseline_evidence_ids)
         ]
         if changed_entries:
             current_refs = [_record_ref(item) for _, item in changed_entries]
@@ -225,15 +230,16 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
 
     for (subject, attribute), entries in by_subject_attribute.items():
         distinct = {str(item.get("id")): item for _, item in entries if item.get("id")}
+        distinct_evidence_ids = {evidence_id for _, item in entries for evidence_id in _evidence_ids(item)}
         values = {_observation_value(item) for _, item in entries if _observation_value(item)}
-        if (subject, attribute) in emitted or len(distinct) < 2 or len(values) < 2:
+        if (subject, attribute) in emitted or len(distinct) < 2 or len(distinct_evidence_ids) < 2 or len(values) < 2:
             continue
         entries.sort(key=lambda pair: pair[0])
         refs = [_record_ref(item) for _, item in entries]
         reviews.append({
             "id": f"repeated:{subject}:{attribute}", "category": "important_to_address",
             "title": str(entries[-1][1].get("subject_label") or attribute)[:240],
-            "reason": "Different values for the same recorded observation were reported more than once within 14 days. Review the sequence against the person's documented baseline; this does not establish cause or clinical severity.",
+            "reason": "Different values for the same recorded observation appear in distinct linked source records within 14 days. Review the sequence against the person's documented baseline; this does not establish independent corroboration, cause, or clinical severity.",
             "pattern_type": "repeated_attribute_with_changed_values", "record_count": len(distinct),
             "records": refs, "evidence_ids": sorted({e for ref in refs for e in ref["evidence_ids"]}),
             "first_observed_at": refs[0]["occurred_at"], "last_observed_at": refs[-1]["occurred_at"],
@@ -243,7 +249,8 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
     for subject, entries in by_subject.items():
         attributes = {attribute for attribute, _, _ in entries}
         days = {occurred.date() for _, occurred, _ in entries}
-        if len(entries) < 3 or len(attributes) < 3 or len(days) < 2 or any((subject, a) in emitted for a in attributes):
+        distinct_evidence_ids = {evidence_id for _, _, item in entries for evidence_id in _evidence_ids(item)}
+        if len(entries) < 3 or len(attributes) < 3 or len(days) < 2 or len(distinct_evidence_ids) < 2 or any((subject, a) in emitted for a in attributes):
             continue
         refs = [_record_ref(item) for _, _, item in sorted(entries, key=lambda row: row[1])]
         reviews.append({
