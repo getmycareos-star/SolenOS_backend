@@ -224,13 +224,14 @@ def persist_source_clarification_questions(
 
     existing_rows = db.query(OpenQuestionModel).filter(
         OpenQuestionModel.person_id == person_id,
-        OpenQuestionModel.status.in_(["open", "unresolved"]),
-    ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
+    ).order_by(OpenQuestionModel.asked_at.desc()).all()
+    active_rows = [row for row in existing_rows if row.status in {"open", "unresolved"}]
+    terminal_rows = [row for row in existing_rows if row.status in {"answered", "declined", "closed"}]
     existing_by_scope = {}
     # A repeated question is reusable only within the same care subject.
     # Matching text across medication, mobility, appointments, or other
     # subjects must never redirect a source to an unrelated care thread.
-    for row in existing_rows:
+    for row in active_rows:
         key = (
             _clarification_question_key(row.question or ""),
             str(row.subject_type or ""),
