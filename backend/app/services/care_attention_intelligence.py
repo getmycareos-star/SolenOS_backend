@@ -297,7 +297,8 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             and change.get("baseline_is_stable") is True
             and change.get("baseline_history_completeness") == "complete"
         )
-        source_complete = bool(records) and bool(source_record_ids)
+        expected_source_record_count = int(change.get("expected_source_record_count") or 0)
+        source_complete = bool(source_record_ids) and expected_source_record_count > 0 and len(source_record_ids) == expected_source_record_count
         item = {
             "id": str(change.get("id") or ""),
             "source": "persisted_change",
