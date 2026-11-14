@@ -3640,7 +3640,7 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
     # and PostgreSQL. Keep the same strict necessity gate used by every other
     # caregiver-facing clarification projection.
     from app.models.uncertainty import OpenQuestion
-    from app.services.care_continuity import has_valid_caregiver_necessity
+    from app.services.care_continuity import has_caregiver_visible_answerer, has_valid_caregiver_necessity
 
     rows = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == scoped_person_id,
@@ -3650,6 +3650,8 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
 
     output = []
     for question in rows:
+        if not has_caregiver_visible_answerer(question):
+            continue
         if not has_valid_caregiver_necessity(question, db, scoped_person_id):
             continue
         output.append({
