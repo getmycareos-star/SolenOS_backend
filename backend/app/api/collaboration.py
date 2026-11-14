@@ -2303,25 +2303,34 @@ def _rank_lcr_context_lines(query: str, lines: list[str], limit: int = 10) -> li
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
 
-    # Event descriptions can be generic ("Daily Care entry") while the linked
-    # evidence contains the caregiver's actual words. Preserve the event when
-    # its linked evidence matched the question, so the response can cite both
-    # the evidence and the durable event that owns it.
+    # A matched evidence record can be the only place where the caregiver's
+    # actual words appear. Retain every person-scoped source record explicitly
+    # linked to that evidence (event, accepted assertion, document extraction,
+    # or other source record) so retrieval and provenance remain connected.
     if matching_evidence_ids:
-        linked_events = list(candidates_by_type.get("events", []))
-        for line in grouped.get("events", []):
-            try:
-                payload = json.loads(line[line.index("{"):])
-                record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
-                linked_ids = {
-                    str(value) for value in (record.get("evidence_ids") or [])
-                    if value is not None
-                }
-            except (ValueError, TypeError, json.JSONDecodeError):
+        for source_type, source_lines in grouped.items():
+            if source_type == "evidence":
                 continue
-            if linked_ids.intersection(matching_evidence_ids) and line not in linked_events:
-                linked_events.append(line)
-        candidates_by_type["events"] = linked_events
+            linked_candidates = list(candidates_by_type.get(source_type, []))
+            for line in source_lines:
+                try:
+                    payload = json.loads(line[line.index("{"):])
+                    record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+                    linked_values = []
+                    for field in ("evidence_ids", "related_evidence_ids"):
+                        value = record.get(field)
+                        if isinstance(value, (list, tuple, set)):
+                            linked_values.extend(value)
+                    for field in ("source_evidence_id", "evidence_id"):
+                        value = record.get(field)
+                        if value:
+                            linked_values.append(value)
+                    linked_ids = {str(value) for value in linked_values if value is not None}
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+                if linked_ids.intersection(matching_evidence_ids) and line not in linked_candidates:
+                    linked_candidates.append(line)
+            candidates_by_type[source_type] = linked_candidates
 
     ordered_types = [name for name in _LCR_CONTEXT_SOURCE_PRIORITY if name in grouped]
     ordered_types.extend(name for name in grouped if name not in _LCR_CONTEXT_SOURCE_PRIORITY)
