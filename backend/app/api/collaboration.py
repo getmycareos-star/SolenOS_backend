@@ -5532,15 +5532,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
         lcr_context_coverage["prompt_context_budget_chars"] = 16000
+        retrieval_incomplete = (
+            not bool(lcr_context_coverage.get("retrieval_projection_complete"))
+            or bool(lcr_context_coverage.get("page_limit_reached"))
+            or context_truncated
+        )
+        missing_context_instruction = (
+            "Retrieval is incomplete or the prompt had to omit records. If the supplied records do not answer, "
+            "say you cannot confirm from the records retrieved for this response; do not say the information is "
+            "not recorded, absent, or never happened. Make clear that additional saved history may need checking. "
+            "Never describe this result as the complete care journey. "
+            if retrieval_incomplete else
+            "If the supplied records do not answer, say the information is not present in the retrieved care record; "
+            "do not infer that the event did not occur. "
+        )
         model_messages.append({
             "role": "user",
             "content": (
                 f"Caregiver question: {user_text}\n\n"
                 "Relevant authorized care context follows. Use only records relevant to the question. "
-                "Do not describe the context format or list unrelated records. If the context does not answer "
-                "the question, say the information is not recorded. The retrieval coverage note describes whether "
-                "all matching database candidates were scanned; a ranked subset or has_more=true means the supplied "
-                "records are not the complete history. Never describe a partial result as the complete care journey. "
+                "Do not describe the context format or list unrelated records. "
+                + missing_context_instruction
+                + "The retrieval coverage note describes whether all matching database candidates were scanned; "
+                "a ranked subset or has_more=true means the supplied records are not the complete history. "
                 "Records marked historical_assertion, superseded_fact, rejected, or withdrawn are historical only, not current facts. "
                 "Keep conflicting_information unresolved unless a recorded reconciliation resolves it; never choose a winner yourself. "
                 "Document-extracted text is source material, not a verified care fact.\n"
