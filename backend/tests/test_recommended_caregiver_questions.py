@@ -295,6 +295,39 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
     finally:
         teardown()
 
+def test_recommended_projection_routes_questions_only_to_the_intended_caregiver():
+    setup()
+    try:
+        db = SessionLocal()
+        person = Person(id="answerer-person", name="Answerer Person")
+        caregiver = Caregiver(
+            id="answerer-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        add_question(db, person.id, caregiver.id, "professional-question", "critical")
+        add_question(db, person.id, caregiver.id, "unknown-answerer-question", "high")
+        add_question(db, person.id, caregiver.id, "other-caregiver-question", "medium")
+        add_question(db, person.id, caregiver.id, "care-recipient-question", "high")
+        db.flush()
+        db.query(OpenQuestion).filter_by(id="professional-question").one().intended_answerer_role = "professional"
+        db.query(OpenQuestion).filter_by(id="unknown-answerer-question").one().intended_answerer_role = "not_known"
+        db.query(OpenQuestion).filter_by(id="other-caregiver-question").one().intended_answerer_role = "other_caregiver"
+        db.query(OpenQuestion).filter_by(id="care-recipient-question").one().intended_answerer_role = "person_receiving_care"
+        db.commit()
+        db.close()
+
+        response = client_for("answerer-person").get(
+            "/api/v1/uncertainty/questions/recommended/answerer-person"
+        )
+        assert response.status_code == 200, response.text
+        ids = set(response.json()["eligible_question_ids"])
+        assert ids == {"other-caregiver-question"}
+    finally:
+        teardown()
+
+
 def test_one_hundred_case_question_gate_benchmark():
     """100 deterministic synthetic cases: 38 eligible, 62 must be withheld."""
     setup()
