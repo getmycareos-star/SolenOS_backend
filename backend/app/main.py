@@ -1271,40 +1271,83 @@ async def generate_lcr_orientation(
         + (f"Care recipient name from the authenticated record: {recipient_name}\n" if recipient_name else "")
         + "Authorized care-record context:\n" + authorized_context
     )
+    def validate_reply(candidate):
+        candidate = (candidate or "").strip()
+        sentence_count = len([part for part in re.split(r"(?<=[.!?])\\s+", candidate) if part.strip()])
+        word_count = len(candidate.split())
+        max_words = 40 if is_greeting else 65
+        max_sentences = 2 if is_greeting else 3
+        if (
+            not candidate or len(candidate) > 700 or word_count > max_words
+            or sentence_count > max_sentences
+            or re.search(r"(?i)\\b(?:as an ai|language model|system prompt)\\b", candidate)
+        ):
+            return None
+        return candidate
+
     try:
         base, model = _ollama_url()
-        reply = await asyncio.to_thread(
-            _ollama_chat,
-            base,
-            model,
-            [
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": raw_input},
+        ]
+        reply = None
+        # A single bounded repair attempt prevents malformed model output
+        # from reaching caregivers without creating an unbounded generation loop.
+        for attempt in range(2):
+            candidate = await asyncio.to_thread(
+                _ollama_chat,
+                base,
+                model,
+                messages,
+                {"temperature": 0.1 if attempt else 0.2, "num_predict": 96 if attempt == 0 else 72},
+            )
+            reply = validate_reply(candidate)
+            if reply:
+                break
+            messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": raw_input},
-            ],
-            {"temperature": 0.2, "num_predict": 96},
-        )
+                {"role": "assistant", "content": str(candidate or "")[:800]},
+                {
+                    "role": "user",
+                    "content": (
+                        "Rewrite your previous answer to meet the response limits. "
+                        + ("Use 1 or 2 short sentences and no more than 40 words. " if is_greeting else "Use no more than 3 short sentences and 65 words. ")
+                        + "Use only the authorized care context. Return only the caregiver-facing answer."
+                    ),
+                },
+            ]
+        if not reply:
+            # Truthful, bounded greeting fallback; explicitly not represented as Qwen output.
+            if is_greeting and caregiver_stage == "new":
+                reply = "Welcome to SolenOS. We help keep your loved one's care story together; start with whatever is happening today."
+            elif is_greeting and caregiver_stage == "returning":
+                reply = "Welcome back to SolenOS. Your care record is here, and we can continue with the update that matters today."
+            elif is_greeting:
+                reply = "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="LCR could not produce a safe, grounded response. Your message was not saved.",
+                )
+            return {
+                "reply": reply,
+                "ai_generated": False,
+                "provider_status": "available_fallback",
+                "care_record_unchanged": True,
+                "companion_history_unchanged": True,
+                "written_to_lcr": False,
+                "model": model,
+            }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=503,
             detail="LCR response generation is temporarily unavailable. Your message was not saved.",
         ) from exc
 
-    reply = (reply or "").strip()
-    sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", reply) if part.strip()])
-    word_count = len(reply.split())
-    max_words = 40 if is_greeting else 65
-    max_sentences = 2 if is_greeting else 3
-    if (
-        not reply
-        or len(reply) > 700
-        or word_count > max_words
-        or sentence_count > max_sentences
-        or "system prompt" in reply.casefold()
-    ):
-        raise HTTPException(
-            status_code=503,
-            detail="LCR could not produce a safe, grounded response. Your message was not saved.",
-        )
     return {
         "reply": reply,
         "ai_generated": True,
