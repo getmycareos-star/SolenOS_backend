@@ -24,6 +24,7 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
+from app.services.care_attention_intelligence import build_care_attention_assessment
 from app.services.care_continuity import get_freshness
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
@@ -2808,6 +2809,19 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "causal_inference": "not_performed",
             "source_of_truth": "persisted_lcr_records",
         },
+        "care_attention": build_care_attention_assessment(
+            records=all_items,
+            open_loops=open_loops,
+            uncertainties=uncertainty_items,
+            missing_information=missing_items,
+            as_of=context.get("as_of"),
+            source_coverage={
+                "history_coverage": context.get("history_coverage", "bounded_subset"),
+                "missing_required_sources": required_missing,
+                "missing_optional_sources": optional_missing,
+                "bounded_sources": bounded_sources,
+            },
+        ),
         "priorities": attention_items[:50],
         "open_loops": {
             "items": open_loops[:100],
