@@ -1103,6 +1103,7 @@ def next_best_questions(
     candidates = list(deduplicated.values())
     candidates.sort(key=lambda item: (-item["_weight"], item["question"].casefold(), item["source_id"]))
     output = []
+    matching_rows_cache: Dict[tuple[str, str], list[OpenQuestion]] = {}
     for item in candidates[:50]:
         clean = {
             key: value for key, value in item.items()
@@ -1113,11 +1114,14 @@ def next_best_questions(
         # Persist only after a separate, explicit necessity assessment has marked it necessary.
         if persist and clean.get("necessity") == "necessary":
             candidate_contexts = list(item.get("_source_contexts") or [])
-            matching_rows = db.query(OpenQuestion).filter(
-                OpenQuestion.person_id == person_id,
-                OpenQuestion.subject_type == clean["subject_type"],
-                OpenQuestion.subject_id == clean["subject_id"],
-            ).order_by(OpenQuestion.asked_at.desc()).with_for_update().all()
+            subject_key = (clean["subject_type"], clean["subject_id"])
+            if subject_key not in matching_rows_cache:
+                matching_rows_cache[subject_key] = db.query(OpenQuestion).filter(
+                    OpenQuestion.person_id == person_id,
+                    OpenQuestion.subject_type == clean["subject_type"],
+                    OpenQuestion.subject_id == clean["subject_id"],
+                ).order_by(OpenQuestion.asked_at.desc()).with_for_update().all()
+            matching_rows = matching_rows_cache[subject_key]
             normalized_candidate_question = " ".join(clean["question"].casefold().split())
             active_rows = [row for row in matching_rows if row.status in {"open", "unresolved"}]
             existing = next((
@@ -1178,6 +1182,7 @@ def next_best_questions(
                 )
                 db.add(question)
                 db.flush()
+                matching_rows.append(question)
                 _record_open_question_revision(
                     db, question, before_state=None, change_kind="created"
                 )
