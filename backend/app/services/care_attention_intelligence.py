@@ -137,7 +137,11 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
     superseded_ids = {
         str(item.get("supersedes_observation_id"))
         for item in records
-        if (item.get("source") == "evidence_observations" and item.get("supersedes_observation_id")) or (item.get("source") == "facts" and item.get("superseded_by_fact_id"))
+        if item.get("source") == "evidence_observations" and item.get("supersedes_observation_id")
+    } | {
+        str(item.get("superseded_by_fact_id"))
+        for item in records
+        if item.get("source") == "facts" and item.get("superseded_by_fact_id")
     }
     eligible = []
     for item in records:
@@ -146,19 +150,18 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
             continue
         if item.get("negated") is True:
             continue
-        if source == "evidence_observations":
-            epistemic = _text(item.get("epistemic_status") or item.get("epistemic_state"))
-            # Only directly reported, observed, or verified records can form
-            # a change pattern. Inference, uncertainty, and conflict are not
-            # promoted into apparent facts by aggregation.
-            if epistemic not in {"reported", "observed", "verified"}:
-                continue
-            if str(item.get("id") or "") in superseded_ids:
-                continue
-            if _text(item.get("assertion_status")) in {"rejected", "superseded", "retracted"}:
-                continue
-            if item.get("hedge_marker") or item.get("ambiguity_note"):
-                continue
+        epistemic = _text(item.get("epistemic_status") or item.get("epistemic_state"))
+        # Only directly reported, observed, or verified structured records can
+        # form a change pattern. Inference, uncertainty, and conflict are not
+        # promoted into apparent facts by aggregation.
+        if epistemic not in {"reported", "observed", "verified"}:
+            continue
+        if str(item.get("id") or "") in superseded_ids:
+            continue
+        if _text(item.get("assertion_status")) in {"rejected", "superseded", "retracted"}:
+            continue
+        if item.get("hedge_marker") or item.get("ambiguity_note"):
+            continue
         if _text(item.get("status") or item.get("lifecycle_status")) in CLOSED_STATUSES:
             continue
         attribute = _text(item.get("attribute") or item.get("event_type") or item.get("fact_type"))
