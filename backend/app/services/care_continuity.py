@@ -1059,6 +1059,9 @@ def next_best_questions(
             prior["source_id"] = item.get("source_id")
             prior["intended_answerer_role"] = item.get("intended_answerer_role")
             prior["reason"] = item.get("reason")
+            if item_is_necessary:
+                prior["necessity_rationale"] = item.get("necessity_rationale")
+                prior["decision_dependency"] = item.get("decision_dependency")
         if item["_weight"] > prior["_weight"]:
             prior["priority"] = item["priority"]
             prior["_weight"] = item["_weight"]
