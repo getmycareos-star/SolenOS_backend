@@ -5,6 +5,27 @@ from app.services.care_attention_intelligence import build_care_attention_assess
 NOW = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
 
 
+def test_missing_or_unrecognized_open_loop_status_is_not_silently_dropped():
+    result = build_care_attention_assessment(
+        records=[],
+        open_loops=[
+            {"id": "missing-status", "source": "open_loop_records", "title": "Clinic callback"},
+            {"id": "unknown-status", "source": "open_loop_records", "title": "Medication question",
+             "recorded_status": "awaiting_magic"},
+        ],
+        uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    by_id = {item["record_id"]: item for item in result["needs_clarification"]}
+    assert set(by_id) == {"missing-status", "unknown-status"}
+    assert by_id["missing-status"]["status"] == "unknown"
+    assert by_id["unknown-status"]["status"] == "awaiting_magic"
+    assert all("cannot safely treat it as open or resolved" in item["priority_basis"][0]
+               for item in by_id.values())
+    assert result["needs_attention_now"] == []
+    assert result["important_to_address"] == []
+    assert result["can_wait_with_documented_basis"] == []
+
+
 def test_explicit_overdue_deadline_reopens_even_when_deferred():
     result = build_care_attention_assessment(
         records=[], open_loops=[{
