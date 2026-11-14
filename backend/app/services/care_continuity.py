@@ -979,6 +979,7 @@ def next_best_questions(
             "decision_dependency": decision_dependency,
             "reason": item.description or f"The record identifies {item.field} as missing or incomplete.",
             "evidence_ids": item.evidence_ids or [], "source_kind": "information_gap", "source_id": item.id,
+            "intended_answerer_role": "reporting_caregiver" if explicit_assessment else "not_known",
             "_weight": _priority_weight(priority),
         })
 
