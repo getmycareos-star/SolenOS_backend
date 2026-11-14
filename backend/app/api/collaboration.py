@@ -2584,11 +2584,6 @@ def _humanize_model_context_line(line: str) -> str:
         ("title", "title"),
         ("filename", "filename"),
         ("description", "description"),
-        ("question", "approved caregiver question"),
-        ("intended_answerer_role", "intended answerer role"),
-        ("intended_answerer_label", "intended answerer"),
-        ("necessity_rationale", "why this question matters"),
-        ("decision_dependency", "decision this answer supports"),
         ("source_text", "document text"),
         ("fact_value", "care fact reported value"),
         ("summary", "summary"),
@@ -2640,6 +2635,18 @@ def _humanize_model_context_line(line: str) -> str:
             flags=re.IGNORECASE,
         )
         parts.append(f"{label_text}: {value_text[:500]}")
+    if str(payload.get("source_type") or "") == "caregiver_question_queue":
+        for key, label_text in (
+            ("question", "approved caregiver question"),
+            ("intended_answerer_role", "intended answerer role"),
+            ("intended_answerer_label", "intended answerer"),
+            ("necessity_rationale", "why this question matters"),
+            ("decision_dependency", "decision this answer supports"),
+        ):
+            value = record.get(key)
+            if value is None or value == "":
+                continue
+            parts.append(f"{label_text}: {str(value)[:500]}")
     if freshness_is_policy_only:
         parts.append("interpretation limit: this is a policy review status, not a truth judgment")
     return f"{label}: " + ("; ".join(parts) if parts else "no additional details recorded")
