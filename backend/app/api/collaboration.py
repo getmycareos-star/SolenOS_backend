@@ -4901,8 +4901,6 @@ def _care_history_reply_covers_requested_topics(
     context_lines: list[str],
 ) -> bool:
     topics = _care_history_requested_topics(user_text)
-    if not topics:
-        return True
     reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
     topic_terms = set().union(*(variants for _, variants in topics))
     detail_stopwords = _CARE_HISTORY_STOPWORDS | {
@@ -4912,6 +4910,7 @@ def _care_history_reply_covers_requested_topics(
         "evening", "night",
     }
     source_details: dict[str, set[str]] = {label: set() for label, _ in topics}
+    generic_source_details: set[str] = set()
     for line in context_lines:
         brace = (line or "").find("{")
         if brace < 0:
@@ -4929,9 +4928,13 @@ def _care_history_reply_covers_requested_topics(
         if not isinstance(description, str):
             continue
         terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
+        if not topics:
+            generic_source_details.update(terms - detail_stopwords)
         for label, variants in topics:
             if terms & variants:
                 source_details[label].update(terms - topic_terms - detail_stopwords)
+    if not topics:
+        return len(reply_terms & generic_source_details) >= 2
     for label, variants in topics:
         if not (reply_terms & variants):
             return False
