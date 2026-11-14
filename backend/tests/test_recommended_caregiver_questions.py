@@ -297,6 +297,145 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
     finally:
         teardown()
 
+def test_generator_selects_only_explicit_evidence_backed_care_scenarios():
+    setup()
+    try:
+        from app.services.care_continuity import (
+            next_best_questions,
+            has_caregiver_visible_answerer,
+            has_valid_caregiver_necessity,
+        )
+        db = SessionLocal()
+        person = Person(id="generator-person", name="Generator Person")
+        other_person = Person(id="generator-other-person", name="Other Person")
+        caregiver = Caregiver(
+            id="generator-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, other_person, caregiver])
+        db.flush()
+        for index in range(20):
+            evidence = Evidence(
+                id=f"generator-med-evidence-{index:02d}", person_id=person.id,
+                type="document", source_text="Conflicting current medication instruction.",
+                uploaded_by_caregiver_id=caregiver.id, source_type="document",
+            )
+            db.add_all([
+                evidence,
+                Contradiction(
+                    id=f"generator-med-conflict-{index:02d}", person_id=person.id,
+                    subject_type="medication", subject_id=f"medication-{index:02d}",
+                    field="current_instruction",
+                    description="Two saved sources disagree about the current instruction.",
+                    evidence_ids=[evidence.id], source_assertion_ids=[],
+                    resolution_status="unresolved",
+                ),
+            ])
+        for index in range(10):
+            evidence = Evidence(
+                id=f"generator-mobility-evidence-{index:02d}", person_id=person.id,
+                type="note", source_text="Two reports differ about walking stability.",
+                uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+            )
+            db.add_all([
+                evidence,
+                Contradiction(
+                    id=f"generator-mobility-conflict-{index:02d}", person_id=person.id,
+                    subject_type="mobility", subject_id=f"mobility-{index:02d}",
+                    field="walking_stability",
+                    description="Two reports differ about walking stability.",
+                    evidence_ids=[evidence.id], source_assertion_ids=[],
+                    resolution_status="unresolved",
+                ),
+            ])
+        for index in range(10):
+            evidence = Evidence(
+                id=f"generator-gap-evidence-{index:02d}", person_id=person.id,
+                type="note", source_text="Current transfer support is recorded.",
+                uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+            )
+            db.add_all([
+                evidence,
+                InformationGap(
+                    id=f"generator-explicit-gap-{index:02d}", person_id=person.id,
+                    subject_type="mobility", subject_id=f"transfer-{index:02d}",
+                    field=f"transfer_support_{index:02d}",
+                    description="The current transfer support needs confirmation.",
+                    evidence_ids=[evidence.id], lifecycle_status=GapLifecycleStatus.OPEN,
+                    priority=Priority.HIGH,
+                    context=[{
+                        "caregiver_attention_required": True,
+                        "necessity_rationale": "The next handoff depends on this detail.",
+                        "decision_dependency": "The receiving caregiver cannot follow the handoff without this detail.",
+                    }],
+                ),
+            ])
+        for index in range(5):
+            evidence = Evidence(
+                id=f"generator-unassessed-evidence-{index:02d}", person_id=person.id,
+                type="note", source_text="An unassessed detail is present.",
+                uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+            )
+            db.add_all([
+                evidence,
+                InformationGap(
+                    id=f"generator-unassessed-gap-{index:02d}", person_id=person.id,
+                    subject_type="mobility", subject_id=f"unassessed-{index:02d}",
+                    field=f"unassessed_field_{index:02d}",
+                    description="This information has not been assessed for caregiver necessity.",
+                    evidence_ids=[evidence.id], lifecycle_status=GapLifecycleStatus.OPEN,
+                    priority=Priority.HIGH, context=[],
+                ),
+            ])
+        for index in range(5):
+            other_evidence = Evidence(
+                id=f"generator-cross-person-evidence-{index:02d}", person_id=other_person.id,
+                type="note", source_text="Another person care detail.",
+                source_type="caregiver_report",
+            )
+            db.add_all([
+                other_evidence,
+                InformationGap(
+                    id=f"generator-cross-person-gap-{index:02d}", person_id=person.id,
+                    subject_type="mobility", subject_id=f"cross-person-{index:02d}",
+                    field=f"cross_person_field_{index:02d}",
+                    description="A source from a different care record is not valid here.",
+                    evidence_ids=[other_evidence.id], lifecycle_status=GapLifecycleStatus.OPEN,
+                    priority=Priority.HIGH,
+                    context=[{
+                        "caregiver_attention_required": True,
+                        "necessity_rationale": "A handoff depends on this detail.",
+                        "decision_dependency": "The receiving caregiver needs this detail.",
+                    }],
+                ),
+            ])
+        db.flush()
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        persisted = db.query(OpenQuestion).filter_by(person_id=person.id).all()
+        assert len(candidates) == 50
+        assert len(persisted) == 30
+        assert sum(row.intended_answerer_role == "professional" for row in persisted) == 20
+        assert sum(row.intended_answerer_role == "reporting_caregiver" for row in persisted) == 10
+        assert all(has_caregiver_visible_answerer(row) for row in persisted)
+        assert all(has_valid_caregiver_necessity(row, db, person.id) for row in persisted)
+        assert all(row.context and row.context[0].get("source_field") for row in persisted)
+        assert not db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.subject_id.like("mobility-%"),
+        ).count()
+        assert not db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.subject_id.like("unassessed-%"),
+        ).count()
+        assert not db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.subject_id.like("cross-person-%"),
+        ).count()
+        db.rollback()
+        db.close()
+    finally:
+        teardown()
+
 def test_recommended_projection_requires_an_explicit_known_answerer():
     setup()
     try:
