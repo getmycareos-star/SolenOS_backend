@@ -27,6 +27,7 @@ from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
+from app.models.collaboration import ConversationMessage, ConversationSession
 
 
 pytestmark = pytest.mark.skipif(
@@ -321,6 +322,27 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
             returning_event_count = db.query(CareEvent).filter_by(
                 person_id=returning_caregiver["person"]["id"]
             ).count()
+
+            new_conversation_count = db.query(ConversationSession).filter_by(
+                person_id=new_caregiver["person"]["id"],
+                caregiver_id=new_caregiver["caregiver"]["id"],
+            ).count()
+            returning_conversation_count = db.query(ConversationSession).filter_by(
+                person_id=returning_caregiver["person"]["id"],
+                caregiver_id=returning_caregiver["caregiver"]["id"],
+            ).count()
+            new_message_count = (
+                db.query(ConversationMessage)
+                .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+                .filter(ConversationSession.person_id == new_caregiver["person"]["id"])
+                .count()
+            )
+            returning_message_count = (
+                db.query(ConversationMessage)
+                .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+                .filter(ConversationSession.person_id == returning_caregiver["person"]["id"])
+                .count()
+            )
         finally:
             db.close()
 
@@ -418,6 +440,27 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
                 id=event_id,
                 person_id=returning_caregiver["person"]["id"],
             ).count() == 1
+
+            assert db.query(ConversationSession).filter_by(
+                person_id=new_caregiver["person"]["id"],
+                caregiver_id=new_caregiver["caregiver"]["id"],
+            ).count() == new_conversation_count
+            assert db.query(ConversationSession).filter_by(
+                person_id=returning_caregiver["person"]["id"],
+                caregiver_id=returning_caregiver["caregiver"]["id"],
+            ).count() == returning_conversation_count
+            assert (
+                db.query(ConversationMessage)
+                .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+                .filter(ConversationSession.person_id == new_caregiver["person"]["id"])
+                .count()
+            ) == new_message_count
+            assert (
+                db.query(ConversationMessage)
+                .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+                .filter(ConversationSession.person_id == returning_caregiver["person"]["id"])
+                .count()
+            ) == returning_message_count
         finally:
             db.close()
 
