@@ -335,6 +335,9 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         assert ids == {"professional-question", "other-caregiver-question", "reporting-caregiver-question", "care-recipient-question"}
         assert "unknown-answerer-question" not in ids
         assert "mislinked-evidence-question" not in ids
+        listed = client_for("answerer-person").get("/api/v1/uncertainty/questions/answerer-person")
+        assert listed.status_code == 200, listed.text
+        assert {item["id"] for item in listed.json()} == ids
     finally:
         teardown()
 
