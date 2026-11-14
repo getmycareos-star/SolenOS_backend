@@ -4807,6 +4807,12 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         if not isinstance(payload, dict) or payload.get("source_type") != "events":
             continue
         record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+        # Only summarize an explicitly caregiver-authored, recorded event.
+        # Pending or otherwise unknown event states must not become settled history.
+        if not record.get("created_by_caregiver_id"):
+            continue
+        if str(record.get("status") or "").strip().casefold() != "recorded":
+            continue
         description = record.get("description")
         if not isinstance(description, str) or not description.strip():
             continue
