@@ -6090,6 +6090,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             document_extractive_answer
             and not _document_reply_contains_source_detail(reply, document_extractive_answer)
         )
+        # Resolve deterministic safety and uncertainty overrides before any
+        # extractive fallback consults them. This ordering keeps every fallback
+        # decision based on the same already-computed guard results.
+        missing_measurement_reply = _missing_requested_measurement_response(
+            user_text,
+            [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
+        )
+        medication_change_reply = _medication_change_safety_response(user_text)
+        unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
+        conflict_response = _contradictory_event_evidence_response(user_text, event_context)
         care_history_extractive_fallback_used = False
         care_history_extractive_answer = _care_history_extractive_answer(
             user_text,
@@ -6107,13 +6117,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # Prefer a short, exact source excerpt over a generic or unsupported
             # answer. The extraction remains source material, not clinical proof.
             reply = document_extractive_answer
-        missing_measurement_reply = _missing_requested_measurement_response(
-            user_text,
-            [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
-        )
-        medication_change_reply = _medication_change_safety_response(user_text)
-        unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
-        conflict_response = _contradictory_event_evidence_response(user_text, event_context)
         if medication_change_reply:
             # Do not rely on a small model to refuse a requested dose change.
             reply = medication_change_reply
