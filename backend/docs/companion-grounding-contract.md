@@ -41,7 +41,10 @@ These signals are narrow behavioral controls, not diagnoses or permanent caregiv
 
 Acceptance requires tests for each signal and a neutral control case. These deterministic tests prove that the correct instructions are added; they do not prove the model follows them in production. Real-model and caregiver evaluation remain required.
 
-## Retrieval behavior in this change
+## Retrieval
+
+Historical question retrieval searches both the saved question and its answer, answer provenance, answerer label, and status. An answered question is evidence that the question was handled, not a new task to ask again.
+ behavior in this change
 
 The Companion considers a bounded candidate pool of recent care events, caregiver-reviewed assertions, appointments, and caregiver-provided evidence. Query-term relevance orders candidate records before the context budget is applied; the original ordering is the stable tie-breaker. Only the selected records are sent to Qwen and included in response source-ID metadata.
 
