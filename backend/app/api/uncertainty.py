@@ -118,11 +118,7 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
             for item in (row.context or [])
         )
     ]
-    from app.services.care_continuity import has_valid_caregiver_necessity
-    caregiver_visible_answerer_roles = {
-        "person_receiving_care", "reporting_caregiver",
-        "other_caregiver", "professional",
-    }
+    from app.services.care_continuity import has_caregiver_visible_answerer, has_valid_caregiver_necessity
     evidence_validated_active = [
         row for row in active
         if row.necessity == "necessary"
@@ -130,8 +126,7 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
     ]
     validated_active = [
         row for row in evidence_validated_active
-        if str(getattr(row, "intended_answerer_role", "") or "").strip().casefold()
-        in caregiver_visible_answerer_roles
+        if has_caregiver_visible_answerer(row)
     ]
     awaiting_answerer_assignment = [
         row for row in evidence_validated_active if row not in validated_active
@@ -183,6 +178,7 @@ def recommended_caregiver_questions(
     """
     _require_person_scope(engine, person_id)
     from app.services.care_continuity import (
+        has_caregiver_visible_answerer,
         has_valid_caregiver_necessity,
         prioritize_caregiver_questions,
     )
@@ -191,17 +187,10 @@ def recommended_caregiver_questions(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).all()
-    caregiver_visible_answerer_roles = {
-        # A caregiver may collect the answer from the person named here.
-        # Unknown ownership is the only role that cannot safely become a task.
-        "person_receiving_care", "reporting_caregiver",
-        "other_caregiver", "professional",
-    }
     eligible = [
         row for row in rows
         if row.necessity == "necessary"
-        and str(getattr(row, "intended_answerer_role", "") or "").strip().casefold()
-        in caregiver_visible_answerer_roles
+        and has_caregiver_visible_answerer(row)
         and has_valid_caregiver_necessity(row, engine.db, person_id)
     ]
     unique, visible, hidden_count = prioritize_caregiver_questions(eligible, ordinary_limit=2)
