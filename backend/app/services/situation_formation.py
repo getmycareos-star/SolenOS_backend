@@ -12,6 +12,7 @@ from app.models.significance import SignificanceAssessment
 from app.services.change_detection import detect_event_changes
 from app.services.pattern_detection import detect_patterns
 from app.services.care_continuity import (
+    has_caregiver_visible_answerer,
     has_valid_caregiver_necessity,
     prioritize_caregiver_questions,
 )
@@ -370,7 +371,7 @@ def _epistemic_context(db: Session, person_id: str, subject_type: str, subject_i
         OpenQuestionModel.status.in_(("open", "unresolved")),
         OpenQuestionModel.necessity == "necessary",
     ).all()
-    questions = [question for question in questions if has_valid_caregiver_necessity(question, db, person_id)]
+    questions = [question for question in questions if has_caregiver_visible_answerer(question) and has_valid_caregiver_necessity(question, db, person_id)]
     _, questions, _ = prioritize_caregiver_questions(questions, ordinary_limit=2)
 
     if contradictions:
