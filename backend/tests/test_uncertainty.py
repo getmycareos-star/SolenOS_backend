@@ -4004,6 +4004,111 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         teardown_db()
 
 
+
+def test_identical_source_questions_remain_separate_across_care_subjects():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.services.uncertainty import persist_source_clarification_questions
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="subject-isolation-person", name="Subject Isolation Person")
+        caregiver = Caregiver(
+            id="subject-isolation-caregiver",
+            name="Subject Isolation Caregiver",
+            email="subject-isolation@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+
+        def add_source(label):
+            evidence = Evidence(
+                id=f"subject-isolation-evidence-{label}",
+                person_id=person.id,
+                type="document",
+                source_text=f"Persisted source for the {label} medication dose.",
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="document",
+            )
+            event = CareEvent(
+                id=f"subject-isolation-event-{label}",
+                person_id=person.id,
+                event_type="daily_care",
+                status="recorded",
+                occurred_at=datetime.now(timezone.utc),
+                title=f"{label.title()} medication review",
+                description=evidence.source_text,
+                evidence_ids=[evidence.id],
+                created_by_caregiver_id=caregiver.id,
+            )
+            gap = InformationGap(
+                id=f"subject-isolation-gap-{label}",
+                person_id=person.id,
+                subject_type="medication",
+                subject_id=f"{label}-medication",
+                field="dose",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.NOT_DOCUMENTED,
+                priority=Priority.HIGH,
+                lifecycle_status=GapLifecycleStatus.OPEN,
+                evidence_ids=[evidence.id],
+                context=[{
+                    "caregiver_attention_required": True,
+                    "necessity_rationale": f"The {label} medication decision depends on the current dose.",
+                    "decision_dependency": f"The care team cannot confirm the {label} medication schedule without the dose.",
+                }],
+            )
+            db.add_all([evidence, event, gap])
+            db.commit()
+            return event, evidence
+
+        morning_event, morning_evidence = add_source("morning")
+        first = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction",
+            source_record_type="care_event",
+            source_record_id=morning_event.id,
+            evidence_ids=[morning_evidence.id],
+            questions=["What is the current medication dose?"],
+        )
+        db.commit()
+        assert len(first) == 1
+        assert first[0].subject_id == "morning-medication"
+        assert first[0].necessity == "necessary"
+
+        evening_event, evening_evidence = add_source("evening")
+        second = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction",
+            source_record_type="care_event",
+            source_record_id=evening_event.id,
+            evidence_ids=[evening_evidence.id],
+            questions=["What is the current medication dose?"],
+        )
+        db.commit()
+
+        assert len(second) == 1
+        assert second[0].id != first[0].id
+        assert second[0].subject_id == "evening-medication"
+        assert second[0].necessity == "necessary"
+        assert first[0].subject_id == "morning-medication"
+        assert first[0].evidence_ids == [morning_evidence.id]
+        assert second[0].evidence_ids == [evening_evidence.id]
+        assert second[0].context[0]["source_id"] == evening_event.id
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).count() == 2
+    finally:
+        teardown_db()
+
+
 def test_source_extraction_questions_reject_cross_person_evidence():
     setup_db()
     try:
