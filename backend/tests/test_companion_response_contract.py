@@ -1574,3 +1574,36 @@ def test_companion_question_queue_uses_source_validation_priority_and_answerer()
         db.close()
         Base.metadata.drop_all(bind=engine)
 
+
+
+def test_companion_never_describes_incomplete_lcr_retrieval_as_missing_information():
+    instruction = collaboration._lcr_missing_context_instruction
+    incomplete = instruction({
+        "retrieval_projection_complete": False,
+        "page_limit_reached": False,
+    }, False)
+    assert "cannot confirm from the records retrieved" in incomplete
+    assert "do not say the information is" in incomplete
+    assert "additional saved history may need checking" in incomplete
+
+    page_limited = instruction({
+        "retrieval_projection_complete": True,
+        "page_limit_reached": True,
+    }, False)
+    assert "cannot confirm from the records retrieved" in page_limited
+
+    prompt_truncated = instruction({
+        "retrieval_projection_complete": True,
+        "page_limit_reached": False,
+    }, True)
+    assert "prompt had to omit records" in prompt_truncated
+
+
+def test_companion_uses_absence_wording_only_after_complete_retrieval():
+    instruction = collaboration._lcr_missing_context_instruction
+    complete = instruction({
+        "retrieval_projection_complete": True,
+        "page_limit_reached": False,
+    }, False)
+    assert "not present in the retrieved care record" in complete
+    assert "additional saved history may need checking" not in complete
