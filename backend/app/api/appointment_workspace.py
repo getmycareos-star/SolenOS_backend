@@ -29,6 +29,7 @@ from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, Appoin
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import (
     create_assertion,
+    has_caregiver_visible_answerer,
     has_valid_caregiver_necessity,
     prioritize_caregiver_questions,
 )
@@ -363,10 +364,6 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             OpenQuestion.person_id == person_id,
             OpenQuestion.status.notin_(["answered", "closed", "resolved", "rejected"]),
             OpenQuestion.necessity == "necessary",
-            OpenQuestion.intended_answerer_role.in_([
-                "person_receiving_care", "reporting_caregiver",
-                "other_caregiver", "professional",
-            ]),
         ).order_by(OpenQuestion.asked_at.desc()).all()
         question_source_status = "available" if question_rows else "empty"
     except Exception:
@@ -376,7 +373,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     if question_rows is not None:
         eligible_questions = [
             item for item in question_rows
-            if has_valid_caregiver_necessity(item, db, person_id)
+            if has_caregiver_visible_answerer(item)
+            and has_valid_caregiver_necessity(item, db, person_id)
         ]
         _, question_rows, _ = prioritize_caregiver_questions(
             eligible_questions, ordinary_limit=2
