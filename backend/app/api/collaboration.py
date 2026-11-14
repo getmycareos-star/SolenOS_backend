@@ -2675,7 +2675,18 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
     for line in lines:
         try:
             payload = json.loads(line[line.index("{"):])
-            record_type = payload.get("source_type")
+            source_type = str(payload.get("source_type") or "")
+            source_type_map = {
+                "events": "care_event",
+                "evidence": "care_evidence",
+                "assertions": "care_assertion",
+                "appointments": "appointment",
+                "document_extractions": "document_extraction",
+                "freshness_assessments": "freshness_assessment",
+                "evidence_observations": "care_evidence_observation",
+                "caregiver_observations": "caregiver_observation",
+            }
+            record_type = source_type_map.get(source_type, source_type)
             record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
             record_id = (
                 payload.get("source_id")
