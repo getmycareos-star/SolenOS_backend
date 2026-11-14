@@ -19,6 +19,7 @@ from app.models.notifications import CareNotification, CarePushDelivery
 from app.models.open_loop import OpenLoopRecord
 from app.models.uncertainty import OpenQuestion
 from app.services.care_continuity import (
+    has_caregiver_visible_answerer,
     has_valid_caregiver_necessity,
     prioritize_caregiver_questions,
 )
@@ -326,6 +327,8 @@ def _active_question(db: Session, person_id: str, source_id: str | None) -> tupl
         return False, "source_unavailable"
     if question.status not in OPEN_QUESTION_STATUSES:
         return False, "question_resolved"
+    if not has_caregiver_visible_answerer(question):
+        return False, "answerer_not_assigned"
     if not has_valid_caregiver_necessity(question, db, person_id):
         return False, "necessity_or_evidence_no_longer_valid"
     eligible = db.query(OpenQuestion).filter(
@@ -335,7 +338,8 @@ def _active_question(db: Session, person_id: str, source_id: str | None) -> tupl
     ).all()
     eligible = [
         row for row in eligible
-        if has_valid_caregiver_necessity(row, db, person_id)
+        if has_caregiver_visible_answerer(row)
+        and has_valid_caregiver_necessity(row, db, person_id)
     ]
     _, selected, _ = prioritize_caregiver_questions(eligible, ordinary_limit=2)
     if question.id not in {row.id for row in selected}:
@@ -485,7 +489,8 @@ def create_proactive_care_notifications(
 
     eligible_questions = [
         question for question in questions
-        if has_valid_caregiver_necessity(question, db, person_id)
+        if has_caregiver_visible_answerer(question)
+        and has_valid_caregiver_necessity(question, db, person_id)
     ]
     _, questions_to_notify, _ = prioritize_caregiver_questions(
         eligible_questions, ordinary_limit=2
