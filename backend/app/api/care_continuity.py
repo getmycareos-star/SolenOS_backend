@@ -2769,14 +2769,28 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     # Reuse persisted Delta Engine assessments; do not build a parallel change model.
     # Incomplete baseline or source coverage remains clarification-only.
     persisted_change_items = []
-    if inspect(db.connection()).has_table("changes"):
+    persisted_change_history_bounded = False
+    inspector = inspect(db.connection())
+    change_table_available = inspector.has_table("changes")
+    change_columns = {column["name"] for column in inspector.get_columns("changes")} if change_table_available else set()
+    required_change_columns = {
+        "id", "person_id", "is_active", "superseded_by_change_id", "created_at",
+        "significance_verdict", "attention_candidate", "follow_up_candidate",
+        "confirmation_status", "baseline_id", "baseline_coverage_status",
+        "current_coverage_status", "evidence_ids", "subject_type", "change_type",
+        "change_direction", "previous_state", "current_state", "explanation",
+    }
+    change_table_available = required_change_columns.issubset(change_columns)
+    if change_table_available:
         active_change_rows = (
             db.query(Change)
             .filter(Change.person_id == person_id, Change.is_active.is_(True), Change.superseded_by_change_id.is_(None))
             .order_by(desc(Change.created_at), Change.id.asc())
-            .limit(100)
+            .limit(101)
             .all()
         )
+        persisted_change_history_bounded = len(active_change_rows) > 100
+        active_change_rows = active_change_rows[:100]
         relevant_changes = []
         for change in active_change_rows:
             verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
@@ -2789,7 +2803,9 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             relevant_changes.append(change)
         baseline_ids = sorted({str(change.baseline_id) for change in relevant_changes if change.baseline_id})
         baseline_by_id = {}
-        if baseline_ids and inspect(db.connection()).has_table("baselines"):
+        baseline_table_available = inspector.has_table("baselines")
+        baseline_columns = {column["name"] for column in inspector.get_columns("baselines")} if baseline_table_available else set()
+        if baseline_ids and {"coverage_status", "history_completeness", "is_stable"}.issubset(baseline_columns):
             baseline_by_id = {
                 str(row.id): row for row in db.query(Baseline).filter(Baseline.person_id == person_id, Baseline.id.in_(baseline_ids)).all()
             }
@@ -2892,6 +2908,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "missing_required_sources": required_missing,
                 "missing_optional_sources": optional_missing,
                 "bounded_sources": bounded_sources,
+                "persisted_change_source_available": change_table_available,
+                "persisted_change_history_bounded": persisted_change_history_bounded,
             },
         ),
         "priorities": attention_items[:50],
