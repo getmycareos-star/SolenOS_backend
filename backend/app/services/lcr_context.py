@@ -346,7 +346,7 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
 
 
 _SEMANTIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
-    "sleep": ("waking", "awake", "night", "rest"),
+    "sleep": ("slept", "sleeping", "waking", "awake", "night", "rest"),
     "waking": ("awake", "sleep", "night"),
     "wandering": ("pacing", "walking", "roaming", "leaving"),
     "agitation": ("agitated", "distressed", "restless", "upset"),
