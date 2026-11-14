@@ -494,21 +494,32 @@ def test_companion_withholds_unsupported_live_trend_claim_when_only_one_dated_ob
         teardown()
 
 
-def test_trend_evidence_requires_two_distinct_dated_topic_observations():
+def test_trend_evidence_requires_three_distinct_days_and_source_backed_direction():
     now = datetime.now(timezone.utc)
     one = (
         'LCR event evidence: {"event_id":"sleep-1","title":"Sleep history",'
-        f'"description":"Caregiver reported restless sleep.","occurred_at":"{(now - timedelta(days=2)).isoformat()}"' + "}"
+        f'"description":"Caregiver reported restless sleep.","occurred_at":"{(now - timedelta(days=3)).isoformat()}"' + "}"
     )
     two = (
         'LCR event evidence: {"event_id":"sleep-2","title":"Sleep history",'
-        f'"description":"Caregiver reported waking overnight.","occurred_at":"{(now - timedelta(days=1)).isoformat()}"' + "}"
+        f'"description":"Caregiver reported waking overnight.","occurred_at":"{(now - timedelta(days=2)).isoformat()}"' + "}"
     )
-    assessment = collaboration._trend_evidence_assessment(
+    three = (
+        'LCR event evidence: {"event_id":"sleep-3","title":"Sleep history",'
+        f'"description":"Caregiver reported sleep was worse than last week.","occurred_at":"{(now - timedelta(days=1)).isoformat()}"' + "}"
+    )
+    two_day_assessment = collaboration._trend_evidence_assessment(
         "Has sleep been getting worse over the last month?", [one, two]
     )
+    assert two_day_assessment["sufficient"] is False
+    assert two_day_assessment["distinct_days"] == 2
+
+    assessment = collaboration._trend_evidence_assessment(
+        "Has sleep been getting worse over the last month?", [one, two, three]
+    )
     assert assessment["sufficient"] is True
-    assert assessment["distinct_days"] == 2
+    assert assessment["distinct_days"] == 3
+    assert assessment["directional_source_signal"] is True
     assert collaboration._contains_unsupported_trend_claim(
         "Sleep has been getting worse.", {"sufficient": False}
     ) is True
@@ -516,6 +527,24 @@ def test_trend_evidence_requires_two_distinct_dated_topic_observations():
         "There is not enough information to establish whether sleep is worsening.",
         {"sufficient": False},
     ) is False
+
+
+def test_trend_evidence_without_source_comparison_cannot_establish_direction():
+    now = datetime.now(timezone.utc)
+    lines = [
+        'LCR event evidence: {"event_id":"sleep-1","description":"Restless sleep reported.",'
+        f'"occurred_at":"{(now - timedelta(days=3)).isoformat()}"' + "}",
+        'LCR event evidence: {"event_id":"sleep-2","description":"Waking overnight reported.",'
+        f'"occurred_at":"{(now - timedelta(days=2)).isoformat()}"' + "}",
+        'LCR event evidence: {"event_id":"sleep-3","description":"Poor sleep reported.",'
+        f'"occurred_at":"{(now - timedelta(days=1)).isoformat()}"' + "}",
+    ]
+    assessment = collaboration._trend_evidence_assessment(
+        "Has sleep been getting worse over the last month?", lines
+    )
+    assert assessment["distinct_days"] == 3
+    assert assessment["directional_source_signal"] is False
+    assert assessment["sufficient"] is False
 
 
 def test_trend_evidence_reads_canonical_shared_lcr_event_records():
