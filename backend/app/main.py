@@ -1273,14 +1273,14 @@ async def generate_lcr_orientation(
     )
     def validate_reply(candidate):
         candidate = (candidate or "").strip()
-        sentence_count = len([part for part in re.split(r"(?<=[.!?])\\s+", candidate) if part.strip()])
+        sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", candidate) if part.strip()])
         word_count = len(candidate.split())
         max_words = 40 if is_greeting else 65
         max_sentences = 2 if is_greeting else 3
         if (
             not candidate or len(candidate) > 700 or word_count > max_words
             or sentence_count > max_sentences
-            or re.search(r"(?i)\\b(?:as an ai|language model|system prompt)\\b", candidate)
+            or re.search(r"(?i)\b(?:as an ai|language model|system prompt)\b", candidate)
         ):
             return None
         return candidate
