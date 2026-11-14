@@ -1324,6 +1324,7 @@ async def generate_lcr_orientation(
         if (
             not candidate or len(candidate) > 700 or word_count > max_words
             or sentence_count > max_sentences
+            or (is_greeting and word_count < 8)
             or re.search(r"(?i)\b(?:as an ai|language model|system prompt)\b", candidate)
         ):
             return None
