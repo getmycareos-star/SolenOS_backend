@@ -144,7 +144,13 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "open_questions": {
         "table": "open_questions",
         "required": False,
-        "fields": ["id", "question", "status", "priority", "evidence_ids", "asked_at", "answered_at", "answer", "closed_at", "closed_reason", "created_by_caregiver_id"],
+        "fields": [
+            "id", "question", "subject_type", "subject_id", "claim_id",
+            "intended_answerer_role", "intended_answerer_label", "necessity",
+            "necessity_rationale", "status", "priority", "evidence_ids",
+            "asked_at", "answered_at", "answer", "answer_provenance",
+            "closed_at", "closed_reason", "created_by_caregiver_id",
+        ],
         "order": ["asked_at"],
     },
     "open_loop_records": {
@@ -248,6 +254,7 @@ SEARCH_FIELDS = {
     "uncertainties": ["question", "uncertainty_type", "status"],
     "uncertainty_assessments": ["subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "known_value"],
     "missing_information": ["topic", "description", "priority", "status"],
+    "open_questions": ["question", "answer", "answer_provenance", "closed_reason", "status"],
     "conflicts": ["conflict_type", "description", "resolution", "status"],
     "provenance": ["source_type", "author_label", "method", "reason"],
     "caregiver_observations": ["observation_category", "description", "source_type"],
@@ -285,7 +292,8 @@ def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
 
 TEXT_FIELDS = {
     "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
-    "decision_text", "context", "summary", "title", "question", "topic", "perspective_text",
+    "decision_text", "context", "summary", "title", "question", "answer", "answer_provenance",
+    "closed_reason", "necessity_rationale", "intended_answerer_label", "topic", "perspective_text",
     "notes", "reason", "review_notes", "resolution",
 }
 MAX_TEXT_CHARS = 2400
