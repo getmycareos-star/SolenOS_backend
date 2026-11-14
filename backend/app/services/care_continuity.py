@@ -1010,6 +1010,7 @@ def next_best_questions(
         return {
             "source_kind": candidate["source_kind"],
             "source_id": candidate["source_id"],
+            "source_field": candidate.get("source_field"),
             "source_ids": list(candidate.get("source_ids") or [candidate["source_id"]]),
             "reason": candidate["reason"],
             "necessity_assessment": {
