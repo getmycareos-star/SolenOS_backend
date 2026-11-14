@@ -2955,7 +2955,13 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
         db.add(historical_evidence)
         db.flush()
         historical_question_context = [{
-            "decision_dependency": "The care handoff cannot state the assessment outcome without this answer."
+            "source_kind": "caregiver_report",
+            "source_id": historical_evidence.id,
+            "necessity_assessment": {
+                "necessity_rationale": "The mobility assessment outcome is needed for the current care handoff.",
+                "decision_dependency": "The care handoff cannot state the assessment outcome without this answer.",
+                "evidence_ids": [historical_evidence.id],
+            },
         }]
         old_asked_at = datetime(2024, 1, 15, 9, 30, tzinfo=timezone.utc)
         old_question = OpenQuestion(
@@ -2966,6 +2972,7 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
             subject_id="mobility-assessment",
             status="open",
             necessity="necessary",
+            intended_answerer_role="reporting_caregiver",
             necessity_rationale="The mobility assessment outcome is needed for the current care handoff.",
             evidence_ids=[historical_evidence.id],
             context=historical_question_context,
@@ -2980,6 +2987,7 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
             subject_id="follow-up",
             status="open",
             necessity="necessary",
+            intended_answerer_role="reporting_caregiver",
             necessity_rationale="The follow-up appointment status is needed for the current care handoff.",
             evidence_ids=[historical_evidence.id],
             context=historical_question_context,
