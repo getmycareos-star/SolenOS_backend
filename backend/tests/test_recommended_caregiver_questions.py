@@ -2,6 +2,7 @@
 import hashlib
 import json
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -347,6 +348,40 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         assert {item["id"] for item in listed.json()} == ids
     finally:
         teardown()
+
+
+def test_only_explicit_source_backed_information_gaps_enter_return_tasks():
+    from app.services.care_continuity import explicit_caregiver_gap_assessment
+
+    evidence_id = "return-gap-evidence"
+    valid_context = {
+        "caregiver_attention_required": True,
+        "necessity_rationale": "The upcoming handoff depends on this missing detail.",
+        "decision_dependency": "The care team cannot complete the handoff without this answer.",
+    }
+    valid_gap = SimpleNamespace(
+        context=[valid_context],
+        evidence_ids=[evidence_id],
+    )
+    assert explicit_caregiver_gap_assessment(valid_gap, {evidence_id}) is valid_context
+
+    unassessed_gap = SimpleNamespace(
+        context=[{**valid_context, "caregiver_attention_required": False}],
+        evidence_ids=[evidence_id],
+    )
+    assert explicit_caregiver_gap_assessment(unassessed_gap, {evidence_id}) is None
+
+    unlinked_gap = SimpleNamespace(
+        context=[valid_context],
+        evidence_ids=["evidence-not-in-this-care-record"],
+    )
+    assert explicit_caregiver_gap_assessment(unlinked_gap, {evidence_id}) is None
+
+    missing_dependency_gap = SimpleNamespace(
+        context=[{**valid_context, "decision_dependency": " "}],
+        evidence_ids=[evidence_id],
+    )
+    assert explicit_caregiver_gap_assessment(missing_dependency_gap, {evidence_id}) is None
 
 
 def test_duplicate_candidate_merge_preserves_the_selected_source_evidence_and_answerer():
