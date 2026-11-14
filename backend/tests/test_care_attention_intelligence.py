@@ -130,3 +130,21 @@ def test_no_implicit_baseline_is_created_from_oldest_record():
     )
     assert not any(item["pattern_type"] == "explicit_baseline_deviation"
                    for item in result["important_to_address"])
+
+
+
+def test_deadline_within_24_hours_is_important_not_immediate_or_deferred():
+    result = build_care_attention_assessment(
+        records=[], open_loops=[{
+            "id": "loop-5", "source": "open_loop_records", "title": "Upcoming follow-up",
+            "recorded_status": "deferred", "priority": "high",
+            "priority_reasons": ["Explicit follow-up deadline is within 24 hours"],
+            "deadline_source": "recorded_commitment", "due_at": NOW + timedelta(hours=12),
+            "deferred_reason": "Waiting for appointment", "review_at": NOW + timedelta(days=2),
+        }], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert result["needs_attention_now"] == []
+    assert result["can_wait_with_documented_basis"] == []
+    item = result["important_to_address"][0]
+    assert item["record_id"] == "loop-5"
+    assert item["category"] == "important_to_address"

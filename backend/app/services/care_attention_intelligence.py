@@ -57,8 +57,10 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
         due = _datetime(loop.get("due_at") or loop.get("deadline_at"))
         explicit_deadline = _text(loop.get("deadline_source")) in {"explicit_user", "recorded_commitment", "system_policy"}
         overdue = bool(due and explicit_deadline and due <= now)
+        deadline_soon = bool(due and explicit_deadline and now < due <= now + timedelta(hours=24))
         reasons = loop.get("priority_reasons") if isinstance(loop.get("priority_reasons"), list) else []
-        critical_delay = _text(loop.get("priority")) in {"high", "critical"} and any(_text(reason) == _text(CRITICAL_DELAY_REASON) for reason in reasons)
+        normalized_reasons = {_text(reason) for reason in reasons}
+        critical_delay = _text(loop.get("priority")) in {"high", "critical"} and _text(CRITICAL_DELAY_REASON) in normalized_reasons
         item = {
             **_record_ref(loop), "status": status, "priority_basis": [],
             "owner": loop.get("owner"), "due_at": loop.get("due_at"),
@@ -73,6 +75,10 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
             item["category"] = "needs_attention_now"
             item["priority_basis"].append(CRITICAL_DELAY_REASON)
             immediate.append(item)
+        elif deadline_soon:
+            item["category"] = "important_to_address"
+            item["priority_basis"].append("An explicitly sourced follow-up deadline is within 24 hours.")
+            important.append(item)
         elif status == "deferred":
             review_at = _datetime(loop.get("review_at"))
             if loop.get("deferred_reason") and review_at and review_at > now:
@@ -83,13 +89,29 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
                 item["category"] = "needs_clarification"
                 item["priority_basis"].append("The item was postponed without a current, future review basis.")
                 clarification.append(item)
-        elif _text(loop.get("priority")) in {"high", "critical"}:
+        elif normalized_reasons.intersection({
+            _text("Competing claims remain unresolved"),
+            _text("Required information is still missing"),
+        }) or "persisted deadline has passed" in normalized_reasons:
+            item["category"] = "needs_clarification"
+            item["priority_basis"].extend(str(reason) for reason in reasons)
+            clarification.append(item)
+        elif _text(loop.get("priority")) in {"high", "critical"} and not reasons:
             item["category"] = "needs_clarification"
             item["priority_basis"].append("The saved priority is high, but its explicit escalation basis is missing.")
             clarification.append(item)
         else:
             item["category"] = "important_to_address"
-            item["priority_basis"].append("An unresolved care commitment is recorded.")
+            item["priority_basis"].extend(
+                str(reason) for reason in reasons
+                if _text(reason) in {
+                    _text("A mandatory prerequisite is unresolved"),
+                    _text("Inactive item requires human review; this is not closure"),
+                    _text("Explicit follow-up deadline is within 24 hours"),
+                }
+            )
+            if not item["priority_basis"]:
+                item["priority_basis"].append("An unresolved care commitment is recorded.")
             important.append(item)
     return immediate, important, deferred, clarification
 
