@@ -861,15 +861,6 @@ def get_situation(
         )
         for event in linked_events:
             linked_evidence_ids.update(event.evidence_ids or [])
-    def _question_with_answerer(row):
-        prefixes = {
-            "professional": "For your care professional",
-            "other_caregiver": "For another caregiver",
-            "person_receiving_care": "Ask the person receiving care",
-            "reporting_caregiver": "Your observation",
-        }
-        prefix = prefixes.get(row.intended_answerer_role or "", "Care question")
-        return f"{prefix}: {row.question}"
         # Signal-type similarity is not a thread relationship. Attach an
         # unresolved question or contradiction only through an explicit
         # situation subject ID or a shared, same-record evidence reference.
@@ -885,7 +876,13 @@ def get_situation(
                 or (linked_claim is not None and linked_claim.subject_id == saved_situation.id)
                 or bool(question_evidence_ids & linked_evidence_ids)
             ):
-                linked_questions.append(_question_with_answerer(question))
+                answerer_prefix = {
+                    "professional": "For your care professional",
+                    "other_caregiver": "For another caregiver",
+                    "person_receiving_care": "Ask the person receiving care",
+                    "reporting_caregiver": "Your observation",
+                }.get(question.intended_answerer_role or "", "Care question")
+                linked_questions.append(f"{answerer_prefix}: {question.question}")
         linked_conflicts = [
             {
                 "id": conflict.id,
@@ -1097,7 +1094,7 @@ def get_situation(
             "is_long_absence": False,
             "recent_relevant_changes": [],
             "important_unresolved": list(dict.fromkeys([
-                *(_question_with_answerer(question) for question in open_question_rows),
+                *(f"{ {"professional": "For your care professional", "other_caregiver": "For another caregiver", "person_receiving_care": "Ask the person receiving care", "reporting_caregiver": "Your observation"}.get(question.intended_answerer_role or "", "Care question") }: {question.question}" for question in open_question_rows),
                 *(
                     f"Conflicting reports: {conflict.description}"
                     for conflict in unresolved_conflict_rows
