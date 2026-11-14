@@ -310,7 +310,14 @@ def test_recommended_projection_routes_questions_only_to_the_intended_caregiver(
         add_question(db, person.id, caregiver.id, "unknown-answerer-question", "high")
         add_question(db, person.id, caregiver.id, "other-caregiver-question", "medium")
         add_question(db, person.id, caregiver.id, "care-recipient-question", "high")
+        add_question(db, person.id, caregiver.id, "mislinked-evidence-question", "high", evidence_id="mislinked-source-evidence")
+        db.add(Evidence(
+            id="unrelated-same-person-evidence", person_id=person.id,
+            type="caregiver_report", source_text="Unrelated source record",
+            uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+        ))
         db.flush()
+        db.query(OpenQuestion).filter_by(id="mislinked-evidence-question").one().context[0]["necessity_assessment"]["evidence_ids"] = ["unrelated-same-person-evidence"]
         db.query(OpenQuestion).filter_by(id="professional-question").one().intended_answerer_role = "professional"
         db.query(OpenQuestion).filter_by(id="unknown-answerer-question").one().intended_answerer_role = "not_known"
         db.query(OpenQuestion).filter_by(id="other-caregiver-question").one().intended_answerer_role = "other_caregiver"
