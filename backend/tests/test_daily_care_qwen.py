@@ -12,7 +12,7 @@ import app.api.daily_care_intelligence as daily_qwen
 import app.api.collaboration as collaboration
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Caregiver
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage, ConversationSession
 
@@ -294,6 +294,24 @@ def test_companion_uses_prior_caregiver_messages_across_sessions_as_context_only
         )
         db.add(previous_session)
         db.flush()
+        peer_caregiver = Caregiver(
+            id="peer-caregiver-same-person",
+            name="Another family caregiver",
+            email="peer-caregiver-same-person@example.invalid",
+            relationship="Family",
+            person_id=session["person"]["id"],
+        )
+        db.add(peer_caregiver)
+        db.flush()
+        peer_session = ConversationSession(
+            id="peer-caregiver-companion-session",
+            person_id=session["person"]["id"],
+            caregiver_id=peer_caregiver.id,
+            title="Another caregiver's private discussion",
+            status="active",
+        )
+        db.add(peer_session)
+        db.flush()
         db.add_all([
             ConversationMessage(
                 id="prior-caregiver-turn",
@@ -306,6 +324,12 @@ def test_companion_uses_prior_caregiver_messages_across_sessions_as_context_only
                 session_id=previous_session.id,
                 role="assistant",
                 content="She likely has a mobility decline.",
+            ),
+            ConversationMessage(
+                id="peer-private-caregiver-turn",
+                session_id=peer_session.id,
+                role="user",
+                content="PRIVATE_PEER_CAREGIVER_CONTEXT: another caregiver's private account.",
             ),
         ])
         db.commit()
@@ -342,6 +366,7 @@ def test_companion_uses_prior_caregiver_messages_across_sessions_as_context_only
     assert "Prior caregiver message from another Companion session" in serialized
     assert "conversation context only; not care evidence or an LCR record" in serialized
     assert "She likely has a mobility decline." not in serialized
+    assert "PRIVATE_PEER_CAREGIVER_CONTEXT" not in serialized
     assert body["lcr_context_coverage"]["prior_caregiver_messages_included"] == 1
     assert "prior-caregiver-turn" not in body.get("source_lcr_context_ids", [])
     assert "prior-companion-session" not in body.get("source_lcr_context_ids", [])
