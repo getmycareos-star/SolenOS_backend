@@ -11,6 +11,7 @@ import app.main as main_module
 from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceObservation, CareAssertion
 from app.models.change import Situation
 from app.models.uncertainty import OpenQuestion, Contradiction, InformationGap
@@ -983,6 +984,34 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
 
         unauthorized = client.post("/api/lcr/orientation", json={"raw_input": "Hi"})
         assert unauthorized.status_code == 401
+
+
+@pytest.mark.session_security
+def test_lcr_orientation_rejects_revoked_caregiver_access(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Revoked Orientation Person")
+        db = TestingSessionLocal()
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=created["person"]["id"],
+            caregiver_id=created["caregiver"]["id"],
+        ).one()
+        grant.status = "revoked"
+        grant.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/lcr/orientation",
+            headers=headers,
+            json={"raw_input": "Hi"},
+        )
+        assert response.status_code == 403, response.text
+    finally:
+        teardown_db()
     finally:
         teardown_db()
 
