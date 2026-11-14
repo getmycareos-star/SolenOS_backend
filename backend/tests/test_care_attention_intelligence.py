@@ -37,7 +37,8 @@ def test_unexplained_high_priority_is_not_automatically_urgent():
         }], uncertainties=[], missing_information=[], as_of=NOW,
     )
     assert result["needs_attention_now"] == []
-    assert result["important_to_address"][0]["category"] == "needs_clarification"
+    assert result["important_to_address"] == []
+    assert result["needs_clarification"][0]["category"] == "needs_clarification"
 
 
 def test_documented_future_deferral_does_not_claim_safety():
