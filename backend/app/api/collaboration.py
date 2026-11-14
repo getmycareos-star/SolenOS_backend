@@ -4673,6 +4673,86 @@ def _is_document_question(user_text: str) -> bool:
     return bool(_DOCUMENT_INTENT_PATTERN.search(user_text or ""))
 
 
+_DOCUMENT_ANSWER_STOPWORDS = {
+    "the", "and", "that", "this", "what", "does", "did", "say", "says", "about",
+    "uploaded", "document", "file", "attachment", "letter", "pdf", "discharge",
+    "summary", "medical", "record", "records", "care", "caregiver", "from", "with",
+    "into", "over", "under", "for", "was", "were", "are", "is", "it", "her", "his",
+    "their", "they", "she", "he", "you", "your", "me", "my", "we", "our",
+}
+
+
+def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
+    """Answer document questions from exact, integrity-verified extracted sentences."""
+    if not _is_document_question(user_text):
+        return None
+
+    query_tokens = [
+        token for token in re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold())
+        if token not in _DOCUMENT_ANSWER_STOPWORDS
+    ]
+    query_terms = {
+        token for token in _expanded_search_terms(query_tokens)
+        if token not in _DOCUMENT_ANSWER_STOPWORDS
+    }
+    candidates: list[tuple[int, int, str]] = []
+    has_extracted_text = False
+    order = 0
+    for line in context_lines:
+        brace = (line or "").find("{")
+        if brace < 0:
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("source_type") != "document_extractions":
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+        source_text = record.get("source_text")
+        if not isinstance(source_text, str) or not source_text.strip():
+            continue
+        has_extracted_text = True
+        sentences = [
+            re.sub(r"\s+", " ", sentence).strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", source_text)
+            if sentence.strip()
+        ]
+        for sentence in sentences:
+            terms = set(re.findall(r"[a-z0-9']{3,}", sentence.casefold()))
+            overlap = query_terms & terms
+            score = len(overlap)
+            if score:
+                candidates.append((score, order, sentence[:420]))
+            order += 1
+
+    if not candidates:
+        if not has_extracted_text:
+            return "I couldn't verify the uploaded document's extracted text, so I can't answer from it."
+        return "I found the uploaded document, but its extracted text does not clearly answer that question. I can't confirm it from this document."
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    selected: list[str] = []
+    seen: set[str] = set()
+    for _, _, sentence in candidates:
+        normalized = sentence.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        selected.append(sentence)
+        if len(selected) >= (3 if not query_terms else 2):
+            break
+    return "The uploaded document says: “" + " ” ".join(selected) + "”"
+
+
+def _document_reply_contains_source_detail(reply: str, extractive_answer: str) -> bool:
+    """Require a document answer to reuse at least two meaningful source terms."""
+    source_terms = set(re.findall(r"[a-z0-9']{3,}", (extractive_answer or "").casefold()))
+    reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
+    meaningful = source_terms - _DOCUMENT_ANSWER_STOPWORDS
+    return len(meaningful & reply_terms) >= 2
+
+
 def _caregiver_interaction_guidance(user_text: str) -> str:
     """Return deterministic response constraints for caregiver capacity and repair signals.
 
@@ -5895,6 +5975,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
         validation_source = user_text + "\n" + "\n".join(bounded_context)
+        document_extractive_answer = _document_extractive_answer(
+            user_text,
+            included_model_context_lines,
+        ) if document_question_for_fallback else None
+        document_extractive_fallback_used = bool(
+            document_extractive_answer
+            and not _document_reply_contains_source_detail(reply, document_extractive_answer)
+        )
+        if document_extractive_fallback_used:
+            # The model received the verified extraction but failed to use it.
+            # Prefer a short, exact source excerpt over a generic or unsupported
+            # answer. The extraction remains source material, not clinical proof.
+            reply = document_extractive_answer
         missing_measurement_reply = _missing_requested_measurement_response(
             user_text,
             [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
@@ -6115,6 +6208,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         elif medication_change_reply:
             verdict = "blocked"
             safety_note = "A medication dose-change request was withheld for qualified professional confirmation."
+            ai_generated = False
+        elif document_extractive_fallback_used:
+            verdict = "passed"
+            safety_note = "The response uses a verbatim excerpt from the integrity-verified document extraction; extracted text is not independent clinical verification."
             ai_generated = False
         else:
             verdict = "passed"
