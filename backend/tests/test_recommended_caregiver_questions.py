@@ -17,7 +17,7 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.uncertainty import OpenQuestion, InformationGap
+from app.models.uncertainty import OpenQuestion, InformationGap, Contradiction
 
 pytestmark = pytest.mark.session_security
 
@@ -348,6 +348,63 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
     finally:
         teardown()
 
+
+def test_duplicate_candidate_merge_preserves_the_selected_source_evidence_and_answerer():
+    setup()
+    try:
+        from app.services.care_continuity import next_best_questions, has_valid_caregiver_necessity
+        db = SessionLocal()
+        person = Person(id="dedupe-source-person", name="Dedupe Source Person")
+        caregiver = Caregiver(
+            id="dedupe-source-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        first_evidence = Evidence(
+            id="dedupe-source-evidence-a", person_id=person.id,
+            type="document", source_text="First medication instruction",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        second_evidence = Evidence(
+            id="dedupe-source-evidence-b", person_id=person.id,
+            type="document", source_text="Conflicting medication instruction",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        db.add_all([person, caregiver, first_evidence, second_evidence])
+        db.flush()
+        db.add_all([
+            Contradiction(
+                id="dedupe-medication-conflict-a", person_id=person.id,
+                subject_type="medication", subject_id="medication-1",
+                field="current_instruction", description="First current instruction report.",
+                evidence_ids=[first_evidence.id], source_assertion_ids=[],
+                resolution_status="unresolved",
+            ),
+            Contradiction(
+                id="dedupe-medication-conflict-b", person_id=person.id,
+                subject_type="medication", subject_id="medication-1",
+                field="current_instruction", description="Conflicting current instruction report.",
+                evidence_ids=[second_evidence.id], source_assertion_ids=[],
+                resolution_status="unresolved",
+            ),
+        ])
+        db.flush()
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        question = db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.subject_type == "medication",
+            OpenQuestion.subject_id == "medication-1",
+        ).one()
+        assert question.intended_answerer_role == "professional"
+        assert set(question.evidence_ids) == {first_evidence.id, second_evidence.id}
+        assert len(question.context) == 1
+        assessment_evidence_ids = question.context[0]["necessity_assessment"]["evidence_ids"]
+        assert assessment_evidence_ids == [first_evidence.id]
+        assert has_valid_caregiver_necessity(question, db, person.id) is True
+        assert sum(1 for item in candidates if item.get("persisted_question_id") == question.id) == 1
+        db.rollback()
+        db.close()
+    finally:
+        teardown()
 
 def test_one_hundred_case_question_gate_benchmark():
     """100 deterministic synthetic cases: 38 eligible, 62 must be withheld."""
