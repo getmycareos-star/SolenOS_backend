@@ -840,7 +840,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         db.commit()
         return True
     except Exception as exc:
-        logger.warning(
+        logger.exception(
             "Qwen background job failed workflow=%s error_type=%s",
             getattr(job, "workflow", None),
             type(exc).__name__,
