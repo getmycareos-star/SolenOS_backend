@@ -407,6 +407,13 @@ def review_question_answer(
     execution = None
     try:
         engine.db.add(event)
+        if review.decision in {"rejected", "needs_clarification"}:
+            # A rejected or incomplete answer is not a resolved care question.
+            # Preserve the answer event and review event, but return the question
+            # to the active queue so a corrected answer can be collected.
+            question.status = "open"
+            question.closed_at = None
+            question.closed_reason = None
         if review.decision == "accepted":
             try:
                 execution = execute_care_continuity_reconciliation(
