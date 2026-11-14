@@ -1012,8 +1012,6 @@ def test_lcr_orientation_rejects_revoked_caregiver_access(monkeypatch):
         assert response.status_code == 403, response.text
     finally:
         teardown_db()
-    finally:
-        teardown_db()
 
 
 @pytest.mark.session_security
