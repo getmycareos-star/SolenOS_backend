@@ -5410,6 +5410,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "record": item,
                         }, ensure_ascii=False, default=str)
                     )
+            # Carry relevant caregiver turns across Companion sessions so a
+            # returning caregiver does not have to repeat the same story.
+            # These turns are conversational context only: never source
+            # evidence, never LCR records, and never AI-generated assertions.
+            conversation_source = shared_lcr_context.get("sources", {}).get(
+                "companion_conversation", {}
+            )
+            conversation_items = [
+                item for item in conversation_source.get("items", [])
+                if isinstance(item, dict)
+                and str(item.get("role") or "").casefold() == "user"
+                and isinstance(item.get("content"), str)
+                and item["content"].strip()
+            ][-3:]
+            conversation_context_lines = [
+                "Prior caregiver message from another Companion session "
+                "(conversation context only; not care evidence or an LCR record): "
+                + item["content"].strip()[:600]
+                for item in conversation_items
+            ]
             shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
             document_question_for_fallback = bool(re.search(
                 r"\b(?:uploaded document|document|file|attachment|letter|pdf|discharge summary|medical record)\b",
@@ -5469,6 +5489,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     if name != "companion_conversation"
                 },
             }
+            conversation_coverage = lcr_context_coverage.get("sources", {}).get("companion_conversation")
+            if isinstance(conversation_coverage, dict):
+                conversation_coverage["selected_for_answer"] = len(conversation_context_lines)
+                conversation_coverage["selection_truncated"] = (
+                    len(conversation_context_lines) < int(conversation_coverage.get("returned_count") or 0)
+                )
+            lcr_context_coverage["prior_caregiver_messages_included"] = len(conversation_context_lines)
 
         # Select context by the current question and, for referential follow-ups,
         # the recent dialogue. Keep source IDs aligned with records sent to Qwen.
@@ -5662,6 +5689,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         model_context_lines = [
             *caregiver_question_queue_lines,
             *shared_lcr_lines,
+            *conversation_context_lines,
             *freshness_context[:1],
             *aggregate_context_lines,
         ]
