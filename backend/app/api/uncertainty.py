@@ -177,9 +177,14 @@ def recommended_caregiver_questions(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).all()
+    caregiver_answerer_roles = {
+        "caregiver", "reporting_caregiver", "other_caregiver",
+    }
     eligible = [
         row for row in rows
         if row.necessity == "necessary"
+        and str(getattr(row, "intended_answerer_role", "") or "").strip().casefold()
+        in caregiver_answerer_roles
         and has_valid_caregiver_necessity(row, engine.db, person_id)
     ]
     unique, visible, hidden_count = prioritize_caregiver_questions(eligible, ordinary_limit=2)
