@@ -318,7 +318,14 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
             uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
         ))
         db.flush()
-        db.query(OpenQuestion).filter_by(id="mislinked-evidence-question").one().context[0]["necessity_assessment"]["evidence_ids"] = ["unrelated-same-person-evidence"]
+        mislinked = db.query(OpenQuestion).filter_by(id="mislinked-evidence-question").one()
+        mislinked.context = [{
+            **mislinked.context[0],
+            "necessity_assessment": {
+                **mislinked.context[0]["necessity_assessment"],
+                "evidence_ids": ["unrelated-same-person-evidence"],
+            },
+        }]
         db.query(OpenQuestion).filter_by(id="professional-question").one().intended_answerer_role = "professional"
         db.query(OpenQuestion).filter_by(id="unknown-answerer-question").one().intended_answerer_role = "not_known"
         db.query(OpenQuestion).filter_by(id="other-caregiver-question").one().intended_answerer_role = "other_caregiver"
