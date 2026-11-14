@@ -1120,7 +1120,7 @@ def next_best_questions(
                     ),
                     None,
                 )
-                if automatically_closed is not None and _question_has_new_grounding(automatically_closed, clean):
+                if automatically_closed is not None and _question_has_new_grounding(automatically_closed, {**clean, "_source_contexts": item.get("_source_contexts") or []}):
                     existing = automatically_closed
                     existing_before = _open_question_state(existing)
                     # Reopen only after a new persisted source/evidence arrives;
@@ -1143,7 +1143,7 @@ def next_best_questions(
                         ),
                         None,
                     )
-                    if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, clean):
+                    if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, {**clean, "_source_contexts": item.get("_source_contexts") or []}):
                         # A repeated reconciliation must not ask again after a
                         # caregiver answered, declined, or manually closed it.
                         persisted_id = prior_terminal_question.id
