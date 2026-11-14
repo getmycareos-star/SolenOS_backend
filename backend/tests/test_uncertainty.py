@@ -254,6 +254,7 @@ def test_next_question_projection_excludes_internal_gaps_and_unassessed_question
                 subject_id=person.id,
                 status="open",
                 necessity="necessary",
+                intended_answerer_role="reporting_caregiver",
                 necessity_rationale="The handoff decision depends on the active instruction.",
                 priority=Priority.HIGH,
                 evidence_ids=[evidence.id],
