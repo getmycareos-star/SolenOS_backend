@@ -68,11 +68,26 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
             created_by_caregiver_id=caregiver_id,
             time_provenance="caregiver_reported",
         )
+        care_event_detail = "Caregiver reported waking around 3 a.m. and needing help settling again."
+        care_event = CareEvent(
+            person_id=person_id,
+            event_type="daily_care_entry",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(hours=8),
+            title="Sleep update",
+            description=care_event_detail,
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
         with TestingSessionLocal() as db:
             db.add(appointment)
+            db.add(care_event)
             db.commit()
             db.refresh(appointment)
+            db.refresh(care_event)
             appointment_id = appointment.id
+            care_event_id = care_event.id
 
         response = client.post(
             "/api/v1/assistant/assist",
@@ -80,7 +95,7 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
             json={
                 "workflow": "appointment",
                 "appointment_id": appointment_id,
-                "text": "Help organize the available appointment details and unanswered questions.",
+                "text": "Help prepare for this appointment using the saved sleep history and any unanswered questions.",
             },
         )
 
@@ -100,8 +115,12 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
         assert data["persistence"] == "read_only_assistance"
         assert data["authority"] == "solenos_care_record_and_caregiver"
         assert appointment_id in data["source_appointment_ids"]
+        assert care_event_id in data["source_event_ids"], data
         assert isinstance(data["reply"], str) and data["reply"].strip()
         assert "scheduled" in data["reply"].casefold(), f"Qwen did not ground its response in the saved appointment status: {data['reply']!r}"
+        assert any(term in data["reply"].casefold() for term in ("sleep", "waking", "night")), (
+            f"Qwen did not retrieve the saved Daily Care sleep history for appointment preparation: {data['reply']!r}"
+        )
         assert appointment_id not in data["reply"], "Caregiver-facing Qwen output must not expose internal appointment IDs"
         assert not __import__("re").search(
             r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
@@ -115,7 +134,9 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
         ), f"Qwen upgraded a scheduled appointment to confirmed: {data['reply']!r}"
 
         with TestingSessionLocal() as db:
-            assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+            events_after = db.query(CareEvent).filter_by(person_id=person_id).all()
+            assert [row.id for row in events_after] == [care_event_id]
+            assert events_after[0].description == care_event_detail
             assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
             assert db.query(ConversationMessage).join(
