@@ -68,8 +68,10 @@ class LoopCreate(BaseModel):
     @field_validator("deadline_source")
     @classmethod
     def valid_deadline_source(cls, value):
-        if value is not None and value not in {"explicit_user", "recorded_commitment", "system_policy"}:
-            raise ValueError("deadline_source must identify an actual supported source")
+        # API callers may report their own explicit commitment, but cannot
+        # impersonate a server policy deadline to escalate attention priority.
+        if value is not None and value not in {"explicit_user", "recorded_commitment"}:
+            raise ValueError("deadline_source must be an explicit caregiver source")
         return value
 
 
@@ -91,6 +93,13 @@ class LoopUpdate(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=4000)
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
     idempotency_key: Optional[str] = Field(default=None, max_length=160)
+
+    @field_validator("deadline_source")
+    @classmethod
+    def valid_deadline_source(cls, value):
+        if value is not None and value not in {"explicit_user", "recorded_commitment"}:
+            raise ValueError("deadline_source must be an explicit caregiver source")
+        return value
 
 
 class EvidenceAction(BaseModel):
