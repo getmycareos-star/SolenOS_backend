@@ -4125,6 +4125,7 @@ def test_finding6_open_information_gaps_do_not_become_caregiver_questions():
         necessary = db.query(OpenQuestion).filter_by(person_id=person.id, necessity="necessary").one()
         assert necessary.necessity_rationale == "The current care handoff depends on which discharge instruction is active."
         assert necessary.context[0]["source_id"] == necessary_gap.id
+        assert necessary.intended_answerer_role == "reporting_caregiver"
 
         # The caregiver-facing question projection fails closed: only questions
         # with an explicit necessity assessment and rationale are returned.
