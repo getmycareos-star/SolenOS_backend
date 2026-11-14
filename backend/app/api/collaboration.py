@@ -4534,9 +4534,11 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
     overload = re.search(
         r"\b(?:i(?:'m| am) overwhelmed|i(?:'m| am) exhausted|"
         r"i(?:'m| am) so tired|i can't keep up|i cannot keep up|"
+        r"i (?:really )?(?:don't|do not) even know what i'm supposed to do anymore|"
         r"i don't know what to do anymore|everything is too much|"
-        r"i can't manage all this|i cannot manage all this|"
-        r"i can't do this anymore|i cannot do this anymore)\b",
+        r"i can't manage(?: all this)?|i cannot manage(?: all this)?|"
+        r"i can't cope|i cannot cope|i can't do this anymore|i cannot do this anymore|"
+        r"every day there's something new and i can't keep up)\b",
         text,
     )
     distress = re.search(
