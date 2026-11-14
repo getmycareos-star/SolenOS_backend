@@ -813,7 +813,11 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         db.commit()
         return True
     except Exception as exc:
-        logger.warning("Qwen background job failed (%s)", type(exc).__name__)
+        logger.warning(
+            "Qwen background job failed workflow=%s error_type=%s",
+            getattr(job, "workflow", None),
+            type(exc).__name__,
+        )
         if job is not None:
             try:
                 db.rollback()
@@ -864,7 +868,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                                 "reconciliation": "not_completed" if terminal_failure else "pending",
                                 "projection": "not_verified",
                             }
-                    db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count}))
+                    db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count, "error_type": type(exc).__name__}))
                     db.commit()
             except Exception:
                 db.rollback()
