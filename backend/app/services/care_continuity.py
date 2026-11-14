@@ -1131,43 +1131,32 @@ def next_best_questions(
                 ), None)
             existing_before = _open_question_state(existing) if existing is not None else None
             prior_terminal_question = None
+            candidate_with_contexts = {**clean, "_source_contexts": candidate_contexts}
             if existing is None:
-                automatically_closed = next((
+                prior_terminal_question = next((
                     row for row in matching_rows
-                    if row.status == "closed"
-                    and str(row.closed_reason or "").startswith("automatically_")
+                    if row.status in {"answered", "declined", "closed"}
                     and (
                         " ".join(str(row.question or "").casefold().split()) == normalized_candidate_question
                         or _question_matches_source_field(row, candidate_contexts)
                     )
                 ), None)
-                candidate_with_contexts = {**clean, "_source_contexts": candidate_contexts}
-                if automatically_closed is not None and _question_has_new_grounding(automatically_closed, candidate_with_contexts):
-                    existing = automatically_closed
+                if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, candidate_with_contexts):
+                    persisted_id = prior_terminal_question.id
+                    clean["persisted_question_id"] = persisted_id
+                    output.append(clean)
+                    continue
+                if (
+                    prior_terminal_question is not None
+                    and prior_terminal_question.status == "closed"
+                    and str(prior_terminal_question.closed_reason or "").startswith("automatically_")
+                ):
+                    existing = prior_terminal_question
                     existing_before = _open_question_state(existing)
                     # Reopen only after new evidence or a genuinely different care field.
                     existing.status = "open"
                     existing.closed_at = None
                     existing.closed_reason = None
-                elif automatically_closed is not None:
-                    persisted_id = automatically_closed.id
-                    clean["persisted_question_id"] = persisted_id
-                    output.append(clean)
-                    continue
-                else:
-                    prior_terminal_question = next((
-                        row for row in matching_rows
-                        if row.status in {"answered", "declined", "closed"}
-                        and (
-                            " ".join(str(row.question or "").casefold().split()) == normalized_candidate_question
-                            or _question_matches_source_field(row, candidate_contexts)
-                        )
-                    ), None)
-                    if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, candidate_with_contexts):
-                        persisted_id = prior_terminal_question.id
-                        clean["persisted_question_id"] = persisted_id
-                        output.append(clean)
-                        continue
             source_contexts = list(item.get("_source_contexts") or [])
             if prior_terminal_question is not None:
                 for source_context in source_contexts:
