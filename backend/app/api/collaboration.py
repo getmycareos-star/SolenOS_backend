@@ -5215,20 +5215,36 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if _is_casual_greeting(user_text):
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
-            care_journey_request = bool(re.search(
+            trend_request = bool(_TREND_INTENT_RE.search(user_text))
+            care_journey_request = trend_request or bool(re.search(
                 r"\b(?:care journey|(?:full|complete|whole|entire) (?:care )?history|history of (?:her|his|their|the person's|this person's)? ?"
                 r"(?:care|sleep|appetite|mobility|medication|incidents|appointments)|timeline of (?:the )?care|"
                 r"everything that happened|what has been happening throughout|reconstruct (?:the )?care)\b",
                 user_text,
                 re.IGNORECASE,
             ))
+            # Trend evaluation must inspect relevant history before the requested
+            # window as context, while the trend guard below counts only records
+            # inside the caregiver's stated period. Strip only the temporal phrase
+            # from retrieval so an older baseline is not filtered out at query time.
+            trend_retrieval_query = retrieval_query
+            if trend_request:
+                trend_retrieval_query = re.sub(
+                    r"\b(?:over|during|within|in|for|throughout)\s+(?:the\s+)?"
+                    r"(?:last|past|previous)\s+(?:(?:\d+|one|two|three|four|six|a|an)\s+)?"
+                    r"(?:days?|weeks?|months?|years?)\b",
+                    " ",
+                    trend_retrieval_query,
+                    flags=re.IGNORECASE,
+                )
+                trend_retrieval_query = re.sub(r"\s+", " ", trend_retrieval_query).strip()
             shared_lcr_context = _build_unified_lcr_context_or_422(
-                db, person_id, caregiver_id, limit_per_source=50, query=retrieval_query,
+                db, person_id, caregiver_id, limit_per_source=50, query=trend_retrieval_query,
                 include_all_history=care_journey_request,
             )
             if care_journey_request:
                 shared_lcr_context = _collect_full_lcr_context_pages(
-                    db, person_id, caregiver_id, retrieval_query, shared_lcr_context,
+                    db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
                     limit_per_source=50, max_pages=4,
                 )
             shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
