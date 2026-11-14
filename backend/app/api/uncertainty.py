@@ -123,14 +123,20 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
         "person_receiving_care", "reporting_caregiver",
         "other_caregiver", "professional",
     }
-    validated_active = [
+    evidence_validated_active = [
         row for row in active
         if row.necessity == "necessary"
-        and str(getattr(row, "intended_answerer_role", "") or "").strip().casefold()
-        in caregiver_visible_answerer_roles
         and has_valid_caregiver_necessity(row, engine.db, engine.person_id)
     ]
-    unassessed_source = [row for row in source_active if row not in validated_active]
+    validated_active = [
+        row for row in evidence_validated_active
+        if str(getattr(row, "intended_answerer_role", "") or "").strip().casefold()
+        in caregiver_visible_answerer_roles
+    ]
+    awaiting_answerer_assignment = [
+        row for row in evidence_validated_active if row not in validated_active
+    ]
+    unassessed_source = [row for row in source_active if row not in evidence_validated_active]
     auto_suppressed = [
         row for row in rows
         if row.status == "closed"
@@ -145,6 +151,7 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
         "person_id": engine.person_id,
         "active_questions": len(active),
         "caregiver_actionable_questions": len(validated_active),
+        "questions_awaiting_answerer_assignment": len(awaiting_answerer_assignment),
         "non_actionable_active_questions": len(active) - len(validated_active),
         "duplicate_question_groups": duplicate_groups,
         "duplicate_question_excess": duplicate_excess,
@@ -156,6 +163,7 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
         "definitions": {
             "non_actionable_active_questions": "Open questions not marked necessary; these must not appear in the caregiver action list.",
             "manual_review_backlog": "Source-linked open questions without a valid necessary assessment.",
+            "questions_awaiting_answerer_assignment": "Evidence-validated necessary questions whose intended answerer is missing or unknown; these are not shown as caregiver tasks.",
             "duplicate_question_excess": "Additional active records beyond one per normalized question text.",
             "automatic_transitions": "System-suppressed or superseded questions; neither is counted as a caregiver answer.",
         },
