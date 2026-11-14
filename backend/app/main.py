@@ -475,6 +475,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             target_person_id = path.rsplit("/", 1)[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
+        # LCR orientation is a session-derived read/response flow. It does
+        # not accept a client-selected person ID, so bind middleware scope to
+        # the validated bearer session just like the situation hydration route.
+        if path == "/api/lcr/orientation":
+            target_person_id = scoped_person_id
         # Caregiver access-management endpoints derive the care-record scope
         # exclusively from the validated bearer session. They intentionally do
         # not accept a client-supplied person_id in invitation/member payloads.
