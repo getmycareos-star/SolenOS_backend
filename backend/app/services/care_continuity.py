@@ -1123,21 +1123,11 @@ def next_best_questions(
                         clean["persisted_question_id"] = persisted_id
                         output.append(clean)
                         continue
-            source_context = {
-                "source_kind": clean["source_kind"],
-                "source_id": clean["source_id"],
-                "source_ids": clean.get("source_ids") or [clean["source_id"]],
-                "reason": clean["reason"],
-                "necessity_assessment": {
-                    "necessity": clean.get("necessity", "not_assessed"),
-                    "necessity_rationale": clean.get("necessity_rationale"),
-                    "decision_dependency": clean.get("decision_dependency"),
-                    "evidence_ids": list(item.get("_source_evidence_ids") or []),
-                },
-            }
+            source_contexts = list(item.get("_source_contexts") or [])
             if prior_terminal_question is not None:
-                source_context["prior_terminal_question_id"] = prior_terminal_question.id
-                source_context["reassessment_trigger"] = "new_persisted_source_or_evidence_after_prior_answer_or_decline"
+                for source_context in source_contexts:
+                    source_context["prior_terminal_question_id"] = prior_terminal_question.id
+                    source_context["reassessment_trigger"] = "new_persisted_source_or_evidence_after_prior_answer_or_decline"
             if existing is None:
                 question = OpenQuestion(
                     person_id=person_id,
@@ -1150,7 +1140,7 @@ def next_best_questions(
                     necessity_rationale=clean["necessity_rationale"],
                     evidence_ids=clean["evidence_ids"],
                     intended_answerer_role=clean.get("intended_answerer_role"),
-                    context=[source_context],
+                    context=source_contexts,
                 )
                 db.add(question)
                 db.flush()
@@ -1167,21 +1157,22 @@ def next_best_questions(
                     list(existing.evidence_ids or []) + list(clean["evidence_ids"] or [])
                 ))
                 contexts = list(existing.context or [])
-                context_key = (source_context["source_kind"], source_context["source_id"])
-                matching = next(
-                    (entry for entry in contexts
-                     if (entry.get("source_kind"), entry.get("source_id")) == context_key),
-                    None,
-                )
-                if matching is None:
-                    contexts.append(source_context)
-                else:
-                    matching["source_ids"] = list(dict.fromkeys(
-                        list(matching.get("source_ids") or [])
-                        + list(source_context["source_ids"])
-                    ))
-                    matching["reason"] = source_context["reason"]
-                    matching["necessity_assessment"] = source_context["necessity_assessment"]
+                for source_context in source_contexts:
+                    context_key = (source_context["source_kind"], source_context["source_id"])
+                    matching = next(
+                        (entry for entry in contexts
+                         if (entry.get("source_kind"), entry.get("source_id")) == context_key),
+                        None,
+                    )
+                    if matching is None:
+                        contexts.append(source_context)
+                    else:
+                        matching["source_ids"] = list(dict.fromkeys(
+                            list(matching.get("source_ids") or [])
+                            + list(source_context["source_ids"])
+                        ))
+                        matching["reason"] = source_context["reason"]
+                        matching["necessity_assessment"] = source_context["necessity_assessment"]
                 existing.context = contexts
                 existing.priority = Priority(clean["priority"]) if _priority_weight(clean["priority"]) > _priority_weight(existing.priority) else existing.priority
                 existing.necessity = clean["necessity"]
