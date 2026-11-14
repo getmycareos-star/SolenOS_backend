@@ -3026,7 +3026,7 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
             continue
         matched_records[str(record_id)] = (observed_at, record_type, searchable)
         relevant_source_sentences = [
-            sentence for sentence in re.split(r"(?<=[.!?;])\\s+", source_content)
+            sentence for sentence in re.split(r"(?<=[.!?;])\s+", source_content)
             if any(term in sentence for term in topic_terms)
         ]
         if worsening_query and any(worsening_source_signal.search(sentence) for sentence in relevant_source_sentences):
