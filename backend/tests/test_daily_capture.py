@@ -18,7 +18,7 @@ from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight,
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
 from app.models.uncertainty import OpenQuestion
-from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.services.learning import LearningEngine
 
 engine = create_engine(
@@ -41,9 +41,14 @@ def process_daily_capture_job(job_id, monkeypatch, extractor):
     db = TestingSessionLocal()
     try:
         job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        failure_event = db.query(QwenJobEvent).filter_by(
+            job_id=job_id, event_type="job_failed_or_requeued"
+        ).order_by(QwenJobEvent.created_at.desc()).first()
+        failure_metadata = failure_event.metadata_json if failure_event is not None else {}
         assert job.status == "completed", (
             f"Daily Care extraction job did not complete: status={job.status!r}, "
-            f"error_code={job.error_code!r}, result_text={job.result_text!r}"
+            f"error_code={job.error_code!r}, failure_metadata={failure_metadata!r}, "
+            f"result_text={job.result_text!r}"
         )
     finally:
         db.close()
