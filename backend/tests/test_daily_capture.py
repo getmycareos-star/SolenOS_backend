@@ -1979,6 +1979,95 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
     finally:
         teardown_db()
 
+def test_source_grounded_observations_survive_reconciliation_retry_without_duplicates(monkeypatch):
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum ate breakfast this morning."
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [{
+                    "subject": "Mum",
+                    "observation": "ate breakfast this morning",
+                    "source_quote": original_report,
+                    "source_event_id": source_event_id,
+                }],
+                "open_questions": [],
+            }
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "durable-observation-retry-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert receipt["qwen_job_id"]
+
+        from app.services import care_continuity_execution
+        real_reconcile = care_continuity_execution.execute_care_continuity_reconciliation
+        attempts = {"count": 0}
+
+        def fail_first_reconciliation(*args, **kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("transient_reconciliation_failure")
+            return real_reconcile(*args, **kwargs)
+
+        monkeypatch.setattr(
+            care_continuity_execution,
+            "execute_care_continuity_reconciliation",
+            fail_first_reconciliation,
+        )
+        process_daily_capture_job(
+            receipt["qwen_job_id"], monkeypatch, exact_source_candidates,
+            expected_status="queued",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            persisted_after_failure = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+                extraction_run_id=receipt["id"],
+            ).all()
+            assert len(persisted_after_failure) == 1
+            failed_job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            assert failed_job.status == "queued"
+        finally:
+            db.close()
+
+        process_daily_capture_job(
+            receipt["qwen_job_id"], monkeypatch, exact_source_candidates,
+            expected_status="completed",
+        )
+        db = TestingSessionLocal()
+        try:
+            persisted_after_retry = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+                extraction_run_id=receipt["id"],
+            ).all()
+            assert len(persisted_after_retry) == 1
+            completed_job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            assert completed_job.status == "completed"
+            assert json.loads(completed_job.result_text)["observation_count"] == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
 def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatch):
 
     setup_db()
