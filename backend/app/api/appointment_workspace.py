@@ -209,6 +209,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window_days)
 
+    fact_has_more = None
     try:
         fact_columns = {column["name"] for column in inspect(db.get_bind()).get_columns("care_facts")}
         fact_select = [
@@ -222,27 +223,36 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         fact_rows = db.execute(text(
             "SELECT " + ", ".join(fact_select) + " FROM care_facts "
             "WHERE person_id = :person_id "
-            "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 40"
+            "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 41"
         ), {"person_id": person_id}).mappings().all()
+        fact_has_more = len(fact_rows) > 40
+        fact_rows = fact_rows[:40]
     except Exception:
         db.rollback()
         fact_rows = None
 
-    events = db.query(CareEvent).filter(
+    fetched_events = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
         CareEvent.occurred_at >= cutoff,
-    ).order_by(CareEvent.occurred_at.desc()).limit(30).all()
-    appointments = db.query(Appointment).filter(
+    ).order_by(CareEvent.occurred_at.desc()).limit(31).all()
+    events_has_more = len(fetched_events) > 30
+    events = fetched_events[:30]
+    fetched_appointments = db.query(Appointment).filter(
         Appointment.person_id == person_id,
-    ).order_by(Appointment.scheduled_at.desc()).limit(15).all()
+    ).order_by(Appointment.scheduled_at.desc()).limit(16).all()
+    appointments_has_more = len(fetched_appointments) > 15
+    appointments = fetched_appointments[:15]
 
     # Source-attributed observations and outcomes are part of the LCR even
     # when they have not been promoted to caregiver-reviewed assertions.
+    assertions_has_more = None
     try:
-        assertion_rows = db.query(CareAssertion).filter(
+        fetched_assertions = db.query(CareAssertion).filter(
             CareAssertion.person_id == person_id,
             CareAssertion.assertion_status.in_(["reported", "review_required", "accepted", "caregiver_reviewed"]),
-        ).order_by(CareAssertion.recorded_at.desc()).limit(40).all()
+        ).order_by(CareAssertion.recorded_at.desc()).limit(41).all()
+        assertions_has_more = len(fetched_assertions) > 40
+        assertion_rows = fetched_assertions[:40]
         assertion_source_status = "available" if assertion_rows else "empty"
     except Exception:
         db.rollback()
@@ -254,14 +264,17 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     # as readable clinical content.
     documents = []
     document_source_status = "empty"
+    documents_has_more = None
     try:
-        extraction_rows = (
+        fetched_extraction_rows = (
             db.query(CaptureAnalysis)
             .filter(CaptureAnalysis.person_id == person_id)
             .order_by(CaptureAnalysis.created_at.desc())
-            .limit(50)
+            .limit(51)
             .all()
         )
+        documents_has_more = len(fetched_extraction_rows) > 50
+        extraction_rows = fetched_extraction_rows[:50]
         for extraction in extraction_rows:
             metadata = extraction.candidates if isinstance(extraction.candidates, dict) else {}
             if metadata.get("kind") != "document_extraction_v1":
@@ -376,7 +389,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             if has_caregiver_visible_answerer(item)
             and has_valid_caregiver_necessity(item, db, person_id)
         ]
-        _, question_rows, _ = prioritize_caregiver_questions(
+        question_candidates, question_rows, question_additional_count = prioritize_caregiver_questions(
             eligible_questions, ordinary_limit=2
         )
         question_source_status = "available" if question_rows else "empty"
@@ -395,11 +408,14 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "context": item.context or [],
         "asked_at": _iso(item.asked_at),
     } for item in (question_rows or [])]
+    contradictions_has_more = None
     try:
-        contradiction_rows = db.query(Contradiction).filter(
+        fetched_contradictions = db.query(Contradiction).filter(
             Contradiction.person_id == person_id,
             Contradiction.resolution_status.in_(["unresolved", "qualified"]),
-        ).order_by(Contradiction.created_at.desc()).limit(30).all()
+        ).order_by(Contradiction.created_at.desc()).limit(31).all()
+        contradictions_has_more = len(fetched_contradictions) > 30
+        contradiction_rows = fetched_contradictions[:30]
         contradiction_source_status = "available" if contradiction_rows else "empty"
     except Exception:
         db.rollback()
@@ -461,6 +477,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         }
     freshness_assessments = []
     freshness_by_evidence: dict[str, list[dict]] = {}
+    freshness_has_more = False
     freshness_schema_available = (
         inspect(db.get_bind()).has_table("evidence_freshness_assessments")
         and inspect(db.get_bind()).has_table("evidence_freshness_policies")
@@ -474,9 +491,11 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 EvidenceFreshnessAssessment.evidence_id.in_(sorted(referenced_evidence_ids)),
             )
             .order_by(EvidenceFreshnessAssessment.assessed_at.desc())
-            .limit(100)
+            .limit(101)
             .all()
         )
+        freshness_has_more = len(freshness_rows) > 100
+        freshness_rows = freshness_rows[:100]
         seen_policy_evidence_pairs = set()
         for assessment, policy in freshness_rows:
             pair = (str(assessment.evidence_id), str(assessment.policy_id))
@@ -535,6 +554,60 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             " Provenance retrieval reached a safety bound; unreturned lineage is unknown, not absent."
         )
 
+    source_completeness = {
+        "care_facts": {
+            "returned_count": len(facts),
+            "has_more": fact_has_more,
+            "retrieval_complete": fact_rows is not None and fact_has_more is False,
+            "record_limit": 40,
+        },
+        "care_events": {
+            "returned_count": len(event_items),
+            "has_more": events_has_more,
+            "retrieval_complete": not events_has_more,
+            "record_limit": 30,
+            "window_days": window_days,
+        },
+        "appointments": {
+            "returned_count": len(appointment_items),
+            "has_more": appointments_has_more,
+            "retrieval_complete": not appointments_has_more,
+            "record_limit": 15,
+        },
+        "care_assertions": {
+            "returned_count": len(assertion_items),
+            "has_more": assertions_has_more,
+            "retrieval_complete": assertion_rows is not None and assertions_has_more is False,
+            "record_limit": 40,
+        },
+        "documents": {
+            "returned_count": len(documents),
+            "has_more": documents_has_more,
+            "retrieval_complete": document_source_status != "failed" and documents_has_more is False,
+            "record_limit": 50,
+            "interpretation_limit": "The bound applies to recent extraction records before filtering for document extractions.",
+        },
+        "open_questions": {
+            "candidate_count": len(question_candidates) if question_rows is not None else None,
+            "returned_count": len(question_items),
+            "additional_ordinary_count": question_additional_count if question_rows is not None else None,
+            "has_more": bool(question_additional_count) if question_rows is not None else None,
+            "retrieval_complete": question_rows is not None,
+            "display_limited": bool(question_additional_count) if question_rows is not None else False,
+        },
+        "contradictions": {
+            "returned_count": len(contradiction_items),
+            "has_more": contradictions_has_more,
+            "retrieval_complete": contradiction_rows is not None and contradictions_has_more is False,
+            "record_limit": 30,
+        },
+        "evidence_freshness_assessments": {
+            "returned_count": len(freshness_assessments),
+            "has_more": freshness_has_more,
+            "retrieval_complete": freshness_schema_available and not freshness_has_more,
+            "record_limit": 100,
+        },
+    }
     return {
         "person_scope_verified": True,
         "snapshot_at": now.isoformat(),
@@ -548,6 +621,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "open_questions": question_items,
         "contradictions": contradiction_items,
         "documents": documents,
+        "source_completeness": source_completeness,
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
         "freshness_assessment_scope": {
