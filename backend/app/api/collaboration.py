@@ -5566,6 +5566,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             context_chars,
             context_truncated,
         ) = _fit_model_context_lines_across_sources(model_context_lines, 16000)
+        if trend_assessment is not None:
+            trend_retrieval_complete = bool(
+                lcr_context_coverage.get("retrieval_scan_complete") is True
+                and lcr_context_coverage.get("retrieval_projection_complete") is True
+                and not lcr_context_coverage.get("page_limit_reached", False)
+                and not context_truncated
+            )
+            trend_assessment["retrieval_complete"] = trend_retrieval_complete
+            trend_assessment["prompt_context_complete"] = not context_truncated
+            trend_assessment["sufficient"] = bool(
+                trend_assessment.get("sufficient") and trend_retrieval_complete
+            )
         prompt_source_counts: dict[str, int] = {}
         for selected_line in included_model_context_lines:
             brace = (selected_line or "").find("{")
