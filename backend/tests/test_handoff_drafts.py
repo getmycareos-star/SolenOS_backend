@@ -1413,3 +1413,44 @@ def test_handoff_includes_only_valid_necessary_open_questions(client):
     ]
     assert "handoff-necessary-question" in question_refs
     assert "handoff-unassessed-question" not in question_refs
+
+
+def test_handoff_discloses_source_history_truncated_at_per_source_limit(client):
+    test_client, session = client
+    person_id = session["person"]["id"]
+    with engine.begin() as connection:
+        for index in range(41):
+            timestamp = datetime.now(timezone.utc) - timedelta(minutes=index)
+            connection.execute(text("""
+                INSERT INTO care_facts
+                    (id, person_id, subject_type, fact_type, fact_value,
+                     epistemic_status, effective_at, recorded_at, created_at, updated_at,
+                     created_by_caregiver_id)
+                VALUES
+                    (:id, :person_id, 'care_recipient', 'caregiver_observation',
+                     :value, 'reported', :timestamp, :timestamp, :timestamp, :timestamp,
+                     :caregiver_id)
+            """), {
+                "id": f"handoff-limit-fact-{index}",
+                "person_id": person_id,
+                "value": f"Caregiver report number {index}",
+                "timestamp": timestamp,
+                "caregiver_id": session["caregiver"]["id"],
+            })
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    facts = body["source_statuses"]["care_facts"]
+    assert facts["returned_count"] == 40
+    assert facts["has_more"] is True
+    assert facts["retrieval_complete"] is False
+    assert body["retrieval_complete"] is False
+    assert {"source": "care_facts", "status": "partial",
+            "reason": "source_projection_reached_40_record_limit",
+            "returned_count": 40} in body["limitations"]
+    assert body["partial_sources"] == [{"source": "care_facts", "returned_count": 40}]
