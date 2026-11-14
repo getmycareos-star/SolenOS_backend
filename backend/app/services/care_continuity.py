@@ -698,10 +698,25 @@ def _question_has_new_grounding(question: OpenQuestion, candidate: Dict[str, Any
     }
     prior_evidence_ids = {str(value) for value in (question.evidence_ids or []) if value}
     candidate_evidence_ids = {str(value) for value in (candidate.get("evidence_ids") or []) if value}
-    return bool(
-        candidate_source_ids - prior_source_ids
-        or candidate_evidence_ids - prior_evidence_ids
-    )
+    new_evidence_ids = candidate_evidence_ids - prior_evidence_ids
+    if new_evidence_ids:
+        return True
+    prior_source_fields = {
+        str(context.get("source_field")).strip().casefold()
+        for context in (question.context or [])
+        if isinstance(context, dict) and context.get("source_field")
+    }
+    candidate_source_fields = {
+        str(context.get("source_field")).strip().casefold()
+        for context in (candidate.get("_source_contexts") or [])
+        if isinstance(context, dict) and context.get("source_field")
+    }
+    # A new database row for the same care field is not new information. Do
+    # not reopen an answered/declined question unless evidence or the care
+    # field itself has changed.
+    if candidate_source_fields and prior_source_fields and candidate_source_fields.issubset(prior_source_fields):
+        return False
+    return bool(candidate_source_ids - prior_source_ids)
 
 
 def explicit_caregiver_gap_assessment(gap: InformationGap, valid_evidence_ids: set[str]) -> Optional[dict]:
