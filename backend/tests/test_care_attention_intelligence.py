@@ -250,3 +250,46 @@ def test_ambiguous_observation_is_visible_for_clarification_not_pattern_review()
     )
     assert result["important_to_address"] == []
     assert result["needs_clarification"][0]["record_id"] == "ambiguous"
+
+
+
+def test_typed_fact_comparison_excludes_superseded_fact_row():
+    result = build_care_attention_assessment(
+        records=[
+            {"id": "fact-old", "source": "facts", "epistemic_status": "reported",
+             "subject_id": "person-10", "fact_type": "sleep_duration", "attribute": "sleep_duration",
+             "fact_value": "7 hours", "observed_value": "7 hours",
+             "effective_at": NOW - timedelta(days=3), "superseded_by_fact_id": "fact-new",
+             "evidence_ids": ["ev-fact-old"]},
+            {"id": "fact-new", "source": "facts", "epistemic_status": "reported",
+             "subject_id": "person-10", "fact_type": "sleep_duration", "attribute": "sleep_duration",
+             "fact_value": "3 hours", "observed_value": "3 hours",
+             "effective_at": NOW - timedelta(days=1), "evidence_ids": ["ev-fact-new"]},
+        ],
+        baseline_items=[{
+            "id": "fact-baseline", "source": "facts", "epistemic_status": "reported",
+            "baseline_basis": "explicit_persisted_baseline_marker",
+            "subject_id": "person-10", "fact_type": "sleep_duration", "attribute": "sleep_duration",
+            "fact_value": "8 hours", "observed_value": "8 hours",
+            "evidence_ids": ["ev-fact-baseline"],
+        }],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    item = next(item for item in result["important_to_address"]
+                if item["pattern_type"] == "explicit_baseline_deviation")
+    assert [record["record_id"] for record in item["records"]] == ["fact-baseline", "fact-new"]
+
+
+def test_free_text_events_are_not_grouped_as_structured_change_patterns():
+    result = build_care_attention_assessment(
+        records=[
+            {"id": "event-1", "source": "events", "subject_id": "person-11",
+             "event_type": "observation", "title": "A little tired", "occurred_at": NOW - timedelta(days=2),
+             "evidence_ids": ["ev-event-1"]},
+            {"id": "event-2", "source": "events", "subject_id": "person-11",
+             "event_type": "observation", "title": "Very tired", "occurred_at": NOW - timedelta(days=1),
+             "evidence_ids": ["ev-event-2"]},
+        ],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert result["important_to_address"] == []
