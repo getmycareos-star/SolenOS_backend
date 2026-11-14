@@ -2807,7 +2807,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         baseline_columns = {column["name"] for column in inspector.get_columns("baselines")} if baseline_table_available else set()
         if baseline_ids and {"coverage_status", "history_completeness", "is_stable"}.issubset(baseline_columns):
             baseline_by_id = {
-                str(row.id): row for row in db.query(Baseline).filter(Baseline.person_id == person_id, Baseline.id.in_(baseline_ids)).all()
+                str(row.id): row for row in db.query(Baseline).filter(Baseline.person_id == person_id, Baseline.id.in_(baseline_ids), Baseline.is_active.is_(True), Baseline.superseded_by_baseline_id.is_(None)).all()
             }
         event_ids = sorted({str(event_id) for change in relevant_changes for event_id in (change.evidence_ids or []) if event_id})
         event_by_id = {}
@@ -2845,6 +2845,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "current_coverage_status": change.current_coverage_status,
                 "baseline_is_stable": bool(baseline.is_stable) if baseline else False,
                 "baseline_history_completeness": baseline.history_completeness if baseline else None,
+                "expected_source_record_count": len(change.evidence_ids or []),
                 "records": event_refs,
             })
     return {
