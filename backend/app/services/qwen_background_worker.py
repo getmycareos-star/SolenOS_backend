@@ -522,7 +522,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "assessment": assessment_status,
         "review": review_status,
         "reconciliation": "completed",
-        "longitudinal_retrieval": "verified" if projection_status == "verified" else "not_verified",
+        "longitudinal_retrieval": "available" if projection_status == "verified" else "unavailable",
         "projection": projection_status,
         "reconciliation_run_id": reconciliation.get("run_id"),
     }

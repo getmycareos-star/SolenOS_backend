@@ -4914,6 +4914,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # context before that branch so the common response path is always safe.
     conversation_context_lines: list[str] = []
 
+    conversation_context_lines = []
+
     if emergency:
         # A fixed emergency instruction is a safety control, not a conversational
         # response mapping. Do not wait for inference when the message signals danger.
@@ -5660,7 +5662,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "that workflow confirms it. "
             "A newer upload does not automatically supersede an older document. "
             "Caregiver question policy: the caregiver_question_queue is the only approved source for proactively asking "
-            "a care question. Ask no more than one focused question in a reply. If the queue is empty, do not invent a question. "
+            "a care question. ask no more than one focused question in a reply. If the queue is empty, do not invent a question. "
             "Do not turn other historical open questions, information gaps, conflicts, or missing fields into caregiver tasks "
             "unless the caregiver explicitly asks or an immediate safety clarification is essential. Respect intended_answerer_role: "
             "do not ask the caregiver to supply an answer intended for a professional, another caregiver, or the person receiving care. "
