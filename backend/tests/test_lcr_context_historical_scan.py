@@ -161,6 +161,12 @@ def test_query_retrieval_finds_older_answered_question_over_newer_related_histor
             "asked_at": asked,
             "answered_at": asked + timedelta(hours=1),
             "answer": "The caregiver recorded that sleep was usual.",
+            # Keep every executemany row's key set identical. SQLAlchemy derives
+            # the INSERT column list from the first mapping in this batch.
+            "answer_provenance": None,
+            "context": None,
+            "answered_by_caregiver_id": None,
+            "updated_at": asked + timedelta(hours=2),
         })
     older = now - timedelta(days=500)
     rows.append({
