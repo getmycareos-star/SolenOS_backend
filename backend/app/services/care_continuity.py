@@ -1071,7 +1071,7 @@ def next_best_questions(
     for item in candidates[:50]:
         clean = {
             key: value for key, value in item.items()
-            if key not in {"_weight", "_source_evidence_ids", "_source_contexts"}
+            if key not in {"_weight", "_source_contexts"}
         }
         persisted_id = None
         # Candidate generation is internal intelligence, not a caregiver request.
