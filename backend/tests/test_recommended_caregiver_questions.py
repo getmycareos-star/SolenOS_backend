@@ -288,7 +288,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
         )
         assert response.status_code == 200, response.text
         ids = {item["id"] for item in response.json()["questions"]}
-        assert "question-gap-open" in ids
+        assert "question-gap-open" not in ids
         assert "question-gap-reopened" in ids
         assert "question-gap-resolved" not in ids
         assert "question-gap-wrong-subject" not in ids
