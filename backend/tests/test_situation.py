@@ -1080,6 +1080,11 @@ def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity
         assert "Caregiver orientation stage (derived from returned care-domain rows): new." in prompt
         assert "NEW CARE RECORD" in prompt
         assert "rough fragments are acceptable" in prompt
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown_db()
+
+
 @pytest.mark.session_security
 def test_lcr_orientation_rejects_returning_language_for_new_caregiver(monkeypatch):
     setup_db()
@@ -1108,9 +1113,6 @@ def test_lcr_orientation_rejects_returning_language_for_new_caregiver(monkeypatc
         teardown_db()
 
 
-        assert response.json()["written_to_lcr"] is False
-    finally:
-        teardown_db()
 
 
 
