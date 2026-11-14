@@ -20,12 +20,12 @@ import app.main as main_module
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Person
-from app.models.change import Change, Pattern
+from app.models.change import Change, Pattern, Baseline
 from app.models.observation_coverage import ObservationCoverage
 from app.services.baseline import get_longitudinal_event_counts
 from app.services.change_detection import detect_event_changes
 from app.services.pattern_detection import detect_patterns
-from app.core.change_enums import ChangeType, ChangeDirection, PatternType
+from app.core.change_enums import ChangeType, ChangeDirection, PatternType, SignificanceVerdict, BaselineType, BaselineConfidence
 
 NOW = datetime.now(timezone.utc)
 _benchmark_database_url = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL", "sqlite:///:memory:")
@@ -1834,3 +1834,119 @@ def test_cross_domain_pattern_marks_bounded_source_history_as_truncated(monkeypa
         assert patterns[0].pattern_metrics["source_history_truncated"] is True
         assert patterns[0].pattern_metrics["event_count"] == 3
 
+
+
+
+def test_situation_assessment_projects_persisted_delta_change_with_real_event_provenance():
+    from app.api.care_continuity import _build_situation_understanding_assessment
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "attention-delta-integration")
+        event = add_event(db, person, caregiver, "mobility", 1, "Needed help walking to the bathroom")
+        baseline = Baseline(
+            id="baseline-attention-delta",
+            person_id=person.id,
+            subject_type="mobility",
+            subject_id="mobility",
+            baseline_type=BaselineType.PERSONAL_HISTORICAL,
+            window_start=NOW - timedelta(days=120),
+            window_end=NOW - timedelta(days=42),
+            event_count=4,
+            confidence=BaselineConfidence.MODERATE,
+            is_stable=True,
+            coverage_status="covered",
+            history_completeness="complete",
+            evidence_ids=[],
+        )
+        db.add(baseline)
+        db.flush()
+        change = Change(
+            id="change-attention-delta",
+            person_id=person.id,
+            subject_type="mobility",
+            subject_id="mobility",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            previous_state="4 recorded events in the baseline window",
+            current_state="1 recent recorded event",
+            baseline_id=baseline.id,
+            baseline_coverage_status="covered",
+            current_coverage_status="covered",
+            evidence_ids=[event.id],
+            explanation="Recorded mobility-related events increased in the current comparison window.",
+            significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            attention_candidate=True,
+            follow_up_candidate=True,
+            confirmation_status="detected",
+            is_active=True,
+        )
+        db.add(change)
+        db.flush()
+
+        assessment = _build_situation_understanding_assessment(db, person.id)
+        attention = assessment["care_attention"]
+        item = next(
+            item for item in attention["important_to_address"]
+            if item["record_id"] == "change-attention-delta"
+        )
+        assert item["source"] == "persisted_change"
+        assert item["source_record_ids"] == [event.id]
+        assert item["records"][0]["record_id"] == event.id
+        assert item["records"][0]["title"] == event.title
+        assert item["evidence_ids"] == []
+
+
+def test_situation_assessment_downgrades_persisted_delta_change_without_complete_baseline():
+    from app.api.care_continuity import _build_situation_understanding_assessment
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "attention-delta-incomplete")
+        event = add_event(db, person, caregiver, "sleep", 1, "Awake repeatedly overnight")
+        baseline = Baseline(
+            id="baseline-attention-incomplete",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            baseline_type=BaselineType.PERSONAL_HISTORICAL,
+            window_start=NOW - timedelta(days=120),
+            window_end=NOW - timedelta(days=42),
+            event_count=2,
+            confidence=BaselineConfidence.MODERATE,
+            is_stable=False,
+            coverage_status="unknown",
+            history_completeness="unknown",
+            evidence_ids=[],
+        )
+        db.add(baseline)
+        db.flush()
+        db.add(Change(
+            id="change-attention-incomplete",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            baseline_id=baseline.id,
+            baseline_coverage_status="unknown",
+            current_coverage_status="covered",
+            evidence_ids=[event.id],
+            explanation="Recorded night waking increased.",
+            significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            attention_candidate=True,
+            follow_up_candidate=True,
+            confirmation_status="detected",
+            is_active=True,
+        ))
+        db.flush()
+
+        assessment = _build_situation_understanding_assessment(db, person.id)
+        attention = assessment["care_attention"]
+        assert not any(
+            item["record_id"] == "change-attention-incomplete"
+            for item in attention["important_to_address"]
+        )
+        clarification = next(
+            item for item in attention["needs_clarification"]
+            if item["record_id"] == "change-attention-incomplete"
+        )
+        assert clarification["category"] == "needs_clarification"
