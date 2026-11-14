@@ -1240,7 +1240,8 @@ async def generate_lcr_orientation(
     normalized_input = re.sub(r"[.!?,;:]+$", "", raw_input.casefold()).strip()
     is_greeting = bool(re.fullmatch(
         r"(?:hi|hello|hey|hiya|good morning|good afternoon|good evening|good day|howdy|yo|sup|"
-        r"what'?s up|how'?s it going|how are you|how're you|hi solenos|hello solenos|hey solenos)",
+        r"what'?s up|how'?s it going|how are you|how're you)"
+        r"(?: there)?(?: solenos)?",
         normalized_input,
     ))
 
