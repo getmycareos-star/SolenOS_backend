@@ -704,6 +704,26 @@ def _question_has_new_grounding(question: OpenQuestion, candidate: Dict[str, Any
     )
 
 
+def explicit_caregiver_gap_assessment(gap: InformationGap, valid_evidence_ids: set[str]) -> Optional[dict]:
+    """Return only a persisted gap assessment that explicitly requires caregiver input."""
+    for entry in (gap.context or []):
+        if not isinstance(entry, dict) or entry.get("caregiver_attention_required") is not True:
+            continue
+        rationale = entry.get("necessity_rationale")
+        dependency = entry.get("decision_dependency")
+        evidence_ids = {
+            str(value) for value in (gap.evidence_ids or []) if value
+        }
+        if not (
+            isinstance(rationale, str) and rationale.strip()
+            and isinstance(dependency, str) and dependency.strip()
+            and evidence_ids and evidence_ids.issubset(valid_evidence_ids)
+        ):
+            continue
+        return entry
+    return None
+
+
 def next_best_questions(
     db: Session,
     person_id: str,
@@ -957,19 +977,7 @@ def next_best_questions(
         # workflow explicitly records that a current care decision depends on
         # the missing information. Priority alone is never a clinical-urgency
         # or necessity signal.
-        explicit_assessment = next((
-            entry for entry in (item.context or [])
-            if isinstance(entry, dict)
-            and entry.get("caregiver_attention_required") is True
-            and isinstance(entry.get("necessity_rationale"), str)
-            and entry.get("necessity_rationale", "").strip()
-            and isinstance(entry.get("decision_dependency"), str)
-            and entry.get("decision_dependency", "").strip()
-            and bool(item.evidence_ids)
-            and {
-                str(evidence_id) for evidence_id in (item.evidence_ids or []) if evidence_id
-            }.issubset(valid_gap_evidence_ids)
-        ), None)
+        explicit_assessment = explicit_caregiver_gap_assessment(item, valid_gap_evidence_ids)
         necessity = "necessary" if explicit_assessment else "not_assessed"
         necessity_rationale = (
             explicit_assessment["necessity_rationale"].strip()
