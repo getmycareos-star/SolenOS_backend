@@ -6136,7 +6136,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             care_history_extractive_answer
             and not (unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
             and (
-                not _care_history_reply_covers_requested_topics(user_text, reply)
+                not isinstance(reply, str)
+                or not reply.strip()
+                or _companion_message_needs_revision(reply)
+                or not _care_history_reply_covers_requested_topics(user_text, reply)
                 or _contains_unrequested_saba(reply, validation_source)
                 or _contains_unsupported_care_claim(reply, validation_source)
                 or _contains_unsupported_operational_claim(reply, validation_source, source_context)
