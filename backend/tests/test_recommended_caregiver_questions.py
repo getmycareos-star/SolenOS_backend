@@ -366,6 +366,70 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         teardown()
 
 
+def test_answered_question_is_not_repeated_from_a_new_source_row_for_the_same_field():
+    setup()
+    try:
+        from app.services.care_continuity import next_best_questions
+        db = SessionLocal()
+        person = Person(id="no-repeat-person", name="No Repeat Person")
+        caregiver = Caregiver(
+            id="no-repeat-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        evidence = Evidence(
+            id="no-repeat-evidence", person_id=person.id,
+            type="document", source_text="Current medication instruction",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        db.add_all([person, caregiver, evidence])
+        db.flush()
+        rationale = "The current medication instruction was already confirmed by the care team."
+        answered = OpenQuestion(
+            id="no-repeat-answered-question", person_id=person.id,
+            question="What instruction is currently on file for this medication?",
+            subject_type="medication", subject_id="medication-1",
+            status="answered", necessity="necessary",
+            necessity_rationale=rationale, intended_answerer_role="professional",
+            evidence_ids=[evidence.id], answer="The pharmacist confirmed the current instruction.",
+            answer_provenance="Caregiver spoke with the pharmacist.",
+            answered_by_caregiver_id=caregiver.id, answered_at=datetime.now(timezone.utc),
+            context=[{
+                "source_kind": "contradiction",
+                "source_id": "prior-medication-conflict",
+                "source_ids": ["prior-medication-conflict"],
+                "source_field": "current_instruction",
+                "necessity_assessment": {
+                    "necessity": "necessary",
+                    "necessity_rationale": rationale,
+                    "decision_dependency": "The family needed confirmation before relying on the instruction.",
+                    "evidence_ids": [evidence.id],
+                },
+            }],
+        )
+        db.add_all([
+            answered,
+            Contradiction(
+                id="new-medication-conflict-row", person_id=person.id,
+                subject_type="medication", subject_id="medication-1",
+                field="current_instruction",
+                description="The same medication instruction was re-imported as a new conflict row.",
+                evidence_ids=[evidence.id], source_assertion_ids=[],
+                resolution_status="unresolved",
+            ),
+        ])
+        db.flush()
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        questions = db.query(OpenQuestion).filter_by(person_id=person.id).all()
+        assert len(questions) == 1
+        assert questions[0].id == answered.id
+        assert questions[0].status == "answered"
+        assert questions[0].answer == "The pharmacist confirmed the current instruction."
+        assert candidates[0]["persisted_question_id"] == answered.id
+        db.rollback()
+        db.close()
+    finally:
+        teardown()
+
 def test_new_conflict_evidence_can_ground_a_question_linked_to_an_older_claim():
     setup()
     try:
