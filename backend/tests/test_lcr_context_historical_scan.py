@@ -198,6 +198,67 @@ def test_query_retrieval_finds_older_answered_question_over_newer_related_histor
         _load_source_schema.cache_clear()
         engine.dispose()
 
+def test_query_retrieval_finds_latest_relevant_answer_revision_beyond_recent_history():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _open_question_answer_events_schema(engine)
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    rows = []
+    for index in range(300):
+        created = now - timedelta(days=index)
+        rows.append({
+            "id": f"recent-answer-{index:03d}",
+            "person_id": "person-a",
+            "question_id": f"recent-question-{index:03d}",
+            "answer": "Sleep was usual.",
+            "answer_provenance": "Caregiver recorded the usual sleep pattern.",
+            "answer_version": "1",
+            "answered_by_caregiver_id": "caregiver-a",
+            "created_at": created,
+        })
+    older = now - timedelta(days=500)
+    rows.extend([
+        {
+            "id": "older-restless-sleep-answer-v1",
+            "person_id": "person-a",
+            "question_id": "older-restless-sleep-question",
+            "answer": "The caregiver initially recorded that sleep was usual.",
+            "answer_provenance": "Daughter first reported the usual sleep pattern.",
+            "answer_version": "1",
+            "answered_by_caregiver_id": "caregiver-a",
+            "created_at": older + timedelta(hours=1),
+        },
+        {
+            "id": "older-restless-sleep-answer-v2",
+            "person_id": "person-a",
+            "question_id": "older-restless-sleep-question",
+            "answer": "The caregiver recorded repeated waking on two nights.",
+            "answer_provenance": "Daughter corrected the earlier report after reviewing the care-team note about restless sleep.",
+            "answer_version": "2",
+            "answered_by_caregiver_id": "caregiver-a",
+            "created_at": older + timedelta(hours=2),
+        },
+    ])
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(events.insert(), rows)
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db, "person-a", limit_per_source=1, query="restless sleep",
+            )
+        source = context["sources"]["open_question_answer_events"]
+        assert source["candidate_scan_complete"] is True
+        assert source["candidate_count"] == 302
+        assert source["has_more"] is True
+        assert [item["id"] for item in source["items"]] == ["older-restless-sleep-answer-v2"]
+        assert source["items"][0]["answer_version"] == "2"
+        assert source["items"][0]["answered_by_caregiver_id"] == "caregiver-a"
+        assert "corrected the earlier report" in source["items"][0]["answer_provenance"]
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
 def test_unqueried_current_care_projection_remains_explicitly_bounded():
     _load_source_schema.cache_clear()
     engine = create_engine("sqlite:///:memory:")
