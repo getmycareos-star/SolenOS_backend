@@ -658,3 +658,43 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
             distress_reply,
             re.IGNORECASE,
         ), distress_reply
+
+
+def test_live_qwen_handoff_draft_selects_an_exact_daily_care_lcr_source():
+    """Real Qwen may select sources, but every generated handoff section must be verbatim and linked."""
+    detail = "Caregiver reported waking around 3 a.m. and needing help settling again."
+    with TestClient(app) as client:
+        session = _create_session(client, "Live Qwen handoff source evaluator")
+        event_id = _record_daily_care(client, session, detail)
+        response = client.post(
+            "/api/v1/handoff-drafts/prepare",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+            json={
+                "purpose": "family_transition",
+                "audience": "family",
+                "window_days": 30,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["generation_status"] == "generated", payload
+    assert payload["validation_status"] == "exact_quote_reference_validation_passed", payload
+    generation = payload["generation"]
+    assert generation["provider"] == "ollama"
+    assert generation["sections"]
+    target_ref = f"care_events:{event_id}"
+    selected = [item for item in generation["sections"] if item.get("source_ref") == target_ref]
+    assert selected, {
+        "expected_daily_care_source": target_ref,
+        "selected_source_refs": [item.get("source_ref") for item in generation["sections"]],
+        "source_statuses": payload.get("source_statuses"),
+    }
+    provenance = payload["claim_provenance"]
+    assert provenance["coverage"] == "all_sections_linked", provenance
+    assert provenance["unmatched_statement_count"] == 0, provenance
+    assert any(
+        claim.get("support_status") == "matched_saved_wording"
+        and any(reference.get("source_ref") == target_ref for reference in claim.get("source_references", []))
+        for claim in provenance["claims"]
+    ), provenance
