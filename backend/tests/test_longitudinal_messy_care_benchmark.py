@@ -462,7 +462,7 @@ def test_handoff_draft_api_is_persisted_read_only_and_source_grounded():
     refs = payload["source_references"]
     assert any(item["source_table"] == "care_events" and item["source_id"] == event.id for item in refs)
     assert all(item["source_id"] != "" for item in refs)
-    assert "Unavailable sources were not read" in payload["warning"]
+    assert "Unavailable or partially retrieved sources were not fully read" in payload["warning"]
     assert payload["source_statuses"]["community"]["status"] == "not_authorized"
     with TestingSessionLocal() as db:
         from app.models.privacy_delivery import AuditLogEvent
