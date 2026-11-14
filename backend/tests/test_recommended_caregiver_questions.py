@@ -93,7 +93,7 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
     context = [{
         "source_kind": source_kind,
         "source_id": evidence_id,
-        **({"source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}]} if source_kind == "document_extraction" else {}),
+        **({"source_record_refs": [{"record_type": "evidence", "record_id": evidence_id}]} if source_kind in {"document_extraction", "caregiver_report", "daily_capture_extraction"} else {}),
         "necessity_assessment": {
             "necessity": "necessary" if necessary else "not_assessed",
             "necessity_rationale": "A recorded care decision depends on this answer." if necessary else None,
