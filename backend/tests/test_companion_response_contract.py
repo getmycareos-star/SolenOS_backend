@@ -1,5 +1,6 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -515,6 +516,32 @@ def test_trend_evidence_requires_two_distinct_dated_topic_observations():
         "There is not enough information to establish whether sleep is worsening.",
         {"sufficient": False},
     ) is False
+
+
+def test_trend_evidence_reads_canonical_shared_lcr_event_records():
+    now = datetime.now(timezone.utc)
+    source_line = "Shared LCR context (source-attributed; bounded subset): " + json.dumps({
+        "source_type": "events",
+        "source_id": "sleep-event-one",
+        "record": {
+            "id": "sleep-event-one",
+            "title": "Sleep history",
+            "description": "Caregiver reported restless sleep.",
+            "occurred_at": (now - timedelta(days=10)).isoformat(),
+        },
+    })
+    assessment = collaboration._trend_evidence_assessment(
+        "Has sleep been getting worse over the last month?",
+        [source_line],
+    )
+    assert assessment["record_count"] == 1
+    assert assessment["distinct_days"] == 1
+    assert assessment["sufficient"] is False
+    assert assessment["source_records"] == [{
+        "record_type": "care_event",
+        "record_id": "sleep-event-one",
+        "date": (now - timedelta(days=10)).date().isoformat(),
+    }]
 
 
 def test_referential_follow_up_uses_prior_caregiver_questions_not_assistant_wording():
