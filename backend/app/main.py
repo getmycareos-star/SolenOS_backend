@@ -1237,7 +1237,7 @@ async def generate_lcr_orientation(
         else "unknown" if missing_core_sources
         else "new"
     )
-    normalized_input = re.sub(r"[.!?,;:]+$", "", raw_input.casefold()).strip()
+    normalized_input = " ".join(re.sub(r"[^a-z0-9' ]+", " ", raw_input.casefold()).split())
     is_greeting = bool(re.fullmatch(
         r"(?:hi|hello|hey|hiya|good morning|good afternoon|good evening|good day|howdy|yo|sup|"
         r"what'?s up|how'?s it going|how are you|how're you)"
@@ -1344,6 +1344,22 @@ async def generate_lcr_orientation(
     except HTTPException:
         raise
     except Exception as exc:
+        if is_greeting:
+            if caregiver_stage == "new":
+                fallback_reply = "Welcome to SolenOS. We help keep your loved one's care story together; start with whatever is happening today."
+            elif caregiver_stage == "returning":
+                fallback_reply = "Welcome back to SolenOS. Your care record is here, and we can continue with the update that matters today."
+            else:
+                fallback_reply = "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+            return {
+                "reply": fallback_reply,
+                "ai_generated": False,
+                "provider_status": "unavailable_fallback",
+                "care_record_unchanged": True,
+                "companion_history_unchanged": True,
+                "written_to_lcr": False,
+                "model": None,
+            }
         raise HTTPException(
             status_code=503,
             detail="LCR response generation is temporarily unavailable. Your message was not saved.",
