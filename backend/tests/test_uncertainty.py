@@ -3190,6 +3190,14 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["resulting_claim_id"] is None
         assert rejected.json()["claim_assessment_id"] is None
+        db = TestingSessionLocal()
+        try:
+            rejected_question = db.query(OpenQuestion).filter_by(id=second_id).one()
+            assert rejected_question.status == "open"
+            assert rejected_question.answer == "Transport details are not available."
+            assert rejected_question.answered_at is not None
+        finally:
+            db.close()
         conflict = client.post(f"/api/v1/uncertainty/questions/{second_id}/reviews", json={
             "decision": "needs_clarification",
             "rationale": "A different decision for the same answer version must conflict.",
