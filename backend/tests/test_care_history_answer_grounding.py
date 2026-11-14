@@ -88,6 +88,25 @@ def test_history_topic_coverage_does_not_accept_generic_care_advice():
 
 
 
+
+def test_broad_history_answer_requires_saved_event_details():
+    question = "What has the caregiver recorded?"
+    context = [
+        _event_line("sleep-event", "Mum slept poorly last night."),
+    ]
+
+    assert not _care_history_reply_covers_requested_topics(
+        question,
+        "I can help you think through her care routine.",
+        context,
+    )
+    assert _care_history_reply_covers_requested_topics(
+        question,
+        "Mum slept poorly last night.",
+        context,
+    )
+
+
 def test_history_fallback_excludes_pending_and_unattributed_events():
     context = [
         _event_line(
