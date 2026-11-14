@@ -407,6 +407,16 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
                 evidence_ids=[evidence_id],
                 questions=questions,
             )
+    logger.info(
+        "Daily Care extraction projected workflow=%s job_id=%s capture_mode=%s "
+        "candidate_count=%s observation_count=%s source_text_length=%s",
+        job.workflow,
+        job.id,
+        capture_mode,
+        candidate_count,
+        observation_count,
+        len(source_text),
+    )
     extraction_status = "not_applicable" if quick_check_in_capture else "available"
     assessment_status = "not_applicable" if quick_check_in_capture else (
         "available" if candidate_count else "not_applicable"
