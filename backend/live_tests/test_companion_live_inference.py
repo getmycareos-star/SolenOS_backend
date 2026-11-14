@@ -654,7 +654,7 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         assert len(distress_reply.split()) <= 70, distress_reply
         assert distress_reply.count("?") <= 1, distress_reply
         assert not re.search(
-            r"\\b(?:checklist|step 1|step 2|first,|second,|third,)\\b",
+            r"\b(?:checklist|step 1|step 2|first,|second,|third,)\b",
             distress_reply,
             re.IGNORECASE,
         ), distress_reply
