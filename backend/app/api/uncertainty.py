@@ -119,9 +119,15 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
         )
     ]
     from app.services.care_continuity import has_valid_caregiver_necessity
+    caregiver_visible_answerer_roles = {
+        "person_receiving_care", "reporting_caregiver",
+        "other_caregiver", "professional",
+    }
     validated_active = [
         row for row in active
         if row.necessity == "necessary"
+        and str(getattr(row, "intended_answerer_role", "") or "").strip().casefold()
+        in caregiver_visible_answerer_roles
         and has_valid_caregiver_necessity(row, engine.db, engine.person_id)
     ]
     unassessed_source = [row for row in source_active if row not in validated_active]
