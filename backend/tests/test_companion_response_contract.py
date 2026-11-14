@@ -1607,3 +1607,13 @@ def test_companion_uses_absence_wording_only_after_complete_retrieval():
     }, False)
     assert "not present in the retrieved care record" in complete
     assert "additional saved history may need checking" not in complete
+
+
+def test_overload_guidance_recognizes_natural_longer_distress_phrasing():
+    for message in (
+        "I don't even know what I'm supposed to do anymore.",
+        "I can't cope.",
+        "I can't manage.",
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert "LOW-CAPACITY RESPONSE" in guidance, message
