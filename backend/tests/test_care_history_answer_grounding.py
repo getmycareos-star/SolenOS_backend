@@ -46,6 +46,7 @@ def test_history_fallback_covers_each_requested_topic_from_saved_event_reports()
     assert _care_history_reply_covers_requested_topics(
         "What has the caregiver recorded about sleep, lunch and dinner?",
         answer,
+        context,
     )
 
 
@@ -67,10 +68,12 @@ def test_history_topic_coverage_does_not_accept_generic_care_advice():
     assert not _care_history_reply_covers_requested_topics(
         question,
         "It may help to discuss her daily routine with the care team.",
+        context,
     )
     assert _care_history_reply_covers_requested_topics(
         question,
-        "Sleep was poor, lunch intake was low, and dinner went better.",
+        "Sleep was unsettled, Mum barely touched lunch, and she ate a little more at dinner.",
+        context,
     )
 
 
