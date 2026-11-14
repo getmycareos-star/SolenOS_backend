@@ -13,7 +13,7 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.care_continuity import EvidenceObservation, CareAssertion
 from app.models.change import Situation
-from app.models.uncertainty import OpenQuestion, Contradiction
+from app.models.uncertainty import OpenQuestion, Contradiction, InformationGap
 from app.core.change_enums import SituationType, SituationState
 from app.core.uncertainty_enums import Priority
 from app.schemas.situation import SituationInput
@@ -524,6 +524,16 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     resolution_status="unresolved",
                     evidence_ids=[first_evidence_id],
                 ),
+                InformationGap(
+                    id="unassessed-mobility-information-gap",
+                    person_id=person_id,
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    field="usual_walking_distance",
+                    description="The usual walking distance is not recorded.",
+                    evidence_ids=[first_evidence_id],
+                    context=[],
+                ),
             ])
             db.commit()
 
@@ -663,6 +673,10 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             threads["persisted-appetite-thread"]["linked_evidence_ids"]
         )
         assert "Has the unsteadiness also happened indoors?" in body["return_continuity"]["important_unresolved"]
+        assert not any(
+            item.startswith("Information needed: usual_walking_distance")
+            for item in body["return_continuity"]["important_unresolved"]
+        )
         assert any(
             item.startswith("Conflicting reports:")
             for item in body["return_continuity"]["important_unresolved"]
