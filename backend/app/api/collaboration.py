@@ -4910,6 +4910,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     document_question_for_fallback = _is_document_question(user_text)
     trend_assessment: dict | None = None
     selected_ids_by_type: dict[str, list[str]] = {}
+    # Emergency responses bypass the retrieval branch; initialize shared prompt
+    # context before that branch so the common response path is always safe.
+    conversation_context_lines: list[str] = []
 
     if emergency:
         # A fixed emergency instruction is a safety control, not a conversational
