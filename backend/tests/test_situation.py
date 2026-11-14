@@ -691,7 +691,8 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         assert not any(
             item.startswith("Information needed: usual_walking_distance")
             for item in body["return_continuity"]["important_unresolved"]
-        )        assert any(
+        )
+        assert any(
             item.startswith("Information needed: current_transfer_support")
             for item in body["return_continuity"]["important_unresolved"]
         )
