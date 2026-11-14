@@ -11,7 +11,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 
 engine = create_engine(
@@ -2051,4 +2051,97 @@ def test_appointment_workspace_freshness_watermark_is_person_scoped(client):
     freshness = response.json()["source_freshness"]
     assert freshness["status"] == "current"
     assert freshness["reason"] is None
+
+
+def test_appointment_workspace_reports_stale_after_later_care_state_revision(client):
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={
+            "status": "preparation",
+            "payload": {"visit_purpose": "Review recent sleep changes"},
+            "change_reason": "Initial preparation",
+        },
+    )
+    assert created.status_code == 201, created.text
+    record = created.json()
+    assert record["source_freshness"]["status"] == "current"
+    assert record["source_freshness"]["basis"] == "care_state_revision_watermark"
+
+    db = TestSessionLocal()
+    try:
+        db.add(CareStateRevision(
+            id="later-care-state-revision",
+            person_id=session["person"]["id"],
+            target_type="care_assertion",
+            target_id="changed-care-assertion",
+            revision_number=1,
+            change_kind="created",
+            after_state='{"asserted_value":"New caregiver-reported change"}',
+            evidence_ids=[],
+            changed_by_caregiver_id=session["caregiver"]["id"],
+            changed_at=datetime.utcnow() + timedelta(seconds=5),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    read = test_client.get(
+        f"/api/v1/appointment-workspaces/{record['id']}",
+        headers=headers,
+    )
+    assert read.status_code == 200, read.text
+    freshness = read.json()["source_freshness"]
+    assert freshness["status"] == "stale"
+    assert freshness["reason"] == "care_record_changed_after_workspace_save"
+    assert freshness["latest_care_change_at"] is not None
+
+    # A stale preparation remains retrievable as historical context; it is not
+    # silently rewritten or deleted when later care information is recorded.
+    assert read.json()["payload"]["visit_purpose"] == "Review recent sleep changes"
+
+
+def test_appointment_workspace_freshness_watermark_is_person_scoped(client):
+    test_client, owner, other = client
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=owner_headers,
+        json={"payload": {"visit_purpose": "Owner's appointment preparation"}},
+    )
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    db = TestSessionLocal()
+    try:
+        db.add(CareStateRevision(
+            id="other-person-care-state-revision",
+            person_id=other["person"]["id"],
+            target_type="care_assertion",
+            target_id="other-private-change",
+            revision_number=1,
+            change_kind="created",
+            after_state='{"asserted_value":"Private other-person care change"}',
+            evidence_ids=[],
+            changed_by_caregiver_id=other["caregiver"]["id"],
+            changed_at=datetime.utcnow() + timedelta(seconds=5),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=owner_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["source_freshness"]["status"] == "current"
+    assert "Private other-person care change" not in response.text
+    assert test_client.get(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=other_headers,
+    ).status_code == 404
 
