@@ -5937,7 +5937,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "Keep the answer grounded only in the authorized records. Do not ask the caregiver "
                     "to repeat information already provided. For an overwhelmed caregiver, use no more "
                     "than three short sentences, no list, and at most one question. For a vague concern, "
-                    "ask at most one focused open question. Do not claim a record was changed or an action "
+                    "ask no more than one focused question, phrased openly when appropriate. Do not claim a record was changed or an action "
                     "was completed unless the backend confirmed it. Return only the revised caregiver-facing answer."
                     if caregiver_guidance else
                     "Revise your previous response for the current greeting. "
