@@ -154,6 +154,15 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         ],
         "order": ["asked_at"],
     },
+    "open_question_answer_events": {
+        "table": "open_question_answer_events",
+        "required": False,
+        "fields": [
+            "id", "question_id", "answer", "answer_provenance", "evidence_ids",
+            "answer_version", "answered_by_caregiver_id", "created_at",
+        ],
+        "order": ["created_at"],
+    },
     "open_loop_records": {
         "table": "open_loop_records",
         "required": False,
@@ -257,6 +266,7 @@ SEARCH_FIELDS = {
     "missing_information": ["topic", "description", "priority", "status"],
     "information_gaps": ["subject_type", "field", "description", "epistemic_state", "gap_reason", "priority", "lifecycle_status"],
     "open_questions": ["question", "subject_type", "answer", "answer_provenance", "closed_reason", "intended_answerer_label", "necessity_rationale", "status"],
+    "open_question_answer_events": ["answer", "answer_provenance"],
     "conflicts": ["conflict_type", "description", "resolution", "status"],
     "provenance": ["source_type", "author_label", "method", "reason"],
     "caregiver_observations": ["observation_category", "description", "source_type"],
