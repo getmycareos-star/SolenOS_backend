@@ -408,3 +408,21 @@ def test_persisted_change_accepts_linked_care_event_ids_as_source_records():
     assert important[0]["source_record_ids"] == ["care-event-1"]
     assert important[0]["evidence_ids"] == []
     assert clarification == []
+
+
+
+def test_bounded_persisted_change_history_cannot_produce_complete_priority():
+    result = build_care_attention_assessment(
+        records=[], open_loops=[], uncertainties=[], missing_information=[],
+        persisted_changes=[{
+            "id": "bounded-change", "significance_verdict": "meaningful_candidate",
+            "attention_candidate": True, "baseline_coverage_status": "covered",
+            "current_coverage_status": "covered", "baseline_is_stable": True,
+            "baseline_history_completeness": "complete",
+            "records": [{"source": "events", "record_id": "event-1", "evidence_ids": []}],
+        }],
+        source_coverage={"persisted_change_history_bounded": True},
+        as_of=NOW,
+    )
+    assert result["important_to_address"] == []
+    assert result["needs_clarification"][0]["record_id"] == "bounded-change"

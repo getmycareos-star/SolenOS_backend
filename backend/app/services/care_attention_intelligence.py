@@ -329,6 +329,21 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
     immediate, important, deferred, loop_clarifications = _open_loop_decisions(open_loops, now)
     important.extend(_pattern_reviews(records, baseline_items or [], now))
     persisted_important, persisted_clarification = _persisted_change_decisions(persisted_changes or [])
+    coverage = source_coverage or {}
+    if coverage.get("persisted_change_history_bounded"):
+        # A capped query cannot establish that the returned candidates represent
+        # the full active history. Preserve the rows as clarification, not as
+        # apparently complete priority decisions.
+        for item in persisted_important:
+            persisted_clarification.append({
+                **item,
+                "category": "needs_clarification",
+                "reason": (
+                    "The saved change history exceeds the assessment's retrieval limit. "
+                    "This candidate needs a complete history review before it can be prioritized."
+                ),
+            })
+        persisted_important = []
     important.extend(persisted_important)
     clarification = [*loop_clarifications, *persisted_clarification]
     for item in [*uncertainties, *missing_information]:
