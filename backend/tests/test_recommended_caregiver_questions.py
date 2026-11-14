@@ -350,15 +350,15 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         )
         assert response.status_code == 200, response.text
         ids = set(response.json()["eligible_question_ids"])
-        assert ids == {"professional-question", "other-caregiver-question", "reporting-caregiver-question", "care-recipient-question"}
+        assert ids == {"other-caregiver-question", "reporting-caregiver-question", "care-recipient-question"}
         assert "unknown-answerer-question" not in ids
         assert "mismatched-assessment-question" not in ids
         assert "mislinked-evidence-question" not in ids
         metrics = client_for("answerer-person").get("/api/v1/uncertainty/question-quality")
         assert metrics.status_code == 200, metrics.text
-        assert metrics.json()["caregiver_actionable_questions"] == 4
+        assert metrics.json()["caregiver_actionable_questions"] == 3
         assert metrics.json()["questions_awaiting_answerer_assignment"] == 1
-        assert metrics.json()["non_actionable_active_questions"] == 3
+        assert metrics.json()["non_actionable_active_questions"] == 4
         listed = client_for("answerer-person").get("/api/v1/uncertainty/questions/answerer-person")
         assert listed.status_code == 200, listed.text
         assert {item["id"] for item in listed.json()} == ids
