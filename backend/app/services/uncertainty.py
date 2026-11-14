@@ -226,11 +226,18 @@ def persist_source_clarification_questions(
         OpenQuestionModel.person_id == person_id,
         OpenQuestionModel.status.in_(["open", "unresolved"]),
     ).order_by(OpenQuestionModel.asked_at.desc()).limit(250).all()
-    existing_by_text = {}
-    # Rows are newest first; keep the newest matching question as the row to
-    # refresh, rather than allowing an older duplicate to overwrite it.
+    existing_by_scope = {}
+    # A repeated question is reusable only within the same care subject.
+    # Matching text across medication, mobility, appointments, or other
+    # subjects must never redirect a source to an unrelated care thread.
     for row in existing_rows:
-        existing_by_text.setdefault(_clarification_question_key(row.question or ""), row)
+        key = (
+            _clarification_question_key(row.question or ""),
+            str(row.subject_type or ""),
+            str(row.subject_id or ""),
+        )
+        # Rows are newest first; keep the newest same-subject match.
+        existing_by_scope.setdefault(key, row)
     # Source extraction writes must use the same append-only question
     # lifecycle as other care workflows. Import locally to avoid a module
     # import cycle; this service is called by Daily Capture and Documents.
@@ -241,7 +248,7 @@ def persist_source_clarification_questions(
     )
 
     persisted: List[OpenQuestionModel] = []
-    seen: set[tuple[str, ...]] = set()
+    seen: set[tuple[tuple[str, ...], str, str]] = set()
     # Source extraction writes their own immutable revision rows. Suppress the
     # ORM listener while these explicit revisions are recorded, or each insert
     # and update would be audited twice.
@@ -251,7 +258,7 @@ def persist_source_clarification_questions(
             continue
         question_text = " ".join(value.strip().split())[:300]
         normalized = _clarification_question_key(question_text)
-        if len(question_text) < 5 or not normalized or normalized in seen:
+        if len(question_text) < 5 or not normalized:
             continue
         # Operational extraction warnings belong in the document review panel,
         # not in the caregiver's list of questions.
@@ -264,7 +271,6 @@ def persist_source_clarification_questions(
             )
         ):
             continue
-        seen.add(normalized)
         # Do not retain a candidate as an open question when an accepted,
         # source-backed current-state LCR assertion already covers its field.
         if _question_is_answered_by_current_lcr(db, person_id, question_text):
@@ -338,7 +344,11 @@ def persist_source_clarification_questions(
                     "assessment_method": "deterministic_match_to_open_lcr_gap",
                 },
             })
-        existing = existing_by_text.get(normalized)
+        scoped_key = (normalized, str(subject_type or ""), str(subject_id or ""))
+        if scoped_key in seen:
+            continue
+        seen.add(scoped_key)
+        existing = existing_by_scope.get(scoped_key)
         if existing is None:
             existing = OpenQuestionModel(
                 person_id=person_id,
@@ -364,7 +374,7 @@ def persist_source_clarification_questions(
                 )
             finally:
                 manual_revision_objects.discard(id(existing))
-            existing_by_text[normalized] = existing
+            existing_by_scope[scoped_key] = existing
         else:
             before_state = _open_question_state(existing)
             manual_revision_objects.add(id(existing))
