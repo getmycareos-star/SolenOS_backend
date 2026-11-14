@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Column, DateTime, MetaData, String, Table, create_engine
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine
 from sqlalchemy.orm import Session
 
 from app.services.lcr_context import (
@@ -134,7 +134,7 @@ def _open_question_answer_events_schema(engine):
         Column("answer", String),
         Column("answer_provenance", String),
         Column("evidence_ids", String),
-        Column("answer_version", String),
+        Column("answer_version", Integer),
         Column("answered_by_caregiver_id", String),
         Column("created_at", DateTime),
     )
@@ -212,7 +212,7 @@ def test_query_retrieval_finds_latest_relevant_answer_revision_beyond_recent_his
             "question_id": f"recent-question-{index:03d}",
             "answer": "Sleep was usual.",
             "answer_provenance": "Caregiver recorded the usual sleep pattern.",
-            "answer_version": "1",
+            "answer_version": 1,
             "answered_by_caregiver_id": "caregiver-a",
             "created_at": created,
         })
@@ -234,7 +234,7 @@ def test_query_retrieval_finds_latest_relevant_answer_revision_beyond_recent_his
             "question_id": "older-restless-sleep-question",
             "answer": "The caregiver recorded repeated waking on two nights.",
             "answer_provenance": "Daughter corrected the earlier report after reviewing the care-team note about restless sleep.",
-            "answer_version": "2",
+            "answer_version": 2,
             "answered_by_caregiver_id": "caregiver-a",
             "created_at": older + timedelta(hours=2),
         },
@@ -252,7 +252,7 @@ def test_query_retrieval_finds_latest_relevant_answer_revision_beyond_recent_his
         assert source["candidate_count"] == 302
         assert source["has_more"] is True
         assert [item["id"] for item in source["items"]] == ["older-restless-sleep-answer-v2"]
-        assert source["items"][0]["answer_version"] == "2"
+        assert source["items"][0]["answer_version"] == 2
         assert source["items"][0]["answered_by_caregiver_id"] == "caregiver-a"
         assert "corrected the earlier report" in source["items"][0]["answer_provenance"]
     finally:
