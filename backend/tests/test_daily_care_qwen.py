@@ -14,6 +14,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion
+from app.models.collaboration import ConversationMessage, ConversationSession
 
 pytestmark = pytest.mark.session_security
 
@@ -274,6 +275,76 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     assert "Caregiver reports poor sleep before breakfast." in serialized_messages
     assert approved.json()["proposal"]["source_ids"][0] not in serialized_messages
 
+
+
+
+def test_companion_uses_prior_caregiver_messages_across_sessions_as_context_only(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Cross-session continuity recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    db = TestSessionLocal()
+    try:
+        previous_session = ConversationSession(
+            id="prior-companion-session",
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            title="Earlier care discussion",
+            status="active",
+        )
+        db.add(previous_session)
+        db.flush()
+        db.add_all([
+            ConversationMessage(
+                id="prior-caregiver-turn",
+                session_id=previous_session.id,
+                role="user",
+                content="The physical therapist said walking was harder after lunch.",
+            ),
+            ConversationMessage(
+                id="prior-assistant-turn",
+                session_id=previous_session.id,
+                role="assistant",
+                content="She likely has a mobility decline.",
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    captured = {}
+
+    def fake_companion(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "I found your earlier note about walking after lunch."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_companion)
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *args, **kwargs: fake_companion("", "", args[0] if args else [], kwargs.get("options")),
+    )
+
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "text": "What about walking after lunch?",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    serialized = json.dumps(captured["messages"], ensure_ascii=False)
+
+    assert "The physical therapist said walking was harder after lunch." in serialized
+    assert "Prior caregiver message from another Companion session" in serialized
+    assert "conversation context only; not care evidence or an LCR record" in serialized
+    assert "She likely has a mobility decline." not in serialized
+    assert body["lcr_context_coverage"]["prior_caregiver_messages_included"] == 1
+    assert "prior-caregiver-turn" not in body.get("source_lcr_context_ids", [])
+    assert "prior-companion-session" not in body.get("source_lcr_context_ids", [])
 
 def test_daily_care_proposal_cannot_be_reviewed_by_another_caregiver_session(monkeypatch):
     client = TestClient(app)
