@@ -16,6 +16,7 @@ from app.core.uncertainty_enums import Priority, GapLifecycleStatus, EpistemicSt
 import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.uncertainty import OpenQuestion, InformationGap, Contradiction
@@ -346,6 +347,70 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         listed = client_for("answerer-person").get("/api/v1/uncertainty/questions/answerer-person")
         assert listed.status_code == 200, listed.text
         assert {item["id"] for item in listed.json()} == ids
+    finally:
+        teardown()
+
+
+def test_new_conflict_evidence_can_ground_a_question_linked_to_an_older_claim():
+    setup()
+    try:
+        from app.services.care_continuity import has_valid_caregiver_necessity
+        db = SessionLocal()
+        person = Person(id="new-conflict-person", name="New Conflict Person")
+        caregiver = Caregiver(
+            id="new-conflict-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        old_evidence = Evidence(
+            id="new-conflict-old-evidence", person_id=person.id,
+            type="document", source_text="Earlier medication instruction",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        new_evidence = Evidence(
+            id="new-conflict-new-evidence", person_id=person.id,
+            type="document", source_text="New conflicting medication instruction",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        claim = CareAssertion(
+            id="new-conflict-claim", person_id=person.id,
+            subject_type="medication", subject_id="medication-1",
+            field="current_instruction", asserted_value="Earlier instruction",
+            source_label="Caregiver", evidence_ids=[old_evidence.id],
+        )
+        conflict = Contradiction(
+            id="new-conflict-record", person_id=person.id,
+            subject_type="medication", subject_id="medication-1",
+            field="current_instruction", description="A newer report conflicts with the earlier instruction.",
+            evidence_ids=[new_evidence.id], source_assertion_ids=[claim.id],
+            resolution_status="unresolved",
+        )
+        db.add_all([person, caregiver, old_evidence, new_evidence, claim, conflict])
+        db.flush()
+        rationale = "The current medication instruction remains unconfirmed."
+        question = OpenQuestion(
+            id="new-conflict-question", person_id=person.id,
+            question="Can the prescribing clinician confirm the current medication instruction?",
+            subject_type="medication", subject_id="medication-1",
+            claim_id=claim.id, status="open", necessity="necessary",
+            necessity_rationale=rationale, intended_answerer_role="professional",
+            evidence_ids=[new_evidence.id],
+            context=[{
+                "source_kind": "contradiction",
+                "source_id": conflict.id,
+                "source_ids": [conflict.id],
+                "necessity_assessment": {
+                    "necessity_rationale": rationale,
+                    "decision_dependency": "The care plan cannot rely on the current instruction until it is confirmed.",
+                    "evidence_ids": [new_evidence.id],
+                },
+            }],
+        )
+        db.add(question)
+        db.flush()
+        assert set(claim.evidence_ids).isdisjoint(question.evidence_ids)
+        assert has_valid_caregiver_necessity(question, db, person.id) is True
+        db.rollback()
+        db.close()
     finally:
         teardown()
 
