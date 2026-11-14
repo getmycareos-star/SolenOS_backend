@@ -108,6 +108,5 @@ def test_broad_document_question_returns_only_extracted_sentences():
     )
 
     assert answer == (
-        "The uploaded document says: “Mary ate half of her breakfast today. ” "
-        "Mary woke twice overnight.”"
+        "The uploaded document says: “Mary ate half of her breakfast today. Mary woke twice overnight.”"
     )
