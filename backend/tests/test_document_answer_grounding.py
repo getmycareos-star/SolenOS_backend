@@ -91,3 +91,23 @@ def test_document_question_fails_closed_when_no_verified_extraction_was_supplied
     assert answer == (
         "I couldn't verify the uploaded document's extracted text, so I can't answer from it."
     )
+
+
+
+def test_broad_document_question_returns_only_extracted_sentences():
+    context = [
+        _document_line(
+            "Mary ate half of her breakfast today. "
+            "Mary woke twice overnight."
+        )
+    ]
+
+    answer = _document_extractive_answer(
+        "What does the uploaded document say?",
+        context,
+    )
+
+    assert answer == (
+        "The uploaded document says: “Mary ate half of her breakfast today. ” "
+        "Mary woke twice overnight.”"
+    )
