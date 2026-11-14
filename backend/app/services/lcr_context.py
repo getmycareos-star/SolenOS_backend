@@ -147,7 +147,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "fields": [
             "id", "question", "subject_type", "subject_id", "claim_id",
             "intended_answerer_role", "intended_answerer_label", "necessity",
-            "necessity_rationale", "status", "priority", "evidence_ids",
+            "necessity_rationale", "status", "priority", "evidence_ids", "context",
             "asked_at", "answered_at", "answer", "answer_provenance",
             "answered_by_caregiver_id", "closed_at", "closed_reason",
             "created_by_caregiver_id", "updated_at",
