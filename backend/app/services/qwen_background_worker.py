@@ -426,11 +426,38 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "review": review_status,
         },
     )
+    projection_query_parts = [str(event.title or "")]
+    if isinstance(original_capture, dict):
+        preferred_capture_fields = ("notes", "summary", "description", "observations", "observation", "details", "care_notes")
+        for field in preferred_capture_fields:
+            value = original_capture.get(field)
+            if isinstance(value, str) and value.strip():
+                projection_query_parts.append(value.strip())
+            elif isinstance(value, (dict, list)):
+                projection_query_parts.append(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str))
+        for field, value in original_capture.items():
+            if field in preferred_capture_fields or field in {
+                "capture_kind", "capture_idempotency_key", "capture_request_fingerprint",
+                "request_fingerprint", "idempotency_key",
+            }:
+                continue
+            if isinstance(value, str) and value.strip():
+                projection_query_parts.append(value.strip())
+            elif isinstance(value, (dict, list)):
+                projection_query_parts.append(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str))
+            elif isinstance(value, (int, float, bool)):
+                projection_query_parts.append(str(value))
+    else:
+        projection_query_parts.append(source_text)
+    # Search with caregiver-entered content, not the JSON metadata envelope.
+    # The first terms drive the bounded lexical query; metadata keys such as
+    # capture_kind/idempotency_key must not crowd out the actual care report.
+    projection_query = " ".join(part for part in projection_query_parts if part)[:1000]
     lcr_context = build_lcr_context(
         db,
         job.person_id,
         caregiver_id=job.caregiver_id,
-        query=(f"{event.title or ''} {event.description or ''}")[:1000],
+        query=projection_query,
         limit_per_source=50,
     )
     # build_lcr_context returns named source collections under "sources";
