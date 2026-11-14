@@ -4524,6 +4524,111 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         teardown_db()
 
 
+def test_source_workflow_does_not_repeat_answered_gap_question_without_new_gap_evidence():
+    setup_db()
+    try:
+        from app.services.uncertainty import persist_source_clarification_questions
+        from app.models.uncertainty import GapLifecycleStatus, Priority, InformationGap
+
+        db = TestingSessionLocal()
+        person = Person(id="source-no-repeat-person", name="Source No Repeat Person")
+        caregiver = Caregiver(
+            id="source-no-repeat-caregiver", name="Caregiver",
+            email="source-no-repeat@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="source-no-repeat-evidence", person_id=person.id,
+            type="note", source_text="The current sleep schedule is recorded.",
+            uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+        )
+        first_event = CareEvent(
+            id="source-no-repeat-event-one", person_id=person.id,
+            event_type="daily_care", status="recorded",
+            occurred_at=datetime.now(timezone.utc), title="First sleep report",
+            description="The current sleep schedule is recorded.",
+            evidence_ids=[evidence.id], created_by_caregiver_id=caregiver.id,
+        )
+        second_event = CareEvent(
+            id="source-no-repeat-event-two", person_id=person.id,
+            event_type="daily_care", status="recorded",
+            occurred_at=datetime.now(timezone.utc), title="Repeated sleep report",
+            description="The current sleep schedule is recorded again.",
+            evidence_ids=[evidence.id], created_by_caregiver_id=caregiver.id,
+        )
+        gap = InformationGap(
+            id="source-no-repeat-gap", person_id=person.id,
+            subject_type="person", subject_id=person.id, field="sleep_schedule",
+            description="The current sleep schedule needs confirmation.",
+            evidence_ids=[evidence.id], lifecycle_status=GapLifecycleStatus.OPEN,
+            priority=Priority.HIGH,
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The next overnight handoff depends on the current sleep schedule.",
+                "decision_dependency": "The receiving caregiver needs the schedule to plan overnight support.",
+            }],
+        )
+        db.add_all([person, caregiver, evidence, first_event, second_event, gap])
+        db.commit()
+
+        first = persist_source_clarification_questions(
+            db, person_id=person.id, caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction", source_record_type="care_event",
+            source_record_id=first_event.id, evidence_ids=[evidence.id],
+            questions=["What is the sleep schedule?"],
+        )
+        db.commit()
+        assert len(first) == 1
+        answered = first[0]
+        answered.status = "answered"
+        answered.answer = "The person usually sleeps from 9 PM to 6 AM."
+        answered.answer_provenance = "Caregiver confirmed the schedule."
+        answered.answered_at = datetime.now(timezone.utc)
+        answered.answered_by_caregiver_id = caregiver.id
+        db.commit()
+
+        repeated = persist_source_clarification_questions(
+            db, person_id=person.id, caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction", source_record_type="care_event",
+            source_record_id=second_event.id, evidence_ids=[evidence.id],
+            questions=["What is the sleep schedule?"],
+        )
+        db.commit()
+        assert repeated == []
+        assert db.query(OpenQuestion).filter_by(person_id=person.id).count() == 1
+        assert answered.status == "answered"
+
+        new_evidence = Evidence(
+            id="source-no-repeat-new-evidence", person_id=person.id,
+            type="note", source_text="A new care-team note changes the sleep schedule.",
+            uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+        )
+        third_event = CareEvent(
+            id="source-no-repeat-event-three", person_id=person.id,
+            event_type="daily_care", status="recorded",
+            occurred_at=datetime.now(timezone.utc), title="Updated sleep report",
+            description="A new care-team note changes the sleep schedule.",
+            evidence_ids=[new_evidence.id], created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([new_evidence, third_event])
+        gap.evidence_ids = [evidence.id, new_evidence.id]
+        db.commit()
+        refreshed = persist_source_clarification_questions(
+            db, person_id=person.id, caregiver_id=caregiver.id,
+            source_kind="daily_capture_extraction", source_record_type="care_event",
+            source_record_id=third_event.id, evidence_ids=[new_evidence.id],
+            questions=["What is the sleep schedule?"],
+        )
+        db.commit()
+        assert len(refreshed) == 1
+        assert refreshed[0].id != answered.id
+        assert refreshed[0].status == "open"
+        assert new_evidence.id in refreshed[0].evidence_ids
+        assert refreshed[0].context[0]["prior_terminal_question_id"] == answered.id
+        db.close()
+    finally:
+        teardown_db()
+
 def test_source_questions_deduplicate_rephrasing_but_preserve_distinct_time_periods():
     setup_db()
     try:
