@@ -421,6 +421,8 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     shared_snapshot = recipient_summary.json()["summary"]
     assert shared_snapshot["source_coverage"]["daily_care"]["status"] == "available"
     assert shared_snapshot["source_coverage"]["documents"]["status"] == "available"
+    assert shared_snapshot["retrieval_complete"] is True
+    assert shared_snapshot["partial_sources"] == []
     assert len(shared_snapshot["source_references"]) == 2
 
     accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
