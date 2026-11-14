@@ -6211,7 +6211,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ai_generated = False
         elif document_extractive_fallback_used:
             verdict = "passed"
-            safety_note = "The response uses a verbatim excerpt from the integrity-verified document extraction; extracted text is not independent clinical verification."
+            safety_note = "Quoted from the uploaded document. The extracted text has not been independently verified."
             ai_generated = False
         else:
             verdict = "passed"
