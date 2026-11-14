@@ -363,6 +363,10 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             OpenQuestion.person_id == person_id,
             OpenQuestion.status.notin_(["answered", "closed", "resolved", "rejected"]),
             OpenQuestion.necessity == "necessary",
+            OpenQuestion.intended_answerer_role.in_([
+                "person_receiving_care", "reporting_caregiver",
+                "other_caregiver", "professional",
+            ]),
         ).order_by(OpenQuestion.asked_at.desc()).all()
         question_source_status = "available" if question_rows else "empty"
     except Exception:
