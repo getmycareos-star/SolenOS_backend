@@ -468,7 +468,7 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
         assert analysis.execution_status["source_preservation"] == "verified"
         assert analysis.execution_status["evidence"] == "verified"
         assert analysis.execution_status["extraction"] == "available"
-        assert analysis.execution_status["assessment"] == "pending"
+        assert analysis.execution_status["assessment"] == "available"
         assert analysis.execution_status["review"] == "required"
         assert analysis.execution_status["reconciliation"] == "completed"
         assert analysis.execution_status["longitudinal_retrieval"] in {"available", "unavailable"}
