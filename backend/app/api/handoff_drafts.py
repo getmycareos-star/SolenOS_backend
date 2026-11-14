@@ -1928,6 +1928,14 @@ def prepare_handoff_draft(
         "reason": "source_projection_reached_40_record_limit",
         "returned_count": item["returned_count"],
     } for item in partial_sources)
+    # "Not authorized" sources (for example, Community) are intentionally
+    # outside the LCR. They remain visible as limitations but do not make a
+    # successfully scanned care-record projection incomplete.
+    retrieval_blocking_gaps = [
+        item for item in gaps
+        if item.get("status") in {"unavailable", "failed", "partial"}
+    ]
+    retrieval_complete = not retrieval_blocking_gaps
     # Persist the complete source snapshot and initial generated revision in the
     # same transaction as its audit event. A request ID makes network retries safe.
     request_id = (request.headers.get("x-request-id") or "").strip() or str(uuid.uuid4())
@@ -1938,7 +1946,7 @@ def prepare_handoff_draft(
         "source_records": records,
         "evidence_lineage": evidence_lineage,
         "limitations": gaps,
-        "retrieval_complete": not gaps,
+        "retrieval_complete": retrieval_complete,
         "partial_sources": partial_sources,
         "window": {"days": payload.window_days, "from": cutoff.isoformat(), "to": now.isoformat()},
     }
