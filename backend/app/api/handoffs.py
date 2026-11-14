@@ -368,6 +368,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         if not isinstance(generated_sections, list) or not generated_sections:
             raise HTTPException(status_code=409, detail="The approved draft has no validated source-grounded sections")
         included_source_refs = set()
+        shared_source_keys = set()
         for item in generated_sections:
             if not isinstance(item, dict):
                 raise HTTPException(status_code=409, detail="The approved draft structure is invalid")
@@ -386,6 +387,17 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             if scope_key not in payload.scope:
                 continue
             included_source_refs.add(source_ref)
+            source_key = source.get("source_key")
+            if not source_key:
+                source_table = str(source.get("source_table") or "")
+                if source_type == "daily_care_observation":
+                    source_key = "daily_care"
+                elif source_type in {"document_extracted_text", "uploaded_document"}:
+                    source_key = "documents"
+                else:
+                    source_key = source_table
+            if source_key:
+                shared_source_keys.add(str(source_key))
             epistemic_status = str(item.get("epistemic_status") or source.get("epistemic_status") or "not_recorded")
             record_status = str(item.get("record_status") or source.get("record_status") or "not_recorded")
             event_at = item.get("event_at") or source.get("event_at") or "not_recorded"
@@ -429,9 +441,13 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         }
         included_source_keys = set().union(*(scope_source_keys.get(scope_key, set()) for scope_key in payload.scope))
         source_coverage = {key: value for key, value in source_statuses.items() if key in included_source_keys}
+        # Completeness is about the source records actually quoted into this
+        # handoff, not every source adapter that exists in the selected scope.
+        # Keep broader scope coverage visible, but do not let an unrelated
+        # unshared source make this recipient's snapshot appear incomplete.
         source_limitations = [
             item for item in source_snapshot.get("limitations", [])
-            if item.get("source") in included_source_keys
+            if item.get("source") in shared_source_keys
         ]
         partial_sources = [
             {
@@ -443,7 +459,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         ]
         unavailable_scope_sources = [
             key for key, value in source_coverage.items()
-            if key in included_source_keys
+            if key in shared_source_keys
             and value.get("status") in {"unavailable", "failed"}
         ]
         retrieval_complete = not partial_sources and not unavailable_scope_sources
