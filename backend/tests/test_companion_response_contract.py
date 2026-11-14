@@ -329,6 +329,36 @@ def test_lcr_context_ranking_balances_conflicts_gaps_questions_and_outcomes():
     }
 
 
+def test_sleep_question_retrieves_slept_report_and_its_parent_event():
+    import json
+
+    evidence = "Shared LCR context: " + json.dumps({
+        "source_type": "evidence",
+        "source_id": "sleep-evidence-1",
+        "record": {
+            "id": "sleep-evidence-1",
+            "source_text": "Mum slept poorly last night and seemed more unsettled this morning.",
+        },
+    })
+    event = "Shared LCR context: " + json.dumps({
+        "source_type": "events",
+        "source_id": "sleep-event-1",
+        "record": {
+            "id": "sleep-event-1",
+            "description": "Daily Care entry",
+            "evidence_ids": ["sleep-evidence-1"],
+        },
+    })
+    selected = collaboration._rank_lcr_context_lines(
+        "What has the caregiver recorded about sleep?",
+        [event, evidence],
+        limit=10,
+    )
+    refs = collaboration._context_record_refs(selected)
+    assert {"record_type": "care_event", "record_id": "sleep-event-1"} in refs
+    assert {"record_type": "care_evidence", "record_id": "sleep-evidence-1"} in refs
+
+
 def test_companion_context_keeps_event_and_assertion_linked_to_matching_evidence():
     import json
 
