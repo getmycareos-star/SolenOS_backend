@@ -52,7 +52,20 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
     immediate, important, deferred, clarification = [], [], [], []
     for loop in open_loops:
         status = _text(loop.get("recorded_status") or loop.get("status"))
-        if status in CLOSED_STATUSES or status not in OPEN_STATUSES:
+        if status in CLOSED_STATUSES:
+            continue
+        item = {
+            **_record_ref(loop), "status": status or "unknown", "priority_basis": [],
+            "owner": loop.get("owner"), "due_at": loop.get("due_at"),
+            "review_at": loop.get("review_at"), "deferred_reason": loop.get("deferred_reason"),
+            "consequence_of_delay": loop.get("consequence_of_delay"),
+        }
+        if status not in OPEN_STATUSES:
+            item["category"] = "needs_clarification"
+            item["priority_basis"].append(
+                "The saved follow-up status is missing or unrecognized; SolenOS cannot safely treat it as open or resolved."
+            )
+            clarification.append(item)
             continue
         due = _datetime(loop.get("due_at") or loop.get("deadline_at"))
         explicit_deadline = _text(loop.get("deadline_source")) in {"explicit_user", "recorded_commitment", "system_policy"}
@@ -61,12 +74,6 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
         reasons = loop.get("priority_reasons") if isinstance(loop.get("priority_reasons"), list) else []
         normalized_reasons = {_text(reason) for reason in reasons}
         critical_delay = _text(loop.get("priority")) in {"high", "critical"} and _text(CRITICAL_DELAY_REASON) in normalized_reasons
-        item = {
-            **_record_ref(loop), "status": status, "priority_basis": [],
-            "owner": loop.get("owner"), "due_at": loop.get("due_at"),
-            "review_at": loop.get("review_at"), "deferred_reason": loop.get("deferred_reason"),
-            "consequence_of_delay": loop.get("consequence_of_delay"),
-        }
         if overdue:
             item["category"] = "needs_attention_now"
             item["priority_basis"].append("An explicitly sourced deadline has passed.")
