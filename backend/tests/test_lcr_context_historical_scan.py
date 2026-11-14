@@ -86,7 +86,7 @@ def test_query_retrieval_scans_beyond_old_250_candidate_ceiling_and_finds_older_
         assert context["history_coverage"] == "query_scanned_ranked_subset"
         # The whole query scan can be complete while the overall LCR schema is
         # partial. Those are deliberately separate claims.
-        assert context["retrieval_scan_complete"] is False
+        assert context["retrieval_scan_complete"] is True
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
