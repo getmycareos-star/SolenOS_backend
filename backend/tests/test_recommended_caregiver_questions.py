@@ -312,7 +312,11 @@ def test_generator_selects_only_explicit_evidence_backed_care_scenarios():
             id="generator-caregiver", name="Caregiver", email=None,
             relationship="Family", person_id=person.id,
         )
-        db.add_all([person, other_person, caregiver])
+        other_caregiver = Caregiver(
+            id="generator-other-caregiver", name="Other Person Caregiver", email=None,
+            relationship="Family", person_id=other_person.id,
+        )
+        db.add_all([person, other_person, caregiver, other_caregiver])
         db.flush()
         for index in range(20):
             evidence = Evidence(
@@ -391,6 +395,7 @@ def test_generator_selects_only_explicit_evidence_backed_care_scenarios():
             other_evidence = Evidence(
                 id=f"generator-cross-person-evidence-{index:02d}", person_id=other_person.id,
                 type="note", source_text="Another person care detail.",
+                uploaded_by_caregiver_id=other_caregiver.id,
                 source_type="caregiver_report",
             )
             db.add_all([
