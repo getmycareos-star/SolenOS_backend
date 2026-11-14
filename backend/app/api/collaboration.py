@@ -2947,18 +2947,18 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
     earliest = now - timedelta(days=period_days) if period_days else None
     matched_records: dict[str, tuple[datetime, str, str]] = {}
     directional_source_signal = False
-    worsening_query = bool(re.search(r"\\b(?:worse|worsen|declin|decreas)\\w*\\b", query))
-    improving_query = bool(re.search(r"\\b(?:better|improv)\\w*\\b", query))
+    worsening_query = bool(re.search(r"\b(?:worse|worsen|declin|decreas)\w*\b", query))
+    improving_query = bool(re.search(r"\b(?:better|improv)\w*\b", query))
     worsening_source_signal = re.compile(
-        r"\\b(?:worse|worsen\\w*|declin\\w*|decreas\\w*|increas\\w*|"
-        r"more often|more frequent\\w*|more than (?:before|usual|last time)|"
-        r"compared with (?:before|last time)|compared to (?:before|last time))\\b",
+        r"\b(?:worse|worsen\w*|declin\w*|decreas\w*|increas\w*|"
+        r"more often|more frequent\w*|more than (?:before|usual|last time)|"
+        r"compared with (?:before|last time)|compared to (?:before|last time))\b",
         re.IGNORECASE,
     )
     improving_source_signal = re.compile(
-        r"\\b(?:better|improv\\w*|less often|less frequent\\w*|"
+        r"\b(?:better|improv\w*|less often|less frequent\w*|"
         r"less than (?:before|usual|last time)|compared with (?:before|last time)|"
-        r"compared to (?:before|last time))\\b",
+        r"compared to (?:before|last time))\b",
         re.IGNORECASE,
     )
     for line in context_lines or []:
