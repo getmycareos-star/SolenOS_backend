@@ -17,6 +17,15 @@ from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority, ResolutionMechanism
 
+CAREGIVER_VISIBLE_ANSWERER_ROLES = frozenset({
+    "person_receiving_care", "reporting_caregiver", "other_caregiver", "professional",
+})
+
+
+def has_caregiver_visible_answerer(question: Any) -> bool:
+    role = str(getattr(question, "intended_answerer_role", "") or "").strip().casefold()
+    return role in CAREGIVER_VISIBLE_ANSWERER_ROLES
+
 
 def _utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
