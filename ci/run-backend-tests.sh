@@ -20,7 +20,8 @@ if report.get("cases_total") != 100:
 if report.get("precision", 0) < 0.95 or report.get("recall", 0) < 0.95:
     raise SystemExit("Question selection benchmark precision or recall fell below 95%.")
 if report.get("critical_preserved", 0) < 10:
-    raise SystemExit("A critical caregiver question was hidden.")
+    raise SystemExit("A critical caregiver question was hidden.")if not report.get("answerer_roles_preserved") or not report.get("unknown_answerer_suppressed"):
+    raise SystemExit("Question answerer routing or unknown-answerer suppression failed.")
 if report.get("ordinary_initial_limit") != 2:
     raise SystemExit("The initial ordinary-question burden exceeded the two-question limit.")
 if not report.get("duplicate_suppressed") or not report.get("cross_person_evidence_rejected"):
