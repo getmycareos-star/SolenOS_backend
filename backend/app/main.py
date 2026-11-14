@@ -300,7 +300,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     # request. Do not read and buffer its body a second time here.
     if path == "/api/v1/share-intake" and method == "POST":
         return await call_next(request)
-    if not path.startswith("/api/v1/") and path != "/api/situation":
+    if not path.startswith("/api/v1/") and path not in {"/api/situation", "/api/lcr/orientation"}:
         return await call_next(request)
     if path.startswith("/api/v1/share-intake/") and method == "GET":
         return await call_next(request)
