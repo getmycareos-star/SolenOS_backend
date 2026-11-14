@@ -547,6 +547,30 @@ def test_trend_evidence_without_source_comparison_cannot_establish_direction():
     assert assessment["sufficient"] is False
 
 
+def test_trend_claim_fails_closed_when_retrieval_or_prompt_coverage_is_partial():
+    complete = {
+        "retrieval_scan_complete": True,
+        "retrieval_projection_complete": True,
+        "page_limit_reached": False,
+    }
+    assessment = {"sufficient": True, "distinct_days": 3}
+    assert collaboration._apply_trend_retrieval_guard(
+        assessment, complete, context_truncated=False
+    )["sufficient"] is True
+
+    for coverage, truncated in [
+        ({**complete, "page_limit_reached": True}, False),
+        ({**complete, "retrieval_scan_complete": False}, False),
+        ({**complete, "retrieval_projection_complete": False}, False),
+        (complete, True),
+    ]:
+        guarded = collaboration._apply_trend_retrieval_guard(
+            assessment, coverage, context_truncated=truncated
+        )
+        assert guarded["sufficient"] is False
+        assert guarded["retrieval_complete"] is False
+
+
 def test_trend_evidence_reads_canonical_shared_lcr_event_records():
     now = datetime.now(timezone.utc)
     source_line = "Shared LCR context (source-attributed; bounded subset): " + json.dumps({
