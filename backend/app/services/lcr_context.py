@@ -254,7 +254,7 @@ SEARCH_FIELDS = {
     "uncertainties": ["question", "uncertainty_type", "status"],
     "uncertainty_assessments": ["subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "known_value"],
     "missing_information": ["topic", "description", "priority", "status"],
-    "open_questions": ["question", "answer", "answer_provenance", "closed_reason", "intended_answerer_label", "necessity_rationale", "status"],
+    "open_questions": ["question", "subject_type", "answer", "answer_provenance", "closed_reason", "intended_answerer_label", "necessity_rationale", "status"],
     "conflicts": ["conflict_type", "description", "resolution", "status"],
     "provenance": ["source_type", "author_label", "method", "reason"],
     "caregiver_observations": ["observation_category", "description", "source_type"],
