@@ -259,6 +259,76 @@ def test_query_retrieval_finds_latest_relevant_answer_revision_beyond_recent_his
         _load_source_schema.cache_clear()
         engine.dispose()
 
+def _open_question_review_events_schema(engine):
+    metadata = MetaData()
+    reviews = Table(
+        "open_question_review_events",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("question_id", String, nullable=False),
+        Column("answer_event_id", String, nullable=False),
+        Column("answer_version", Integer),
+        Column("decision", String),
+        Column("rationale", String),
+        Column("reviewer_caregiver_id", String),
+        Column("claim_assessment_id", String),
+        Column("resulting_claim_id", String),
+        Column("created_at", DateTime),
+    )
+    metadata.create_all(engine)
+    return reviews
+
+def test_query_retrieval_finds_older_answer_review_that_limits_reliance_on_it():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    reviews = _open_question_review_events_schema(engine)
+    now = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    rows = []
+    for index in range(300):
+        created = now - timedelta(days=index)
+        rows.append({
+            "id": f"recent-review-{index:03d}",
+            "person_id": "person-a",
+            "question_id": f"recent-question-{index:03d}",
+            "answer_event_id": f"recent-answer-{index:03d}",
+            "answer_version": 1,
+            "decision": "accepted",
+            "rationale": "The review confirms the usual sleep pattern.",
+            "reviewer_caregiver_id": "caregiver-a",
+            "created_at": created,
+        })
+    older = now - timedelta(days=500)
+    rows.append({
+        "id": "older-restless-sleep-review",
+        "person_id": "person-a",
+        "question_id": "older-restless-sleep-question",
+        "answer_event_id": "older-restless-sleep-answer-v2",
+        "answer_version": 2,
+        "decision": "needs_clarification",
+        "rationale": "The corrected report still does not establish whether restless sleep continued.",
+        "reviewer_caregiver_id": "caregiver-a",
+        "created_at": older,
+    })
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(reviews.insert(), rows)
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db, "person-a", limit_per_source=1, query="restless sleep",
+            )
+        source = context["sources"]["open_question_review_events"]
+        assert source["candidate_scan_complete"] is True
+        assert source["candidate_count"] == 301
+        assert source["has_more"] is True
+        assert [item["id"] for item in source["items"]] == ["older-restless-sleep-review"]
+        assert source["items"][0]["decision"] == "needs_clarification"
+        assert "does not establish whether restless sleep continued" in source["items"][0]["rationale"]
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
 def test_unqueried_current_care_projection_remains_explicitly_bounded():
     _load_source_schema.cache_clear()
     engine = create_engine("sqlite:///:memory:")
