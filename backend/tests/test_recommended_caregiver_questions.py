@@ -511,7 +511,6 @@ def test_duplicate_candidate_merge_preserves_the_selected_source_evidence_and_an
         ).one()
         assert question.intended_answerer_role == "professional"
         assert set(question.evidence_ids) == {first_evidence.id, second_evidence.id}
-        assert len(question.context) == 1
         assert len(question.context) == 2
         contexts_by_source = {entry["source_id"]: entry for entry in question.context}
         assert set(contexts_by_source) == {
