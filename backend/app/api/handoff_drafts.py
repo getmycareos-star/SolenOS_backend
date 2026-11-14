@@ -1214,6 +1214,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
             source_revision_value = event.updated_at or event.recorded_at
             output.append({
                 "source_type": "daily_care_observation",
+                "source_key": "daily_care",
                 "source_table": "care_events",
                 "source_id": str(event.id),
                 "source_fingerprint": daily_fingerprint,
@@ -1333,6 +1334,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                     ))
                     output.append({
                         "source_type": "document_extracted_text",
+                        "source_key": "documents",
                         "source_table": "capture_analyses",
                         "source_id": str(extraction.id),
                         "source_fingerprint": extraction_fingerprint,
@@ -1383,6 +1385,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             ))
             output.append({
                 "source_type": "uploaded_document",
+                "source_key": "documents",
                 "source_table": "evidence_uploads",
                 "source_id": str(document.id),
                 "source_fingerprint": upload_fingerprint,
@@ -1763,6 +1766,7 @@ def prepare_handoff_draft(
                 source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
                 records.append({
                     "source_type": spec["kind"],
+                    "source_key": table_name,
                     "source_table": table_name,
                     "source_id": str(source_id),
                     "source_fingerprint": source_fingerprint,
