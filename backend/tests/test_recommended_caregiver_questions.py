@@ -425,6 +425,23 @@ def test_answered_question_is_not_repeated_from_a_new_source_row_for_the_same_fi
         assert questions[0].status == "answered"
         assert questions[0].answer == "The pharmacist confirmed the current instruction."
         assert candidates[0]["persisted_question_id"] == answered.id
+        new_evidence = Evidence(
+            id="no-repeat-new-evidence", person_id=person.id,
+            type="document", source_text="A newly issued medication instruction",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        db.add(new_evidence)
+        db.flush()
+        conflict = db.query(Contradiction).filter_by(id="new-medication-conflict-row").one()
+        conflict.evidence_ids = [evidence.id, new_evidence.id]
+        db.flush()
+        next_best_questions(db, person.id, persist=True, commit=False)
+        refreshed_questions = db.query(OpenQuestion).filter_by(person_id=person.id).all()
+        assert len(refreshed_questions) == 2
+        reopened = next(row for row in refreshed_questions if row.status == "open")
+        assert reopened.id != answered.id
+        assert reopened.context[0]["prior_terminal_question_id"] == answered.id
+        assert new_evidence.id in reopened.evidence_ids
         db.rollback()
         db.close()
     finally:
