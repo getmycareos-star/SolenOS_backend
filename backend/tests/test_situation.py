@@ -425,6 +425,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     evidence_ids=[first_evidence_id],
                     status="open",
                     necessity="necessary",
+                    intended_answerer_role="reporting_caregiver",
                     necessity_rationale="A current mobility decision depends on clarifying whether the unsteadiness also happens indoors.",
                     priority=Priority.CRITICAL,
                     context=[{
@@ -447,6 +448,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     evidence_ids=[first_evidence_id],
                     status="open",
                     necessity="necessary",
+                    intended_answerer_role="reporting_caregiver",
                     necessity_rationale="The next mobility handoff depends on confirming the support needed when standing.",
                     priority=Priority.HIGH,
                     context=[{
@@ -468,6 +470,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     evidence_ids=[first_evidence_id],
                     status="open",
                     necessity="necessary",
+                    intended_answerer_role="reporting_caregiver",
                     necessity_rationale="The current mobility plan depends on knowing whether a usual route is being avoided.",
                     priority=Priority.MEDIUM,
                     context=[{
@@ -489,6 +492,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     evidence_ids=[first_evidence_id],
                     status="open",
                     necessity="necessary",
+                    intended_answerer_role="reporting_caregiver",
                     necessity_rationale="A future mobility review depends on knowing whether timing affects the walking routine.",
                     priority=Priority.LOW,
                     context=[{
