@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -589,3 +590,71 @@ def test_live_qwen_respects_low_capacity_caregiver_response_contract():
     assert len([part for part in __import__("re").split(r"(?<=[.!?])\s+", reply.strip()) if part]) <= 3, reply
     assert reply.count("?") <= 1, reply
     assert not __import__("re").search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", reply), reply
+
+
+def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_or_reasking():
+    """Real Qwen must lower caregiver effort, retrieve prior facts, and stop when asked."""
+    with TestClient(app) as client:
+        session = _create_session(client, "Caregiver behavior acceptance evaluator")
+        event_id = _record_daily_care(
+            client,
+            session,
+            "Caregiver reported that Mum woke repeatedly overnight on three nights this week and was restless before settling.",
+        )
+        session_id = None
+
+        overwhelmed = _ask(
+            client,
+            session,
+            "I'm exhausted. I don't know what to do anymore. Mum has been waking repeatedly overnight. What should I focus on?",
+        )
+        assert overwhelmed.status_code == 200, overwhelmed.text
+        overwhelmed_data = overwhelmed.json()
+        session_id = overwhelmed_data.get("session_id")
+        assert session_id, overwhelmed_data
+        assert overwhelmed_data.get("ai_generated") is True, overwhelmed_data
+        assert event_id in overwhelmed_data.get("source_event_ids", []), overwhelmed_data
+        assert overwhelmed_data.get("written_to_lcr") is False, overwhelmed_data
+        overwhelmed_reply = overwhelmed_data.get("reply", "")
+        assert len(overwhelmed_reply.split()) <= 100, overwhelmed_reply
+        assert overwhelmed_reply.count("?") <= 1, overwhelmed_reply
+        assert any(
+            term in overwhelmed_reply.casefold()
+            for term in ("waking", "sleep", "overnight", "restless")
+        ), overwhelmed_reply
+
+        pushback = _ask(
+            client,
+            session,
+            "You keep asking me the same questions. I've already told you this. This is getting ridiculous.",
+            session_id,
+        )
+        assert pushback.status_code == 200, pushback.text
+        pushback_data = pushback.json()
+        assert event_id in pushback_data.get("source_event_ids", []), pushback_data
+        assert pushback_data.get("written_to_lcr") is False, pushback_data
+        pushback_reply = pushback_data.get("reply", "")
+        assert len(pushback_reply.split()) <= 100, pushback_reply
+        assert pushback_reply.count("?") == 0, pushback_reply
+        assert any(
+            term in pushback_reply.casefold()
+            for term in ("sorry", "right", "repeat", "record", "already shared", "information")
+        ), pushback_reply
+
+        distress = _ask(
+            client,
+            session,
+            "I'm angry and exhausted. I just want a break.",
+            session_id,
+        )
+        assert distress.status_code == 200, distress.text
+        distress_data = distress.json()
+        assert distress_data.get("written_to_lcr") is False, distress_data
+        distress_reply = distress_data.get("reply", "")
+        assert len(distress_reply.split()) <= 70, distress_reply
+        assert distress_reply.count("?") <= 1, distress_reply
+        assert not re.search(
+            r"\\b(?:checklist|step 1|step 2|first,|second,|third,)\\b",
+            distress_reply,
+            re.IGNORECASE,
+        ), distress_reply
