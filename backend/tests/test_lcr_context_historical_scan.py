@@ -114,9 +114,11 @@ def _open_questions_schema(engine):
         Column("answered_at", DateTime),
         Column("answer", String),
         Column("answer_provenance", String),
+        Column("answered_by_caregiver_id", String),
         Column("closed_at", DateTime),
         Column("closed_reason", String),
         Column("created_by_caregiver_id", String),
+        Column("updated_at", DateTime),
     )
     metadata.create_all(engine)
     return questions
@@ -154,6 +156,8 @@ def test_query_retrieval_finds_older_answered_question_over_newer_related_histor
         "answered_at": older + timedelta(hours=1),
         "answer": "The caregiver recorded repeated waking on two nights.",
         "answer_provenance": "Daughter reported the answer after speaking with the care team.",
+        "answered_by_caregiver_id": "caregiver-a",
+        "updated_at": older + timedelta(hours=2),
     })
 
     try:
@@ -170,6 +174,7 @@ def test_query_retrieval_finds_older_answered_question_over_newer_related_histor
         assert [item["id"] for item in source["items"]] == ["older-restless-sleep-answer"]
         assert source["items"][0]["status"] == "answered"
         assert "repeated waking on two nights" in source["items"][0]["answer"]
+        assert source["items"][0]["answered_by_caregiver_id"] == "caregiver-a"
         assert context["history_coverage"] == "query_scanned_ranked_subset"
     finally:
         _load_source_schema.cache_clear()
