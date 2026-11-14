@@ -3007,6 +3007,7 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
     now = datetime.now(timezone.utc)
     earliest = now - timedelta(days=period_days) if period_days else None
     matched_records: dict[str, tuple[datetime, str, str]] = {}
+    relevant_source_records: dict[str, tuple[datetime, str, str]] = {}
     directional_source_signal = False
     worsening_query = bool(re.search(r"\b(?:worse|worsen|declin|decreas)\w*\b", query))
     improving_query = bool(re.search(r"\b(?:better|improv)\w*\b", query))
@@ -3085,6 +3086,11 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
             observed_at = observed_at.astimezone(timezone.utc)
         if observed_at > now + timedelta(days=1):
             continue
+        # Keep older topic-matched records for provenance even when they fall
+        # outside the requested measurement window. They may explain why the
+        # answer is "no dated observations in this period"; they do not count
+        # toward the requested trend.
+        relevant_source_records[str(record_id)] = (observed_at, record_type, searchable)
         if earliest and observed_at < earliest:
             continue
         matched_records[str(record_id)] = (observed_at, record_type, searchable)
@@ -3116,8 +3122,9 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         "sufficient": len(distinct_days) >= 3 and directional_source_signal,
         "direction": direction,
         "source_records": [
-            {"record_type": record_type, "record_id": record_id, "date": observed_at.date().isoformat()}
-            for record_id, (observed_at, record_type, _) in sorted(matched_records.items())
+            {"record_type": record_type, "record_id": record_id, "date": observed_at.date().isoformat(),
+             "within_requested_period": not earliest or observed_at >= earliest}
+            for record_id, (observed_at, record_type, _) in sorted(relevant_source_records.items())
         ],
     }
 
