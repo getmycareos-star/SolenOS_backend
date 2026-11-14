@@ -476,3 +476,19 @@ def test_unavailable_persisted_change_source_is_not_silently_treated_as_no_chang
     )
     assert item["source"] == "changes"
     assert "cannot confirm whether there are recorded changes" in item["reason"]
+
+
+
+def test_persisted_change_with_one_unresolved_source_record_is_clarification():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-partial-source", "significance_verdict": "meaningful_candidate",
+        "attention_candidate": True, "baseline_coverage_status": "covered",
+        "current_coverage_status": "covered", "baseline_is_stable": True,
+        "baseline_history_completeness": "complete", "expected_source_record_count": 2,
+        "records": [{"source": "events", "record_id": "event-resolved", "evidence_ids": []}],
+    }])
+    assert important == []
+    assert len(clarification) == 1
+    assert clarification[0]["category"] == "needs_clarification"
