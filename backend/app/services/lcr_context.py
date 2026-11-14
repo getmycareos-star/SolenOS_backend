@@ -716,7 +716,17 @@ def build_lcr_context(
             name: source.get("offset", 0) for name, source in sources.items()
             if source.get("offset", 0) > 0
         },
-        "retrieval_scan_complete": bool(terms or temporal_window or include_all_history) and not missing_required and not missing_optional,
+                # A scan is complete when every source whose schema is available was
+        # exhausted. Schema gaps are reported independently below; they must not
+        # erase proof that the available source history was fully scanned.
+        "retrieval_scan_complete": (
+            bool(terms or temporal_window or include_all_history)
+            and all(
+                source.get("candidate_scan_complete") is True
+                for source in sources.values()
+                if source.get("status") in {"available", "empty"}
+            )
+        ),
         "retrieval_projection_complete": (
             bool(terms or temporal_window or include_all_history)
             and not missing_required
