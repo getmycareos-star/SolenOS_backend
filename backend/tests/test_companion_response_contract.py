@@ -329,6 +329,54 @@ def test_lcr_context_ranking_balances_conflicts_gaps_questions_and_outcomes():
     }
 
 
+def test_companion_context_keeps_event_and_assertion_linked_to_matching_evidence():
+    import json
+
+    def line(source_type, source_id, record):
+        return "Shared LCR context: " + json.dumps({
+            "source_type": source_type,
+            "source_id": source_id,
+            "record": record,
+        })
+
+    evidence = line("evidence", "evidence-1", {
+        "id": "evidence-1",
+        "source_text": "Caregiver reported that Mum was unusually confused and refused lunch.",
+    })
+    event = line("events", "event-1", {
+        "id": "event-1",
+        "description": "Daily Care entry",
+        "evidence_ids": ["evidence-1"],
+    })
+    assertion = line("assertions", "assertion-1", {
+        "id": "assertion-1",
+        "fact_value": "Caregiver reported confusion and refused lunch.",
+        "evidence_ids": ["evidence-1"],
+        "assertion_status": "accepted",
+    })
+    unrelated_event = line("events", "event-2", {
+        "id": "event-2",
+        "description": "A separate appointment was attended.",
+        "evidence_ids": ["evidence-2"],
+    })
+
+    selected = collaboration._rank_lcr_context_lines(
+        "What was recorded about confusion and lunch?",
+        [event, assertion, unrelated_event, evidence],
+        limit=10,
+    )
+    selected_payloads = [
+        json.loads(item[item.index("{"):]) for item in selected
+    ]
+    selected_refs = {
+        (item["source_type"], item["source_id"]) for item in selected_payloads
+    }
+    assert ("evidence", "evidence-1") in selected_refs
+    assert ("events", "event-1") in selected_refs
+    assert ("assertions", "assertion-1") in selected_refs
+    assert ("events", "event-2") not in selected_refs
+
+
 def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
     recent_irrelevant = (
         'LCR event evidence: {"event_id":"meal-2","title":"Lunch observation",'
