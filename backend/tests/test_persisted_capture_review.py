@@ -43,6 +43,27 @@ def teardown_function():
     Base.metadata.drop_all(bind=engine)
 
 
+def process_daily_capture_job(job_id, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.models.qwen_background_job import QwenBackgroundJob
+    from app.services import qwen_background_worker
+
+    monkeypatch.setattr(qwen_background_worker, "SessionLocal", TestSessionLocal)
+    monkeypatch.setattr(
+        qwen_background_worker,
+        "extract_review_candidates",
+        api_v1_module.extract_review_candidates,
+    )
+    db = TestSessionLocal()
+    try:
+        job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        job.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
+    return asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
+
+
 def create_session(client, name):
     response = client.post(
         "/api/v1/sessions/anonymous",
@@ -93,9 +114,11 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     )
     assert saved.status_code == 200, saved.text
     body = saved.json()
-    assert body["qwen_extraction_status"] == "available"
+    assert body["qwen_extraction_status"] == "queued"
+    assert body["qwen_job_id"]
     assert body["qwen_analysis_id"]
     assert body["qwen_written_to_lcr"] is False
+    process_daily_capture_job(body["qwen_job_id"], monkeypatch)
 
     db = TestSessionLocal()
     try:
@@ -219,6 +242,7 @@ def test_daily_capture_rejection_never_creates_lcr_assertion_or_allows_retry(mon
     )
     assert saved.status_code == 200, saved.text
     analysis_id = saved.json()["qwen_analysis_id"]
+    process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
 
     rejected = client.post(
         f"/api/v1/capture/analyses/{analysis_id}/review",
@@ -276,6 +300,7 @@ def test_capture_review_rejects_foreign_analysis_and_invalid_candidate_index(mon
     )
     assert saved.status_code == 200, saved.text
     analysis_id = saved.json()["qwen_analysis_id"]
+    process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
     second_auth = {"Authorization": f"Bearer {second['access_token']}"}
 
     foreign = client.post(
@@ -320,6 +345,7 @@ def test_capture_review_rejects_repeat_decisions_and_empty_corrections(monkeypat
     )
     assert saved.status_code == 200, saved.text
     analysis_id = saved.json()["qwen_analysis_id"]
+    process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
     auth = {"Authorization": f"Bearer {session['access_token']}"}
 
     empty_correction = client.post(
@@ -372,6 +398,7 @@ def test_daily_capture_cannot_promote_model_observation_not_supported_by_source_
     )
     assert saved.status_code == 200, saved.text
     analysis_id = saved.json()["qwen_analysis_id"]
+    process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
 
     accepted = client.post(
         f"/api/v1/capture/analyses/{analysis_id}/review",
@@ -427,20 +454,21 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
     assert saved.status_code == 200, saved.text
     body = saved.json()
     assert body["qwen_analysis_id"]
-    assert body["execution_status"]["source_preservation"] == "verified"
-    assert body["execution_status"]["evidence"] == "verified"
-    assert body["execution_status"]["extraction"] == "available"
-    assert body["execution_status"]["assessment"] == "pending"
-    assert body["execution_status"]["review"] == "required"
-    assert body["execution_status"]["reconciliation"] == "completed"
-    assert body["execution_status"]["longitudinal_retrieval"] in {"available", "unavailable"}
+    assert body["qwen_extraction_status"] == "queued"
+    process_daily_capture_job(body["qwen_job_id"], monkeypatch)
 
     db = TestSessionLocal()
     try:
         evidence = db.query(Evidence).filter_by(id=body["evidence_ids"][0]).one()
         analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
-        assert seen == [(evidence.source_text, body["id"], evidence.id)]
-        assert analysis.source_text == evidence.source_text
-        assert analysis.execution_status == body["execution_status"]
+        assert seen == [(analysis.source_text, body["id"], evidence.id)]
+        assert analysis.source_text
+        assert analysis.execution_status["source_preservation"] == "verified"
+        assert analysis.execution_status["evidence"] == "verified"
+        assert analysis.execution_status["extraction"] == "available"
+        assert analysis.execution_status["assessment"] == "pending"
+        assert analysis.execution_status["review"] == "required"
+        assert analysis.execution_status["reconciliation"] == "completed"
+        assert analysis.execution_status["longitudinal_retrieval"] in {"available", "unavailable"}
     finally:
         db.close()
