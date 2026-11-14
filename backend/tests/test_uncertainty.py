@@ -2953,6 +2953,15 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
             source_type="caregiver_report",
         )
         db.add(historical_evidence)
+        recent_evidence = Evidence(
+            id="recent-question-evidence",
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="The specialist follow-up appointment has not yet been confirmed.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        )
+        db.add(recent_evidence)
         db.flush()
         historical_question_context = [{
             "source_kind": "caregiver_report",
@@ -2961,6 +2970,15 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
                 "necessity_rationale": "The mobility assessment outcome is needed for the current care handoff.",
                 "decision_dependency": "The care handoff cannot state the assessment outcome without this answer.",
                 "evidence_ids": [historical_evidence.id],
+            },
+        }]
+        recent_question_context = [{
+            "source_kind": "caregiver_report",
+            "source_id": recent_evidence.id,
+            "necessity_assessment": {
+                "necessity_rationale": "The follow-up appointment status is needed for the current care handoff.",
+                "decision_dependency": "The handoff cannot state that the specialist appointment is confirmed without this answer.",
+                "evidence_ids": [recent_evidence.id],
             },
         }]
         old_asked_at = datetime(2024, 1, 15, 9, 30, tzinfo=timezone.utc)
@@ -2989,8 +3007,8 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
             necessity="necessary",
             intended_answerer_role="reporting_caregiver",
             necessity_rationale="The follow-up appointment status is needed for the current care handoff.",
-            evidence_ids=[historical_evidence.id],
-            context=historical_question_context,
+            evidence_ids=[recent_evidence.id],
+            context=recent_question_context,
             created_by_caregiver_id=caregiver.id,
         )
         db.add_all([old_question, recent_question])
