@@ -64,6 +64,11 @@ def test_history_fallback_refuses_to_summarize_when_a_requested_topic_is_missing
 
 def test_history_topic_coverage_does_not_accept_generic_care_advice():
     question = "What has the caregiver recorded about sleep, lunch and dinner?"
+    context = [
+        _event_line("sleep-event", "Mum slept poorly last night and seemed more unsettled."),
+        _event_line("lunch-event", "Mum barely touched her lunch today."),
+        _event_line("dinner-event", "Mum was calmer and ate more at dinner."),
+    ]
 
     assert not _care_history_reply_covers_requested_topics(
         question,
