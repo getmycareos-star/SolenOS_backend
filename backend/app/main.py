@@ -1296,7 +1296,7 @@ async def generate_lcr_orientation(
         candidate = (candidate or "").strip()
         sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", candidate) if part.strip()])
         word_count = len(candidate.split())
-        max_words = 40 if is_greeting else 65
+        max_words = 40 if is_greeting else 55
         max_sentences = 2 if is_greeting else 3
         if (
             not candidate or len(candidate) > 700 or word_count > max_words
@@ -1304,6 +1304,31 @@ async def generate_lcr_orientation(
             or re.search(r"(?i)\b(?:as an ai|language model|system prompt)\b", candidate)
         ):
             return None
+        if is_greeting:
+            # A greeting is an orientation to the care record, not a generic
+            # chatbot exchange. Reject plausible-sounding but unhelpful replies.
+            if re.search(
+                r"(?i)\b(?:how can i help|how may i help|what can i do for you|"
+                r"what would you like help with|what can i assist you with)\b",
+                candidate,
+            ):
+                return None
+            if not re.search(r"(?i)\bsolenos\b", candidate):
+                return None
+            if not re.search(r"(?i)\b(?:care story|care record|care history)\b", candidate):
+                return None
+            if caregiver_stage == "new" and re.search(
+                r"(?i)\b(?:welcome back|as we discussed|your previous updates|"
+                r"last time we|we talked about)\b",
+                candidate,
+            ):
+                return None
+            if caregiver_stage == "returning" and re.search(
+                r"(?i)\b(?:first time here|new to solenos|new caregiver|"
+                r"starting from scratch)\b",
+                candidate,
+            ):
+                return None
         return candidate
 
     try:
@@ -1333,8 +1358,10 @@ async def generate_lcr_orientation(
                 {
                     "role": "user",
                     "content": (
-                        "Rewrite your previous answer to meet the response limits. "
-                        + ("Use 1 or 2 short sentences and no more than 40 words. " if is_greeting else "Use no more than 3 short sentences and 65 words. ")
+                        "Rewrite your previous answer to meet the caregiver-facing response contract. "
+                        + ("Use 1 or 2 short sentences and no more than 40 words. Mention SolenOS and the care story or care record; do not ask a generic 'How can I help?' question. " if is_greeting else "Use no more than 3 short sentences and 55 words. ")
+                        + ("Do not imply prior history for a new caregiver. " if is_greeting and caregiver_stage == "new" else "")
+                        + ("Do not describe a returning caregiver as new. " if is_greeting and caregiver_stage == "returning" else "")
                         + "Use only the authorized care context. Return only the caregiver-facing answer."
                     ),
                 },
