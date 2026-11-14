@@ -1240,15 +1240,14 @@ async def generate_lcr_orientation(
     # Determine first-vs-returning orientation from actual care-domain rows,
     # never from the existence of an account, session, or empty LCR shell.
     sources = lcr_context.get("sources", {}) if isinstance(lcr_context, dict) else {}
-    care_source_names = (
-        "events", "evidence", "evidence_observations", "facts", "assertions",
-        "decisions", "decision_outcomes", "timeline", "caregiver_observations",
-        "caregiver_contexts", "caregiver_perspectives", "appointments",
-    )
+    # Any persisted care-domain source means this is not a first-use record.
+    # Count the complete source projection, not a hand-maintained subset: a
+    # caregiver may have only documents, open questions, handoffs, corrections,
+    # or reconciliations before the first ordinary care event is recorded.
     held_care_rows = sum(
-        max(0, int((sources.get(name) or {}).get("returned_count", 0) or 0))
-        for name in care_source_names
-        if isinstance(sources.get(name), dict)
+        max(0, int((source or {}).get("returned_count", 0) or 0))
+        for name, source in sources.items()
+        if name != "living_record" and isinstance(source, dict)
     )
     missing_core_sources = set(lcr_context.get("missing_required_sources", [])).intersection(
         {"events", "evidence", "facts", "assertions"}
