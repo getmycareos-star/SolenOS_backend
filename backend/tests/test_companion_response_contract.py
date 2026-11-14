@@ -691,6 +691,7 @@ def test_trend_evidence_reads_canonical_shared_lcr_event_records():
         "record_type": "care_event",
         "record_id": "sleep-event-one",
         "date": (now - timedelta(days=10)).date().isoformat(),
+        "within_requested_period": True,
     }]
 
 
