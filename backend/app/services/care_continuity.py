@@ -997,18 +997,46 @@ def next_best_questions(
             "_weight": _priority_weight(priority),
         })
 
+    def candidate_source_context(candidate: Dict[str, Any]) -> dict:
+        return {
+            "source_kind": candidate["source_kind"],
+            "source_id": candidate["source_id"],
+            "source_ids": list(candidate.get("source_ids") or [candidate["source_id"]]),
+            "reason": candidate["reason"],
+            "necessity_assessment": {
+                "necessity": candidate.get("necessity", "not_assessed"),
+                "necessity_rationale": candidate.get("necessity_rationale"),
+                "decision_dependency": candidate.get("decision_dependency"),
+                "evidence_ids": list(candidate.get("evidence_ids") or []),
+            },
+        }
     # Collapse identical questions from repeated stale assertions while retaining every source.
     deduplicated: Dict[tuple, Dict[str, Any]] = {}
     for item in candidates:
         key = (item["question"], item["subject_type"], item["subject_id"])
         if key not in deduplicated:
             item["source_ids"] = item.get("source_ids") or [item["source_id"]]
-            item["_source_evidence_ids"] = list(item.get("evidence_ids") or [])
+            item["_source_contexts"] = [candidate_source_context(item)]
             deduplicated[key] = item
             continue
         prior = deduplicated[key]
         prior["evidence_ids"] = list(dict.fromkeys(prior["evidence_ids"] + item["evidence_ids"]))
         prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + (item.get("source_ids") or [item["source_id"]])))
+        candidate_context = candidate_source_context(item)
+        context_key = (candidate_context["source_kind"], candidate_context["source_id"])
+        matching_context = next((
+            entry for entry in prior["_source_contexts"]
+            if (entry.get("source_kind"), entry.get("source_id")) == context_key
+        ), None)
+        if matching_context is None:
+            prior["_source_contexts"].append(candidate_context)
+        else:
+            matching_context["source_ids"] = list(dict.fromkeys(
+                list(matching_context.get("source_ids") or [])
+                + list(candidate_context.get("source_ids") or [])
+            ))
+            matching_context["reason"] = candidate_context["reason"]
+            matching_context["necessity_assessment"] = candidate_context["necessity_assessment"]
         item_is_necessary = item.get("necessity") == "necessary"
         prior_is_necessary = prior.get("necessity") == "necessary"
         if item_is_necessary and not prior_is_necessary:
@@ -1019,7 +1047,6 @@ def next_best_questions(
             prior["decision_dependency"] = item.get("decision_dependency")
             prior["source_kind"] = item.get("source_kind")
             prior["source_id"] = item.get("source_id")
-            prior["_source_evidence_ids"] = list(item.get("evidence_ids") or [])
             prior["intended_answerer_role"] = item.get("intended_answerer_role")
             prior["reason"] = item.get("reason")
         elif item_is_necessary == prior_is_necessary and item["_weight"] > prior["_weight"]:
@@ -1039,7 +1066,7 @@ def next_best_questions(
     for item in candidates[:50]:
         clean = {
             key: value for key, value in item.items()
-            if key not in {"_weight", "_source_evidence_ids"}
+            if key not in {"_weight", "_source_evidence_ids", "_source_contexts"}
         }
         persisted_id = None
         # Candidate generation is internal intelligence, not a caregiver request.
