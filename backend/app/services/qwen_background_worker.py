@@ -172,6 +172,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     """Extract a saved Daily Care report after the caregiver-facing save has committed."""
     from app.models.care import CareEvent, Evidence
     from app.models.capture_analysis import CaptureAnalysis
+    from app.models.care_continuity import EvidenceObservation
     from app.services.capture_review import (
         persist_source_grounded_daily_observations,
         supplement_source_grounded_daily_observations,
@@ -391,6 +392,27 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             candidates=candidates,
             reported_at=event.recorded_at,
         )
+        # Source-grounded observations are primary record data. Commit them
+        # before derived change/question reconciliation so a later derived-stage
+        # failure cannot roll back the caregiver's captured observations.
+        db.flush()
+        persisted_observation_count = db.query(EvidenceObservation.id).filter(
+            EvidenceObservation.person_id == job.person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+            EvidenceObservation.extraction_run_id == event_id,
+        ).count()
+        if persisted_observation_count < observation_count:
+            raise RuntimeError("daily_capture_observation_persistence_not_verified")
+        observation_count = persisted_observation_count
+        db.commit()
+        current_job = db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.id == job.id,
+            QwenBackgroundJob.person_id == job.person_id,
+            QwenBackgroundJob.caregiver_id == job.caregiver_id,
+        ).with_for_update().first()
+        if current_job is None or current_job.status == "cancelled":
+            db.rollback()
+            return True
     else:
         # Structured captures are not promoted from model candidates into LCR
         # assertions. Keep every extracted item pending caregiver review.
