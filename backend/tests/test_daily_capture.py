@@ -1922,6 +1922,10 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             event = db.query(CareEvent).filter_by(id=receipt["id"]).one()
             evidence = db.query(Evidence).filter_by(id=receipt["evidence_ids"][0]).one()
             analysis = db.query(CaptureAnalysis).filter_by(source_event_id=event.id).one()
+            completed_job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            worker_result = json.loads(completed_job.result_text or "{}")
+            assert worker_result.get("capture_mode") == "natural_language_update", worker_result
+            assert worker_result.get("observation_count") == 2, worker_result
             observations = db.query(EvidenceObservation).filter_by(
                 person_id="person-daily-test",
                 evidence_id=evidence.id,
