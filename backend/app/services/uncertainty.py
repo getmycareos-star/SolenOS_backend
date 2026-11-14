@@ -450,10 +450,29 @@ def persist_source_clarification_questions(
                     if matching_context is None:
                         contexts.append(new_context)
                     else:
-                        matching_context["source_record_refs"] = list(dict.fromkeys(
+                        combined_source_refs = (
                             list(matching_context.get("source_record_refs") or [])
                             + list(new_context.get("source_record_refs") or [])
-                        ))
+                        )
+                        deduplicated_source_refs = []
+                        seen_source_ref_keys = set()
+                        for source_ref in combined_source_refs:
+                            # Source references are structured dictionaries,
+                            # not hashable scalar IDs. Deduplicate by a
+                            # deterministic serialized identity while
+                            # preserving the original reference payload.
+                            source_ref_key = json.dumps(
+                                source_ref,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                default=str,
+                            )
+                            if source_ref_key in seen_source_ref_keys:
+                                continue
+                            seen_source_ref_keys.add(source_ref_key)
+                            deduplicated_source_refs.append(source_ref)
+                        matching_context["source_record_refs"] = deduplicated_source_refs
                         if new_context.get("necessity_assessment"):
                             matching_context["necessity_assessment"] = new_context["necessity_assessment"]
                 existing.context = contexts
