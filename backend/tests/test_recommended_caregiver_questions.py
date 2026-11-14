@@ -909,7 +909,7 @@ def test_one_hundred_case_question_gate_benchmark():
         db.add(OpenQuestion(
             id="benchmark-question-duplicate", person_id=person.id,
             question="What is the source-backed status for synthetic case 34?",
-            subject_type="care", subject_id="benchmark-subject-034",
+            subject_type="care", subject_id="benchmark-subject-34",
             status="open", necessity="necessary",
             intended_answerer_role="reporting_caregiver",
             necessity_rationale="A recorded care decision depends on this answer.",
