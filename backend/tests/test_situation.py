@@ -984,6 +984,64 @@ def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity
         teardown_db()
 
 
+
+@pytest.mark.session_security
+def test_lcr_orientation_retries_once_when_qwen_exceeds_greeting_limits(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "Greeting Retry Person")
+        calls = []
+
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            calls.append(messages)
+            if len(calls) == 1:
+                return " ".join(["This is an unnecessarily long greeting"] * 12)
+            return "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
+        assert response.status_code == 200, response.text
+        assert len(calls) == 2
+        assert "Rewrite your previous answer" in calls[1][-1]["content"]
+        assert response.json()["ai_generated"] is True
+        assert len(response.json()["reply"].split()) <= 40
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
+def test_lcr_orientation_uses_explicit_non_ai_greeting_fallback_after_two_invalid_outputs(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "Greeting Fallback Person")
+        calls = []
+
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            calls.append(messages)
+            return " ".join(["This answer is too long"] * 20)
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hello"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert len(calls) == 2
+        assert body["ai_generated"] is False
+        assert body["provider_status"] == "available_fallback"
+        assert "keep your loved one's care story together" in body["reply"]
+        assert body["written_to_lcr"] is False
+    finally:
+        teardown_db()
+
 def test_lcr_interaction_only_classifier_includes_insults_without_response_templates():
     assert main_module._is_casual_conversation_only("Hi")
     assert main_module._is_casual_conversation_only("This thing is useless.")
