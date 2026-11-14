@@ -337,6 +337,17 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
     important.extend(_pattern_reviews(records, baseline_items or [], now))
     persisted_important, persisted_clarification = _persisted_change_decisions(persisted_changes or [])
     coverage = source_coverage or {}
+    if coverage.get("persisted_change_source_available") is False:
+        persisted_clarification.append({
+            "source": "changes",
+            "record_id": "source-unavailable",
+            "title": "Care-change history could not be checked",
+            "category": "needs_clarification",
+            "reason": (
+                "The saved change-history source is unavailable or its required fields are incomplete. "
+                "SolenOS cannot confirm whether there are recorded changes until this source is restored."
+            ),
+        })
     if coverage.get("persisted_change_history_bounded"):
         # A capped query cannot establish that the returned candidates represent
         # the full active history. Preserve the rows as clarification, not as

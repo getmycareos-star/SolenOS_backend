@@ -462,3 +462,17 @@ def test_bounded_change_history_creates_visible_clarification_notice():
     )
     assert item["source"] == "changes"
     assert "list may be incomplete" in item["reason"]
+
+
+def test_unavailable_persisted_change_source_is_not_silently_treated_as_no_change():
+    result = build_care_attention_assessment(
+        records=[], open_loops=[], uncertainties=[], missing_information=[],
+        source_coverage={"persisted_change_source_available": False},
+        as_of=NOW,
+    )
+    item = next(
+        item for item in result["needs_clarification"]
+        if item["record_id"] == "source-unavailable"
+    )
+    assert item["source"] == "changes"
+    assert "cannot confirm whether there are recorded changes" in item["reason"]
