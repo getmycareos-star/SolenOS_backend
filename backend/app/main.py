@@ -1352,6 +1352,23 @@ async def generate_lcr_orientation(
                 candidate,
             ):
                 return None
+            if caregiver_stage == "new" and not re.search(
+                r"(?i)\b(?:start|starting|begin|beginning|today|first|welcome)\b",
+                candidate,
+            ):
+                return None
+            if caregiver_stage == "returning" and not re.search(
+                r"(?i)\b(?:welcome back|already underway|continue|continuing|pick up|"
+                r"care record is here|care story is here|ongoing)\b",
+                candidate,
+            ):
+                return None
+            if caregiver_stage == "unknown" and re.search(
+                r"(?i)\b(?:welcome back|already underway|as we discussed|"
+                r"your previous updates|last time we|we talked about)\b",
+                candidate,
+            ):
+                return None
         return candidate
 
     try:
