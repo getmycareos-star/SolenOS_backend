@@ -1113,6 +1113,69 @@ def test_lcr_orientation_retries_once_when_qwen_exceeds_greeting_limits(monkeypa
 
 
 @pytest.mark.session_security
+def test_lcr_orientation_retries_generic_greeting_and_rejects_false_continuity(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "Greeting Quality Contract")
+        outputs = iter([
+            "Hi! How can I help?",
+            "Welcome to SolenOS. Your care story can start with whatever is happening today.",
+        ])
+        calls = []
+
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            calls.append(messages)
+            return next(outputs)
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert len(calls) == 2
+        assert body["ai_generated"] is True
+        assert "care story" in body["reply"].casefold()
+        assert "how can i help" not in body["reply"].casefold()
+        assert "Rewrite your previous answer" in calls[1][-1]["content"]
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
+def test_lcr_orientation_retries_false_returning_claim_for_new_caregiver(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "New Caregiver False Continuity")
+        outputs = iter([
+            "Welcome back to SolenOS. Your care record is ready.",
+            "Welcome to SolenOS. Your care story can start with whatever is happening today.",
+        ])
+        calls = []
+
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            calls.append(messages)
+            return next(outputs)
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hello"})
+        assert response.status_code == 200, response.text
+        assert len(calls) == 2
+        assert response.json()["ai_generated"] is True
+        assert "welcome back" not in response.json()["reply"].casefold()
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
 def test_lcr_orientation_uses_explicit_non_ai_greeting_fallback_after_two_invalid_outputs(monkeypatch):
     setup_db()
     try:
