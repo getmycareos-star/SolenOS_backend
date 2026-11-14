@@ -985,6 +985,8 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
 
         unauthorized = client.post("/api/lcr/orientation", json={"raw_input": "Hi"})
         assert unauthorized.status_code == 401
+    finally:
+        teardown_db()
 
 
 @pytest.mark.session_security
