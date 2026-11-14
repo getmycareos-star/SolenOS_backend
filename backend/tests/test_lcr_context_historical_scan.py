@@ -110,6 +110,7 @@ def _open_questions_schema(engine):
         Column("status", String),
         Column("priority", String),
         Column("evidence_ids", String),
+        Column("context", String),
         Column("asked_at", DateTime),
         Column("answered_at", DateTime),
         Column("answer", String),
