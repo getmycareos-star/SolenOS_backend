@@ -940,11 +940,42 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
         prompt = captured["messages"][0]["content"]
         assert "slept poorly last night" in prompt
         assert "Do not use canned replies" in prompt
+        assert "Caregiver orientation stage (derived from returned care-domain rows): returning." in prompt
+        assert "GREETING LENGTH" in prompt
+        assert "RETURNING-CAREGIVER POSITIONING" in prompt
         after_count = TestingSessionLocal().query(CareEvent).filter_by(person_id=person_id).count()
         assert after_count == before_count
 
         unauthorized = client.post("/api/lcr/orientation", json={"raw_input": "Hi"})
         assert unauthorized.status_code == 401
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
+def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "New Orientation Person")
+
+        captured = {}
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            captured["messages"] = messages
+            return "Welcome. SolenOS helps keep your loved one's care story together; start with whatever is happening today."
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hello"})
+        assert response.status_code == 200, response.text
+        prompt = captured["messages"][0]["content"]
+        assert "Caregiver orientation stage (derived from returned care-domain rows): new." in prompt
+        assert "NEW-CAREGIVER POSITIONING" in prompt
+        assert "rough fragments are acceptable" in prompt
+        assert response.json()["written_to_lcr"] is False
     finally:
         teardown_db()
 
