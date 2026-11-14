@@ -6169,10 +6169,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text,
             included_model_context_lines,
         ) if document_question_for_fallback else None
-        document_extractive_fallback_used = bool(
-            document_extractive_answer
-            and not _document_reply_contains_source_detail(reply, document_extractive_answer)
-        )
+        # Direct questions about what an uploaded document says are answered
+        # from the integrity-verified extraction itself, not model paraphrase.
+        document_extractive_fallback_used = bool(document_extractive_answer)
         # Resolve deterministic safety and uncertainty overrides before any
         # extractive fallback consults them. This ordering keeps every fallback
         # decision based on the same already-computed guard results.
