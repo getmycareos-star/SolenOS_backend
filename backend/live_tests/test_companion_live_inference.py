@@ -302,7 +302,7 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
 
 
 
-def test_live_qwen_lcr_orientation_distinguishes_new_and_returning_caregivers_without_writes():
+def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_history_without_writes(monkeypatch):
     """Real Qwen must orient from persisted LCR state and leave both records unchanged."""
     with TestClient(app) as client:
         new_caregiver = _create_session(client, "Live Qwen new caregiver orientation")
@@ -343,6 +343,10 @@ def test_live_qwen_lcr_orientation_distinguishes_new_and_returning_caregivers_wi
             re.IGNORECASE,
         ), new_reply
         assert not re.search(r"\bhow can i help\b", new_reply, re.IGNORECASE), new_reply
+        assert re.search(r"\bsolenos\b", new_reply, re.IGNORECASE), new_reply
+        assert re.search(r"\b(?:care story|care record|care history)\b", new_reply, re.IGNORECASE), new_reply
+        assert re.search(r"\b(?:start|starting|begin|beginning|today|welcome)\b", new_reply, re.IGNORECASE), new_reply
+        assert len(new_reply.split()) >= 8, new_reply
 
         returning_response = client.post(
             "/api/lcr/orientation",
@@ -362,6 +366,45 @@ def test_live_qwen_lcr_orientation_distinguishes_new_and_returning_caregivers_wi
             returning_reply,
             re.IGNORECASE,
         ), returning_reply
+        assert re.search(r"\bsolenos\b", returning_reply, re.IGNORECASE), returning_reply
+        assert re.search(r"\b(?:care story|care record|care history)\b", returning_reply, re.IGNORECASE), returning_reply
+        assert re.search(r"\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\b", returning_reply, re.IGNORECASE), returning_reply
+        assert len(returning_reply.split()) >= 8, returning_reply
+
+        # Simulate unavailable core history; Qwen must not falsely label the
+        # caregiver new or returning when retrieval coverage is incomplete.
+        from app import main as main_module
+        monkeypatch.setattr(
+            main_module,
+            "build_lcr_context",
+            lambda *args, **kwargs: {"sources": {}, "missing_required_sources": ["events"]},
+        )
+        monkeypatch.setattr(
+            main_module,
+            "format_lcr_context_for_prompt",
+            lambda context: "Some required care history sources are unavailable.",
+        )
+        unknown_response = client.post(
+            "/api/lcr/orientation",
+            headers={"Authorization": f"Bearer {new_caregiver['access_token']}"},
+            json={"raw_input": "Hello"},
+        )
+        assert unknown_response.status_code == 200, unknown_response.text
+        unknown_body = unknown_response.json()
+        assert unknown_body.get("ai_generated") is True, unknown_body
+        assert unknown_body.get("provider_status") == "available", unknown_body
+        assert unknown_body.get("written_to_lcr") is False, unknown_body
+        unknown_reply = unknown_body.get("reply", "")
+        assert 8 <= len(unknown_reply.split()) <= 40, unknown_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\s+", unknown_reply.strip()) if part]) <= 2, unknown_reply
+        assert re.search(r"\bsolenos\b", unknown_reply, re.IGNORECASE), unknown_reply
+        assert re.search(r"\b(?:care story|care record|care history)\b", unknown_reply, re.IGNORECASE), unknown_reply
+        assert not re.search(
+            r"\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
+            r"we talked about|first time here|new caregiver|starting from scratch)\b",
+            unknown_reply,
+            re.IGNORECASE,
+        ), unknown_reply
 
         db = TestingSessionLocal()
         try:
