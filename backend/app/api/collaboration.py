@@ -78,6 +78,7 @@ from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProp
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import (
     create_assertion,
+    has_caregiver_visible_answerer,
     has_valid_caregiver_necessity,
     prioritize_caregiver_questions,
 )
@@ -101,7 +102,8 @@ def _attach_caregiver_question_queue(db: Session, person_id: str, context: dict)
     ).all()
     eligible = [
         row for row in rows
-        if has_valid_caregiver_necessity(row, db, person_id)
+        if has_caregiver_visible_answerer(row)
+        and has_valid_caregiver_necessity(row, db, person_id)
     ]
     unique, visible, additional_count = prioritize_caregiver_questions(
         eligible, ordinary_limit=2
