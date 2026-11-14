@@ -4875,11 +4875,21 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
 
     word_count = len(re.findall(r"[a-z0-9']+", answer.casefold()))
     if word_count > 55:
-        missing = [label for label, _ in topics]
-        if missing:
+        if topics and missing_topics:
+            if available_topics:
+                return (
+                    "The saved notes include " + " and ".join(available_topics)
+                    + ", but I couldn't confirm " + " and ".join(missing_topics)
+                    + " from the records I retrieved."
+                )
             return (
-                "I couldn't confirm " + " and ".join(missing)
+                "I couldn't confirm " + " and ".join(missing_topics)
                 + " from the saved notes I retrieved."
+            )
+        if topics:
+            return (
+                "The saved notes include " + " and ".join(label for label, _ in topics)
+                + ", but I can't summarize them reliably from the records retrieved."
             )
         return "I found saved care notes, but I can't summarize them reliably from the records retrieved."
     return answer
