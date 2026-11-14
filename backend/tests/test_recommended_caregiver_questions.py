@@ -309,6 +309,7 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         add_question(db, person.id, caregiver.id, "professional-question", "critical")
         add_question(db, person.id, caregiver.id, "unknown-answerer-question", "high")
         add_question(db, person.id, caregiver.id, "other-caregiver-question", "medium")
+        add_question(db, person.id, caregiver.id, "reporting-caregiver-question", "low")
         add_question(db, person.id, caregiver.id, "care-recipient-question", "high")
         add_question(db, person.id, caregiver.id, "mislinked-evidence-question", "high", evidence_id="mislinked-source-evidence")
         db.add(Evidence(
@@ -331,7 +332,7 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         )
         assert response.status_code == 200, response.text
         ids = set(response.json()["eligible_question_ids"])
-        assert ids == {"professional-question", "other-caregiver-question", "care-recipient-question"}
+        assert ids == {"professional-question", "other-caregiver-question", "reporting-caregiver-question", "care-recipient-question"}
         assert "unknown-answerer-question" not in ids
         assert "mislinked-evidence-question" not in ids
     finally:
