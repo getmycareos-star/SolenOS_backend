@@ -4753,7 +4753,7 @@ def _document_reply_contains_source_detail(reply: str, extractive_answer: str) -
     source_terms = set(re.findall(r"[a-z0-9']{3,}", (extractive_answer or "").casefold()))
     reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
     meaningful = source_terms - _DOCUMENT_ANSWER_STOPWORDS
-    return len(meaningful & reply_terms) >= 2
+    return len(meaningful & reply_terms) >= 3
 
 
 def _caregiver_interaction_guidance(user_text: str) -> str:
