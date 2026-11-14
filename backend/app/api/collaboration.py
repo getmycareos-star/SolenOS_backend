@@ -5348,6 +5348,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Greetings do not need care-history reads; conversation remains non-evidence.
         shared_lcr_lines: list[str] = []
         caregiver_question_queue_lines: list[str] = []
+        # Greetings intentionally skip historical retrieval. Keep the prompt
+        # context contract initialized so the no-retrieval path is safe too.
+        conversation_context_lines: list[str] = []
         evidence_lineage_context: dict[str, Any] = {
             "status": "not_assessed",
             "groups": [],
