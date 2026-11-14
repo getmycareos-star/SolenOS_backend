@@ -388,7 +388,7 @@ def test_proactive_question_notifications_preserve_critical_and_limit_ordinary()
                 subject_type="care", subject_id="current-plan",
                 status="open", necessity="necessary",
                 necessity_rationale=rationale, priority=priority,
-                intended_answerer_role="professional" if question_id == "notify-critical" else "caregiver",
+                intended_answerer_role="professional" if question_id == "notify-critical" else "reporting_caregiver",
                 intended_answerer_label="prescribing clinician" if question_id == "notify-critical" else None,
                 evidence_ids=[evidence.id],
                 context=[{
@@ -430,6 +430,7 @@ def test_proactive_question_notifications_preserve_critical_and_limit_ordinary()
             subject_type="care", subject_id="current-plan",
             status="open", necessity="necessary",
             necessity_rationale=new_rationale, priority=Priority.HIGH,
+            intended_answerer_role="reporting_caregiver",
             evidence_ids=[evidence.id],
             context=[{
                 "source_kind": "caregiver_report",
