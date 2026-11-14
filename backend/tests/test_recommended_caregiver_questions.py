@@ -109,6 +109,7 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
         subject_id="current-plan",
         status="open",
         necessity="necessary" if necessary else "not_assessed",
+        intended_answerer_role="caregiver",
         necessity_rationale="A recorded care decision depends on this answer." if necessary else None,
         priority=Priority(priority),
         evidence_ids=[evidence_id],
@@ -250,6 +251,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
                 question=f"What is the source-backed status for {gap_id}?",
                 subject_type="care", subject_id=gap_id, status="open",
                 necessity="necessary",
+                intended_answerer_role="caregiver",
                 necessity_rationale="The next care decision depends on this missing detail.",
                 priority=Priority.HIGH, evidence_ids=["gap-evidence"],
                 context=[{
@@ -266,6 +268,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
             question="What is the source-backed status for the wrong subject?",
             subject_type="care", subject_id="not-the-gap-subject", status="open",
             necessity="necessary",
+            intended_answerer_role="caregiver",
             necessity_rationale="The next care decision depends on this missing detail.",
             priority=Priority.HIGH, evidence_ids=["gap-evidence"],
             context=[{
