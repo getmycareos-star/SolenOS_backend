@@ -1373,7 +1373,7 @@ async def generate_lcr_orientation(
             elif is_greeting and caregiver_stage == "returning":
                 reply = "Welcome back to SolenOS. Your care record is here, and we can continue with the update that matters today."
             elif is_greeting:
-                reply = "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+                reply = "Welcome to SolenOS. We can start with the care story you want to keep track of today."
             else:
                 raise HTTPException(
                     status_code=503,
@@ -1397,7 +1397,7 @@ async def generate_lcr_orientation(
             elif caregiver_stage == "returning":
                 fallback_reply = "Welcome back to SolenOS. Your care record is here, and we can continue with the update that matters today."
             else:
-                fallback_reply = "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+                fallback_reply = "Welcome to SolenOS. We can start with the care story you want to keep track of today."
             return {
                 "reply": fallback_reply,
                 "ai_generated": False,
