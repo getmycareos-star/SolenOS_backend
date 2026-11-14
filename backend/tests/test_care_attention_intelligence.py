@@ -327,3 +327,67 @@ def test_baseline_and_current_observation_from_same_source_do_not_create_change(
         open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
     )
     assert result["important_to_address"] == []
+
+
+
+def test_persisted_change_is_important_only_with_complete_baseline_and_source_records():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-1", "title": "Mobility", "significance_verdict": "meaningful_candidate",
+        "attention_candidate": True, "follow_up_candidate": True,
+        "baseline_coverage_status": "covered", "current_coverage_status": "covered",
+        "baseline_is_stable": True, "baseline_history_completeness": "complete",
+        "explanation": "Recorded mobility events increased.",
+        "records": [{"source": "events", "record_id": "event-1", "title": "Fall",
+                     "evidence_ids": ["ev-1"]}],
+    }])
+    assert len(important) == 1
+    assert important[0]["source"] == "persisted_change"
+    assert important[0]["evidence_ids"] == ["ev-1"]
+    assert clarification == []
+
+
+def test_persisted_change_with_incomplete_coverage_is_clarification_not_importance():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-2", "title": "Sleep", "significance_verdict": "meaningful_candidate",
+        "attention_candidate": True, "follow_up_candidate": True,
+        "baseline_coverage_status": "unknown", "current_coverage_status": "covered",
+        "baseline_is_stable": False, "baseline_history_completeness": "unknown",
+        "explanation": "More sleep events were recorded.",
+        "records": [{"source": "events", "record_id": "event-2", "title": "Night waking",
+                     "evidence_ids": ["ev-2"]}],
+    }])
+    assert important == []
+    assert len(clarification) == 1
+    assert clarification[0]["category"] == "needs_clarification"
+
+
+def test_persisted_change_without_resolvable_source_records_is_clarification():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-3", "title": "Mobility", "significance_verdict": "meaningful_candidate",
+        "attention_candidate": True, "follow_up_candidate": True,
+        "baseline_coverage_status": "covered", "current_coverage_status": "covered",
+        "baseline_is_stable": True, "baseline_history_completeness": "complete",
+        "explanation": "A recorded change exists.",
+        "records": [],
+    }])
+    assert important == []
+    assert len(clarification) == 1
+
+
+def test_rejected_or_not_meaningful_persisted_changes_are_not_surfaced():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([
+        {"id": "change-rejected", "significance_verdict": "meaningful_candidate",
+         "confirmation_status": "rejected", "attention_candidate": True},
+        {"id": "change-not-meaningful", "significance_verdict": "not_meaningful",
+         "follow_up_candidate": True},
+    ])
+    assert important == []
+    assert clarification == []

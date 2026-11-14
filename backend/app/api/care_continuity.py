@@ -29,7 +29,7 @@ from app.services.care_continuity import get_freshness
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
-from app.models.change import Situation as SituationModel
+from app.models.change import Situation as SituationModel, Change, Baseline
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
@@ -2766,6 +2766,71 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "numeric_confidence": "not_provided; this deterministic scorecard is not a calibrated probability",
         "interpretation_policy": "No-records is not evidence of absence; source availability and record counts do not establish clinical truth.",
     }
+    # Reuse persisted Delta Engine assessments; do not build a parallel change model.
+    # Incomplete baseline or source coverage remains clarification-only.
+    persisted_change_items = []
+    if inspect(db.connection()).has_table("changes"):
+        active_change_rows = (
+            db.query(Change)
+            .filter(Change.person_id == person_id, Change.is_active.is_(True), Change.superseded_by_change_id.is_(None))
+            .order_by(desc(Change.created_at), Change.id.asc())
+            .limit(100)
+            .all()
+        )
+        relevant_changes = []
+        for change in active_change_rows:
+            verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
+            if verdict not in {"meaningful_candidate", "insufficient_evidence"}:
+                continue
+            if not (change.attention_candidate or change.follow_up_candidate):
+                continue
+            if str(change.confirmation_status or "").casefold() in {"rejected", "dismissed", "cancelled", "withdrawn", "superseded"}:
+                continue
+            relevant_changes.append(change)
+        baseline_ids = sorted({str(change.baseline_id) for change in relevant_changes if change.baseline_id})
+        baseline_by_id = {}
+        if baseline_ids and inspect(db.connection()).has_table("baselines"):
+            baseline_by_id = {
+                str(row.id): row for row in db.query(Baseline).filter(Baseline.person_id == person_id, Baseline.id.in_(baseline_ids)).all()
+            }
+        event_ids = sorted({str(event_id) for change in relevant_changes for event_id in (change.evidence_ids or []) if event_id})
+        event_by_id = {}
+        if event_ids:
+            event_by_id = {
+                str(row.id): row for row in db.query(CareEvent).filter(CareEvent.person_id == person_id, CareEvent.id.in_(event_ids)).all()
+            }
+        for change in relevant_changes:
+            linked_events = [event_by_id[event_id] for event_id in (change.evidence_ids or []) if str(event_id) in event_by_id]
+            baseline = baseline_by_id.get(str(change.baseline_id)) if change.baseline_id else None
+            event_refs = [
+                {
+                    "source": "events",
+                    "record_id": str(event.id),
+                    "title": str(event.title or event.event_type or "Care event")[:240],
+                    "occurred_at": event.occurred_at,
+                    "recorded_at": getattr(event, "recorded_at", None) or getattr(event, "created_at", None),
+                    "evidence_ids": [str(value) for value in (event.evidence_ids or []) if value],
+                }
+                for event in linked_events
+            ]
+            persisted_change_items.append({
+                "id": str(change.id),
+                "title": str(change.subject_type or "Recorded care change").replace("_", " ").capitalize(),
+                "change_type": getattr(change.change_type, "value", change.change_type),
+                "change_direction": getattr(change.change_direction, "value", change.change_direction),
+                "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "attention_candidate": bool(change.attention_candidate),
+                "follow_up_candidate": bool(change.follow_up_candidate),
+                "confirmation_status": change.confirmation_status,
+                "previous_state": change.previous_state,
+                "current_state": change.current_state,
+                "explanation": change.explanation,
+                "baseline_coverage_status": change.baseline_coverage_status or (baseline.coverage_status if baseline else None),
+                "current_coverage_status": change.current_coverage_status,
+                "baseline_is_stable": bool(baseline.is_stable) if baseline else False,
+                "baseline_history_completeness": baseline.history_completeness if baseline else None,
+                "records": event_refs,
+            })
     return {
         "schema_version": "situation-understanding.v1",
         "source_state_fingerprint": _situation_source_fingerprint(context),
@@ -2820,6 +2885,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             uncertainties=uncertainty_items,
             missing_information=missing_items,
             baseline_items=baseline_items,
+            persisted_changes=persisted_change_items,
             as_of=context.get("as_of"),
             source_coverage={
                 "history_coverage": context.get("history_coverage", "bounded_subset"),

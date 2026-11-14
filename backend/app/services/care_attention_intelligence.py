@@ -264,13 +264,68 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
     return reviews
 
 
+def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    important, clarification = [], []
+    for change in changes:
+        verdict = _text(change.get("significance_verdict"))
+        if verdict not in {"meaningful_candidate", "insufficient_evidence"}:
+            continue
+        if _text(change.get("confirmation_status")) in {"rejected", "dismissed", "cancelled", "withdrawn", "superseded"}:
+            continue
+        if not (change.get("attention_candidate") or change.get("follow_up_candidate")):
+            continue
+        records = change.get("records") if isinstance(change.get("records"), list) else []
+        evidence_ids = sorted({
+            str(evidence_id)
+            for record in records if isinstance(record, dict)
+            for evidence_id in (record.get("evidence_ids") or []) if evidence_id
+        })
+        coverage_complete = (
+            change.get("baseline_coverage_status") == "covered"
+            and change.get("current_coverage_status") == "covered"
+            and change.get("baseline_is_stable") is True
+            and change.get("baseline_history_completeness") == "complete"
+        )
+        source_complete = bool(records) and bool(evidence_ids)
+        item = {
+            "id": str(change.get("id") or ""),
+            "source": "persisted_change",
+            "record_id": str(change.get("id") or ""),
+            "title": str(change.get("title") or "Recorded care change")[:240],
+            "change_type": change.get("change_type"),
+            "change_direction": change.get("change_direction"),
+            "previous_state": change.get("previous_state"),
+            "current_state": change.get("current_state"),
+            "category": "important_to_address",
+            "reason": str(change.get("explanation") or "A saved change assessment needs review.")[:2400],
+            "evidence_ids": evidence_ids,
+            "records": records,
+            "record_count": len(records),
+            "baseline_coverage_status": change.get("baseline_coverage_status"),
+            "current_coverage_status": change.get("current_coverage_status"),
+        }
+        if verdict == "meaningful_candidate" and coverage_complete and source_complete:
+            item["reason"] += " This is a review prompt based on the recorded history, not a diagnosis or a causal conclusion."
+            important.append(item)
+        else:
+            item["category"] = "needs_clarification"
+            item["reason"] = (
+                "A saved change candidate cannot yet be treated as a meaningful change because "
+                "its source records, baseline, or observation coverage are incomplete. "
+                + str(change.get("explanation") or "Check the linked care records before drawing a conclusion.")[:1800]
+            )
+            clarification.append(item)
+    return important, clarification
+
 def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops: list[dict[str, Any]],
     uncertainties: list[dict[str, Any]], missing_information: list[dict[str, Any]],
-    baseline_items: list[dict[str, Any]] | None = None, as_of: Any = None, source_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
+    baseline_items: list[dict[str, Any]] | None = None, persisted_changes: list[dict[str, Any]] | None = None, as_of: Any = None, source_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
     now = _datetime(as_of) or datetime.now(timezone.utc)
     immediate, important, deferred, loop_clarifications = _open_loop_decisions(open_loops, now)
     important.extend(_pattern_reviews(records, baseline_items or [], now))
-    clarification = list(loop_clarifications)
+    persisted_important, persisted_clarification = _persisted_change_decisions(persisted_changes or [])
+    important.extend(persisted_important)
+    clarification = [*loop_clarifications, *persisted_clarification]
     for item in [*uncertainties, *missing_information]:
         if _text(item.get("status") or item.get("lifecycle_status")) in CLOSED_STATUSES:
             continue
