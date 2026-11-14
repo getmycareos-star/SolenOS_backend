@@ -4858,12 +4858,49 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
     return answer
 
 
-def _care_history_reply_covers_requested_topics(user_text: str, reply: str) -> bool:
+def _care_history_reply_covers_requested_topics(
+    user_text: str,
+    reply: str,
+    context_lines: list[str],
+) -> bool:
     topics = _care_history_requested_topics(user_text)
     if not topics:
         return True
     reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
-    return all(bool(reply_terms & variants) for _, variants in topics)
+    topic_terms = set().union(*(variants for _, variants in topics))
+    detail_stopwords = _CARE_HISTORY_STOPWORDS | {
+        "mum", "her", "his", "she", "he", "they", "was", "were", "is", "are",
+        "a", "an", "to", "of", "at", "on", "in", "some", "though", "now",
+        "last", "this", "today", "more", "little", "seemed", "morning",
+        "evening", "night", "poor", "poorly",
+    }
+    source_details: dict[str, set[str]] = {label: set() for label, _ in topics}
+    for line in context_lines:
+        brace = (line or "").find("{")
+        if brace < 0:
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("source_type") != "events":
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+        if not record.get("created_by_caregiver_id") or str(record.get("status") or "").strip().casefold() != "recorded":
+            continue
+        description = record.get("description")
+        if not isinstance(description, str):
+            continue
+        terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
+        for label, variants in topics:
+            if terms & variants:
+                source_details[label].update(terms - topic_terms - detail_stopwords)
+    for label, variants in topics:
+        if not (reply_terms & variants):
+            return False
+        if not (reply_terms & source_details[label]):
+            return False
+    return True
 
 
 def _caregiver_interaction_guidance(user_text: str) -> str:
@@ -6139,7 +6176,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 not isinstance(reply, str)
                 or not reply.strip()
                 or _companion_message_needs_revision(reply)
-                or not _care_history_reply_covers_requested_topics(user_text, reply)
+                or not _care_history_reply_covers_requested_topics(user_text, reply, included_model_context_lines)
                 or _contains_unrequested_saba(reply, validation_source)
                 or _contains_unsupported_care_claim(reply, validation_source)
                 or _contains_unsupported_operational_claim(reply, validation_source, source_context)
