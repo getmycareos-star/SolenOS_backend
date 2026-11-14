@@ -94,3 +94,39 @@ def test_unresolved_conflicts_and_gaps_need_clarification():
         as_of=NOW,
     )
     assert len(result["needs_clarification"]) == 2
+
+
+
+def test_recent_observation_is_compared_with_only_explicit_personal_baseline():
+    result = build_care_attention_assessment(
+        records=[{
+            "id": "current-1", "source": "evidence_observations", "subject_id": "person-3",
+            "subject_label": "Mom", "attribute": "usual_orientation",
+            "observed_value": "confused about location", "occurred_at": NOW - timedelta(days=1),
+            "evidence_ids": ["ev-current"],
+        }],
+        baseline_items=[{
+            "id": "baseline-1", "source": "evidence_observations", "subject_id": "person-3",
+            "subject_label": "Mom", "attribute": "usual_orientation",
+            "observed_value": "usually knows where she is", "evidence_ids": ["ev-baseline"],
+        }],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    item = next(item for item in result["important_to_address"]
+                if item["pattern_type"] == "explicit_baseline_deviation")
+    assert item["evidence_ids"] == ["ev-baseline", "ev-current"]
+    assert len(item["records"]) == 2
+    assert "does not establish clinical severity or cause" in item["reason"]
+
+
+def test_no_implicit_baseline_is_created_from_oldest_record():
+    result = build_care_attention_assessment(
+        records=[{
+            "id": "current-2", "source": "evidence_observations", "subject_id": "person-4",
+            "attribute": "usual_orientation", "observed_value": "confused about location",
+            "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-current-2"],
+        }],
+        baseline_items=[], open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert not any(item["pattern_type"] == "explicit_baseline_deviation"
+                   for item in result["important_to_address"])

@@ -105,7 +105,7 @@ def _subject_key(item: dict[str, Any]) -> str:
     return _text(item.get("subject_id")) or _text(item.get("subject_label") or item.get("subject_type"))
 
 
-def _pattern_reviews(records: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
     eligible = []
     for item in records:
         if item.get("source") not in {"evidence_observations", "caregiver_observations", "events", "facts"}:
@@ -127,10 +127,48 @@ def _pattern_reviews(records: list[dict[str, Any]], now: datetime) -> list[dict[
         by_subject_attribute[(subject, attribute)].append((occurred, item))
 
     reviews, emitted = [], set()
+    baseline_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    baseline_ids = set()
+    for baseline in baseline_items:
+        subject = _subject_key(baseline)
+        attribute = _text(baseline.get("attribute") or baseline.get("event_type") or baseline.get("fact_type"))
+        value = _observation_value(baseline)
+        if subject and attribute and value:
+            baseline_by_key[(subject, attribute)].append(baseline)
+            if baseline.get("id"):
+                baseline_ids.add(str(baseline["id"]))
+
+    for (subject, attribute), entries in by_subject_attribute.items():
+        baseline_rows = baseline_by_key.get((subject, attribute), [])
+        current_entries = [(when, item) for when, item in entries if str(item.get("id") or "") not in baseline_ids]
+        baseline_values = {_observation_value(item) for item in baseline_rows if _observation_value(item)}
+        changed_entries = [
+            (when, item) for when, item in current_entries
+            if _observation_value(item) and baseline_values
+            and _observation_value(item) not in baseline_values
+        ]
+        if changed_entries:
+            current_refs = [_record_ref(item) for _, item in changed_entries]
+            baseline_refs = [_record_ref(item) for item in baseline_rows]
+            refs = baseline_refs + current_refs
+            reviews.append({
+                "id": f"baseline-change:{subject}:{attribute}",
+                "category": "important_to_address",
+                "title": str(changed_entries[-1][1].get("subject_label") or attribute)[:240],
+                "reason": "A recent source-linked observation differs from an explicitly recorded personal baseline. Review the change in context; this does not establish clinical severity or cause.",
+                "pattern_type": "explicit_baseline_deviation",
+                "record_count": len(current_refs),
+                "records": refs,
+                "evidence_ids": sorted({e for ref in refs for e in ref["evidence_ids"]}),
+                "first_observed_at": current_refs[0]["occurred_at"],
+                "last_observed_at": current_refs[-1]["occurred_at"],
+            })
+            emitted.add((subject, attribute))
+
     for (subject, attribute), entries in by_subject_attribute.items():
         distinct = {str(item.get("id")): item for _, item in entries if item.get("id")}
         values = {_observation_value(item) for _, item in entries if _observation_value(item)}
-        if len(distinct) < 2 or len(values) < 2:
+        if (subject, attribute) in emitted or len(distinct) < 2 or len(values) < 2:
             continue
         entries.sort(key=lambda pair: pair[0])
         refs = [_record_ref(item) for _, item in entries]
@@ -163,10 +201,10 @@ def _pattern_reviews(records: list[dict[str, Any]], now: datetime) -> list[dict[
 
 def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops: list[dict[str, Any]],
     uncertainties: list[dict[str, Any]], missing_information: list[dict[str, Any]],
-    as_of: Any = None, source_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
+    baseline_items: list[dict[str, Any]] | None = None, as_of: Any = None, source_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
     now = _datetime(as_of) or datetime.now(timezone.utc)
     immediate, important, deferred, loop_clarifications = _open_loop_decisions(open_loops, now)
-    important.extend(_pattern_reviews(records, now))
+    important.extend(_pattern_reviews(records, baseline_items or [], now))
     clarification = list(loop_clarifications)
     for item in [*uncertainties, *missing_information]:
         if _text(item.get("status") or item.get("lifecycle_status")) in CLOSED_STATUSES:

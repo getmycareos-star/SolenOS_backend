@@ -2814,6 +2814,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             open_loops=open_loops,
             uncertainties=uncertainty_items,
             missing_information=missing_items,
+            baseline_items=baseline_items,
             as_of=context.get("as_of"),
             source_coverage={
                 "history_coverage": context.get("history_coverage", "bounded_subset"),
