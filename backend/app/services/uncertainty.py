@@ -956,22 +956,17 @@ class UncertaintyEngine:
         else:
             # The default caregiver projection is an active-work list, not an
             # archive. Closed/superseded questions remain available through
-            # the explicit status filter and answer-history route. Unknown
-            # answer ownership is not converted into a caregiver task.
-            query = query.filter(
-                OpenQuestionModel.status.in_(["open", "unresolved"]),
-                OpenQuestionModel.intended_answerer_role.in_([
-                    "person_receiving_care", "reporting_caregiver",
-                    "other_caregiver", "professional",
-                ]),
-            )
+            # the explicit status filter and answer-history route.
+            query = query.filter(OpenQuestionModel.status.in_(["open", "unresolved"]))
         from app.services.care_continuity import (
+            has_caregiver_visible_answerer,
             has_valid_caregiver_necessity,
             prioritize_caregiver_questions,
         )
         rows = [
             row for row in query.all()
-            if has_valid_caregiver_necessity(row, self.db, scoped_person_id)
+            if has_caregiver_visible_answerer(row)
+            and has_valid_caregiver_necessity(row, self.db, scoped_person_id)
         ]
         # Return the full unique queue for on-demand review; the caregiver
         # interface applies the shared critical-plus-two initial display cap.
