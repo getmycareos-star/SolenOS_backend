@@ -426,3 +426,18 @@ def test_bounded_persisted_change_history_cannot_produce_complete_priority():
     )
     assert result["important_to_address"] == []
     assert result["needs_clarification"][0]["record_id"] == "bounded-change"
+
+
+
+def test_bounded_change_history_creates_visible_clarification_notice():
+    result = build_care_attention_assessment(
+        records=[], open_loops=[], uncertainties=[], missing_information=[],
+        source_coverage={"persisted_change_history_bounded": True},
+        as_of=NOW,
+    )
+    item = next(
+        item for item in result["needs_clarification"]
+        if item["record_id"] == "bounded-history"
+    )
+    assert item["source"] == "changes"
+    assert "list may be incomplete" in item["reason"]

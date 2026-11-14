@@ -333,7 +333,7 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
     if coverage.get("persisted_change_history_bounded"):
         # A capped query cannot establish that the returned candidates represent
         # the full active history. Preserve the rows as clarification, not as
-        # apparently complete priority decisions.
+        # apparently complete priority decisions, and make the truncation visible.
         for item in persisted_important:
             persisted_clarification.append({
                 **item,
@@ -344,6 +344,16 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
                 ),
             })
         persisted_important = []
+        persisted_clarification.append({
+            "source": "changes",
+            "record_id": "bounded-history",
+            "title": "Some saved care changes need a wider review",
+            "category": "needs_clarification",
+            "reason": (
+                "More active care-change records exist than this review could examine. "
+                "The list may be incomplete; review the full change history before relying on its priorities."
+            ),
+        })
     important.extend(persisted_important)
     clarification = [*loop_clarifications, *persisted_clarification]
     for item in [*uncertainties, *missing_information]:
