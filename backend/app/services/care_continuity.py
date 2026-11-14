@@ -1117,7 +1117,7 @@ def next_best_questions(
                 OpenQuestion.person_id == person_id,
                 OpenQuestion.subject_type == clean["subject_type"],
                 OpenQuestion.subject_id == clean["subject_id"],
-            ).order_by(OpenQuestion.asked_at.desc()).limit(200).with_for_update().all()
+            ).order_by(OpenQuestion.asked_at.desc()).with_for_update().all()
             normalized_candidate_question = " ".join(clean["question"].casefold().split())
             active_rows = [row for row in matching_rows if row.status in {"open", "unresolved"}]
             existing = next((
