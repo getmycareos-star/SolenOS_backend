@@ -356,6 +356,46 @@ def persist_source_clarification_questions(
         seen.add(scoped_key)
         existing = existing_by_scope.get(scoped_key)
         if existing is None:
+            existing = next((
+                row for row in active_rows
+                if row.subject_type == subject_type
+                and row.subject_id == subject_id
+                and _question_matches_source_field(row, contexts_to_add)
+            ), None)
+        candidate_grounding = {
+            "source_ids": [matched_gap[0].id] if matched_gap else [source_record_id],
+            "evidence_ids": matched_gap[3] if matched_gap else linked_ids,
+            "_source_contexts": contexts_to_add,
+        }
+        prior_terminal_question = None
+        existing_before = None
+        if existing is None:
+            prior_terminal_question = next((
+                row for row in terminal_rows
+                if row.subject_type == subject_type
+                and row.subject_id == subject_id
+                and (
+                    _clarification_question_key(row.question or "") == normalized
+                    or _question_matches_source_field(row, contexts_to_add)
+                )
+            ), None)
+            if prior_terminal_question is not None:
+                if not matched_gap or not _question_has_new_grounding(prior_terminal_question, candidate_grounding):
+                    continue
+                if (
+                    prior_terminal_question.status == "closed"
+                    and str(prior_terminal_question.closed_reason or "").startswith("automatically_")
+                ):
+                    existing = prior_terminal_question
+                    existing_before = _open_question_state(existing)
+                    existing.status = "open"
+                    existing.closed_at = None
+                    existing.closed_reason = None
+        if prior_terminal_question is not None:
+            for context in contexts_to_add:
+                context["prior_terminal_question_id"] = prior_terminal_question.id
+                context["reassessment_trigger"] = "new_persisted_gap_evidence_or_care_field_after_prior_answer"
+        if existing is None:
             existing = OpenQuestionModel(
                 person_id=person_id,
                 question=question_text,
@@ -380,29 +420,41 @@ def persist_source_clarification_questions(
                 )
             finally:
                 manual_revision_objects.discard(id(existing))
-            existing_by_scope[scoped_key] = existing
+            existing_rows.append(existing)
+            active_rows.append(existing)
         else:
-            before_state = _open_question_state(existing)
+            before_state = existing_before or _open_question_state(existing)
             manual_revision_objects.add(id(existing))
             try:
+                if existing.question != question_text:
+                    existing.question = question_text
                 existing.evidence_ids = list(dict.fromkeys(
                     list(existing.evidence_ids or []) + assessed_evidence_ids
                 )) or None
-                if matched_gap and existing.necessity != "necessary":
+                if matched_gap:
                     existing.subject_type = subject_type
                     existing.subject_id = subject_id
-                    existing.necessity = necessity
+                    existing.necessity = "necessary"
                     existing.necessity_rationale = necessity_rationale
                     existing.priority = priority
                     existing.intended_answerer_role = "reporting_caregiver"
                 contexts = list(existing.context or [])
                 for new_context in contexts_to_add:
                     context_key = (new_context.get("source_kind"), new_context.get("source_id"))
-                    if not any(
-                        (item.get("source_kind"), item.get("source_id")) == context_key
-                        for item in contexts if isinstance(item, dict)
-                    ):
+                    matching_context = next((
+                        item for item in contexts
+                        if isinstance(item, dict)
+                        and (item.get("source_kind"), item.get("source_id")) == context_key
+                    ), None)
+                    if matching_context is None:
                         contexts.append(new_context)
+                    else:
+                        matching_context["source_record_refs"] = list(dict.fromkeys(
+                            list(matching_context.get("source_record_refs") or [])
+                            + list(new_context.get("source_record_refs") or [])
+                        ))
+                        if new_context.get("necessity_assessment"):
+                            matching_context["necessity_assessment"] = new_context["necessity_assessment"]
                 existing.context = contexts
                 if before_state != _open_question_state(existing):
                     _record_open_question_revision(
@@ -412,8 +464,8 @@ def persist_source_clarification_questions(
                 db.flush()
             finally:
                 manual_revision_objects.discard(id(existing))
+        existing_by_scope[scoped_key] = existing
         persisted.append(existing)
-
     # Reconcile the newly linked source against accepted LCR assertions and
     # explicit decision dependencies before the caller commits the source.
     # This never commits and never turns an unassessed extraction question
