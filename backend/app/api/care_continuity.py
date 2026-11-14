@@ -2805,7 +2805,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         baseline_by_id = {}
         baseline_table_available = inspector.has_table("baselines")
         baseline_columns = {column["name"] for column in inspector.get_columns("baselines")} if baseline_table_available else set()
-        if baseline_ids and {"coverage_status", "history_completeness", "is_stable"}.issubset(baseline_columns):
+        if baseline_ids and {"id", "person_id", "coverage_status", "history_completeness", "is_stable", "is_active", "superseded_by_baseline_id"}.issubset(baseline_columns):
             baseline_by_id = {
                 str(row.id): row for row in db.query(Baseline).filter(Baseline.person_id == person_id, Baseline.id.in_(baseline_ids), Baseline.is_active.is_(True), Baseline.superseded_by_baseline_id.is_(None)).all()
             }
