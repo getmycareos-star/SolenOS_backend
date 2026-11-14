@@ -3006,9 +3006,11 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
             "care_evidence_observation", "caregiver_observation",
         }:
             continue
+        # Recording time is not occurrence time. Do not manufacture a dated
+        # observation from the day a caregiver or system entered the record.
         raw_time = (
-            record.get("occurred_at") or record.get("observed_at") or record.get("event_date")
-            or record.get("source_time") or record.get("recorded_at")
+            record.get("occurred_at") or record.get("observed_at")
+            or record.get("event_date") or record.get("source_time")
         )
         if not isinstance(raw_time, str) or not raw_time.strip():
             continue
