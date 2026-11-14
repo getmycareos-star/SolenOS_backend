@@ -1979,3 +1979,76 @@ def test_appointment_brief_discloses_when_lcr_fact_history_exceeds_its_projectio
         "retrieval_complete": False,
         "record_limit": 40,
     }
+
+def test_appointment_workspace_is_marked_stale_after_person_care_state_changes(client):
+    test_client, owner, other = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={
+            "status": "preparation",
+            "change_reason": "Prepare for the next appointment",
+            "payload": {"questions": ["Review recent sleep changes"]},
+        },
+    )
+    assert created.status_code == 201, created.text
+    workspace_id = created.json()["id"]
+
+    # Simulate a later committed care-state mutation in the same person's record.
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO care_state_revisions
+                (id, person_id, target_type, target_id, revision_number, change_kind, changed_at)
+            VALUES
+                ('later-owner-revision', :person_id, 'care_events', 'later-event',
+                 1, 'created', :changed_at)
+        """), {
+            "person_id": owner["person"]["id"],
+            "changed_at": datetime.now(timezone.utc) + timedelta(minutes=1),
+        })
+
+    response = test_client.get(
+        f"/api/v1/appointment-workspaces/{workspace_id}", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    freshness = response.json()["source_freshness"]
+    assert freshness["status"] == "stale"
+    assert freshness["reason"] == "care_record_changed_after_workspace_save"
+
+
+def test_appointment_workspace_freshness_watermark_is_person_scoped(client):
+    test_client, owner, other = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={
+            "status": "preparation",
+            "change_reason": "Prepare for the next appointment",
+            "payload": {"questions": ["Review recent sleep changes"]},
+        },
+    )
+    assert created.status_code == 201, created.text
+    workspace_id = created.json()["id"]
+
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO care_state_revisions
+                (id, person_id, target_type, target_id, revision_number, change_kind, changed_at)
+            VALUES
+                ('later-other-person-revision', :person_id, 'care_events', 'other-event',
+                 1, 'created', :changed_at)
+        """), {
+            "person_id": other["person"]["id"],
+            "changed_at": datetime.now(timezone.utc) + timedelta(minutes=1),
+        })
+
+    response = test_client.get(
+        f"/api/v1/appointment-workspaces/{workspace_id}", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    freshness = response.json()["source_freshness"]
+    assert freshness["status"] == "current"
+    assert freshness["reason"] is None
+
