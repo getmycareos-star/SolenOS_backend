@@ -1042,6 +1042,56 @@ def test_lcr_orientation_uses_explicit_non_ai_greeting_fallback_after_two_invali
     finally:
         teardown_db()
 
+
+@pytest.mark.session_security
+@pytest.mark.parametrize("greeting", ["Good morning, SolenOS!", "Hey there!", "Hello, SolenOS."])
+def test_lcr_orientation_recognizes_punctuated_greeting_variants(monkeypatch, greeting):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "Greeting Variant Person")
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+        captured = {}
+
+        def fake_qwen(base, model, messages, options=None):
+            captured["prompt"] = messages[0]["content"]
+            return "Welcome to SolenOS. Share what is happening today, and we can take it from there."
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": greeting})
+        assert response.status_code == 200, response.text
+        assert "GREETING LENGTH" in captured["prompt"]
+        assert len(response.json()["reply"].split()) <= 40
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
+def test_lcr_orientation_returns_truthful_greeting_fallback_when_qwen_is_unavailable(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "Unavailable Qwen Greeting")
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def unavailable(*args, **kwargs):
+            raise RuntimeError("Qwen unavailable")
+
+        monkeypatch.setattr(main_module, "_ollama_chat", unavailable)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["ai_generated"] is False
+        assert body["provider_status"] == "unavailable_fallback"
+        assert "care story together" in body["reply"]
+        assert body["written_to_lcr"] is False
+    finally:
+        teardown_db()
+
 def test_lcr_interaction_only_classifier_includes_insults_without_response_templates():
     assert main_module._is_casual_conversation_only("Hi")
     assert main_module._is_casual_conversation_only("This thing is useless.")
