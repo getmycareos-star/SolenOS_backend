@@ -195,7 +195,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         assert record.execution_status["extraction"] == "available"
         assert record.execution_status["review"] == "completed"
         assert record.execution_status["reconciliation"] == "committed"
-        assert record.execution_status["longitudinal_retrieval"] == "verified"
+        assert record.execution_status["longitudinal_retrieval"] == "available"
         assert record.candidates["observations"][0]["observation"] == "Mum slept badly last night."
         assert record.candidates["observations"][0]["corrected_observation"] == "Mum slept poorly last night."
         assert len(record.review_history) == 2
@@ -467,6 +467,6 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
         assert analysis.execution_status["assessment"] == "available"
         assert analysis.execution_status["review"] == "required"
         assert analysis.execution_status["reconciliation"] == "completed"
-        assert analysis.execution_status["longitudinal_retrieval"] == "verified"
+        assert analysis.execution_status["longitudinal_retrieval"] == "available"
     finally:
         db.close()
