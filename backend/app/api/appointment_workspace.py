@@ -21,7 +21,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, CareAssertion
+from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.uncertainty import Contradiction, OpenQuestion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
@@ -91,7 +91,49 @@ def _evidence_ids_from_row(row) -> list[str]:
     return [str(values)] if isinstance(values, str) and values.strip() else []
 
 
-def _record_out(record: AppointmentWorkspaceRecord) -> dict:
+def _record_out(record: AppointmentWorkspaceRecord, db: Session | None = None) -> dict:
+    """Serialize a workspace and fail closed when its care context may have changed.
+
+    Workspace revisions are immutable snapshots. A later person-scoped care-state
+    revision does not prove that a referenced source changed, but it does mean the
+    preparation cannot safely be represented as current without dependency-level
+    recomputation. The conservative status prevents stale visit context from being
+    silently presented as fresh.
+    """
+    freshness = {
+        "status": "unknown",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "basis": "care_state_revision_watermark",
+        "interpretation_limit": "The workspace is an immutable caregiver-authored snapshot. Currentness cannot be confirmed when the care-state revision history is unavailable.",
+    }
+    if db is not None:
+        try:
+            if not inspect(db.get_bind()).has_table("care_state_revisions"):
+                freshness["reason"] = "care_state_revision_history_unavailable"
+            elif record.updated_at is None:
+                freshness["reason"] = "workspace_update_time_unavailable"
+            else:
+                latest = db.query(CareStateRevision.changed_at).filter(
+                    CareStateRevision.person_id == record.person_id,
+                    CareStateRevision.changed_at > record.updated_at,
+                ).order_by(CareStateRevision.changed_at.desc()).first()
+                if latest:
+                    freshness.update({
+                        "status": "stale",
+                        "latest_care_change_at": _iso(latest[0]),
+                        "reason": "care_record_changed_after_workspace_save",
+                        "interpretation_limit": "At least one care-state record changed after this workspace was saved. The workspace remains available as historical context but must be reviewed before relying on it as current.",
+                    })
+                else:
+                    freshness.update({
+                        "status": "current",
+                        "latest_care_change_at": None,
+                        "reason": None,
+                        "interpretation_limit": "No later person-scoped care-state revision was found. This watermark check does not replace exact source-dependency verification.",
+                    })
+        except Exception:
+            logger.exception("Appointment workspace freshness check failed")
+            freshness["reason"] = "care_state_freshness_check_failed"
     return {
         "id": record.id,
         "appointment_id": record.appointment_id,
@@ -100,6 +142,7 @@ def _record_out(record: AppointmentWorkspaceRecord) -> dict:
         "payload": record.payload,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
+        "source_freshness": freshness,
     }
 
 
@@ -109,7 +152,7 @@ def list_appointment_workspaces(request: Request, db: Session = Depends(get_db))
     rows = db.query(AppointmentWorkspaceRecord).filter(
         AppointmentWorkspaceRecord.person_id == person_id
     ).order_by(AppointmentWorkspaceRecord.updated_at.desc()).limit(50).all()
-    return {"items": [_record_out(row) for row in rows], "limit": 50}
+    return {"items": [_record_out(row, db) for row in rows], "limit": 50}
 
 
 @router.post("", status_code=201)
@@ -138,7 +181,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         ).first()
         if existing is not None:
             if existing.idempotency_request_sha256 == request_fingerprint:
-                return _record_out(existing)
+                return _record_out(existing, db)
             raise HTTPException(status_code=409, detail="This save key was already used for different appointment information")
 
     row = AppointmentWorkspaceRecord(
@@ -186,7 +229,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
                 AppointmentWorkspaceRecord.idempotency_key == payload.idempotency_key,
             ).first()
             if existing is not None and existing.idempotency_request_sha256 == request_fingerprint:
-                return _record_out(existing)
+                return _record_out(existing, db)
             if existing is not None:
                 raise HTTPException(status_code=409, detail="This save key was already used for different appointment information") from exc
         raise HTTPException(status_code=503, detail="Appointment workspace could not be persisted") from exc
@@ -196,7 +239,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Appointment workspace could not be persisted") from exc
-    return _record_out(row)
+    return _record_out(row, db)
 
 
 
@@ -1188,7 +1231,7 @@ def get_appointment_workspace(record_id: str, request: Request, db: Session = De
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Appointment workspace not found")
-    return _record_out(row)
+    return _record_out(row, db)
 
 
 @router.patch("/{record_id}")
@@ -1216,7 +1259,7 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
         ).first()
         if prior_revision is not None:
             if prior_revision.idempotency_request_sha256 == update_fingerprint:
-                return _record_out(row)
+                return _record_out(row, db)
             raise HTTPException(status_code=409, detail="This save key was already used for different appointment information")
 
     if row.version_number != payload.expected_version:
@@ -1276,14 +1319,14 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
                     AppointmentWorkspaceRecord.person_id == person_id,
                 ).first()
                 if current is not None:
-                    return _record_out(current)
+                    return _record_out(current, db)
             if prior_revision is not None:
                 raise HTTPException(status_code=409, detail="This save key was already used for different appointment information") from exc
         raise HTTPException(status_code=503, detail="Appointment workspace update could not be persisted") from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Appointment workspace update could not be persisted") from exc
-    return _record_out(row)
+    return _record_out(row, db)
 
 
 @router.get("/{record_id}/revisions")
