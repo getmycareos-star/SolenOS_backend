@@ -102,8 +102,17 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
                 necessity_rationale="The unresolved schedule determines the next documented care handoff.",
                 status="open",
                 priority=Priority.HIGH,
+                intended_answerer_role="reporting_caregiver",
                 evidence_ids=[evidence.id],
-                context=[{"decision_dependency": "The next care handoff cannot identify the active schedule without this answer."}],
+                context=[{
+                    "source_kind": "caregiver_report",
+                    "source_id": evidence.id,
+                    "necessity_assessment": {
+                        "necessity_rationale": "The unresolved schedule determines the next documented care handoff.",
+                        "decision_dependency": "The next care handoff cannot identify the active schedule without this answer.",
+                        "evidence_ids": [evidence.id],
+                    },
+                }],
             ),
             OpenQuestion(
                 id="notify-invalid-necessity-question",
