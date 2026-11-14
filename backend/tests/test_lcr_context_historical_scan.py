@@ -123,6 +123,24 @@ def _open_questions_schema(engine):
     metadata.create_all(engine)
     return questions
 
+def _open_question_answer_events_schema(engine):
+    metadata = MetaData()
+    events = Table(
+        "open_question_answer_events",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("question_id", String, nullable=False),
+        Column("answer", String),
+        Column("answer_provenance", String),
+        Column("evidence_ids", String),
+        Column("answer_version", String),
+        Column("answered_by_caregiver_id", String),
+        Column("created_at", DateTime),
+    )
+    metadata.create_all(engine)
+    return events
+
 def test_query_retrieval_finds_older_answered_question_over_newer_related_history():
     _load_source_schema.cache_clear()
     engine = create_engine("sqlite:///:memory:")
