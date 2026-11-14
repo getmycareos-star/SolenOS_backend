@@ -139,9 +139,9 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
         for item in records
         if item.get("source") == "evidence_observations" and item.get("supersedes_observation_id")
     } | {
-        str(item.get("superseded_by_fact_id"))
+        str(item.get("id"))
         for item in records
-        if item.get("source") == "facts" and item.get("superseded_by_fact_id")
+        if item.get("source") == "facts" and item.get("superseded_by_fact_id") and item.get("id")
     }
     eligible = []
     for item in records:
