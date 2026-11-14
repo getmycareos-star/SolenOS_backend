@@ -4871,8 +4871,8 @@ def _care_history_reply_covers_requested_topics(
     detail_stopwords = _CARE_HISTORY_STOPWORDS | {
         "mum", "her", "his", "she", "he", "they", "was", "were", "is", "are",
         "a", "an", "to", "of", "at", "on", "in", "some", "though", "now",
-        "last", "this", "today", "more", "little", "seemed", "morning",
-        "evening", "night", "poor", "poorly",
+        "last", "this", "today", "little", "seemed", "morning",
+        "evening", "night",
     }
     source_details: dict[str, set[str]] = {label: set() for label, _ in topics}
     for line in context_lines:
