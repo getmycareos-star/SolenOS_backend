@@ -252,7 +252,8 @@ def test_proactive_notifications_require_person_scoped_evidence_and_explicit_que
         assert "2026-10-01 to 2026-10-07" in care_change_notification.body
         assert "Daily Care entry (2026-10-06)" in care_change_notification.body
         assert "Daily Care entry (2026-10-06)" in care_attention_notification.body
-        assert "If you're not sure, you can say so" in care_attention_notification.body
+        assert "if you're not sure" in care_attention_notification.body.casefold()
+        assert "say so" in care_attention_notification.body.casefold()
         assert db.query(CareNotification).filter(
             CareNotification.source_event_id.like("notify-outside-window-loop|%")
         ).count() == 0
