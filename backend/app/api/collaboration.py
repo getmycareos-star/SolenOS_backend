@@ -4747,6 +4747,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     source_freshness_assessment_ids: list[str] = []
     freshness_source_status = "not_retrieved"
     lcr_context_coverage: dict = {"status": "not_retrieved_for_emergency"}
+    # Emergency replies intentionally bypass retrieval. Keep downstream source
+    # projection safe with an empty selected-source map for that path.
+    selected_ids_by_type: dict[str, list[str]] = {}
 
     if emergency:
         # A fixed emergency instruction is a safety control, not a conversational
