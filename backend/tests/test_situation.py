@@ -975,7 +975,7 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
         assert body["written_to_lcr"] is False
         prompt = captured["messages"][0]["content"]
         assert "slept poorly last night" in prompt
-        assert "Do not use canned replies" in prompt
+        assert "Respond to the latest message, not to an imagined onboarding flow" in prompt
         assert "Caregiver orientation stage (derived from returned care-domain rows): returning." in prompt
         assert "GREETING LENGTH" in prompt
         assert "RETURNING-CAREGIVER POSITIONING" in prompt
