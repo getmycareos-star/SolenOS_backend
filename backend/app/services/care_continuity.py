@@ -129,6 +129,8 @@ def has_valid_caregiver_necessity(
             for value in rationale_values
         )
         assessment_evidence_ids = nested.get("evidence_ids")
+        context_necessity = nested.get("necessity", item.get("necessity"))
+        has_necessary_assessment = context_necessity in (None, "necessary")
         # Evidence must be linked either by the source-context assessment
         # itself or by the persisted source record resolved below. Evidence
         # attached only to the question, without a source-level relationship,
@@ -269,7 +271,8 @@ def has_valid_caregiver_necessity(
             and context_evidence_ids.issubset(source_record_evidence_ids)
         )
         if (
-            has_dependency and has_source_reference and has_rationale
+            has_necessary_assessment
+            and has_dependency and has_source_reference and has_rationale
             and evidence_matches_context and source_record_exists
         ):
             return True
