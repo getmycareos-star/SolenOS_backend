@@ -301,6 +301,84 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         )
 
 
+
+def test_live_qwen_lcr_orientation_distinguishes_new_and_returning_caregivers_without_writes():
+    """Real Qwen must orient from persisted LCR state and leave both records unchanged."""
+    with TestClient(app) as client:
+        new_caregiver = _create_session(client, "Live Qwen new caregiver orientation")
+        returning_caregiver = _create_session(client, "Live Qwen returning caregiver orientation")
+        event_id = _record_daily_care(
+            client,
+            returning_caregiver,
+            "Caregiver reported that Mum woke repeatedly overnight and needed help settling again.",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            new_event_count = db.query(CareEvent).filter_by(
+                person_id=new_caregiver["person"]["id"]
+            ).count()
+            returning_event_count = db.query(CareEvent).filter_by(
+                person_id=returning_caregiver["person"]["id"]
+            ).count()
+        finally:
+            db.close()
+
+        new_response = client.post(
+            "/api/lcr/orientation",
+            headers={"Authorization": f"Bearer {new_caregiver['access_token']}"},
+            json={"raw_input": "Good morning, SolenOS!"},
+        )
+        assert new_response.status_code == 200, new_response.text
+        new_body = new_response.json()
+        assert new_body.get("ai_generated") is True, new_body
+        assert new_body.get("provider_status") == "available", new_body
+        assert new_body.get("written_to_lcr") is False, new_body
+        new_reply = new_body.get("reply", "")
+        assert 1 <= len(new_reply.split()) <= 40, new_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\\s+", new_reply.strip()) if part]) <= 2, new_reply
+        assert not re.search(
+            r"\\b(?:welcome back|your previous updates|as we discussed|i remember everything)\\b",
+            new_reply,
+            re.IGNORECASE,
+        ), new_reply
+        assert not re.search(r"\\bhow can i help\\b", new_reply, re.IGNORECASE), new_reply
+
+        returning_response = client.post(
+            "/api/lcr/orientation",
+            headers={"Authorization": f"Bearer {returning_caregiver['access_token']}"},
+            json={"raw_input": "Hi"},
+        )
+        assert returning_response.status_code == 200, returning_response.text
+        returning_body = returning_response.json()
+        assert returning_body.get("ai_generated") is True, returning_body
+        assert returning_body.get("provider_status") == "available", returning_body
+        assert returning_body.get("written_to_lcr") is False, returning_body
+        returning_reply = returning_body.get("reply", "")
+        assert 1 <= len(returning_reply.split()) <= 40, returning_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\\s+", returning_reply.strip()) if part]) <= 2, returning_reply
+        assert not re.search(
+            r"\\b(?:first time here|new caregiver|starting from scratch)\\b",
+            returning_reply,
+            re.IGNORECASE,
+        ), returning_reply
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareEvent).filter_by(
+                person_id=new_caregiver["person"]["id"]
+            ).count() == new_event_count
+            assert db.query(CareEvent).filter_by(
+                person_id=returning_caregiver["person"]["id"]
+            ).count() == returning_event_count
+            assert db.query(CareEvent).filter_by(
+                id=event_id,
+                person_id=returning_caregiver["person"]["id"],
+            ).count() == 1
+        finally:
+            db.close()
+
+
 def test_live_qwen_support_reads_shared_lcr_without_peer_document_leakage():
     """The actual Qwen support route must use canonical LCR context and stay read-only."""
     with TestClient(app) as client:
