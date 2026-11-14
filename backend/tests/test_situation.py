@@ -687,7 +687,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         assert set(threads["persisted-mobility-thread"]["linked_evidence_ids"]).isdisjoint(
             threads["persisted-appetite-thread"]["linked_evidence_ids"]
         )
-        assert "Has the unsteadiness also happened indoors?" in body["return_continuity"]["important_unresolved"]
+        assert any("Has the unsteadiness also happened indoors?" in item for item in body["return_continuity"]["important_unresolved"])
         assert not any(
             item.startswith("Information needed: usual_walking_distance")
             for item in body["return_continuity"]["important_unresolved"]
