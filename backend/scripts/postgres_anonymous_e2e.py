@@ -2294,6 +2294,7 @@ def main():
                 "subject_id": "postgres-account-continuity-routine",
                 "priority": "high",
                 "necessity": "necessary",
+                "intended_answerer_role": "reporting_caregiver",
                 "necessity_rationale": "The caregiver needs this answer to decide whether the reported evening routine change requires a follow-up.",
                 "evidence_ids": [continuity_evidence_id],
                 "context": [{
