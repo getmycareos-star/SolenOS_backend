@@ -43,7 +43,7 @@ Acceptance requires tests for each signal and a neutral control case. These dete
 
 ## Retrieval
 
-Historical question retrieval searches both the saved question and its answer, answer provenance, answerer label, and status. An answered question is evidence that the question was handled, not a new task to ask again.
+Historical question retrieval searches the saved question plus every append-only answer revision, answer provenance, answerer identity, answerer label, and status. An answered question is evidence that the question was handled, not a new task to ask again.
  behavior in this change
 
 The Companion considers a bounded candidate pool of recent care events, caregiver-reviewed assertions, appointments, and caregiver-provided evidence. Query-term relevance orders candidate records before the context budget is applied; the original ordering is the stable tie-breaker. Only the selected records are sent to Qwen and included in response source-ID metadata.
