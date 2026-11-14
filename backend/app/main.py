@@ -36,6 +36,7 @@ from app.models.appointment_workspace import AppointmentWorkspaceRecord, Appoint
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.care_continuity import (
+    explicit_caregiver_gap_assessment,
     has_caregiver_visible_answerer,
     has_valid_caregiver_necessity,
     prioritize_caregiver_questions,
@@ -777,6 +778,26 @@ def get_situation(
         .order_by(InformationGapModel.created_at.asc(), InformationGapModel.id.asc())
         .all()
     )
+
+    # Historical gaps remain visible in the care record, but only gaps with
+    # an explicit, source-backed decision dependency belong in proactive
+    # returning-caregiver questions.
+    gap_evidence_ids = list(dict.fromkeys(
+        str(value)
+        for gap in open_information_gaps
+        for value in (gap.evidence_ids or [])
+        if value
+    ))
+    valid_gap_evidence_ids = {
+        str(row[0]) for row in db.query(Evidence.id).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(gap_evidence_ids),
+        ).all()
+    } if gap_evidence_ids else set()
+    caregiver_actionable_gaps = [
+        gap for gap in open_information_gaps
+        if explicit_caregiver_gap_assessment(gap, valid_gap_evidence_ids)
+    ]
     persisted_situation_ids = {item.id for item in persisted_situations}
     relationship_rows = (
         db.query(CareRecordRelationship)
@@ -1105,7 +1126,7 @@ def get_situation(
                 ),
                 *(
                     f"Information needed: {gap.field} — {gap.description or (gap.gap_reason.value if gap.gap_reason else 'not documented')}"
-                    for gap in open_information_gaps
+                    for gap in caregiver_actionable_gaps
                 ),
             ])),
             "suppress_first_time_ux": bool(observations),
