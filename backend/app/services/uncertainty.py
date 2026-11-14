@@ -372,7 +372,8 @@ def persist_source_clarification_questions(
         if existing is None:
             prior_terminal_question = next((
                 row for row in terminal_rows
-                if row.subject_type == subject_type
+                if row.status in {"answered", "declined", "closed"}
+                and row.subject_type == subject_type
                 and row.subject_id == subject_id
                 and (
                     _clarification_question_key(row.question or "") == normalized
@@ -464,6 +465,8 @@ def persist_source_clarification_questions(
                 db.flush()
             finally:
                 manual_revision_objects.discard(id(existing))
+        if existing.status in {"open", "unresolved"} and existing not in active_rows:
+            active_rows.append(existing)
         existing_by_scope[scoped_key] = existing
         persisted.append(existing)
     # Reconcile the newly linked source against accepted LCR assertions and
