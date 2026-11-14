@@ -318,11 +318,20 @@ def review_capture_candidate(
                 db,
                 person_id,
                 caregiver_id=caregiver_id,
-                limit_per_source=1,
+                limit_per_source=50,
+            )
+            assertion_items = (
+                projection.get("sources", {}).get("assertions", {}).get("items", [])
+                if isinstance(projection.get("sources"), dict)
+                else []
+            )
+            assertion_retrieved = any(
+                isinstance(item, dict) and str(item.get("id")) == str(assertion_id)
+                for item in assertion_items
             )
             retrieval_status = (
-                "available"
-                if not projection.get("missing_required_sources")
+                "verified"
+                if assertion_retrieved and not projection.get("missing_required_sources")
                 else "unavailable"
             )
         except Exception:
