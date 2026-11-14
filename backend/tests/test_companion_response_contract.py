@@ -90,6 +90,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
             person_id=person_id,
             type="note",
             source_text="Caregiver reported a synthetic sleep observation.",
+            source_type="caregiver_report",
             uploaded_by_caregiver_id=caregiver_id,
             occurred_at=event_time,
             occurred_at_timezone="UTC",
