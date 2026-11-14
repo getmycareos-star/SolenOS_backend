@@ -750,6 +750,7 @@ def next_best_questions(
                 "question": "Can the prescribing clinician or pharmacist confirm the current instruction for this medication?",
                 "subject_type": item.subject_type,
                 "subject_id": item.subject_id,
+                "source_field": item.field,
                 "priority": "high",
                 "necessity": "necessary",
                 "necessity_rationale": (
@@ -773,6 +774,7 @@ def next_best_questions(
             candidates.append({
                 "question": f"Two different reports conflict about {item.field}. What, if anything, confirms the current situation? Neither report has been selected as correct.",
                 "subject_type": item.subject_type, "subject_id": item.subject_id,
+                "source_field": item.field,
                 "priority": "high", "necessity": "not_assessed", "necessity_rationale": "A contradiction is retained for internal reconciliation; its presence alone does not establish that caregiver input is necessary.", "reason": "An unresolved contradiction prevents a reliable current-state conclusion.",
                 "evidence_ids": item.evidence_ids or [], "source_kind": "contradiction", "source_id": item.id, "source_ids": item.source_assertion_ids or [], "_weight": 40,
             })
@@ -804,6 +806,7 @@ def next_best_questions(
             candidates.append({
                 "question": f"Can you confirm whether the reported information about {item.field} is still accurate? The record does not establish that it is current.",
                 "subject_type": item.subject_type, "subject_id": item.subject_id,
+                "source_field": item.field,
                 "priority": "medium", "necessity": "not_assessed", "necessity_rationale": "Age or an unreviewed status alone does not establish that caregiver input is necessary; monitor internally until a current care decision depends on it.", "reason": freshness["explanation"],
                 "evidence_ids": item.evidence_ids or [], "source_kind": "stale_or_unreviewed_assertion",
                 "source_id": item.id, "_weight": 30,
@@ -874,6 +877,7 @@ def next_best_questions(
             "question": question_text,
             "subject_type": str(action.subject_type or "patient"),
             "subject_id": str(action.subject_id or person_id),
+            "source_field": "current_instruction" if is_medication else str(action.action_type or "registered_action"),
             "priority": "informational",
             "necessity": "necessary",
             "necessity_rationale": rationale,
@@ -940,6 +944,7 @@ def next_best_questions(
             "question": question_text.strip()[:300],
             "subject_type": "appointment_follow_up",
             "subject_id": str(loop.id),
+            "source_field": str(assessment.get("field") or "appointment_follow_up"),
             "priority": "informational",
             "necessity": "necessary",
             "necessity_rationale": rationale.strip(),
@@ -991,6 +996,7 @@ def next_best_questions(
         candidates.append({
             "question": f"What is currently known about {item.field}?",
             "subject_type": item.subject_type, "subject_id": item.subject_id,
+            "source_field": item.field,
             "priority": priority if priority in {"critical", "high", "medium", "low", "informational"} else "informational",
             "necessity": necessity, "necessity_rationale": necessity_rationale,
             "decision_dependency": decision_dependency,
