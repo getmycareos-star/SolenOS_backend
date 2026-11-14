@@ -4745,7 +4745,7 @@ def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str
         selected.append(sentence)
         if len(selected) >= (3 if not query_terms else 2):
             break
-    return "The uploaded document says: “" + " ” ".join(selected) + "”"
+    return "The uploaded document says: “" + " ".join(selected) + "”"
 
 
 def _document_reply_contains_source_detail(reply: str, extractive_answer: str) -> bool:
