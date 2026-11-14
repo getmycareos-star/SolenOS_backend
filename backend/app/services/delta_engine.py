@@ -233,6 +233,40 @@ def _parse_model_json(content: str) -> dict[str, Any]:
     return data
 
 
+def _request_delta_json(messages: list[dict[str, str]], *, timeout: float) -> dict[str, Any]:
+    """Generate a schema-valid Delta object, retrying one malformed model response.
+
+    The retry is bounded within the request budget and never persists an incomplete
+    response. Timeouts and schema violations are not retried as formatting errors.
+    """
+    for attempt in range(2):
+        attempt_messages = list(messages)
+        attempt_timeout = min(float(timeout), 120.0) if attempt == 0 else min(float(timeout), 30.0)
+        output_budget = 384 if attempt == 0 else 512
+        if attempt:
+            attempt_messages.append({
+                "role": "user",
+                "content": (
+                    "Your previous response was incomplete or invalid JSON. "
+                    "Regenerate from the original care records. Return one complete compact JSON "
+                    "object matching the supplied schema; include every required key, use empty "
+                    "arrays when no finding is supported, and add no explanation or markdown."
+                ),
+            })
+        raw = qwen_chat(
+            attempt_messages,
+            timeout=attempt_timeout,
+            response_format=DELTA_JSON_CONTRACT,
+            options={"temperature": 0, "num_ctx": 4096, "num_predict": output_budget},
+        )
+        try:
+            return _parse_model_json(raw)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            if attempt or detail.get("code") != "delta_invalid_json":
+                raise
+    raise HTTPException(status_code=502, detail="The local model could not produce a complete Delta response; no delta was persisted.")
+
 def _normalise(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
@@ -510,18 +544,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         },
     }
     try:
-        content_json = qwen_chat(
+        result = _request_delta_json(
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             timeout=timeout,
-            response_format=DELTA_JSON_CONTRACT,
-            # Delta output is deliberately bounded. The previous 1,024-token override
-# defeated the shared gateway's CPU budget and made routine reconciliation
-# consume the full 180-second request timeout. Truncation remains fail-closed
-# because the response must pass the complete JSON schema validator.
-            options={"temperature": 0, "num_ctx": 4096, "num_predict": 384},
         )
     except HTTPException as exc:
         if exc.status_code == 504:
@@ -530,7 +558,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             raise HTTPException(status_code=503, detail="The local SolenOS model could not complete reconciliation. No fallback model was used and no delta was persisted.") from exc
         raise
 
-    result = _parse_model_json(content_json)
 
     # Medication-list mentions are not prescribing instructions. Fail closed
     # unless the quoted source itself explicitly describes the requested change.
