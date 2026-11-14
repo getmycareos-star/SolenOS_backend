@@ -116,7 +116,7 @@ def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monke
     })
     assert saved.status_code == 200, saved.text
     assert saved.json()["success"] is True
-    assert saved.json()["qwen_extraction_status"] == "unavailable"
+    assert saved.json()["qwen_extraction_status"] == "queued"
 
     projection = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
     assert projection.status_code == 200, projection.text
