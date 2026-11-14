@@ -244,6 +244,8 @@ def persist_source_clarification_questions(
     # import cycle; this service is called by Daily Capture and Documents.
     from app.services.care_continuity import (
         _open_question_state,
+        _question_has_new_grounding,
+        _question_matches_source_field,
         _record_open_question_revision,
         reassess_open_question_lifecycle,
     )
@@ -315,6 +317,7 @@ def persist_source_clarification_questions(
         source_context = {
             "source_kind": source_kind,
             "source_id": source_record_id,
+            "source_field": matched_gap[0].field if matched_gap else None,
             "source_record_refs": source_refs,
             "reason": "Suggested while reviewing saved care information. Please check the wording before relying on it.",
             "grounding_status": "source_record_linked; question wording not independently verified",
@@ -335,9 +338,11 @@ def persist_source_clarification_questions(
             contexts_to_add.append({
                 "source_kind": "information_gap",
                 "source_id": gap.id,
+                "source_field": gap.field,
                 "source_record_refs": source_refs,
                 "necessity_assessment": {
                     "status": "necessary",
+                    "necessity": "necessary",
                     "field": gap.field,
                     "necessity_rationale": necessity_rationale,
                     "decision_dependency": dependency,
