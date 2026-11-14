@@ -366,6 +366,67 @@ def test_recommended_projection_requires_an_explicit_known_answerer():
         teardown()
 
 
+def test_reworded_active_question_for_the_same_care_field_is_updated_not_duplicated():
+    setup()
+    try:
+        from app.services.care_continuity import next_best_questions
+        db = SessionLocal()
+        person = Person(id="active-topic-person", name="Active Topic Person")
+        caregiver = Caregiver(
+            id="active-topic-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        evidence = Evidence(
+            id="active-topic-evidence", person_id=person.id,
+            type="document", source_text="Current medication instruction",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        db.add_all([person, caregiver, evidence])
+        db.flush()
+        rationale = "The current medication instruction still needs professional confirmation."
+        existing = OpenQuestion(
+            id="active-topic-question", person_id=person.id,
+            question="What instruction is currently on file for this medication?",
+            subject_type="medication", subject_id="medication-1",
+            status="open", necessity="necessary", necessity_rationale=rationale,
+            intended_answerer_role="professional", evidence_ids=[evidence.id],
+            context=[{
+                "source_kind": "contradiction",
+                "source_id": "active-topic-old-conflict",
+                "source_ids": ["active-topic-old-conflict"],
+                "source_field": "current_instruction",
+                "necessity_assessment": {
+                    "necessity": "necessary",
+                    "necessity_rationale": rationale,
+                    "decision_dependency": "The family needs professional confirmation before relying on the instruction.",
+                    "evidence_ids": [evidence.id],
+                },
+            }],
+        )
+        conflict = Contradiction(
+            id="active-topic-new-conflict", person_id=person.id,
+            subject_type="medication", subject_id="medication-1",
+            field="current_instruction",
+            description="The same instruction was imported from a second source.",
+            evidence_ids=[evidence.id], source_assertion_ids=[],
+            resolution_status="unresolved",
+        )
+        db.add_all([existing, conflict])
+        db.flush()
+        next_best_questions(db, person.id, persist=True, commit=False)
+        questions = db.query(OpenQuestion).filter_by(person_id=person.id).all()
+        assert len(questions) == 1
+        assert questions[0].id == existing.id
+        assert questions[0].status == "open"
+        assert questions[0].question == "Can the prescribing clinician or pharmacist confirm the current instruction for this medication?"
+        assert {entry["source_id"] for entry in questions[0].context} == {
+            "active-topic-old-conflict", "active-topic-new-conflict",
+        }
+        db.rollback()
+        db.close()
+    finally:
+        teardown()
+
 def test_answered_question_is_not_repeated_from_a_new_source_row_for_the_same_field():
     setup()
     try:
