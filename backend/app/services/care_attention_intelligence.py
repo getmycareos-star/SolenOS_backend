@@ -49,7 +49,7 @@ def _record_ref(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
-    immediate, important, deferred = [], [], []
+    immediate, important, deferred, clarification = [], [], [], []
     for loop in open_loops:
         status = _text(loop.get("recorded_status") or loop.get("status"))
         if status in CLOSED_STATUSES or status not in OPEN_STATUSES:
@@ -82,17 +82,16 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
             else:
                 item["category"] = "needs_clarification"
                 item["priority_basis"].append("The item was postponed without a current, future review basis.")
-                important.append(item)
+                clarification.append(item)
         elif _text(loop.get("priority")) in {"high", "critical"}:
             item["category"] = "needs_clarification"
             item["priority_basis"].append("The saved priority is high, but its explicit escalation basis is missing.")
-            important.append(item)
+            clarification.append(item)
         else:
             item["category"] = "important_to_address"
             item["priority_basis"].append("An unresolved care commitment is recorded.")
             important.append(item)
-    return immediate, important, deferred
-
+    return immediate, important, deferred, clarification
 
 def _observation_value(item: dict[str, Any]) -> str:
     for key in ("observed_value", "normalized_value", "value_text", "asserted_value", "current_state", "title"):
@@ -166,9 +165,9 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
     uncertainties: list[dict[str, Any]], missing_information: list[dict[str, Any]],
     as_of: Any = None, source_coverage: dict[str, Any] | None = None) -> dict[str, Any]:
     now = _datetime(as_of) or datetime.now(timezone.utc)
-    immediate, important, deferred = _open_loop_decisions(open_loops, now)
+    immediate, important, deferred, loop_clarifications = _open_loop_decisions(open_loops, now)
     important.extend(_pattern_reviews(records, now))
-    clarification = []
+    clarification = list(loop_clarifications)
     for item in [*uncertainties, *missing_information]:
         if _text(item.get("status") or item.get("lifecycle_status")) in CLOSED_STATUSES:
             continue
