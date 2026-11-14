@@ -124,6 +124,15 @@ def _ocr_quality_marker(image: Image.Image) -> str | None:
     )
 
 
+
+def _page_count(source_text: str) -> int:
+    """Return the highest persisted page number, or zero when no page markers exist."""
+    page_numbers = [
+        int(match.group(1))
+        for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text or "")
+    ]
+    return max(page_numbers, default=0)
+
 def _unreadable_page_numbers(source_text: str) -> list[int]:
     return [
         int(match.group(1))
