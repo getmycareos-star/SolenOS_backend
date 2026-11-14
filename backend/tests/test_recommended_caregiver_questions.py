@@ -109,7 +109,7 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
         subject_id="current-plan",
         status="open",
         necessity="necessary" if necessary else "not_assessed",
-        intended_answerer_role="caregiver",
+        intended_answerer_role="reporting_caregiver",
         necessity_rationale="A recorded care decision depends on this answer." if necessary else None,
         priority=Priority(priority),
         evidence_ids=[evidence_id],
@@ -251,7 +251,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
                 question=f"What is the source-backed status for {gap_id}?",
                 subject_type="care", subject_id=gap_id, status="open",
                 necessity="necessary",
-                intended_answerer_role="caregiver",
+                intended_answerer_role="reporting_caregiver",
                 necessity_rationale="The next care decision depends on this missing detail.",
                 priority=Priority.HIGH, evidence_ids=["gap-evidence"],
                 context=[{
@@ -268,7 +268,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
             question="What is the source-backed status for the wrong subject?",
             subject_type="care", subject_id="not-the-gap-subject", status="open",
             necessity="necessary",
-            intended_answerer_role="caregiver",
+            intended_answerer_role="reporting_caregiver",
             necessity_rationale="The next care decision depends on this missing detail.",
             priority=Priority.HIGH, evidence_ids=["gap-evidence"],
             context=[{
@@ -295,7 +295,7 @@ def test_recommended_projection_reassesses_gap_lifecycle_before_showing_question
     finally:
         teardown()
 
-def test_recommended_projection_routes_questions_only_to_the_intended_caregiver():
+def test_recommended_projection_requires_an_explicit_known_answerer():
     setup()
     try:
         db = SessionLocal()
@@ -322,6 +322,7 @@ def test_recommended_projection_routes_questions_only_to_the_intended_caregiver(
         db.query(OpenQuestion).filter_by(id="unknown-answerer-question").one().intended_answerer_role = "not_known"
         db.query(OpenQuestion).filter_by(id="other-caregiver-question").one().intended_answerer_role = "other_caregiver"
         db.query(OpenQuestion).filter_by(id="care-recipient-question").one().intended_answerer_role = "person_receiving_care"
+        db.query(OpenQuestion).filter_by(id="professional-question").one().intended_answerer_label = "prescribing clinician"
         db.commit()
         db.close()
 
@@ -330,7 +331,9 @@ def test_recommended_projection_routes_questions_only_to_the_intended_caregiver(
         )
         assert response.status_code == 200, response.text
         ids = set(response.json()["eligible_question_ids"])
-        assert ids == {"other-caregiver-question"}
+        assert ids == {"professional-question", "other-caregiver-question", "care-recipient-question"}
+        assert "unknown-answerer-question" not in ids
+        assert "mislinked-evidence-question" not in ids
     finally:
         teardown()
 
@@ -411,7 +414,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 subject_id=f"benchmark-subject-{index}",
                 status="open",
                 necessity="necessary" if necessary else "not_assessed",
-                intended_answerer_role="caregiver",
+                intended_answerer_role="reporting_caregiver",
                 necessity_rationale=assessment["necessity_rationale"],
                 priority=priority,
                 evidence_ids=[evidence_id],
