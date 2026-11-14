@@ -177,6 +177,16 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def _caregiver_question_text(question):
+    prefixes = {
+        "professional": "For your care professional",
+        "other_caregiver": "For another caregiver",
+        "person_receiving_care": "Ask the person receiving care",
+        "reporting_caregiver": "Your observation",
+    }
+    prefix = prefixes.get(question.intended_answerer_role or "", "Care question")
+    return f"{prefix}: {question.question}"
+
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
 # Community is out of scope for the MVP. Enforce the suspension at the ASGI
@@ -876,13 +886,7 @@ def get_situation(
                 or (linked_claim is not None and linked_claim.subject_id == saved_situation.id)
                 or bool(question_evidence_ids & linked_evidence_ids)
             ):
-                answerer_prefix = {
-                    "professional": "For your care professional",
-                    "other_caregiver": "For another caregiver",
-                    "person_receiving_care": "Ask the person receiving care",
-                    "reporting_caregiver": "Your observation",
-                }.get(question.intended_answerer_role or "", "Care question")
-                linked_questions.append(f"{answerer_prefix}: {question.question}")
+                linked_questions.append(_caregiver_question_text(question))
         linked_conflicts = [
             {
                 "id": conflict.id,
@@ -1094,7 +1098,7 @@ def get_situation(
             "is_long_absence": False,
             "recent_relevant_changes": [],
             "important_unresolved": list(dict.fromkeys([
-                *(f"{ {"professional": "For your care professional", "other_caregiver": "For another caregiver", "person_receiving_care": "Ask the person receiving care", "reporting_caregiver": "Your observation"}.get(question.intended_answerer_role or "", "Care question") }: {question.question}" for question in open_question_rows),
+                *(_caregiver_question_text(question) for question in open_question_rows),
                 *(
                     f"Conflicting reports: {conflict.description}"
                     for conflict in unresolved_conflict_rows
