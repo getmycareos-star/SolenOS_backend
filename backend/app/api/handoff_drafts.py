@@ -1131,13 +1131,16 @@ def _is_stale(value, now: datetime, days: int = 30) -> bool:
 def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, now: datetime) -> tuple[dict, list[dict]]:
     """Read persisted Daily Care events and same-person evidence; never promote them to LCR facts."""
     try:
-        events = db.query(CareEvent).filter(
+        fetched_events = db.query(CareEvent).filter(
             CareEvent.person_id == person_id,
             CareEvent.event_type.in_(DAILY_CARE_EVENT_TYPES),
             or_(CareEvent.occurred_at >= cutoff, CareEvent.recorded_at >= cutoff, CareEvent.updated_at >= cutoff),
-        ).order_by(CareEvent.recorded_at.desc().nullslast()).limit(MAX_ROWS_PER_SOURCE).all()
+        ).order_by(CareEvent.recorded_at.desc().nullslast()).limit(MAX_ROWS_PER_SOURCE + 1).all()
+        daily_has_more = len(fetched_events) > MAX_ROWS_PER_SOURCE
+        events = fetched_events[:MAX_ROWS_PER_SOURCE]
         if not events:
-            return {"status": "empty", "label": "Daily Care observations", "count": 0}, []
+            return {"status": "empty", "label": "Daily Care observations", "count": 0,
+                    "returned_count": 0, "has_more": False, "retrieval_complete": True}, []
         evidence_ids = sorted({
             str(evidence_id)
             for event in events
@@ -1244,6 +1247,8 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
             })
         return {
             "status": "available", "label": "Daily Care observations", "count": len(events),
+            "returned_count": len(events), "has_more": daily_has_more,
+            "retrieval_complete": not daily_has_more,
             "reason": "some_persisted_records_have_no_text" if no_text_count else None,
         }, output
     except Exception:
@@ -1254,12 +1259,15 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
 def _verified_document_source(db: Session, person_id: str, caregiver_id: str) -> tuple[dict, list[dict]]:
     """Read verified original uploads and persisted extraction text as separate provenance nodes."""
     try:
-        documents = db.query(Evidence).filter(
+        fetched_documents = db.query(Evidence).filter(
             Evidence.person_id == person_id,
             Evidence.type == "document",
-        ).order_by(Evidence.uploaded_at.desc()).limit(MAX_ROWS_PER_SOURCE).all()
+        ).order_by(Evidence.uploaded_at.desc()).limit(MAX_ROWS_PER_SOURCE + 1).all()
+        documents_has_more = len(fetched_documents) > MAX_ROWS_PER_SOURCE
+        documents = fetched_documents[:MAX_ROWS_PER_SOURCE]
         if not documents:
-            return {"status": "empty", "label": "Uploaded documents and extracted text", "count": 0}, []
+            return {"status": "empty", "label": "Uploaded documents and extracted text", "count": 0,
+                    "returned_count": 0, "has_more": False, "retrieval_complete": True}, []
         output = []
         missing_originals = 0
         unavailable_extractions = 0
@@ -1412,7 +1420,11 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             })
         status = "available" if output else "unavailable" if missing_originals else "empty"
         reason = "original_upload_bytes_unavailable" if missing_originals and not output else "some_original_uploads_unavailable" if missing_originals else "some_documents_not_extracted_or_extraction_failed" if unavailable_extractions else None
-        result = {"status": status, "label": "Uploaded documents and extracted text", "count": len(output)}
+        result = {
+            "status": status, "label": "Uploaded documents and extracted text",
+            "count": len(output), "returned_count": len(documents),
+            "has_more": documents_has_more, "retrieval_complete": not documents_has_more,
+        }
         if reason:
             result["reason"] = reason
         return result, output
@@ -1694,8 +1706,13 @@ def prepare_handoff_draft(
                 else:
                     query = query.where(in_window)
                 query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
-            query = query.limit(MAX_ROWS_PER_SOURCE)
-            rows = [dict(row) for row in db.execute(query).mappings().all()]
+            # Fetch one extra row so a capped source projection is never
+            # represented as a complete history.
+            fetched_rows = [dict(row) for row in db.execute(
+                query.limit(MAX_ROWS_PER_SOURCE + 1)
+            ).mappings().all()]
+            source_has_more = len(fetched_rows) > MAX_ROWS_PER_SOURCE
+            rows = fetched_rows[:MAX_ROWS_PER_SOURCE]
             if rows and spec.get("validate_necessity"):
                 # Handoffs are caregiver-facing work products. Do not copy
                 # an unassessed or malformed question into the handoff merely
@@ -1717,6 +1734,9 @@ def prepare_handoff_draft(
                 "status": source_status,
                 "label": spec["label"],
                 "count": len(rows),
+                "returned_count": len(rows),
+                "has_more": source_has_more,
+                "retrieval_complete": not source_has_more,
             }
             for row in rows:
                 source_id = row.get("id")
@@ -1895,6 +1915,17 @@ def prepare_handoff_draft(
         for name, info in statuses.items()
         if info["status"] in {"unavailable", "not_authorized", "failed"}
     ]
+    partial_sources = [
+        {"source": name, "returned_count": info.get("returned_count", info.get("count", 0))}
+        for name, info in statuses.items()
+        if info.get("has_more") is True
+    ]
+    gaps.extend({
+        "source": item["source"],
+        "status": "partial",
+        "reason": "source_projection_reached_40_record_limit",
+        "returned_count": item["returned_count"],
+    } for item in partial_sources)
     # Persist the complete source snapshot and initial generated revision in the
     # same transaction as its audit event. A request ID makes network retries safe.
     request_id = (request.headers.get("x-request-id") or "").strip() or str(uuid.uuid4())
@@ -1905,6 +1936,8 @@ def prepare_handoff_draft(
         "source_records": records,
         "evidence_lineage": evidence_lineage,
         "limitations": gaps,
+        "retrieval_complete": not gaps,
+        "partial_sources": partial_sources,
         "window": {"days": payload.window_days, "from": cutoff.isoformat(), "to": now.isoformat()},
     }
     structured_content = {
