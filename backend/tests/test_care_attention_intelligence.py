@@ -391,3 +391,20 @@ def test_rejected_or_not_meaningful_persisted_changes_are_not_surfaced():
     ])
     assert important == []
     assert clarification == []
+
+
+
+def test_persisted_change_accepts_linked_care_event_ids_as_source_records():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-event-source", "significance_verdict": "meaningful_candidate",
+        "attention_candidate": True, "baseline_coverage_status": "covered",
+        "current_coverage_status": "covered", "baseline_is_stable": True,
+        "baseline_history_completeness": "complete",
+        "records": [{"source": "events", "record_id": "care-event-1", "evidence_ids": []}],
+    }])
+    assert len(important) == 1
+    assert important[0]["source_record_ids"] == ["care-event-1"]
+    assert important[0]["evidence_ids"] == []
+    assert clarification == []

@@ -280,13 +280,17 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             for record in records if isinstance(record, dict)
             for evidence_id in (record.get("evidence_ids") or []) if evidence_id
         })
+        source_record_ids = sorted({
+            str(record.get("record_id")) for record in records
+            if isinstance(record, dict) and record.get("record_id")
+        })
         coverage_complete = (
             change.get("baseline_coverage_status") == "covered"
             and change.get("current_coverage_status") == "covered"
             and change.get("baseline_is_stable") is True
             and change.get("baseline_history_completeness") == "complete"
         )
-        source_complete = bool(records) and bool(evidence_ids)
+        source_complete = bool(records) and bool(source_record_ids)
         item = {
             "id": str(change.get("id") or ""),
             "source": "persisted_change",
@@ -299,6 +303,7 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "category": "important_to_address",
             "reason": str(change.get("explanation") or "A saved change assessment needs review.")[:2400],
             "evidence_ids": evidence_ids,
+            "source_record_ids": source_record_ids,
             "records": records,
             "record_count": len(records),
             "baseline_coverage_status": change.get("baseline_coverage_status"),
