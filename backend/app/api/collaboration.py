@@ -4756,6 +4756,110 @@ def _document_reply_contains_source_detail(reply: str, extractive_answer: str) -
     return len(meaningful & reply_terms) >= 3
 
 
+_CARE_HISTORY_TOPIC_GROUPS = {
+    "sleep": {"sleep", "slept", "sleeping", "rest", "rested", "woke", "waking", "overnight", "night"},
+    "lunch": {"lunch", "midday"},
+    "dinner": {"dinner", "supper", "evening"},
+    "breakfast": {"breakfast"},
+    "appetite": {"appetite", "ate", "eating", "food", "meal", "snack"},
+    "mobility": {"mobility", "walk", "walked", "walking", "walker", "frame", "transfer", "transfers"},
+    "mood": {"mood", "calm", "calmer", "agitated", "unsettled", "upset"},
+    "hydration": {"water", "drink", "drank", "drinking", "hydration", "fluid", "fluids"},
+    "medication": {"medication", "medicine", "dose", "tablet", "pill", "prescribed"},
+}
+_CARE_HISTORY_INTENT_PATTERN = re.compile(
+    r"\bwhat\s+(?:has|have|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
+    r"(?:recorded|logged|saved|noted)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b",
+    re.IGNORECASE,
+)
+_CARE_HISTORY_STOPWORDS = {
+    "what", "has", "have", "did", "the", "caregiver", "i", "we", "you", "recorded",
+    "logged", "saved", "noted", "about", "and", "or", "does", "record", "say",
+    "show", "tell", "me", "my", "us", "our", "from", "for", "with", "today",
+}
+
+
+def _care_history_requested_topics(user_text: str) -> list[tuple[str, set[str]]]:
+    tokens = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold()))
+    return [
+        (label, variants)
+        for label, variants in _CARE_HISTORY_TOPIC_GROUPS.items()
+        if tokens & variants
+    ]
+
+
+def _care_history_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
+    """Return only caregiver-authored event descriptions relevant to a history question."""
+    if not _CARE_HISTORY_INTENT_PATTERN.search(user_text or ""):
+        return None
+
+    topics = _care_history_requested_topics(user_text)
+    candidates: list[tuple[int, int, str, set[str]]] = []
+    order = 0
+    for line in context_lines:
+        brace = (line or "").find("{")
+        if brace < 0:
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("source_type") != "events":
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+        description = record.get("description")
+        if not isinstance(description, str) or not description.strip():
+            continue
+        terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
+        matched_topics = {
+            label for label, variants in topics if terms & variants
+        }
+        if topics and not matched_topics:
+            continue
+        candidates.append((
+            len(matched_topics),
+            order,
+            re.sub(r"\s+", " ", description).strip(),
+            matched_topics,
+        ))
+        order += 1
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    selected: list[tuple[int, int, str, set[str]]] = []
+    covered_topics: set[str] = set()
+    for candidate in candidates:
+        if not topics or candidate[3] - covered_topics:
+            selected.append(candidate)
+            covered_topics.update(candidate[3])
+        if topics and len(covered_topics) == len(topics):
+            break
+        if not topics and len(selected) >= 3:
+            break
+
+    if topics and len(covered_topics) < len(topics):
+        return None
+    selected.sort(key=lambda item: item[1])
+    descriptions = [item[2] for item in selected[:3]]
+    if not descriptions:
+        return None
+    answer = "The saved notes say: " + "; ".join(f"“{description}”" for description in descriptions)
+    word_count = len(re.findall(r"[a-z0-9']+", answer.casefold()))
+    if word_count > 55:
+        return None
+    return answer
+
+
+def _care_history_reply_covers_requested_topics(user_text: str, reply: str) -> bool:
+    topics = _care_history_requested_topics(user_text)
+    if not topics:
+        return True
+    reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
+    return all(bool(reply_terms & variants) for _, variants in topics)
+
+
 def _caregiver_interaction_guidance(user_text: str) -> str:
     """Return deterministic response constraints for caregiver capacity and repair signals.
 
@@ -5986,6 +6090,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             document_extractive_answer
             and not _document_reply_contains_source_detail(reply, document_extractive_answer)
         )
+        care_history_extractive_fallback_used = False
+        care_history_extractive_answer = _care_history_extractive_answer(
+            user_text,
+            included_model_context_lines,
+        )
+        if (
+            care_history_extractive_answer
+            and not _care_history_reply_covers_requested_topics(user_text, reply)
+            and not (unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
+        ):
+            reply = care_history_extractive_answer
+            care_history_extractive_fallback_used = True
         if document_extractive_fallback_used:
             # The model received the verified extraction but failed to use it.
             # Prefer a short, exact source excerpt over a generic or unsupported
@@ -6171,6 +6287,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 if not invalid_reply:
                     break
+        if (
+            invalid_reply
+            and care_history_extractive_answer
+            and not (unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
+        ):
+            history_fallback_invalid = (
+                _companion_message_needs_revision(care_history_extractive_answer)
+                or _contains_unrequested_saba(care_history_extractive_answer, validation_source)
+                or _contains_unsupported_care_claim(care_history_extractive_answer, validation_source)
+                or _contains_unsupported_operational_claim(care_history_extractive_answer, validation_source, source_context)
+                or _contains_unsupported_record_reference(care_history_extractive_answer, validation_source)
+                or _caregiver_response_needs_revision(user_text, care_history_extractive_answer)
+            )
+            if not history_fallback_invalid:
+                reply = care_history_extractive_answer
+                invalid_reply = False
+                care_history_extractive_fallback_used = True
         if invalid_reply:
             failed_rules = []
             if not isinstance(reply, str) or not reply.strip():
@@ -6215,6 +6348,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         elif document_extractive_fallback_used:
             verdict = "passed"
             safety_note = "Quoted from the uploaded document. The extracted text has not been independently verified."
+            ai_generated = False
+        elif care_history_extractive_fallback_used:
+            verdict = "passed"
+            safety_note = "Quoted from saved caregiver entries. This is not a clinical interpretation."
             ai_generated = False
         else:
             verdict = "passed"
