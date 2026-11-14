@@ -673,6 +673,16 @@ def test_one_hundred_case_question_gate_benchmark():
             "predicted_eligible": len(predicted_eligible),
             "precision": precision,
             "recall": recall,
+            "answerer_roles_preserved": {
+                item["intended_answerer_role"] for item in listed.json()
+            } == {
+                "professional", "other_caregiver",
+                "person_receiving_care", "reporting_caregiver",
+            },
+            "unknown_answerer_suppressed": all(
+                item["intended_answerer_role"] != "not_known"
+                for item in listed.json()
+            ),
             "critical_preserved": result["critical_count"],
             "ordinary_initial_limit": result["ordinary_visible_count"],
             "duplicate_suppressed": "benchmark-question-duplicate" not in result["eligible_question_ids"],
