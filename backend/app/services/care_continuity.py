@@ -1043,8 +1043,57 @@ def next_best_questions(
             "reason": item.description or f"The record identifies {item.field} as missing or incomplete.",
             "evidence_ids": item.evidence_ids or [], "source_kind": "information_gap", "source_id": item.id,
             "intended_answerer_role": "reporting_caregiver" if explicit_assessment else "not_known",
+            "expected_by": item.expected_by.isoformat() if item.expected_by else None,
             "_weight": _priority_weight(priority),
         })
+
+    def candidate_caregiver_guidance(candidate: Dict[str, Any]) -> dict:
+        """Describe why and when a necessary question is useful without inventing urgency."""
+        source_kind = str(candidate.get("source_kind") or "")
+        answerer_role = str(candidate.get("intended_answerer_role") or "not_known")
+        if source_kind == "registered_action":
+            if answerer_role == "professional":
+                return {
+                    "timing": "before_relying_on_instruction",
+                    "timing_label": "Before relying on this instruction",
+                    "explanation": "The recorded medication instruction is waiting for confirmation from a prescribing professional.",
+                }
+            return {
+                "timing": "before_next_step",
+                "timing_label": "Before this step proceeds",
+                "explanation": "A saved care step is waiting for confirmation. The record does not identify a person who can answer yet.",
+            }
+        if source_kind == "appointment_workspace_follow_up":
+            return {
+                "timing": "before_next_step",
+                "timing_label": "Before this follow-up proceeds",
+                "explanation": "The saved appointment follow-up is blocked until this detail is confirmed.",
+            }
+        if source_kind == "contradiction" and answerer_role == "professional":
+            return {
+                "timing": "before_relying_on_instruction",
+                "timing_label": "Before relying on this instruction",
+                "explanation": "The saved records disagree about the current medication instruction. A prescribing professional needs to confirm it.",
+            }
+        if source_kind == "information_gap":
+            target_at = candidate.get("expected_by")
+            if target_at:
+                return {
+                    "timing": "recorded_target_date",
+                    "timing_label": "A target date is recorded",
+                    "target_at": target_at,
+                    "explanation": "The care record includes a target date for clarifying this detail.",
+                }
+            return {
+                "timing": "no_deadline_recorded",
+                "timing_label": "No deadline is recorded",
+                "explanation": "The record links this missing detail to a care decision, but does not record when it needs an answer.",
+            }
+        return {
+            "timing": "not_established",
+            "timing_label": "Timing not established",
+            "explanation": "The saved record does not establish when this detail needs an answer.",
+        }
 
     def candidate_source_context(candidate: Dict[str, Any]) -> dict:
         return {
@@ -1053,6 +1102,7 @@ def next_best_questions(
             "source_field": candidate.get("source_field"),
             "source_ids": list(candidate.get("source_ids") or [candidate["source_id"]]),
             "reason": candidate["reason"],
+            "caregiver_guidance": candidate_caregiver_guidance(candidate),
             "necessity_assessment": {
                 "necessity": candidate.get("necessity", "not_assessed"),
                 "necessity_rationale": candidate.get("necessity_rationale"),

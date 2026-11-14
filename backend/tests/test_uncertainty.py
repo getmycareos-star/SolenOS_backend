@@ -4862,6 +4862,24 @@ def test_blocked_medication_and_appointment_actions_create_scoped_necessary_ques
         assert len(questions) == 2
         medication_question = next(item for item in questions if item.intended_answerer_role == "professional")
         assert "prescribing clinician" in medication_question.question
+        medication_context = next(
+            item for item in medication_question.context
+            if item.get("source_kind") == "registered_action"
+        )
+        assert medication_context["caregiver_guidance"] == {
+            "timing": "before_relying_on_instruction",
+            "timing_label": "Before relying on this instruction",
+            "explanation": "The recorded medication instruction is waiting for confirmation from a prescribing professional.",
+        }
+        appointment_question = next(
+            item for item in questions
+            if item.intended_answerer_role == "not_known"
+        )
+        appointment_context = next(
+            item for item in appointment_question.context
+            if item.get("source_kind") == "registered_action"
+        )
+        assert appointment_context["caregiver_guidance"]["timing"] == "before_next_step"
         assert has_valid_caregiver_necessity(medication_question, db, person.id)
         assert not db.query(OpenQuestion).filter(
             OpenQuestion.person_id == other_person.id
