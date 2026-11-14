@@ -433,6 +433,19 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             item for item in source_snapshot.get("limitations", [])
             if item.get("source") in included_source_keys
         ]
+        partial_sources = [
+            {
+                "source": str(item.get("source")),
+                "returned_count": int(item.get("returned_count") or 0),
+            }
+            for item in source_limitations
+            if item.get("status") == "partial"
+        ]
+        unavailable_scope_sources = [
+            key for key, value in source_coverage.items()
+            if value.get("status") in {"unavailable", "failed"}
+        ]
+        retrieval_complete = not partial_sources and not unavailable_scope_sources
         source_references = [{
             "source_ref": item.get("source_ref"),
             "epistemic_status": item.get("epistemic_status"),
@@ -451,6 +464,8 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             "sections": summary_sections,
             "source_coverage": source_coverage,
             "limitations": source_limitations,
+            "retrieval_complete": retrieval_complete,
+            "partial_sources": partial_sources,
             "source_references": source_references,
             "source_record_ids": source_record_ids,
             "source_record_tables": validated_source_records,
