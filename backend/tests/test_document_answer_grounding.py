@@ -64,6 +64,24 @@ def test_document_question_does_not_invent_an_answer_when_extraction_has_no_matc
     )
 
 
+def test_broad_document_question_returns_a_short_verified_excerpt():
+    context = [
+        _document_line(
+            "Mary ate half of her breakfast today. "
+            "Mary woke twice overnight. "
+            "Mary walked to the kitchen using her walking frame. "
+            "Mary rested after lunch."
+        )
+    ]
+
+    answer = _document_extractive_answer("What does the uploaded document say?", context)
+
+    assert answer == (
+        "The uploaded document says: “Mary ate half of her breakfast today. ” "
+        "“Mary woke twice overnight. ” “Mary walked to the kitchen using her walking frame.”"
+    )
+
+
 def test_document_question_fails_closed_when_no_verified_extraction_was_supplied():
     answer = _document_extractive_answer(
         "What does the uploaded document say about walking?",
