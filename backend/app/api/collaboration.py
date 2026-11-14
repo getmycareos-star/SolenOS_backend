@@ -4721,7 +4721,10 @@ def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str
         for sentence in sentences:
             terms = set(re.findall(r"[a-z0-9']{3,}", sentence.casefold()))
             overlap = query_terms & terms
-            score = len(overlap)
+            # A broad "what does the document say?" request has no useful
+            # query terms. In that case return a short source excerpt rather
+            # than incorrectly claiming that the document has no answer.
+            score = len(overlap) if query_terms else 1
             if score:
                 candidates.append((score, order, sentence[:420]))
             order += 1
