@@ -2078,7 +2078,7 @@ _CONTEXT_STOPWORDS = {
 
 
 _CONTEXT_SYNONYM_GROUPS = (
-    {"sleep", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
+    {"sleep", "slept", "sleeping", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
     {"fall", "fell", "fallen", "slipped", "slip", "tumbled"},
     {"appointment", "visit", "clinic", "consultation", "doctor", "nurse"},
     {"medication", "medicine", "medicines", "pill", "pills", "dose", "doses", "drug"},
