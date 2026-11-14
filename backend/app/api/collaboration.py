@@ -4640,6 +4640,26 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     return False
 
 
+def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) -> str:
+    """Prevent a bounded or incomplete LCR projection from being described as absence."""
+    retrieval_incomplete = (
+        not bool(coverage.get("retrieval_projection_complete"))
+        or bool(coverage.get("page_limit_reached"))
+        or bool(context_truncated)
+    )
+    if retrieval_incomplete:
+        return (
+            "Retrieval is incomplete or the prompt had to omit records. If the supplied records do not answer, "
+            "say you cannot confirm from the records retrieved for this response; do not say the information is "
+            "not recorded, absent, or never happened. Make clear that additional saved history may need checking. "
+            "Never describe this result as the complete care journey. "
+        )
+    return (
+        "If the supplied records do not answer, say the information is not present in the retrieved care record; "
+        "do not infer that the event did not occur. "
+    )
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -5532,20 +5552,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
         lcr_context_coverage["prompt_context_budget_chars"] = 16000
-        retrieval_incomplete = (
-            not bool(lcr_context_coverage.get("retrieval_projection_complete"))
-            or bool(lcr_context_coverage.get("page_limit_reached"))
-            or context_truncated
-        )
-        missing_context_instruction = (
-            "Retrieval is incomplete or the prompt had to omit records. If the supplied records do not answer, "
-            "say you cannot confirm from the records retrieved for this response; do not say the information is "
-            "not recorded, absent, or never happened. Make clear that additional saved history may need checking. "
-            "Never describe this result as the complete care journey. "
-            if retrieval_incomplete else
-            "If the supplied records do not answer, say the information is not present in the retrieved care record; "
-            "do not infer that the event did not occur. "
-        )
+        missing_context_instruction = _lcr_missing_context_instruction(lcr_context_coverage, context_truncated)
         model_messages.append({
             "role": "user",
             "content": (
