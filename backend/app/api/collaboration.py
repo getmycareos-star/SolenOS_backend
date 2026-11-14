@@ -3060,6 +3060,28 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
 
 
 
+def _apply_trend_retrieval_guard(
+    assessment: dict | None,
+    coverage: dict,
+    *,
+    context_truncated: bool,
+) -> dict | None:
+    """A trend is not supportable when its source scan or supplied context is partial."""
+    if assessment is None:
+        return None
+    result = dict(assessment)
+    retrieval_complete = bool(
+        coverage.get("retrieval_scan_complete") is True
+        and coverage.get("retrieval_projection_complete") is True
+        and not coverage.get("page_limit_reached", False)
+        and not context_truncated
+    )
+    result["retrieval_complete"] = retrieval_complete
+    result["prompt_context_complete"] = not context_truncated
+    result["sufficient"] = bool(result.get("sufficient") and retrieval_complete)
+    return result
+
+
 _MEASUREMENT_REQUESTS = (
     (
         re.compile(r"\b(?:blood\s+pressure|bp)\b", re.IGNORECASE),
@@ -5577,18 +5599,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             context_chars,
             context_truncated,
         ) = _fit_model_context_lines_across_sources(model_context_lines, 16000)
-        if trend_assessment is not None:
-            trend_retrieval_complete = bool(
-                lcr_context_coverage.get("retrieval_scan_complete") is True
-                and lcr_context_coverage.get("retrieval_projection_complete") is True
-                and not lcr_context_coverage.get("page_limit_reached", False)
-                and not context_truncated
-            )
-            trend_assessment["retrieval_complete"] = trend_retrieval_complete
-            trend_assessment["prompt_context_complete"] = not context_truncated
-            trend_assessment["sufficient"] = bool(
-                trend_assessment.get("sufficient") and trend_retrieval_complete
-            )
+        trend_assessment = _apply_trend_retrieval_guard(
+            trend_assessment,
+            lcr_context_coverage,
+            context_truncated=context_truncated,
+        )
         prompt_source_counts: dict[str, int] = {}
         for selected_line in included_model_context_lines:
             brace = (selected_line or "").find("{")
