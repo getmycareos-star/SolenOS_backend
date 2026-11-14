@@ -998,6 +998,7 @@ def next_best_questions(
         key = (item["question"], item["subject_type"], item["subject_id"])
         if key not in deduplicated:
             item["source_ids"] = item.get("source_ids") or [item["source_id"]]
+            item["_source_evidence_ids"] = list(item.get("evidence_ids") or [])
             deduplicated[key] = item
             continue
         prior = deduplicated[key]
@@ -1013,6 +1014,7 @@ def next_best_questions(
             prior["decision_dependency"] = item.get("decision_dependency")
             prior["source_kind"] = item.get("source_kind")
             prior["source_id"] = item.get("source_id")
+            prior["_source_evidence_ids"] = list(item.get("evidence_ids") or [])
             prior["intended_answerer_role"] = item.get("intended_answerer_role")
             prior["reason"] = item.get("reason")
         elif item_is_necessary == prior_is_necessary and item["_weight"] > prior["_weight"]:
@@ -1020,6 +1022,7 @@ def next_best_questions(
             # and keep its answerer attached to that exact source.
             prior["source_kind"] = item.get("source_kind")
             prior["source_id"] = item.get("source_id")
+            prior["_source_evidence_ids"] = list(item.get("evidence_ids") or [])
             prior["intended_answerer_role"] = item.get("intended_answerer_role")
             prior["reason"] = item.get("reason")
         if item["_weight"] > prior["_weight"]:
@@ -1029,7 +1032,10 @@ def next_best_questions(
     candidates.sort(key=lambda item: (-item["_weight"], item["question"].casefold(), item["source_id"]))
     output = []
     for item in candidates[:50]:
-        clean = {key: value for key, value in item.items() if key != "_weight"}
+        clean = {
+            key: value for key, value in item.items()
+            if key not in {"_weight", "_source_evidence_ids"}
+        }
         persisted_id = None
         # Candidate generation is internal intelligence, not a caregiver request.
         # Persist only after a separate, explicit necessity assessment has marked it necessary.
@@ -1094,7 +1100,7 @@ def next_best_questions(
                     "necessity": clean.get("necessity", "not_assessed"),
                     "necessity_rationale": clean.get("necessity_rationale"),
                     "decision_dependency": clean.get("decision_dependency"),
-                    "evidence_ids": list(clean.get("evidence_ids") or []),
+                    "evidence_ids": list(item.get("_source_evidence_ids") or []),
                 },
             }
             if prior_terminal_question is not None:
