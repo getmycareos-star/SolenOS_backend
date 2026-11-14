@@ -388,7 +388,13 @@ def _epistemic_context(db: Session, person_id: str, subject_type: str, subject_i
         "contradictions": [{"id": c.id, "field": c.field, "description": c.description,
                             "evidence_ids": c.evidence_ids or [], "resolution_status": c.resolution_status} for c in contradictions],
         "open_gaps": [{"id": g.id, "field": g.field, "gap_reason": g.gap_reason.value if g.gap_reason else None} for g in gaps],
-        "open_questions": [{"id": q.id, "question": q.question, "priority": q.priority.value if q.priority else None} for q in questions],
+        "open_questions": [{
+            "id": q.id,
+            "question": q.question,
+            "priority": q.priority.value if q.priority else None,
+            "intended_answerer_role": q.intended_answerer_role or "not_known",
+            "intended_answerer_label": q.intended_answerer_label,
+        } for q in questions],
     }
 
 
