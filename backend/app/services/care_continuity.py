@@ -161,6 +161,8 @@ def has_valid_caregiver_necessity(
                         Evidence.person_id == scoped_person_id,
                     ).first()
                 )
+                if source_record_exists:
+                    source_record_evidence_ids.add(source_id)
             elif source_kind in {"daily_capture_extraction", "document_extraction", "caregiver_report"}:
                 source_refs = item.get("source_record_refs")
                 normalized_refs = [
@@ -256,7 +258,9 @@ def has_valid_caregiver_necessity(
                             source_record_evidence_ids.update(str(value) for value in (assessment.get("evidence_ids") or []) if value)
                         source_record_evidence_ids.update(str(value) for value in (evidence_item.get("evidence_ids") or []) if value)
         evidence_matches_context = bool(
-            (context_evidence_ids | source_record_evidence_ids).intersection(evidence_ids)
+            context_evidence_ids
+            and context_evidence_ids.issubset(set(evidence_ids))
+            and context_evidence_ids.issubset(source_record_evidence_ids)
         )
         if (
             has_dependency and has_source_reference and has_rationale
