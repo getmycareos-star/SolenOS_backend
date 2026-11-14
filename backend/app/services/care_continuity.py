@@ -161,7 +161,7 @@ def has_valid_caregiver_necessity(
                         Evidence.person_id == scoped_person_id,
                     ).first()
                 )
-            elif source_kind in {"daily_capture_extraction", "document_extraction"}:
+            elif source_kind in {"daily_capture_extraction", "document_extraction", "caregiver_report"}:
                 source_refs = item.get("source_record_refs")
                 normalized_refs = [
                     source_ref for source_ref in source_refs
