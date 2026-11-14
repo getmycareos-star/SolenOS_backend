@@ -460,25 +460,37 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
             [item for peer in conflicts for item in (peer.evidence_ids or [])]
             + list(payload.evidence_ids or [])
         ))
-        # A single timestamp does not prove that two assertions describe
-        # different moments. Qualify only when at least two comparable source
-        # time values are present and actually differ. A timestamp cannot be
-        # compared safely with free-text time wording.
-        observed_time_keys = []
-        event_time_keys = []
+        # Qualify a conflict as time-separated only when every competing
+        # assertion has a usable value in the same time representation.
+        # Ignoring an undated third source (or mixing timestamps with free text)
+        # could incorrectly make the whole conflict appear temporally explained.
+        time_keys = []
+        time_kind = None
+        all_sources_have_comparable_time = True
         for candidate in [*conflicts, assertion]:
             if candidate.observed_at is not None:
+                candidate_kind = "observed_at"
                 observed_at = candidate.observed_at
                 if observed_at.tzinfo is None:
                     observed_at = observed_at.replace(tzinfo=timezone.utc)
                 else:
                     observed_at = observed_at.astimezone(timezone.utc)
-                observed_time_keys.append(observed_at.isoformat())
+                time_key = observed_at.isoformat()
             elif candidate.event_time_text and candidate.event_time_text.strip():
-                event_time_keys.append(" ".join(candidate.event_time_text.casefold().split()))
+                candidate_kind = "event_time_text"
+                time_key = " ".join(candidate.event_time_text.casefold().split())
+            else:
+                all_sources_have_comparable_time = False
+                continue
+            if time_kind is None:
+                time_kind = candidate_kind
+            elif candidate_kind != time_kind:
+                all_sources_have_comparable_time = False
+            time_keys.append(time_key)
         has_distinct_time_context = (
-            len(set(observed_time_keys)) > 1
-            or len(set(event_time_keys)) > 1
+            all_sources_have_comparable_time
+            and len(time_keys) == len(conflicts) + 1
+            and len(set(time_keys)) > 1
         )
         proposed_conflict_status = "qualified" if has_distinct_time_context else "unresolved"
         if contradiction:
