@@ -2145,3 +2145,32 @@ def test_appointment_workspace_freshness_watermark_is_person_scoped(client):
         headers=other_headers,
     ).status_code == 404
 
+
+def test_appointment_workspace_reports_unknown_when_revision_history_is_unavailable(client, monkeypatch):
+    from app.api import appointment_workspace as workspace_api
+
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={"payload": {"visit_purpose": "Review care changes"}},
+    )
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    real_inspect = workspace_api.inspect
+
+    class InspectorWithoutRevisionHistory:
+        def has_table(self, table_name):
+            if table_name == "care_state_revisions":
+                return False
+            return real_inspect(engine).has_table(table_name)
+
+    monkeypatch.setattr(workspace_api, "inspect", lambda bind: InspectorWithoutRevisionHistory())
+    response = test_client.get(f"/api/v1/appointment-workspaces/{record_id}", headers=headers)
+    assert response.status_code == 200, response.text
+    freshness = response.json()["source_freshness"]
+    assert freshness["status"] == "unknown"
+    assert freshness["reason"] == "care_state_revision_history_unavailable"
+
