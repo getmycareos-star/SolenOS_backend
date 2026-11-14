@@ -4780,7 +4780,15 @@ def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim(
             uploaded_by_caregiver_id=caregiver.id,
             source_type="document",
         )
-        db.add_all([person, caregiver, first, second])
+        third = Evidence(
+            id="finding6-document-conflict-evidence-c",
+            person_id=person.id,
+            type="document",
+            source_text="Another discharge document records a different mobility support level on 13 November.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        )
+        db.add_all([person, caregiver, first, second, third])
         db.commit()
 
         existing = create_assertion(
@@ -4822,6 +4830,27 @@ def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim(
             commit=False,
         )
         document.assertion_status = "accepted"
+        db.flush()
+
+        third_document = create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="mobility_support",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="Requires two-person assistance",
+                source_label="Second caregiver-reviewed discharge document",
+                source_text=third.source_text,
+                evidence_ids=[third.id],
+                event_time_text="13 November 2026",
+                review_after_days=30,
+                created_by_caregiver_id=caregiver.id,
+            ),
+            commit=False,
+        )
+        third_document.assertion_status = "accepted"
         db.commit()
 
         conflict = db.query(Contradiction).filter(
@@ -4830,15 +4859,15 @@ def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim(
             Contradiction.subject_id == person.id,
             Contradiction.field == "mobility_support",
         ).one()
-        # One source carries a date but the competing source does not. That is
-        # insufficient to establish that the reports describe distinct moments.
+        # Two sources carry different dates, but the third has no date.
+        # Partial temporal coverage must not qualify the entire conflict.
         assert conflict.resolution_status == "unresolved"
-        assert set(conflict.source_assertion_ids) == {existing.id, document.id}
-        assert set(conflict.evidence_ids) == {first.id, second.id}
+        assert set(conflict.source_assertion_ids) == {existing.id, document.id, third_document.id}
+        assert set(conflict.evidence_ids) == {first.id, second.id, third.id}
         assert db.query(CareAssertion).filter(
             CareAssertion.person_id == person.id,
             CareAssertion.field == "mobility_support",
-        ).count() == 2
+        ).count() == 3
     finally:
         db.close()
         teardown_db()
