@@ -1268,7 +1268,17 @@ async def generate_lcr_orientation(
         ) from exc
 
     reply = (reply or "").strip()
-    sentence_count = len([part for part in re.split(r"(?<=[.!?])\\s+", reply) if part.strip()])\n    word_count = len(reply.split())\n    max_words = 40 if is_greeting else 65\n    max_sentences = 2 if is_greeting else 3\n    if (not reply or len(reply) > 700 or word_count > max_words or sentence_count > max_sentences or "system prompt" in reply.casefold():
+    sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", reply) if part.strip()])
+    word_count = len(reply.split())
+    max_words = 40 if is_greeting else 65
+    max_sentences = 2 if is_greeting else 3
+    if (
+        not reply
+        or len(reply) > 700
+        or word_count > max_words
+        or sentence_count > max_sentences
+        or "system prompt" in reply.casefold()
+    ):
         raise HTTPException(
             status_code=503,
             detail="LCR could not produce a safe, grounded response. Your message was not saved.",
