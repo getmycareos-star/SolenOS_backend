@@ -2945,7 +2945,22 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
 
     now = datetime.now(timezone.utc)
     earliest = now - timedelta(days=period_days) if period_days else None
-    matched_records: dict[str, tuple[datetime, str]] = {}
+    matched_records: dict[str, tuple[datetime, str, str]] = {}
+    directional_source_signal = False
+    worsening_query = bool(re.search(r"\\b(?:worse|worsen|declin|decreas)\\w*\\b", query))
+    improving_query = bool(re.search(r"\\b(?:better|improv)\\w*\\b", query))
+    worsening_source_signal = re.compile(
+        r"\\b(?:worse|worsen\\w*|declin\\w*|decreas\\w*|increas\\w*|"
+        r"more often|more frequent\\w*|more than (?:before|usual|last time)|"
+        r"compared with (?:before|last time)|compared to (?:before|last time))\\b",
+        re.IGNORECASE,
+    )
+    improving_source_signal = re.compile(
+        r"\\b(?:better|improv\\w*|less often|less frequent\\w*|"
+        r"less than (?:before|usual|last time)|compared with (?:before|last time)|"
+        r"compared to (?:before|last time))\\b",
+        re.IGNORECASE,
+    )
     for line in context_lines or []:
         brace = line.find("{")
         if brace < 0:
@@ -3003,22 +3018,32 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
             continue
         if earliest and observed_at < earliest:
             continue
-        matched_records[str(record_id)] = (observed_at, record_type)
+        matched_records[str(record_id)] = (observed_at, record_type, searchable)
+        if worsening_query and worsening_source_signal.search(searchable):
+            directional_source_signal = True
+        elif improving_query and improving_source_signal.search(searchable):
+            directional_source_signal = True
+        elif not worsening_query and not improving_query and (
+            worsening_source_signal.search(searchable) or improving_source_signal.search(searchable)
+        ):
+            directional_source_signal = True
 
     distinct_days = {value[0].date() for value in matched_records.values()}
-    direction = "getting worse" if re.search(r"\b(?:worse|worsen|declin)\w*\b", query) else (
-        "improving" if re.search(r"\b(?:better|improv)\w*\b", query) else "changing"
+    direction = "getting worse" if worsening_query else (
+        "improving" if improving_query else "changing"
     )
     return {
         "topic": topic_terms[0],
         "period_label": period_label,
         "record_count": len(matched_records),
         "distinct_days": len(distinct_days),
-        "sufficient": len(distinct_days) >= 2,
+        "minimum_distinct_days": 3,
+        "directional_source_signal": directional_source_signal,
+        "sufficient": len(distinct_days) >= 3 and directional_source_signal,
         "direction": direction,
         "source_records": [
-            {"record_type": record_type, "record_id": record_id}
-            for record_id, (_, record_type) in sorted(matched_records.items())
+            {"record_type": record_type, "record_id": record_id, "date": observed_at.date().isoformat()}
+            for record_id, (observed_at, record_type, _) in sorted(matched_records.items())
         ],
     }
 
