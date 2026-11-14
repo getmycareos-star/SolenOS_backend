@@ -1123,6 +1123,68 @@ def test_historical_event_outside_recent_window_is_retrieved_with_synonym_matchi
         teardown()
 
 
+def test_companion_reports_missing_history_topic_instead_of_filling_it_in(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "Mum slept poorly, lunch was barely touched, and dinner went well."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        now = datetime.now(timezone.utc)
+        db.add_all([
+            CareEvent(
+                person_id=person_id,
+                event_type="daily_note",
+                status="recorded",
+                occurred_at=now - timedelta(hours=8),
+                title="Overnight sleep",
+                description="Mum slept poorly last night.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ),
+            CareEvent(
+                person_id=person_id,
+                event_type="daily_note",
+                status="recorded",
+                occurred_at=now - timedelta(hours=2),
+                title="Lunch",
+                description="Mum barely touched her lunch today.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "What has the caregiver recorded about sleep, lunch and dinner?",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        reply = response.json()["reply"]
+        assert "Mum slept poorly last night" in reply
+        assert "Mum barely touched her lunch today" in reply
+        assert "I couldn't confirm dinner" in reply
+        assert "dinner went well" not in reply
+        assert response.json()["written_to_lcr"] is False
+        assert len(calls) == 1
+    finally:
+        teardown()
+
+
 def test_historical_document_outside_recent_window_is_retrieved_and_attributed(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
