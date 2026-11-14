@@ -1245,7 +1245,7 @@ def test_companion_returns_typed_document_extraction_and_original_evidence_refer
         )
         assert response.status_code == 200, response.text
         data = response.json()
-        assert {"record_type": "document_extractions", "record_id": "document-extraction-reference"} in data["source_record_refs"]
+        assert {"record_type": "document_extraction", "record_id": "document-extraction-reference"} in data["source_record_refs"]
         assert {"record_type": "care_evidence", "record_id": "document-evidence-reference"} in data["source_record_refs"]
         assert "document-evidence-reference" in data["source_evidence_ids"]
         assert "document-extraction-reference" in data["source_lcr_context_ids"]
