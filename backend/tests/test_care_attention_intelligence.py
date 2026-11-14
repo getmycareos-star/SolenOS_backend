@@ -56,10 +56,10 @@ def test_documented_future_deferral_does_not_claim_safety():
 def test_repeated_structured_observations_are_grouped_with_provenance():
     result = build_care_attention_assessment(
         records=[
-            {"id": "obs-1", "source": "evidence_observations", "subject_id": "person-1",
+            {"id": "obs-1", "source": "evidence_observations", "epistemic_status": "reported", "subject_id": "person-1",
              "subject_label": "Mom", "attribute": "usual_activity", "observed_value": "walks daily",
              "occurred_at": NOW - timedelta(days=3), "evidence_ids": ["ev-1"]},
-            {"id": "obs-2", "source": "evidence_observations", "subject_id": "person-1",
+            {"id": "obs-2", "source": "evidence_observations", "epistemic_status": "reported", "subject_id": "person-1",
              "subject_label": "Mom", "attribute": "usual_activity", "observed_value": "stopped walking",
              "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-2"]},
         ], open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
@@ -74,7 +74,7 @@ def test_repeated_structured_observations_are_grouped_with_provenance():
 def test_multi_attribute_cluster_is_reviewed_without_causal_claim():
     result = build_care_attention_assessment(
         records=[
-            {"id": f"obs-{i}", "source": "evidence_observations", "subject_id": "person-2",
+            {"id": f"obs-{i}", "source": "evidence_observations", "epistemic_status": "reported", "subject_id": "person-2",
              "attribute": f"attribute-{i}", "observed_value": f"value-{i}",
              "occurred_at": NOW - timedelta(days=i), "evidence_ids": [f"ev-{i}"]}
             for i in (1, 2, 3)
@@ -101,13 +101,13 @@ def test_unresolved_conflicts_and_gaps_need_clarification():
 def test_recent_observation_is_compared_with_only_explicit_personal_baseline():
     result = build_care_attention_assessment(
         records=[{
-            "id": "current-1", "source": "evidence_observations", "subject_id": "person-3",
+            "id": "current-1", "source": "evidence_observations", "epistemic_status": "reported", "subject_id": "person-3",
             "subject_label": "Mom", "attribute": "usual_orientation",
             "observed_value": "confused about location", "occurred_at": NOW - timedelta(days=1),
             "evidence_ids": ["ev-current"],
         }],
         baseline_items=[{
-            "id": "baseline-1", "source": "evidence_observations", "subject_id": "person-3",
+            "id": "baseline-1", "source": "evidence_observations", "epistemic_status": "reported", "baseline_basis": "explicit_persisted_baseline_marker", "subject_id": "person-3",
             "subject_label": "Mom", "attribute": "usual_orientation",
             "observed_value": "usually knows where she is", "evidence_ids": ["ev-baseline"],
         }],
@@ -123,7 +123,7 @@ def test_recent_observation_is_compared_with_only_explicit_personal_baseline():
 def test_no_implicit_baseline_is_created_from_oldest_record():
     result = build_care_attention_assessment(
         records=[{
-            "id": "current-2", "source": "evidence_observations", "subject_id": "person-4",
+            "id": "current-2", "source": "evidence_observations", "epistemic_status": "reported", "subject_id": "person-4",
             "attribute": "usual_orientation", "observed_value": "confused about location",
             "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-current-2"],
         }],
@@ -149,3 +149,104 @@ def test_deadline_within_24_hours_is_important_not_immediate_or_deferred():
     item = result["important_to_address"][0]
     assert item["record_id"] == "loop-5"
     assert item["category"] == "important_to_address"
+
+
+
+def test_uncertain_inferred_negated_and_superseded_observations_do_not_form_patterns():
+    result = build_care_attention_assessment(
+        records=[
+            {"id": "reported", "source": "evidence_observations", "epistemic_status": "reported",
+             "subject_id": "person-5", "attribute": "mobility", "observed_value": "needs help",
+             "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-reported"]},
+            {"id": "inferred", "source": "evidence_observations", "epistemic_status": "inferred",
+             "subject_id": "person-5", "attribute": "mobility", "observed_value": "cannot walk",
+             "occurred_at": NOW - timedelta(days=2), "evidence_ids": ["ev-inferred"]},
+            {"id": "uncertain", "source": "evidence_observations", "epistemic_status": "uncertain",
+             "subject_id": "person-5", "attribute": "mobility", "observed_value": "may need help",
+             "occurred_at": NOW - timedelta(days=3), "evidence_ids": ["ev-uncertain"]},
+            {"id": "negated", "source": "evidence_observations", "epistemic_status": "reported",
+             "subject_id": "person-5", "attribute": "mobility", "observed_value": "walks independently",
+             "negated": True, "occurred_at": NOW - timedelta(days=4), "evidence_ids": ["ev-negated"]},
+        ],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert result["important_to_address"] == []
+    clarification_ids = {item["record_id"] for item in result["needs_clarification"]}
+    assert clarification_ids == {"inferred", "uncertain"}
+
+
+def test_correcting_observation_is_used_and_superseded_observation_is_excluded():
+    result = build_care_attention_assessment(
+        records=[
+            {"id": "old", "source": "evidence_observations", "epistemic_status": "reported",
+             "subject_id": "person-6", "attribute": "orientation", "observed_value": "usual",
+             "occurred_at": NOW - timedelta(days=2), "evidence_ids": ["ev-old"]},
+            {"id": "correction", "source": "evidence_observations", "epistemic_status": "reported",
+             "subject_id": "person-6", "attribute": "orientation", "observed_value": "disoriented",
+             "supersedes_observation_id": "old", "correction_rationale": "Corrected after checking source note",
+             "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-correction"]},
+        ],
+        baseline_items=[{
+            "id": "baseline", "source": "evidence_observations", "epistemic_status": "reported",
+            "baseline_basis": "explicit_persisted_baseline_marker",
+            "subject_id": "person-6", "attribute": "orientation", "observed_value": "usually oriented",
+            "evidence_ids": ["ev-baseline"],
+        }],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    item = next(item for item in result["important_to_address"]
+                if item["pattern_type"] == "explicit_baseline_deviation")
+    assert [record["record_id"] for record in item["records"]] == ["baseline", "correction"]
+    assert item["evidence_ids"] == ["ev-baseline", "ev-correction"]
+
+
+def test_baseline_without_explicit_persisted_marker_is_not_used():
+    result = build_care_attention_assessment(
+        records=[{
+            "id": "current", "source": "evidence_observations", "epistemic_status": "reported",
+            "subject_id": "person-7", "attribute": "sleep", "observed_value": "awake all night",
+            "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-current"],
+        }],
+        baseline_items=[{
+            "id": "unmarked", "source": "evidence_observations", "epistemic_status": "reported",
+            "subject_id": "person-7", "attribute": "sleep", "observed_value": "usually sleeps",
+            "evidence_ids": ["ev-baseline"],
+        }],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert not any(item["pattern_type"] == "explicit_baseline_deviation"
+                   for item in result["important_to_address"])
+
+
+def test_same_numeric_value_with_different_units_is_a_changed_observation():
+    result = build_care_attention_assessment(
+        records=[{
+            "id": "current-units", "source": "evidence_observations", "epistemic_status": "reported",
+            "subject_id": "person-8", "attribute": "fluid_amount", "observed_value": "5",
+            "units": "ml", "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-current-units"],
+        }],
+        baseline_items=[{
+            "id": "baseline-units", "source": "evidence_observations", "epistemic_status": "reported",
+            "baseline_basis": "explicit_persisted_baseline_marker",
+            "subject_id": "person-8", "attribute": "fluid_amount", "observed_value": "5",
+            "units": "mg", "evidence_ids": ["ev-baseline-units"],
+        }],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    item = next(item for item in result["important_to_address"]
+                if item["pattern_type"] == "explicit_baseline_deviation")
+    assert item["record_count"] == 1
+
+
+def test_ambiguous_observation_is_visible_for_clarification_not_pattern_review():
+    result = build_care_attention_assessment(
+        records=[{
+            "id": "ambiguous", "source": "evidence_observations", "epistemic_status": "reported",
+            "subject_id": "person-9", "attribute": "behavior", "observed_value": "worse",
+            "ambiguity_note": "The source does not identify what became worse.",
+            "occurred_at": NOW - timedelta(days=1), "evidence_ids": ["ev-ambiguous"],
+        }],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert result["important_to_address"] == []
+    assert result["needs_clarification"][0]["record_id"] == "ambiguous"
