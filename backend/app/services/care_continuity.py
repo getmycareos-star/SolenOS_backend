@@ -684,6 +684,19 @@ def _priority_weight(value: Any) -> int:
     return {"critical": 50, "high": 40, "medium": 30, "low": 20, "informational": 10}.get(str(value), 10)
 
 
+def _question_matches_source_field(question: OpenQuestion, candidate_contexts: list[dict]) -> bool:
+    prior_fields = {
+        str(context.get("source_field")).strip().casefold()
+        for context in (question.context or [])
+        if isinstance(context, dict) and context.get("source_field")
+    }
+    candidate_fields = {
+        str(context.get("source_field")).strip().casefold()
+        for context in candidate_contexts
+        if isinstance(context, dict) and context.get("source_field")
+    }
+    return bool(candidate_fields and prior_fields and candidate_fields.issubset(prior_fields))
+
 def _question_has_new_grounding(question: OpenQuestion, candidate: Dict[str, Any]) -> bool:
     """A closed system question reopens only for a new persisted source or evidence."""
     prior_source_ids = set()
