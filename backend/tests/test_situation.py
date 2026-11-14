@@ -1080,6 +1080,34 @@ def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity
         assert "Caregiver orientation stage (derived from returned care-domain rows): new." in prompt
         assert "NEW CARE RECORD" in prompt
         assert "rough fragments are acceptable" in prompt
+@pytest.mark.session_security
+def test_lcr_orientation_rejects_returning_language_for_new_caregiver(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "New Caregiver Misposition Person")
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+        calls = []
+
+        def misleading_qwen(base, model, messages, options=None):
+            calls.append(messages)
+            return "Welcome back to SolenOS. Your care record is ready to continue."
+
+        monkeypatch.setattr(main_module, "_ollama_chat", misleading_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert len(calls) == 2
+        assert body["ai_generated"] is False
+        assert body["provider_status"] == "available_fallback"
+        assert "Welcome back" not in body["reply"]
+        assert body["written_to_lcr"] is False
+    finally:
+        teardown_db()
+
+
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown_db()
