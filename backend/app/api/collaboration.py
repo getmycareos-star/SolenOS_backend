@@ -2972,6 +2972,13 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
             continue
         record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
         searchable = json.dumps(record, ensure_ascii=False, default=str).casefold()
+        source_content = " ".join(
+            str(record.get(field) or "")
+            for field in (
+                "title", "description", "value", "value_text", "asserted_value",
+                "source_text", "source_passage", "summary", "fact_value",
+            )
+        ).casefold()
         if not any(term in searchable for term in topic_terms):
             continue
         source_type = str(payload.get("source_type") or "").casefold()
@@ -3018,12 +3025,17 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         if earliest and observed_at < earliest:
             continue
         matched_records[str(record_id)] = (observed_at, record_type, searchable)
-        if worsening_query and worsening_source_signal.search(searchable):
+        relevant_source_sentences = [
+            sentence for sentence in re.split(r"(?<=[.!?;])\\s+", source_content)
+            if any(term in sentence for term in topic_terms)
+        ]
+        if worsening_query and any(worsening_source_signal.search(sentence) for sentence in relevant_source_sentences):
             directional_source_signal = True
-        elif improving_query and improving_source_signal.search(searchable):
+        elif improving_query and any(improving_source_signal.search(sentence) for sentence in relevant_source_sentences):
             directional_source_signal = True
-        elif not worsening_query and not improving_query and (
-            worsening_source_signal.search(searchable) or improving_source_signal.search(searchable)
+        elif not worsening_query and not improving_query and any(
+            worsening_source_signal.search(sentence) or improving_source_signal.search(sentence)
+            for sentence in relevant_source_sentences
         ):
             directional_source_signal = True
 
