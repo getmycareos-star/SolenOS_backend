@@ -1563,9 +1563,11 @@ def test_companion_question_queue_uses_source_validation_priority_and_answerer()
         )
         queue = context["sources"]["caregiver_question_queue"]
         assert queue["status"] == "available"
-        assert queue["candidate_count"] == 4
+        # Unknown-answerer questions are deliberately excluded from the
+        # caregiver-facing queue rather than silently assigned to this caregiver.
+        assert queue["candidate_count"] == 3
         assert queue["returned_count"] == 3
-        assert queue["additional_ordinary_count"] == 1
+        assert queue["additional_ordinary_count"] == 0
         assert [item["id"] for item in queue["items"]] == [
             "queue-critical", "queue-high", "queue-medium",
         ]
