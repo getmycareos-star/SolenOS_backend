@@ -1999,10 +1999,10 @@ def test_appointment_workspace_is_marked_stale_after_person_care_state_changes(c
     with engine.begin() as connection:
         connection.execute(text("""
             INSERT INTO care_state_revisions
-                (id, person_id, target_type, target_id, revision_number, change_kind, changed_at)
+                (id, person_id, target_type, target_id, revision_number, change_kind, evidence_ids, changed_at)
             VALUES
                 ('later-owner-revision', :person_id, 'care_events', 'later-event',
-                 1, 'created', :changed_at)
+                 1, 'created', '[]', :changed_at)
         """), {
             "person_id": owner["person"]["id"],
             "changed_at": datetime.now(timezone.utc) + timedelta(minutes=1),
