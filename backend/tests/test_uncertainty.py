@@ -4080,6 +4080,11 @@ def test_identical_source_questions_remain_separate_across_care_subjects():
         assert first[0].subject_id == "morning-medication"
         assert first[0].necessity == "necessary"
 
+        # Remove the first gap from active matching so the second source has
+        # exactly one independently valid subject candidate.
+        db.query(InformationGap).filter_by(id="subject-isolation-gap-morning").one().lifecycle_status = GapLifecycleStatus.RESOLVED
+        db.commit()
+
         evening_event, evening_evidence = add_source("evening")
         second = persist_source_clarification_questions(
             db,
