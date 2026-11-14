@@ -117,7 +117,7 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
 
 def _observation_value(item: dict[str, Any]) -> str:
     value = ""
-    for key in ("observed_value", "normalized_value", "value_text", "asserted_value", "current_state", "title"):
+    for key in ("observed_value", "normalized_value", "value_text", "fact_value", "asserted_value", "current_state", "title"):
         value = _text(item.get(key))
         if value:
             break
@@ -137,12 +137,12 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
     superseded_ids = {
         str(item.get("supersedes_observation_id"))
         for item in records
-        if item.get("source") == "evidence_observations" and item.get("supersedes_observation_id")
+        if (item.get("source") == "evidence_observations" and item.get("supersedes_observation_id")) or (item.get("source") == "facts" and item.get("superseded_by_fact_id"))
     }
     eligible = []
     for item in records:
         source = item.get("source")
-        if source not in {"evidence_observations", "caregiver_observations", "events", "facts"}:
+        if source not in {"evidence_observations", "facts"}:
             continue
         if item.get("negated") is True:
             continue
