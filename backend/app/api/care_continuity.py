@@ -2982,6 +2982,13 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         # Compare semantic content, excluding the assessment clock.
         previous_comparison.pop("as_of", None)
         current_comparison.pop("as_of", None)
+        # Care-attention carries its own evaluation clock. It is metadata, not
+        # a source-state change; comparing it would create a new snapshot on
+        # every identical reassessment and grow the audit table indefinitely.
+        for comparison in (previous_comparison, current_comparison):
+            care_attention = comparison.get("care_attention")
+            if isinstance(care_attention, dict):
+                care_attention.pop("as_of", None)
         previous_records = {
             (str(item.get("source", "")), str(item.get("id", ""))): item
             for item in (previous_assessment.get("current_care_reality", {}).get("records", []) if isinstance(previous_assessment, dict) else [])
