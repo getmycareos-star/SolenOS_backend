@@ -1015,6 +1015,46 @@ def test_lcr_orientation_rejects_revoked_caregiver_access(monkeypatch):
 
 
 @pytest.mark.session_security
+def test_lcr_orientation_recognizes_existing_open_question_as_returning_history(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Open Question Returning Person")
+        person_id = created["person"]["id"]
+        with TestingSessionLocal() as db:
+            db.add(OpenQuestion(
+                id="orientation-existing-open-question",
+                person_id=person_id,
+                question="Has the nighttime waking continued?",
+                subject_type="sleep",
+                subject_id=person_id,
+                status="open",
+                necessity="necessary",
+                priority=Priority.HIGH,
+            ))
+            db.commit()
+
+        captured = {}
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            captured["prompt"] = messages[0]["content"]
+            return "Your care record already has an open sleep question. We can continue with the update that matters today."
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
+        assert response.status_code == 200, response.text
+        assert "Caregiver orientation stage (derived from returned care-domain rows): returning." in captured["prompt"]
+        assert "NEW-CAREGIVER POSITIONING" not in captured["prompt"]
+        assert response.json()["ai_generated"] is True
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
 def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity(monkeypatch):
     setup_db()
     try:
