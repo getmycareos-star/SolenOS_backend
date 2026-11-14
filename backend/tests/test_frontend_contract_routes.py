@@ -483,7 +483,7 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
         assert own.status_code == 200, own.text
         payload = own.json()
         assert payload["read_only"] is True
-        assert payload["history_coverage"] == "bounded_subset"
+        assert payload["history_coverage"] == "bounded_recent_subset"
         assert "schema_status" in payload
         assert "missing_required_sources" in payload
         assert "missing_optional_sources" in payload
@@ -499,7 +499,7 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
         current_payload = current.json()
         assert current_payload["projection_type"] == "bounded_evidence_derived_current_care"
         assert current_payload["read_only"] is True
-        assert current_payload["history_coverage"] == "bounded_subset"
+        assert current_payload["history_coverage"] == "bounded_recent_subset"
         projected = next(item for item in current_payload["items"] if item["id"] == event_id)
         assert projected["kind"] == "Care event needing attention"
         assert projected["source_collection"] == "events"
