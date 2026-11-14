@@ -817,7 +817,7 @@ def test_shared_lcr_context_is_bounded_and_person_scoped():
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["read_only"] is True
-    assert body["history_coverage"] == "bounded_subset"
+    assert body["history_coverage"] == "bounded_recent_subset"
     assert body["person_id"] == first["person"]["id"]
     assert body["sources"]["events"]["returned_count"] == 1
     assert body["sources"]["events"]["items"][0]["title"] == "Breakfast was mostly uneaten."
