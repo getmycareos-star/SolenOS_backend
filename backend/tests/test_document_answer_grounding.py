@@ -78,7 +78,7 @@ def test_broad_document_question_returns_a_short_verified_excerpt():
 
     assert answer == (
         "The uploaded document says: “Mary ate half of her breakfast today. ” "
-        "“Mary woke twice overnight. ” “Mary walked to the kitchen using her walking frame.”"
+        "Mary woke twice overnight. ” Mary walked to the kitchen using her walking frame.”"
     )
 
 
