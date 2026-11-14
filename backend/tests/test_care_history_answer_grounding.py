@@ -6,14 +6,20 @@ from app.api.collaboration import (
 )
 
 
-def _event_line(event_id: str, description: str) -> str:
+def _event_line(
+    event_id: str,
+    description: str,
+    *,
+    status: str = "recorded",
+    caregiver_id: str | None = "caregiver-1",
+) -> str:
     return "Shared LCR context: " + json.dumps({
         "source_type": "events",
         "record": {
             "id": event_id,
             "description": description,
-            "status": "recorded",
-            "created_by_caregiver_id": "caregiver-1",
+            "status": status,
+            "created_by_caregiver_id": caregiver_id,
             "occurred_at": "2026-11-14T18:00:00+00:00",
         },
     })
@@ -66,6 +72,31 @@ def test_history_topic_coverage_does_not_accept_generic_care_advice():
         question,
         "Sleep was poor, lunch intake was low, and dinner went better.",
     )
+
+
+
+def test_history_fallback_excludes_pending_and_unattributed_events():
+    context = [
+        _event_line(
+            "pending-sleep",
+            "Mum slept poorly last night.",
+            status="pending_review",
+        ),
+        _event_line(
+            "unattributed-lunch",
+            "Mum barely touched her lunch today.",
+            caregiver_id=None,
+        ),
+        _event_line(
+            "recorded-dinner",
+            "Mum ate more at dinner.",
+        ),
+    ]
+
+    assert _care_history_extractive_answer(
+        "What has the caregiver recorded about sleep, lunch and dinner?",
+        context,
+    ) is None
 
 
 def test_history_fallback_is_limited_to_explicit_record_retrieval_questions():
