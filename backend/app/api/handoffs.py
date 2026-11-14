@@ -443,7 +443,8 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         ]
         unavailable_scope_sources = [
             key for key, value in source_coverage.items()
-            if value.get("status") in {"unavailable", "failed"}
+            if key in included_source_keys
+            and value.get("status") in {"unavailable", "failed"}
         ]
         retrieval_complete = not partial_sources and not unavailable_scope_sources
         source_references = [{
