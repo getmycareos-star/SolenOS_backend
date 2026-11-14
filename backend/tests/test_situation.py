@@ -979,7 +979,7 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
         assert "Respond to the latest message, not to an imagined onboarding flow" in prompt
         assert "Caregiver orientation stage (derived from returned care-domain rows): returning." in prompt
         assert "GREETING LENGTH" in prompt
-        assert "RETURNING-CAREGIVER POSITIONING" in prompt
+        assert "RETURNING CARE RECORD" in prompt
         after_count = TestingSessionLocal().query(CareEvent).filter_by(person_id=person_id).count()
         assert after_count == before_count
 
@@ -1050,7 +1050,7 @@ def test_lcr_orientation_recognizes_existing_open_question_as_returning_history(
         response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
         assert response.status_code == 200, response.text
         assert "Caregiver orientation stage (derived from returned care-domain rows): returning." in captured["prompt"]
-        assert "NEW-CAREGIVER POSITIONING" not in captured["prompt"]
+        assert "NEW CARE RECORD" not in captured["prompt"]
         assert response.json()["ai_generated"] is True
         assert response.json()["written_to_lcr"] is False
     finally:
@@ -1078,7 +1078,7 @@ def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity
         assert response.status_code == 200, response.text
         prompt = captured["messages"][0]["content"]
         assert "Caregiver orientation stage (derived from returned care-domain rows): new." in prompt
-        assert "NEW-CAREGIVER POSITIONING" in prompt
+        assert "NEW CARE RECORD" in prompt
         assert "rough fragments are acceptable" in prompt
         assert response.json()["written_to_lcr"] is False
     finally:
