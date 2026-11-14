@@ -359,6 +359,7 @@ def test_persisted_change_is_important_only_with_complete_baseline_and_source_re
         "attention_candidate": True, "follow_up_candidate": True,
         "baseline_coverage_status": "covered", "current_coverage_status": "covered",
         "baseline_is_stable": True, "baseline_history_completeness": "complete",
+        "expected_source_record_count": 1,
         "explanation": "Recorded mobility events increased.",
         "records": [{"source": "events", "record_id": "event-1", "title": "Fall",
                      "evidence_ids": ["ev-1"]}],
@@ -423,6 +424,7 @@ def test_persisted_change_accepts_linked_care_event_ids_as_source_records():
         "attention_candidate": True, "baseline_coverage_status": "covered",
         "current_coverage_status": "covered", "baseline_is_stable": True,
         "baseline_history_completeness": "complete",
+        "expected_source_record_count": 1,
         "records": [{"source": "events", "record_id": "care-event-1", "evidence_ids": []}],
     }])
     assert len(important) == 1
@@ -440,13 +442,18 @@ def test_bounded_persisted_change_history_cannot_produce_complete_priority():
             "attention_candidate": True, "baseline_coverage_status": "covered",
             "current_coverage_status": "covered", "baseline_is_stable": True,
             "baseline_history_completeness": "complete",
+            "expected_source_record_count": 1,
             "records": [{"source": "events", "record_id": "event-1", "evidence_ids": []}],
         }],
         source_coverage={"persisted_change_history_bounded": True},
         as_of=NOW,
     )
     assert result["important_to_address"] == []
-    assert result["needs_clarification"][0]["record_id"] == "bounded-change"
+    clarification_by_id = {
+        item["record_id"]: item for item in result["needs_clarification"]
+    }
+    assert clarification_by_id["bounded-change"]["category"] == "needs_clarification"
+    assert clarification_by_id["bounded-history"]["category"] == "needs_clarification"
 
 
 
