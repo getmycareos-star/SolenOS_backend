@@ -1198,6 +1198,8 @@ def next_best_questions(
                 # Keep unresolved questions unresolved; never rewrite their status.
                 if existing_before is None:
                     existing_before = _open_question_state(existing)
+                if existing.question != clean["question"]:
+                    existing.question = clean["question"]
                 existing.evidence_ids = list(dict.fromkeys(
                     list(existing.evidence_ids or []) + list(clean["evidence_ids"] or [])
                 ))
