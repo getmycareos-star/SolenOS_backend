@@ -2960,11 +2960,19 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         searchable = json.dumps(record, ensure_ascii=False, default=str).casefold()
         if not any(term in searchable for term in topic_terms):
             continue
+        source_type = str(payload.get("source_type") or "").casefold()
+        source_type_map = {
+            "events": "care_event",
+            "assertions": "care_assertion",
+            "evidence": "care_evidence",
+            "evidence_observations": "care_evidence_observation",
+            "caregiver_observations": "caregiver_observation",
+        }
         record_type = (
             "care_event" if record.get("event_id")
             else "care_assertion" if record.get("assertion_id")
             else "care_evidence" if record.get("evidence_id")
-            else str(payload.get("record_type") or record.get("record_type") or "")
+            else str(payload.get("record_type") or record.get("record_type") or source_type_map.get(source_type) or "")
         )
         record_id = (
             record.get("event_id") or record.get("assertion_id") or record.get("evidence_id")
@@ -2972,7 +2980,10 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         )
         if not record_id:
             continue
-        if record_type not in {"care_event", "care_assertion", "care_evidence"}:
+        if record_type not in {
+            "care_event", "care_assertion", "care_evidence",
+            "care_evidence_observation", "caregiver_observation",
+        }:
             continue
         raw_time = (
             record.get("occurred_at") or record.get("observed_at") or record.get("event_date")
