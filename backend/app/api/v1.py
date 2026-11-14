@@ -946,7 +946,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
     # Extraction reads the saved evidence row, not the browser request body.
     natural_language_update = (
-        event_type == "daily_care_entry"
+        event_type in {"daily_care_entry", "structured_daily_capture"}
         and detail.get("capture_kind") == "natural_language_update"
         and isinstance(detail.get("notes"), str)
     )
