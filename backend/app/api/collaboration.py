@@ -4830,9 +4830,6 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         ))
         order += 1
 
-    if not candidates:
-        return None
-
     candidates.sort(key=lambda item: (-item[0], item[1]))
     selected: list[tuple[int, int, str, set[str]]] = []
     covered_topics: set[str] = set()
@@ -4845,16 +4842,46 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         if not topics and len(selected) >= 3:
             break
 
-    if topics and len(covered_topics) < len(topics):
-        return None
     selected.sort(key=lambda item: item[1])
     descriptions = [item[2] for item in selected[:3]]
-    if not descriptions:
-        return None
-    answer = "The saved notes say: " + "; ".join(f"“{description}”" for description in descriptions)
+    if topics:
+        missing_topics = [
+            label for label, _ in topics if label not in covered_topics
+        ]
+        available_topics = [
+            label for label, _ in topics if label in covered_topics
+        ]
+        if descriptions:
+            answer = (
+                "The saved notes mention " + " and ".join(available_topics) + ": "
+                + "; ".join(f"“{description}”" for description in descriptions)
+            )
+            if missing_topics:
+                answer += (
+                    ". I couldn't confirm " + " and ".join(missing_topics)
+                    + " from the saved notes I retrieved."
+                )
+        else:
+            answer = (
+                "I couldn't confirm " + " and ".join(missing_topics)
+                + " from the saved notes I retrieved."
+            )
+    elif descriptions:
+        answer = "The saved notes say: " + "; ".join(
+            f"“{description}”" for description in descriptions
+        )
+    else:
+        return "I couldn't confirm a matching saved care note in the records I retrieved."
+
     word_count = len(re.findall(r"[a-z0-9']+", answer.casefold()))
     if word_count > 55:
-        return None
+        missing = [label for label, _ in topics]
+        if missing:
+            return (
+                "I couldn't confirm " + " and ".join(missing)
+                + " from the saved notes I retrieved."
+            )
+        return "I found saved care notes, but I can't summarize them reliably from the records retrieved."
     return answer
 
 
