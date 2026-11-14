@@ -1942,3 +1942,40 @@ def test_blocked_appointment_follow_up_rejects_another_persons_evidence(client):
         },
     )
     assert response.status_code == 422, response.text
+
+
+def test_appointment_brief_discloses_when_lcr_fact_history_exceeds_its_projection_limit(client):
+    test_client, owner, _ = client
+    with engine.begin() as connection:
+        for index in range(41):
+            timestamp = datetime.now(timezone.utc) - timedelta(minutes=index)
+            connection.execute(text("""
+                INSERT INTO care_facts
+                    (id, person_id, subject_type, subject_id, fact_type, fact_value,
+                     epistemic_status, effective_at, recorded_at, created_at, updated_at,
+                     created_by_caregiver_id)
+                VALUES
+                    (:id, :person_id, 'person', :person_id, 'caregiver_report',
+                     :value, 'reported', :timestamp, :timestamp, :timestamp, :timestamp,
+                     :caregiver_id)
+            """), {
+                "id": f"appointment-limit-fact-{index}",
+                "person_id": owner["person"]["id"],
+                "value": f"Saved caregiver report {index}",
+                "timestamp": timestamp,
+                "caregiver_id": owner["caregiver"]["id"],
+            })
+
+    response = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief?window_days=90",
+        headers={"Authorization": f"Bearer {owner['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["facts"]) == 40
+    assert body["source_completeness"]["care_facts"] == {
+        "returned_count": 40,
+        "has_more": True,
+        "retrieval_complete": False,
+        "record_limit": 40,
+    }
