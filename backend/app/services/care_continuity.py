@@ -1112,53 +1112,58 @@ def next_best_questions(
         # Candidate generation is internal intelligence, not a caregiver request.
         # Persist only after a separate, explicit necessity assessment has marked it necessary.
         if persist and clean.get("necessity") == "necessary":
+            candidate_contexts = list(item.get("_source_contexts") or [])
             matching_rows = db.query(OpenQuestion).filter(
                 OpenQuestion.person_id == person_id,
                 OpenQuestion.subject_type == clean["subject_type"],
                 OpenQuestion.subject_id == clean["subject_id"],
-                OpenQuestion.question == clean["question"],
-            ).order_by(OpenQuestion.asked_at.desc()).limit(50).with_for_update().all()
-            existing = next(
-                (row for row in matching_rows if row.status in {"open", "unresolved"}),
-                None,
-            )
+            ).order_by(OpenQuestion.asked_at.desc()).limit(200).with_for_update().all()
+            normalized_candidate_question = " ".join(clean["question"].casefold().split())
+            active_rows = [row for row in matching_rows if row.status in {"open", "unresolved"}]
+            existing = next((
+                row for row in active_rows
+                if " ".join(str(row.question or "").casefold().split()) == normalized_candidate_question
+            ), None)
+            if existing is None:
+                existing = next((
+                    row for row in active_rows
+                    if _question_matches_source_field(row, candidate_contexts)
+                ), None)
             existing_before = _open_question_state(existing) if existing is not None else None
             prior_terminal_question = None
             if existing is None:
-                automatically_closed = next(
-                    (
-                        row for row in matching_rows
-                        if row.status == "closed"
-                        and str(row.closed_reason or "").startswith("automatically_")
-                    ),
-                    None,
-                )
-                if automatically_closed is not None and _question_has_new_grounding(automatically_closed, {**clean, "_source_contexts": item.get("_source_contexts") or []}):
+                automatically_closed = next((
+                    row for row in matching_rows
+                    if row.status == "closed"
+                    and str(row.closed_reason or "").startswith("automatically_")
+                    and (
+                        " ".join(str(row.question or "").casefold().split()) == normalized_candidate_question
+                        or _question_matches_source_field(row, candidate_contexts)
+                    )
+                ), None)
+                candidate_with_contexts = {**clean, "_source_contexts": candidate_contexts}
+                if automatically_closed is not None and _question_has_new_grounding(automatically_closed, candidate_with_contexts):
                     existing = automatically_closed
                     existing_before = _open_question_state(existing)
-                    # Reopen only after a new persisted source/evidence arrives;
-                    # a repeated assessment of unchanged information is not new.
+                    # Reopen only after new evidence or a genuinely different care field.
                     existing.status = "open"
                     existing.closed_at = None
                     existing.closed_reason = None
                 elif automatically_closed is not None:
-                    # Retain the closed historical row; do not manufacture a
-                    # second copy or reopen it from unchanged evidence.
                     persisted_id = automatically_closed.id
                     clean["persisted_question_id"] = persisted_id
                     output.append(clean)
                     continue
                 else:
-                    prior_terminal_question = next(
-                        (
-                            row for row in matching_rows
-                            if row.status in {"answered", "declined", "closed"}
-                        ),
-                        None,
-                    )
-                    if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, {**clean, "_source_contexts": item.get("_source_contexts") or []}):
-                        # A repeated reconciliation must not ask again after a
-                        # caregiver answered, declined, or manually closed it.
+                    prior_terminal_question = next((
+                        row for row in matching_rows
+                        if row.status in {"answered", "declined", "closed"}
+                        and (
+                            " ".join(str(row.question or "").casefold().split()) == normalized_candidate_question
+                            or _question_matches_source_field(row, candidate_contexts)
+                        )
+                    ), None)
+                    if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, candidate_with_contexts):
                         persisted_id = prior_terminal_question.id
                         clean["persisted_question_id"] = persisted_id
                         output.append(clean)
