@@ -175,6 +175,7 @@ def test_query_retrieval_finds_older_answered_question_over_newer_related_histor
         "answered_at": older + timedelta(hours=1),
         "answer": "The caregiver recorded repeated waking on two nights.",
         "answer_provenance": "Daughter reported the answer after speaking with the care team.",
+        "context": '[{"source_field":"current_instruction","source_id":"older-restless-sleep-conflict","necessity_assessment":{"necessity":"necessary"}}]',
         "answered_by_caregiver_id": "caregiver-a",
         "updated_at": older + timedelta(hours=2),
     })
@@ -194,6 +195,7 @@ def test_query_retrieval_finds_older_answered_question_over_newer_related_histor
         assert source["items"][0]["status"] == "answered"
         assert "repeated waking on two nights" in source["items"][0]["answer"]
         assert source["items"][0]["answered_by_caregiver_id"] == "caregiver-a"
+        assert source["items"][0]["context"][0]["source_field"] == "current_instruction"
         assert context["history_coverage"] == "query_scanned_ranked_subset"
     finally:
         _load_source_schema.cache_clear()
