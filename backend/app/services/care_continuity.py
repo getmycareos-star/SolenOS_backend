@@ -1054,7 +1054,6 @@ def next_best_questions(
             # and keep its answerer attached to that exact source.
             prior["source_kind"] = item.get("source_kind")
             prior["source_id"] = item.get("source_id")
-            prior["_source_evidence_ids"] = list(item.get("evidence_ids") or [])
             prior["intended_answerer_role"] = item.get("intended_answerer_role")
             prior["reason"] = item.get("reason")
         if item["_weight"] > prior["_weight"]:
