@@ -36,6 +36,7 @@ from app.models.appointment_workspace import AppointmentWorkspaceRecord, Appoint
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.care_continuity import (
+    has_caregiver_visible_answerer,
     has_valid_caregiver_necessity,
     prioritize_caregiver_questions,
 )
@@ -739,7 +740,9 @@ def get_situation(
         .all()
     )
     open_question_rows = [
-        row for row in open_question_rows if has_valid_caregiver_necessity(row, db, person_id)
+        row for row in open_question_rows
+        if has_caregiver_visible_answerer(row)
+        and has_valid_caregiver_necessity(row, db, person_id)
     ]
     _, open_question_rows, _ = prioritize_caregiver_questions(
         open_question_rows, ordinary_limit=2
