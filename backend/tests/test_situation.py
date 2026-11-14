@@ -1117,6 +1117,45 @@ def test_lcr_orientation_rejects_returning_language_for_new_caregiver(monkeypatc
 
 
 @pytest.mark.session_security
+@pytest.mark.session_security
+def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        _, headers = create_authenticated_session(client, "Incomplete History Person")
+        monkeypatch.setattr(
+            main_module,
+            "build_lcr_context",
+            lambda *args, **kwargs: {
+                "sources": {},
+                "missing_required_sources": ["events"],
+            },
+        )
+        monkeypatch.setattr(
+            main_module,
+            "format_lcr_context_for_prompt",
+            lambda context: "Some required care history sources are unavailable.",
+        )
+        captured = {}
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            captured["prompt"] = messages[0]["content"]
+            return "Welcome to SolenOS. We can start with the care story you want to keep track of today."
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
+        assert response.status_code == 200, response.text
+        assert "Caregiver orientation stage (derived from returned care-domain rows): unknown." in captured["prompt"]
+        assert "CARE HISTORY STATUS UNKNOWN" in captured["prompt"]
+        assert "NEW CARE RECORD" not in captured["prompt"]
+        assert response.json()["ai_generated"] is True
+    finally:
+        teardown_db()
+
+
 def test_lcr_orientation_retries_once_when_qwen_exceeds_greeting_limits(monkeypatch):
     setup_db()
     try:
