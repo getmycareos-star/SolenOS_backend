@@ -4858,7 +4858,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             )
             if missing_topics:
                 answer += (
-                    ". I couldn't confirm " + " and ".join(missing_topics)
+                    "; I couldn't confirm " + " and ".join(missing_topics)
                     + " from the saved notes I retrieved."
                 )
         else:
