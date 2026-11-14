@@ -12,6 +12,8 @@ def _event_line(event_id: str, description: str) -> str:
         "record": {
             "id": event_id,
             "description": description,
+            "status": "recorded",
+            "created_by_caregiver_id": "caregiver-1",
             "occurred_at": "2026-11-14T18:00:00+00:00",
         },
     })
