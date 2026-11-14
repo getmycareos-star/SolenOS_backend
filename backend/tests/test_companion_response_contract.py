@@ -547,6 +547,21 @@ def test_trend_evidence_without_source_comparison_cannot_establish_direction():
     assert assessment["sufficient"] is False
 
 
+def test_trend_does_not_treat_record_entry_time_as_observation_time():
+    now = datetime.now(timezone.utc)
+    line = (
+        'LCR event evidence: {"event_id":"sleep-undated","title":"Sleep history",'
+        '"description":"Caregiver reported restless sleep.",'
+        f'"recorded_at":"{now.isoformat()}"' + "}"
+    )
+    assessment = collaboration._trend_evidence_assessment(
+        "Has sleep been getting worse over the last month?", [line]
+    )
+    assert assessment["record_count"] == 0
+    assert assessment["distinct_days"] == 0
+    assert assessment["sufficient"] is False
+
+
 def test_trend_claim_fails_closed_when_retrieval_or_prompt_coverage_is_partial():
     complete = {
         "retrieval_scan_complete": True,
