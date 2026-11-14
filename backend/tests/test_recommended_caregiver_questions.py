@@ -404,6 +404,7 @@ def test_one_hundred_case_question_gate_benchmark():
                 subject_id=f"benchmark-subject-{index}",
                 status="open",
                 necessity="necessary" if necessary else "not_assessed",
+                intended_answerer_role="caregiver",
                 necessity_rationale=assessment["necessity_rationale"],
                 priority=priority,
                 evidence_ids=[evidence_id],
