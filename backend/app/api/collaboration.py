@@ -6101,17 +6101,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
         conflict_response = _contradictory_event_evidence_response(user_text, event_context)
         care_history_extractive_fallback_used = False
-        care_history_extractive_answer = _care_history_extractive_answer(
-            user_text,
-            included_model_context_lines,
-        )
-        if (
-            care_history_extractive_answer
-            and not _care_history_reply_covers_requested_topics(user_text, reply)
-            and not (unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
-        ):
-            reply = care_history_extractive_answer
-            care_history_extractive_fallback_used = True
         if document_extractive_fallback_used:
             # The model received the verified extraction but failed to use it.
             # Prefer a short, exact source excerpt over a generic or unsupported
@@ -6133,6 +6122,33 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # let the model restate an old observation as a recent trend or imply
             # direction indirectly. Return the evidence-derived limit directly.
             reply = _trend_uncertainty_response(trend_assessment)
+        care_history_extractive_answer = _care_history_extractive_answer(
+            user_text,
+            included_model_context_lines,
+        )
+        if (
+            care_history_extractive_answer
+            and not (unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
+            and (
+                not _care_history_reply_covers_requested_topics(user_text, reply)
+                or _contains_unrequested_saba(reply, validation_source)
+                or _contains_unsupported_care_claim(reply, validation_source)
+                or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+                or _contains_unsupported_record_reference(reply, validation_source)
+                or _caregiver_response_needs_revision(user_text, reply)
+            )
+        ):
+            history_fallback_invalid = (
+                _companion_message_needs_revision(care_history_extractive_answer)
+                or _contains_unrequested_saba(care_history_extractive_answer, validation_source)
+                or _contains_unsupported_care_claim(care_history_extractive_answer, validation_source)
+                or _contains_unsupported_operational_claim(care_history_extractive_answer, validation_source, source_context)
+                or _contains_unsupported_record_reference(care_history_extractive_answer, validation_source)
+                or _caregiver_response_needs_revision(user_text, care_history_extractive_answer)
+            )
+            if not history_fallback_invalid:
+                reply = care_history_extractive_answer
+                care_history_extractive_fallback_used = True
         invalid_reply = (
             not isinstance(reply, str)
             or not reply.strip()
