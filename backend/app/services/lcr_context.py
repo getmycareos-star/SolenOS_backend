@@ -721,6 +721,7 @@ def build_lcr_context(
         # erase proof that the available source history was fully scanned.
         "retrieval_scan_complete": (
             bool(terms or temporal_window or include_all_history)
+            and any(source.get("status") in {"available", "empty"} for source in sources.values())
             and all(
                 source.get("candidate_scan_complete") is True
                 for source in sources.values()
