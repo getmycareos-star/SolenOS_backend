@@ -113,7 +113,7 @@ def test_daily_care_history_is_paginated_and_scoped_to_authenticated_person():
     event_coverage = lcr_coverage["sources"]["events"]
     assert event_coverage["candidate_scan_complete"] is False
     assert event_coverage["returned_history_complete"] is False
-    assert event_coverage["selection"] == "recent_records"
+    assert event_coverage["selection"] == "recent_records_page"
     assert "Foreign record" not in json.dumps(body1)
 
     page2 = client.get("/api/v1/daily-care/intelligence/history?person_id=" + first["person"]["id"] + "&limit=1&offset=1", headers=auth)
@@ -268,7 +268,7 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     assert approved.json()["proposal"]["review_status"] == "accepted_by_caregiver"
     assert companion_body["source_assertion_ids"]
     assert "companion-shared-lcr-fact" in companion_body["source_lcr_context_ids"]
-    assert companion_body["lcr_context_coverage"]["history_coverage"] == "bounded_subset"
+    assert companion_body["lcr_context_coverage"]["history_coverage"] == "query_scanned_ranked_subset"
     serialized_messages = json.dumps(captured["messages"], ensure_ascii=False)
     assert "Caregiver reported that sleep was poor last night." in serialized_messages
     assert "Caregiver reports poor sleep before breakfast." in serialized_messages
