@@ -32,6 +32,9 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def process_daily_capture_job(job_id, monkeypatch, extractor):
     from app.services import qwen_background_worker
 
+    # Queue delays are intentional in production. Tests advance the persisted job
+    # clock explicitly so the worker executes deterministically without sleeping.
+    make_daily_capture_job_runnable(job_id)
     monkeypatch.setattr(qwen_background_worker, "SessionLocal", TestingSessionLocal)
     monkeypatch.setattr(qwen_background_worker, "extract_review_candidates", extractor)
     return asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
