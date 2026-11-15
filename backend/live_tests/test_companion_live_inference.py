@@ -428,6 +428,44 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
             re.IGNORECASE,
         ), unknown_reply
 
+        # Repeat each real inference once to detect stochastic stage leakage,
+        # not merely a single lucky response. Unknown history remains monkeypatched
+        # so the second trial exercises the same fail-closed retrieval condition.
+        repeated_trials = (
+            (new_caregiver, "Good evening", "new"),
+            (returning_caregiver, "Hello again", "returning"),
+            (new_caregiver, "Hello again", "unknown"),
+        )
+        for trial_session, greeting, expected_stage in repeated_trials:
+            repeated = client.post(
+                "/api/lcr/orientation",
+                headers={"Authorization": f"Bearer {trial_session['access_token']}"},
+                json={"raw_input": greeting},
+            )
+            assert repeated.status_code == 200, repeated.text
+            repeated_body = repeated.json()
+            assert repeated_body.get("ai_generated") is True, repeated_body
+            assert repeated_body.get("provider_status") == "available", repeated_body
+            assert repeated_body.get("written_to_lcr") is False, repeated_body
+            repeated_reply = repeated_body.get("reply", "")
+            assert 8 <= len(repeated_reply.split()) <= 40, repeated_reply
+            assert len([part for part in re.split(r"(?<=[.!?])\\s+", repeated_reply.strip()) if part]) <= 2, repeated_reply
+            assert re.search(r"\\bsolenos\\b", repeated_reply, re.IGNORECASE), repeated_reply
+            assert re.search(r"\\b(?:care story|care record|care history)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+            if expected_stage == "new":
+                assert re.search(r"\\b(?:start|starting|begin|beginning|today|welcome)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+                assert not re.search(r"\\b(?:welcome back|already underway|your previous updates)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+            elif expected_stage == "returning":
+                assert re.search(r"\\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+                assert not re.search(r"\\b(?:first time here|new caregiver|starting from scratch)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+            else:
+                assert not re.search(
+                    r"\\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
+                    r"we talked about|first time here|new caregiver|starting from scratch)\\b",
+                    repeated_reply,
+                    re.IGNORECASE,
+                ), repeated_reply
+
         db = TestingSessionLocal()
         try:
             assert db.query(CareEvent).filter_by(
