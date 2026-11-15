@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import inspect, or_
@@ -166,6 +167,105 @@ async def _classify_task(task_text: str, context_text: str) -> str:
         # Do not guess or silently choose a workflow if model routing is malformed.
         raise ValueError("workflow_classification_invalid")
     return value
+
+
+def _reconcile_daily_capture_delta(
+    *,
+    person_id: str,
+    caregiver_id: str,
+    source_event_id: str,
+    source_evidence_id: str,
+) -> dict[str, Any]:
+    """Run the existing Delta Engine for a queued, persisted Daily Care capture."""
+    from app.models.care import CareEvent, Evidence
+    from app.models.care_continuity import CareDeltaRun, CareStateRevision
+    from sqlalchemy import func
+    from app.services.delta_engine import (
+        DELTA_ENGINE_VERSION,
+        reconcile_event,
+        source_event_snapshot_hash,
+    )
+
+    delta_db = SessionLocal()
+    try:
+        event = delta_db.query(CareEvent).filter(
+            CareEvent.id == source_event_id,
+            CareEvent.person_id == person_id,
+            CareEvent.created_by_caregiver_id == caregiver_id,
+        ).first()
+        evidence = delta_db.query(Evidence).filter(
+            Evidence.id == source_evidence_id,
+            Evidence.person_id == person_id,
+            Evidence.uploaded_by_caregiver_id == caregiver_id,
+        ).first()
+        if (
+            event is None
+            or evidence is None
+            or source_evidence_id not in {str(value) for value in (event.evidence_ids or [])}
+            or event.status in {"invalidated", "deleted"}
+            or evidence.evidence_status == "deleted_by_caregiver"
+        ):
+            return {"status": "skipped", "error_code": "source_unavailable"}
+        if not event.description:
+            return {"status": "failed", "error_code": "source_description_missing"}
+
+        snapshot_hash = source_event_snapshot_hash(event)
+        latest_revision_time = delta_db.query(func.max(CareStateRevision.changed_at)).filter(
+            CareStateRevision.person_id == person_id
+        ).scalar()
+        care_state_revision_snapshot = latest_revision_time.isoformat() if latest_revision_time else None
+        existing_runs = (
+            delta_db.query(CareDeltaRun)
+            .filter(
+                CareDeltaRun.person_id == person_id,
+                CareDeltaRun.source_event_id == source_event_id,
+                CareDeltaRun.source == "SolenOS Daily Capture",
+            )
+            .order_by(CareDeltaRun.created_at.desc())
+            .all()
+        )
+        for existing_run in existing_runs:
+            try:
+                saved = json.loads(existing_run.delta_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            provenance = saved.get("provenance") or {}
+            if (
+                provenance.get("engine_version") == DELTA_ENGINE_VERSION
+                and provenance.get("source_event_snapshot_sha256") == snapshot_hash
+                and provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
+                and [str(value) for value in (provenance.get("evidence_ids") or [])] == [str(source_evidence_id)]
+            ):
+                return {
+                    "status": "completed",
+                    "run_id": str(existing_run.id),
+                    "reused": True,
+                }
+
+        result = reconcile_event(
+            delta_db,
+            person_id=person_id,
+            event_date=event.occurred_at,
+            source="SolenOS Daily Capture",
+            content=event.description,
+            source_event_id=source_event_id,
+            evidence_ids=[source_evidence_id],
+            persist=True,
+            created_by_caregiver_id=caregiver_id,
+        )
+        run_id = (result.get("provenance") or {}).get("delta_run_id")
+        if not run_id:
+            raise RuntimeError("daily_capture_delta_run_not_persisted")
+        return {"status": "completed", "run_id": str(run_id), "reused": False}
+    except Exception as exc:
+        delta_db.rollback()
+        logger.exception(
+            "Daily Care Delta reconciliation failed for source event %s",
+            source_event_id,
+        )
+        return {"status": "failed", "error_code": type(exc).__name__}
+    finally:
+        delta_db.close()
 
 
 async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
@@ -473,6 +573,42 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "review": review_status,
         },
     )
+
+    # Commit the canonical evidence/change reconciliation and release source
+    # row locks before model-backed Delta inference. The Delta Engine opens its
+    # own session and revalidates the source snapshot immediately before save.
+    current_job.locked_at = datetime.now(timezone.utc)
+    db.commit()
+    if quick_check_in_capture:
+        delta_reconciliation = {"status": "not_applicable"}
+    else:
+        delta_reconciliation = await asyncio.to_thread(
+            _reconcile_daily_capture_delta,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_event_id=event_id,
+            source_evidence_id=evidence_id,
+        )
+    current_job = (
+        db.query(QwenBackgroundJob)
+        .filter(QwenBackgroundJob.id == job_id)
+        .with_for_update()
+        .first()
+    )
+    if current_job is None or current_job.status != "processing":
+        db.rollback()
+        return True
+    current_job.locked_at = datetime.now(timezone.utc)
+
+    logger.info(
+        "Daily Care Delta reconciliation finished job=%s person=%s event=%s status=%s run_id=%s",
+        job_id,
+        person_id,
+        event_id,
+        delta_reconciliation.get("status", "failed"),
+        delta_reconciliation.get("run_id"),
+    )
+
     projection_query_parts = [str(event.title or "")]
     if isinstance(original_capture, dict):
         preferred_capture_fields = ("notes", "summary", "description", "observations", "observation", "details", "care_notes")
@@ -562,6 +698,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "longitudinal_retrieval": "verified" if projection_status == "verified" else "unavailable",
         "projection": projection_status,
         "reconciliation_run_id": reconciliation.get("run_id"),
+        "delta_reconciliation": delta_reconciliation.get("status", "failed"),
+        "delta_run_id": delta_reconciliation.get("run_id"),
+        "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
     }
     current_job.status = "completed"
     current_job.result_text = json.dumps({
@@ -576,6 +715,10 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "assessment_status": assessment_status,
         "reconciliation_status": "completed",
         "projection_status": projection_status,
+        "delta_reconciliation_status": delta_reconciliation.get("status", "failed"),
+        "delta_run_id": delta_reconciliation.get("run_id"),
+        "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
+        "delta_engine_output_persisted": delta_reconciliation.get("status") == "completed",
         "model_output_written_to_lcr": False,
         "source_grounded_observations_projected": observation_count,
     }, ensure_ascii=False, sort_keys=True)
@@ -598,6 +741,10 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "review_required": review_status == "required",
             "capture_mode": "structured_quick_check_in" if quick_check_in_capture else (capture_mode or "legacy_natural_language_update"),
             "projection_status": projection_status,
+            "delta_reconciliation_status": delta_reconciliation.get("status", "failed"),
+            "delta_run_id": delta_reconciliation.get("run_id"),
+            "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
+            "delta_engine_output_persisted": delta_reconciliation.get("status") == "completed",
             "model_output_written_to_lcr": False,
             "source_grounded_observations_projected": observation_count,
         },
