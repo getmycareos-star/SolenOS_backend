@@ -808,8 +808,10 @@ def _reconcile_from_change_intelligence(
             all_refs[(reference["record_type"], reference["record_id"])] = reference
 
     supported_count = sum(1 for item in computed_changes if item.get("certainty") == "supported")
-    if supported_count:
-        caregiver_summary = f"{supported_count} care change(s) are supported by saved records."
+    if supported_count == 1:
+        caregiver_summary = "One care change is supported by saved records."
+    elif supported_count > 1:
+        caregiver_summary = f"{supported_count} care changes are supported by saved records."
     elif computed_changes:
         caregiver_summary = "Some comparisons need more information before they can be confirmed."
     elif history_coverage.get("complete"):
