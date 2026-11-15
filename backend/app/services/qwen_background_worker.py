@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import inspect, or_
@@ -166,6 +167,304 @@ async def _classify_task(task_text: str, context_text: str) -> str:
         # Do not guess or silently choose a workflow if model routing is malformed.
         raise ValueError("workflow_classification_invalid")
     return value
+
+
+def _reconcile_daily_capture_delta(
+    *,
+    person_id: str,
+    caregiver_id: str,
+    source_event_id: str,
+    source_evidence_id: str,
+) -> dict[str, Any]:
+    """Run the existing Delta Engine for a queued, persisted Daily Care capture."""
+    from app.models.care import CareEvent, Evidence
+    from app.models.care_continuity import CareDeltaRun, CareStateRevision
+    from sqlalchemy import func
+    from app.services.delta_engine import (
+        DELTA_ENGINE_VERSION,
+        reconcile_event,
+        source_event_snapshot_hash,
+    )
+
+    delta_db = SessionLocal()
+    try:
+        event = delta_db.query(CareEvent).filter(
+            CareEvent.id == source_event_id,
+            CareEvent.person_id == person_id,
+            CareEvent.created_by_caregiver_id == caregiver_id,
+        ).first()
+        evidence = delta_db.query(Evidence).filter(
+            Evidence.id == source_evidence_id,
+            Evidence.person_id == person_id,
+            Evidence.uploaded_by_caregiver_id == caregiver_id,
+        ).first()
+        if (
+            event is None
+            or evidence is None
+            or source_evidence_id not in {str(value) for value in (event.evidence_ids or [])}
+            or event.status in {"invalidated", "deleted"}
+            or evidence.evidence_status == "deleted_by_caregiver"
+        ):
+            return {"status": "skipped", "error_code": "source_unavailable"}
+        if not event.description:
+            return {"status": "failed", "error_code": "source_description_missing"}
+
+        snapshot_hash = source_event_snapshot_hash(event)
+        latest_revision_time = delta_db.query(func.max(CareStateRevision.changed_at)).filter(
+            CareStateRevision.person_id == person_id
+        ).scalar()
+        care_state_revision_snapshot = latest_revision_time.isoformat() if latest_revision_time else None
+        existing_runs = (
+            delta_db.query(CareDeltaRun)
+            .filter(
+                CareDeltaRun.person_id == person_id,
+                CareDeltaRun.source_event_id == source_event_id,
+                CareDeltaRun.source == "SolenOS Daily Capture",
+            )
+            .order_by(CareDeltaRun.created_at.desc())
+            .all()
+        )
+        for existing_run in existing_runs:
+            try:
+                saved = json.loads(existing_run.delta_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            provenance = saved.get("provenance") or {}
+            if (
+                provenance.get("engine_version") == DELTA_ENGINE_VERSION
+                and provenance.get("source_event_snapshot_sha256") == snapshot_hash
+                and provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
+                and [str(value) for value in (provenance.get("evidence_ids") or [])] == [str(source_evidence_id)]
+            ):
+                return {
+                    "status": "completed",
+                    "run_id": str(existing_run.id),
+                    "reused": True,
+                }
+
+        result = reconcile_event(
+            delta_db,
+            person_id=person_id,
+            event_date=event.occurred_at,
+            source="SolenOS Daily Capture",
+            content=event.description,
+            source_event_id=source_event_id,
+            evidence_ids=[source_evidence_id],
+            persist=True,
+            created_by_caregiver_id=caregiver_id,
+        )
+        run_id = (result.get("provenance") or {}).get("delta_run_id")
+        if not run_id:
+            raise RuntimeError("daily_capture_delta_run_not_persisted")
+        return {"status": "completed", "run_id": str(run_id), "reused": False}
+    except Exception as exc:
+        delta_db.rollback()
+        logger.exception(
+            "Daily Care Delta reconciliation failed for source event %s",
+            source_event_id,
+        )
+        return {"status": "failed", "error_code": type(exc).__name__}
+    finally:
+        delta_db.close()
+
+
+def _merge_daily_capture_job_result(job: QwenBackgroundJob, updates: dict[str, Any]) -> None:
+    """Update stage receipts without discarding persisted extraction/projection details."""
+    try:
+        result = json.loads(job.result_text or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
+    result.update(updates)
+    job.result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+
+async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob) -> bool:
+    """Retry Delta reconciliation from persisted Daily Care sources without re-running extraction."""
+    from app.models.capture_analysis import CaptureAnalysis
+    from app.models.care import CareEvent, Evidence
+
+    job_id = str(job.id)
+    person_id = str(job.person_id)
+    caregiver_id = str(job.caregiver_id)
+    try:
+        event_ids = json.loads(job.source_event_ids_json or "[]")
+        evidence_ids = json.loads(job.source_evidence_ids_json or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("daily_capture_delta_source_references_invalid") from exc
+    if (
+        not isinstance(event_ids, list) or len(event_ids) != 1
+        or not isinstance(evidence_ids, list) or len(evidence_ids) != 1
+        or not all(isinstance(value, str) and value.strip() for value in event_ids + evidence_ids)
+    ):
+        raise ValueError("daily_capture_delta_source_scope_invalid")
+    event_id, evidence_id = event_ids[0], evidence_ids[0]
+
+    event = db.query(CareEvent).filter(
+        CareEvent.id == event_id,
+        CareEvent.person_id == person_id,
+        CareEvent.created_by_caregiver_id == caregiver_id,
+    ).first()
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+        Evidence.uploaded_by_caregiver_id == caregiver_id,
+    ).first()
+    analysis = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
+        CaptureAnalysis.source_event_id == event_id,
+        CaptureAnalysis.source_evidence_id == evidence_id,
+    ).order_by(CaptureAnalysis.created_at.desc()).first()
+
+    if event is None or evidence is None or analysis is None:
+        raise ValueError("daily_capture_delta_source_missing")
+    if evidence_id not in {str(value) for value in (event.evidence_ids or [])}:
+        raise ValueError("daily_capture_delta_evidence_link_invalid")
+    if event.status in {"invalidated", "deleted"} or getattr(evidence, "evidence_status", None) == "deleted_by_caregiver":
+        current = db.query(QwenBackgroundJob).filter_by(
+            id=job_id, person_id=person_id, caregiver_id=caregiver_id
+        ).with_for_update().first()
+        if current is not None:
+            current.status = "cancelled"
+            current.error_code = "daily_capture_source_unavailable"
+            current.locked_at = None
+            analysis.execution_status = {
+                **(analysis.execution_status or {}),
+                "delta_reconciliation": "skipped",
+                "delta_reconciliation_error_code": current.error_code,
+                "longitudinal_processing": "cancelled",
+                "longitudinal_processing_error": current.error_code,
+            }
+            _merge_daily_capture_job_result(current, {
+                "delta_reconciliation_status": "skipped",
+                "longitudinal_processing_status": "cancelled",
+                "longitudinal_processing_error": current.error_code,
+            })
+            db.add(QwenJobEvent(
+                job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id,
+                event_type="daily_capture_delta_retry_cancelled", from_status="processing",
+                to_status="cancelled", error_code=current.error_code,
+                metadata_json={"source_event_id": event_id, "source_evidence_id": evidence_id},
+            ))
+            db.commit()
+        return True
+
+    result = await asyncio.to_thread(
+        _reconcile_daily_capture_delta,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        source_event_id=event_id,
+        source_evidence_id=evidence_id,
+    )
+    current = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.id == job_id,
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+    ).with_for_update().first()
+    if current is None or current.status != "processing":
+        db.rollback()
+        return True
+    analysis = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.id == analysis.id,
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
+    ).with_for_update().first()
+    if analysis is None:
+        raise RuntimeError("daily_capture_delta_analysis_disappeared")
+
+    delta_status = str(result.get("status") or "failed")
+    analysis.execution_status = {
+        **(analysis.execution_status or {}),
+        "delta_reconciliation": delta_status,
+        "delta_run_id": result.get("run_id"),
+        "delta_reconciliation_error_code": result.get("error_code"),
+        "longitudinal_processing": "completed" if delta_status == "completed" else "incomplete",
+        "longitudinal_processing_error": result.get("error_code"),
+    }
+    if delta_status == "skipped":
+        current.status = "cancelled"
+        current.error_code = str(result.get("error_code") or "daily_capture_source_unavailable")[:48]
+        current.locked_at = None
+        current.completed_at = None
+        analysis.execution_status = {
+            **(analysis.execution_status or {}),
+            "longitudinal_processing": "cancelled",
+            "longitudinal_processing_error": current.error_code,
+        }
+        db.add(QwenJobEvent(
+            job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id,
+            event_type="daily_capture_delta_retry_cancelled",
+            from_status="processing", to_status="cancelled", error_code=current.error_code,
+            metadata_json={"source_event_id": event_id, "source_evidence_id": evidence_id},
+        ))
+        db.commit()
+        return True
+
+    if delta_status != "completed":
+        current.status = "failed" if current.attempt_count >= 3 else "queued"
+        current.available_at = datetime.now(timezone.utc) + timedelta(seconds=15 * current.attempt_count)
+        current.error_code = str(result.get("error_code") or "daily_capture_delta_reconciliation_failed")[:48]
+        current.locked_at = None
+        current.completed_at = None
+        analysis.execution_status = {
+            **(analysis.execution_status or {}),
+            "longitudinal_processing": "failed" if current.status == "failed" else "retrying",
+            "longitudinal_processing_error": current.error_code,
+        }
+        _merge_daily_capture_job_result(current, {
+            "delta_reconciliation_status": "failed",
+            "delta_reconciliation_error_code": current.error_code,
+            "longitudinal_processing_status": "failed" if current.status == "failed" else "retrying",
+            "longitudinal_processing_error": current.error_code,
+        })
+        db.add(QwenJobEvent(
+            job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id,
+            event_type="daily_capture_delta_reconciliation_retry",
+            from_status="processing", to_status=current.status, error_code=current.error_code,
+            metadata_json={
+                "attempt": current.attempt_count, "source_event_id": event_id,
+                "source_evidence_id": evidence_id, "analysis_id": str(analysis.id),
+            },
+        ))
+        if current.status == "failed":
+            analysis.execution_status = {
+                **(analysis.execution_status or {}),
+                "longitudinal_processing": "failed",
+                "longitudinal_processing_error": current.error_code,
+            }
+        db.commit()
+        return True
+
+    current.status = "completed"
+    _merge_daily_capture_job_result(current, {
+        "source_event_id": event_id,
+        "source_evidence_id": evidence_id,
+        "analysis_id": str(analysis.id),
+        "delta_reconciliation_status": "completed",
+        "delta_reconciliation_error_code": None,
+        "delta_engine_output_persisted": True,
+        "delta_run_id": result.get("run_id"),
+        "delta_reused": bool(result.get("reused")),
+        "longitudinal_processing_status": "completed",
+        "longitudinal_processing_error": None,
+    })
+    current.completed_at = datetime.now(timezone.utc)
+    current.locked_at = None
+    current.error_code = None
+    db.add(QwenJobEvent(
+        job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id,
+        event_type="daily_capture_delta_retry_completed",
+        from_status="processing", to_status="completed",
+        metadata_json={
+            "source_event_id": event_id, "source_evidence_id": evidence_id,
+            "analysis_id": str(analysis.id), "delta_run_id": result.get("run_id"),
+            "reused": bool(result.get("reused")),
+        },
+    ))
+    db.commit()
+    return True
 
 
 async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
@@ -502,6 +801,42 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "review": review_status,
         },
     )
+
+    # Commit the canonical evidence/change reconciliation and release source
+    # row locks before model-backed Delta inference. The Delta Engine opens its
+    # own session and revalidates the source snapshot immediately before save.
+    current_job.locked_at = datetime.now(timezone.utc)
+    db.commit()
+    if quick_check_in_capture:
+        delta_reconciliation = {"status": "not_applicable"}
+    else:
+        delta_reconciliation = await asyncio.to_thread(
+            _reconcile_daily_capture_delta,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_event_id=event_id,
+            source_evidence_id=evidence_id,
+        )
+    current_job = (
+        db.query(QwenBackgroundJob)
+        .filter(QwenBackgroundJob.id == job_id)
+        .with_for_update()
+        .first()
+    )
+    if current_job is None or current_job.status != "processing":
+        db.rollback()
+        return True
+    current_job.locked_at = datetime.now(timezone.utc)
+
+    logger.info(
+        "Daily Care Delta reconciliation finished job=%s person=%s event=%s status=%s run_id=%s",
+        job_id,
+        person_id,
+        event_id,
+        delta_reconciliation.get("status", "failed"),
+        delta_reconciliation.get("run_id"),
+    )
+
     projection_query_parts = [str(event.title or "")]
     if isinstance(original_capture, dict):
         preferred_capture_fields = ("notes", "summary", "description", "observations", "observation", "details", "care_notes")
@@ -581,6 +916,14 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         raise RuntimeError("daily_capture_analysis_disappeared")
     analysis.candidates = candidates
     analysis.extraction_status = extraction_status
+    delta_status = str(delta_reconciliation.get("status") or "failed")
+    longitudinal_processing_status = (
+        "not_applicable"
+        if delta_status == "not_applicable"
+        else "completed"
+        if delta_status == "completed"
+        else "incomplete"
+    )
     analysis.execution_status = {
         "source_preservation": "verified",
         "evidence": "verified",
@@ -591,8 +934,12 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "longitudinal_retrieval": "verified" if projection_status == "verified" else "unavailable",
         "projection": projection_status,
         "reconciliation_run_id": reconciliation.get("run_id"),
+        "delta_reconciliation": delta_status,
+        "delta_run_id": delta_reconciliation.get("run_id"),
+        "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
+        "longitudinal_processing": longitudinal_processing_status,
+        "longitudinal_processing_error": delta_reconciliation.get("error_code"),
     }
-    current_job.status = "completed"
     current_job.result_text = json.dumps({
         "analysis_id": analysis.id,
         "source_event_id": event_id,
@@ -605,9 +952,76 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "assessment_status": assessment_status,
         "reconciliation_status": "completed",
         "projection_status": projection_status,
+        "delta_reconciliation_status": delta_status,
+        "delta_run_id": delta_reconciliation.get("run_id"),
+        "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
+        "delta_engine_output_persisted": delta_status == "completed",
+        "longitudinal_processing_status": longitudinal_processing_status,
+        "longitudinal_processing_error": delta_reconciliation.get("error_code"),
         "model_output_written_to_lcr": False,
         "source_grounded_observations_projected": observation_count,
     }, ensure_ascii=False, sort_keys=True)
+    if delta_status == "skipped":
+        current_job.status = "cancelled"
+        current_job.error_code = str(delta_reconciliation.get("error_code") or "daily_capture_source_unavailable")[:48]
+        current_job.completed_at = None
+        current_job.locked_at = None
+        analysis.execution_status = {
+            **(analysis.execution_status or {}),
+            "longitudinal_processing": "cancelled",
+            "longitudinal_processing_error": current_job.error_code,
+        }
+        _merge_daily_capture_job_result(current_job, {
+            "delta_reconciliation_status": "skipped",
+            "longitudinal_processing_status": "cancelled",
+            "longitudinal_processing_error": current_job.error_code,
+        })
+        db.add(QwenJobEvent(
+            job_id=current_job.id, person_id=current_job.person_id, caregiver_id=current_job.caregiver_id,
+            event_type="daily_capture_delta_retry_cancelled",
+            from_status="processing", to_status="cancelled",
+            error_code=current_job.error_code,
+            metadata_json={"source_event_id": event_id, "source_evidence_id": evidence_id},
+        ))
+        db.commit()
+        return True
+
+    if delta_status != "completed" and delta_status != "not_applicable":
+        # Preserve extraction and source projections; retry only Delta using the
+        # immutable event/evidence references already stored on this job.
+        current_job.workflow = "daily_capture_delta_reconciliation"
+        # Retry budget belongs to the Delta stage, not earlier extraction
+        # attempts. The initial Delta attempt has already run once.
+        current_job.attempt_count = 1
+        current_job.status = "queued"
+        current_job.available_at = datetime.now(timezone.utc) + timedelta(seconds=15)
+        current_job.completed_at = None
+        current_job.error_code = str(delta_reconciliation.get("error_code") or "daily_capture_delta_reconciliation_failed")[:48]
+        current_job.locked_at = None
+        analysis.execution_status = {
+            **(analysis.execution_status or {}),
+            "longitudinal_processing": "retrying" if current_job.status == "queued" else "failed",
+        }
+        _merge_daily_capture_job_result(current_job, {
+            "delta_reconciliation_status": "failed",
+            "delta_reconciliation_error_code": current_job.error_code,
+            "longitudinal_processing_status": "retrying" if current_job.status == "queued" else "failed",
+            "longitudinal_processing_error": current_job.error_code,
+        })
+        db.add(QwenJobEvent(
+            job_id=current_job.id, person_id=current_job.person_id, caregiver_id=current_job.caregiver_id,
+            event_type="daily_capture_delta_retry_queued",
+            from_status="processing", to_status=current_job.status,
+            error_code=current_job.error_code,
+            metadata_json={
+                "source_event_id": event_id, "source_evidence_id": evidence_id,
+                "analysis_id": str(analysis.id), "attempt": current_job.attempt_count,
+            },
+        ))
+        db.commit()
+        return True
+
+    current_job.status = "completed"
     current_job.completed_at = datetime.now(timezone.utc)
     current_job.locked_at = None
     current_job.error_code = None
@@ -627,6 +1041,12 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "review_required": review_status == "required",
             "capture_mode": "structured_quick_check_in" if quick_check_in_capture else (capture_mode or "legacy_natural_language_update"),
             "projection_status": projection_status,
+            "delta_reconciliation_status": delta_status,
+            "delta_run_id": delta_reconciliation.get("run_id"),
+            "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
+            "delta_engine_output_persisted": delta_status == "completed",
+            "longitudinal_processing_status": longitudinal_processing_status,
+            "longitudinal_processing_error": delta_reconciliation.get("error_code"),
             "model_output_written_to_lcr": False,
             "source_grounded_observations_projected": observation_count,
         },
@@ -676,6 +1096,8 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
 
         if job.workflow == "daily_capture_extraction":
             return await _process_daily_capture_extraction(db, job)
+        if job.workflow == "daily_capture_delta_reconciliation":
+            return await _process_daily_capture_delta_reconciliation(db, job)
 
         # Document intake reuses this durable PostgreSQL queue so extraction and
         # review continue even if the caregiver closes the app after upload.
@@ -991,6 +1413,32 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                                 "longitudinal_retrieval": "not_verified",
                                 "projection": "not_verified",
                             }
+                    elif current.workflow == "daily_capture_delta_reconciliation":
+                        from app.models.capture_analysis import CaptureAnalysis
+                        try:
+                            source_event_ids = json.loads(current.source_event_ids_json or "[]")
+                        except (TypeError, ValueError, json.JSONDecodeError):
+                            source_event_ids = []
+                        analysis = db.query(CaptureAnalysis).filter(
+                            CaptureAnalysis.person_id == current.person_id,
+                            CaptureAnalysis.caregiver_id == current.caregiver_id,
+                            CaptureAnalysis.source_event_id.in_(source_event_ids or ["__none__"]),
+                        ).order_by(CaptureAnalysis.created_at.desc()).first()
+                        if analysis is not None:
+                            terminal_failure = current.status == "failed"
+                            analysis.execution_status = {
+                                **(analysis.execution_status or {}),
+                                "delta_reconciliation": "failed" if terminal_failure else "retrying",
+                                "delta_reconciliation_error_code": current.error_code,
+                                "longitudinal_processing": "failed" if terminal_failure else "retrying",
+                                "longitudinal_processing_error": current.error_code,
+                            }
+                            _merge_daily_capture_job_result(current, {
+                                "delta_reconciliation_status": "failed",
+                                "delta_reconciliation_error_code": current.error_code,
+                                "longitudinal_processing_status": "failed" if terminal_failure else "retrying",
+                                "longitudinal_processing_error": current.error_code,
+                            })
                     db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count, "error_type": type(exc).__name__}))
                     db.commit()
             except Exception:
