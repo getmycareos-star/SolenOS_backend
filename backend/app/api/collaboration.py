@@ -6593,8 +6593,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         elif low_capacity_support_fallback_used:
             verdict = "passed"
             safety_note = (
-                "A brief supportive reply was used because the generated answer did not pass "
-                "SolenOS grounding checks. It does not summarize or change the care record."
+                "I couldn't confirm a reliable answer from the care record, so this is only a "
+                "brief supportive reply. Nothing was changed in the care record."
             )
             ai_generated = False
         else:
