@@ -624,6 +624,39 @@ def _reconcile_from_change_intelligence(
     ).scalar()
     care_state_revision_snapshot = latest_revision_time.isoformat() if latest_revision_time else None
 
+    def validate_source_snapshot() -> None:
+        if source_event_id:
+            current_event = db.query(CareEvent).filter(
+                CareEvent.id == source_event_id,
+                CareEvent.person_id == person_id,
+            ).with_for_update().first()
+            if (
+                current_event is None
+                or current_event.status in {"invalidated", "deleted"}
+                or source_event_snapshot_hash(current_event) != source_event_snapshot_sha256
+            ):
+                db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="The saved care update changed during reconciliation. Retry using the latest record.",
+                )
+        current_evidence = (
+            db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).with_for_update().all()
+            if evidence_ids else []
+        )
+        if evidence_ids and (
+            {str(item.id) for item in current_evidence} != {str(value) for value in evidence_ids}
+            or any(item.evidence_status == "deleted_by_caregiver" for item in current_evidence)
+        ):
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="The source evidence changed during reconciliation. Retry using the latest record.",
+            )
+
     if persist:
         existing_runs = db.query(CareDeltaRun).filter(
             CareDeltaRun.person_id == person_id,
@@ -643,6 +676,8 @@ def _reconcile_from_change_intelligence(
                 and [str(value) for value in (saved_provenance.get("evidence_ids") or [])]
                     == [str(value) for value in evidence_ids]
             ):
+                validate_source_snapshot()
+                db.commit()
                 saved_provenance["delta_run_id"] = str(existing_run.id)
                 return saved_result
 
@@ -826,37 +861,7 @@ def _reconcile_from_change_intelligence(
     }
 
     if persist:
-        if source_event_id:
-            current_event = db.query(CareEvent).filter(
-                CareEvent.id == source_event_id,
-                CareEvent.person_id == person_id,
-            ).with_for_update().first()
-            if (
-                current_event is None
-                or current_event.status in {"invalidated", "deleted"}
-                or source_event_snapshot_hash(current_event) != source_event_snapshot_sha256
-            ):
-                db.rollback()
-                raise HTTPException(
-                    status_code=409,
-                    detail="The saved care update changed during reconciliation. Retry using the latest record.",
-                )
-        current_evidence = (
-            db.query(Evidence).filter(
-                Evidence.person_id == person_id,
-                Evidence.id.in_(evidence_ids),
-            ).with_for_update().all()
-            if evidence_ids else []
-        )
-        if evidence_ids and (
-            {str(item.id) for item in current_evidence} != {str(value) for value in evidence_ids}
-            or any(item.evidence_status == "deleted_by_caregiver" for item in current_evidence)
-        ):
-            db.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="The source evidence changed during reconciliation. Retry using the latest record.",
-            )
+        validate_source_snapshot()
         run = CareDeltaRun(
             person_id=person_id,
             source=source,
