@@ -406,6 +406,9 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     assert body["source_coverage"]["medications_and_allergies"] == "unavailable"
     assert body["source_coverage"]["evidence_freshness_assessments"] == "available"
     assert any(item["assessment_id"] == "appointment-freshness-assessment" for item in body["freshness_assessments"])
+    shared_lcr = body["living_care_record_context"]
+    assert any(item["id"] == "appointment-freshness-event" for item in shared_lcr["sources"]["events"]["items"])
+    assert any(item["id"] == "appointment-freshness-evidence" for item in shared_lcr["sources"]["evidence"]["items"])
     event_item = next(item for item in body["events"] if item["source_id"] == "appointment-freshness-event")
     assert event_item["freshness_assessments"][0]["freshness_status"] == "needs_review"
     assert event_item["freshness_assessments"][0]["interpretation_limit"].startswith("This is a policy application")
