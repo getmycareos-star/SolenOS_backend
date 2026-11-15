@@ -219,9 +219,12 @@ def test_medication_dose_recall_never_overrides_higher_priority_safety_guards():
     assert collaboration._should_use_medication_dose_recall_fallback(
         request, conflict_response="The saved reports disagree; confirm with the prescriber."
     ) is False
+    # A generic missing-measurement reply must not suppress the exact
+    # caregiver-report lookup. If no report exists, the deterministic fallback
+    # still refuses to confirm a dose.
     assert collaboration._should_use_medication_dose_recall_fallback(
         request, missing_measurement_reply="The prescribed dose is not recorded."
-    ) is False
+    ) is True
     assert collaboration._should_use_medication_dose_recall_fallback(
         request, medication_change_reply="I can't recommend changing a prescribed dose."
     ) is False
@@ -231,6 +234,86 @@ def test_medication_dose_recall_never_overrides_higher_priority_safety_guards():
     assert collaboration._should_use_medication_dose_recall_fallback(
         request, unsupported_trend=True
     ) is False
+
+
+def test_medication_dose_recall_directly_retrieves_person_scoped_report_and_evidence(monkeypatch):
+    client = setup_client(monkeypatch)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        other_token, other_person_id, other_caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        report = "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose."
+        evidence = Evidence(
+            id="medication-recall-source-evidence",
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=report,
+            source_type="caregiver_report",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            reported_by_label="Daughter",
+            original_author="Daughter",
+            occurred_at=datetime(2026, 11, 14, 18, 0, tzinfo=timezone.utc),
+            reported_at=datetime(2026, 11, 15, 8, 0, tzinfo=timezone.utc),
+        )
+        matching_event = CareEvent(
+            id="medication-recall-source-event",
+            person_id=person_id,
+            event_type="daily_care_entry",
+            status="recorded",
+            occurred_at=datetime(2026, 11, 14, 18, 0, tzinfo=timezone.utc),
+            title="Daily care entry",
+            description=json.dumps({"capture_kind": "natural_language_update", "notes": report}),
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver_id,
+        )
+        other_person_event = CareEvent(
+            id="other-person-medication-event",
+            person_id=other_person_id,
+            event_type="daily_care_entry",
+            status="recorded",
+            occurred_at=datetime(2026, 11, 14, 19, 0, tzinfo=timezone.utc),
+            title="Daily care entry",
+            description=json.dumps({"notes": "The medication dose was changed to 900 mg."}),
+            evidence_ids=[],
+            created_by_caregiver_id=other_caregiver_id,
+        )
+        pending_event = CareEvent(
+            id="pending-medication-event",
+            person_id=person_id,
+            event_type="daily_care_entry",
+            status="pending",
+            occurred_at=datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc),
+            title="Unrecorded daily care entry",
+            description=json.dumps({"notes": "Medication dose may have changed."}),
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, matching_event, other_person_event, pending_event])
+        db.commit()
+
+        retrieved = collaboration._medication_dose_recall_context_lines(db, person_id)
+        lines = [*retrieved["event_lines"], *retrieved["evidence_lines"]]
+        answer = collaboration._care_history_extractive_answer(
+            "What new dose did the doctor prescribe for Mum yesterday?",
+            lines,
+        )
+        assert answer is not None
+        assert report in answer
+        assert "not confirmation of the current prescription" in answer
+        assert "900 mg" not in answer
+        assert collaboration._context_record_ids(retrieved["event_lines"], "event_id") == [
+            matching_event.id
+        ]
+        assert collaboration._context_record_ids(retrieved["evidence_lines"], "evidence_id") == [
+            evidence.id
+        ]
+        assert retrieved["has_more"] is False
+    finally:
+        db.close()
+        teardown()
 
 
 def test_companion_identity_guidance_does_not_repeat_the_one_time_name_question():
