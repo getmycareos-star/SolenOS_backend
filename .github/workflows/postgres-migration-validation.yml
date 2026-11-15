@@ -72,13 +72,12 @@ jobs:
 
           engine = create_engine(os.environ["DATABASE_URL"])
           with engine.begin() as connection:
+              # This validation database is fresh. Seed the pre-change enum
+              # directly so Alembic must add both new labels.
               connection.execute(text("""
-                  DO $ BEGIN
-                      CREATE TYPE situationstate AS ENUM (
-                          'ACTIVE', 'HISTORICAL', 'RESOLVED', 'EVOLVED', 'UNKNOWN'
-                      );
-                  EXCEPTION WHEN duplicate_object THEN NULL;
-                  END $;
+                  CREATE TYPE situationstate AS ENUM (
+                      'ACTIVE', 'HISTORICAL', 'RESOLVED', 'EVOLVED', 'UNKNOWN'
+                  )
               """))
           PY
 
