@@ -283,6 +283,15 @@ def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(m
 def test_companion_care_report_requires_explicit_creation_and_separate_acceptance(monkeypatch):
     source = "Her sleep has been worse since last Friday."
     client = setup_client(monkeypatch, lambda text: {"observations": []})
+    captured_prompts = []
+    monkeypatch.setattr(
+        collaboration,
+        "_ollama_chat",
+        lambda base, model, messages, options=None: (
+            captured_prompts.append(messages)
+            or "I can explain what the saved care report says."
+        ),
+    )
     try:
         first = create_session(client, "Caregiver one")
         headers = {"Authorization": f"Bearer {first['access_token']}"}
@@ -357,6 +366,26 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         assert replay_review.status_code == 200, replay_review.text
         assert replay_review.json()["idempotent_replay"] is True
         assert replay_review.json()["assertion_id"] == assertion_id
+
+        current_care = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert current_care.status_code == 200, current_care.text
+        assert any(item.get("id") == assertion_id for item in current_care.json().get("items", []))
+
+        follow_up = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": first["person"]["id"],
+                "text": "What have I told you about her sleep?",
+                "session_id": body["session_id"],
+                "client_turn_id": "companion-report-readback-0001",
+            },
+        )
+        assert follow_up.status_code == 200, follow_up.text
+        follow_up_prompt = "\\n".join(
+            str(item.get("content", "")) for item in captured_prompts[-1]
+        )
+        assert source in follow_up_prompt
 
         db = TestingSessionLocal()
         try:
