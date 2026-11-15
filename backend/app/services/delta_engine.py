@@ -1055,6 +1055,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
     if persist:
         try:
+            created_assertion_ids: list[str] = []
             incoming_evidence_rows = (
                 db.query(Evidence).filter(
                     Evidence.person_id == person_id,
@@ -1298,7 +1299,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         ).first()
                         if same_event_assertion:
                             continue
-                    create_assertion(db, CareAssertionCreate(
+                    created_assertion = create_assertion(db, CareAssertionCreate(
                         person_id=person_id, subject_type=domain.rstrip("s"), subject_id=subject_id,
                         field=field, assertion_kind=assertion_kind,
                         epistemic_state="reported" if assertion_kind == "time_bound_observation" else "inferred",
@@ -1308,6 +1309,8 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         created_by_caregiver_id=created_by_caregiver_id,
                         review_after_days=30 if domain != "symptoms" else None,
                     ), commit=False)
+                    if created_assertion is not None:
+                        created_assertion_ids.append(str(created_assertion.id))
 
             def add_internal_gap_candidate(
                 subject_type: str,
@@ -1532,8 +1535,35 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     "analysis": analysis,
                 })
             db.flush()
+            if created_assertion_ids:
+                # Delta extraction must feed the same persisted change reconciler
+                # used by the Living Care Record. The LLM candidate is not a
+                # separate source of truth for longitudinal change.
+                from app.services.change_intelligence_reconciliation import (
+                    reconcile_person_change_intelligence,
+                )
+
+                reconcile_person_change_intelligence(
+                    db,
+                    person_id,
+                    reference_time=event_date,
+                    protected_assertion_ids=created_assertion_ids,
+                )
+                db.flush()
+                result["provenance"]["canonical_change_reconciliation"] = {
+                    "status": "completed",
+                    "engine": "persisted_change_intelligence_reconciliation",
+                    "protected_assertion_count": len(created_assertion_ids),
+                }
+            else:
+                result["provenance"]["canonical_change_reconciliation"] = {
+                    "status": "not_run",
+                    "reason": "no_new_assertions_created",
+                }
         except Exception as exc:
             # Keep the API response generic, but retain the original database or
+            # validation exception in server logs so persistence regressions are
+            # diagnosable without exposing care content to the caller., but retain the original database or
             # validation exception in server logs so persistence regressions are
             # diagnosable without exposing care content to the caller.
             logger.exception("Delta reconciliation persistence failed")
