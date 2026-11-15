@@ -242,9 +242,23 @@ def assess_change(
         and (novelty == 1.0 or recurrence == 1.0 or magnitude_score >= 0.7 or clustering == 1.0)
         and (corroboration_score >= 0.3 or functional_score == 1.0 or persistence_score >= 0.5)
     )
+    # Do not turn one uncorroborated, non-functional report into an
+    # automatic follow-up. The verdict logic above deliberately classifies
+    # that case as insufficient evidence; the persisted follow-up flag must
+    # preserve the same boundary instead of reintroducing a task downstream.
+    isolated_unverified_report = (
+        current_count == 1
+        and recurrence == 0.0
+        and functional_score == 0.0
+        and corroboration_score < 0.3
+        and contextual_score == 0.0
+    )
     follow_up_candidate = (
         verdict == SignificanceVerdict.MEANINGFUL_CANDIDATE
-        or (verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE and baseline_event_count == 0 and current_count > 0)
+        or (
+            verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
+            and not isolated_unverified_report
+        )
     )
 
     explanation = _build_explanation(
