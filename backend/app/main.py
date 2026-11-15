@@ -1254,11 +1254,13 @@ async def generate_lcr_orientation(
         for name, source in sources.items()
         if name != "living_record" and isinstance(source, dict)
     )
-    missing_required_sources = set(lcr_context.get("missing_required_sources", []))
-    # Any unavailable required source makes first-use classification unsafe.
-    # Partial documents, handoffs, or events cannot prove the whole record is complete.
+    missing_core_sources = set(lcr_context.get("missing_required_sources", [])).intersection(
+        {"events", "evidence", "facts", "assertions"}
+    )
+    # Missing core care-history sources take precedence over partial evidence elsewhere.
+    # A document or handoff row cannot prove the core history is complete.
     caregiver_stage = (
-        "unknown" if missing_required_sources
+        "unknown" if missing_core_sources
         else "returning" if held_care_rows > 0
         else "new"
     )
