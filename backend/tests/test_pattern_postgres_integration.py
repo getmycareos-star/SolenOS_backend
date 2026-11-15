@@ -701,6 +701,11 @@ def test_postgres_concurrent_tracked_record_updates_allocate_unique_revision_num
             assert [row.revision_number for row in revisions] == [1, 2, 3]
             assert revisions[0].change_kind == "created"
             assert all(row.change_kind == "updated" for row in revisions[1:])
+            second_before = json.loads(revisions[2].before_state)
+            first_after = json.loads(revisions[1].after_state)
+            assert second_before["title"] == first_after["title"], (
+                "concurrent audit snapshots must form a before/after chain"
+            )
             persisted = db.query(CareEvent).filter(
                 CareEvent.id == event_id,
                 CareEvent.person_id == person_id,
