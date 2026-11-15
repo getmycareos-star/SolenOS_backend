@@ -286,6 +286,48 @@ def test_resolved_contradiction_no_longer_blocks_current_significance():
         teardown_db()
 
 
+def test_unresolved_subject_conflict_is_detected_without_event_evidence_ids():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.uncertainty import Contradiction
+        from app.services.change_detection import detect_event_changes
+
+        app.dependency_overrides[get_db] = override_get_db
+        db, person, caregiver = _seed_person()
+        now = datetime.now(timezone.utc)
+        event = _add_event(
+            db, person, caregiver, "confusion",
+            "Caregiver reported a change in confusion",
+            days_ago=1,
+        )
+        assert event.evidence_ids == []
+        db.add(Contradiction(
+            person_id=person.id,
+            subject_type="confusion",
+            subject_id="",
+            field="reported_state",
+            description="Unresolved subject-level conflict without linked evidence IDs.",
+            evidence_ids=[],
+            matching_candidate_ids=[event.id],
+            source_assertion_ids=[],
+            resolution_status="unresolved",
+        ))
+        db.commit()
+
+        changes = detect_event_changes(db, person.id, "confusion", None, now)
+        assert len(changes) == 1
+        assessment = db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.id == changes[0].significance_assessment_id
+        ).one()
+        assert assessment.evidence_status == EvidenceStatus.CONTRADICTORY
+        assert assessment.verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
+        assert assessment.attention_candidate is False
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_professional_claim_in_source_text_does_not_verify_authority():
     setup_db()
     try:
