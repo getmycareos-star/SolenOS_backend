@@ -8,6 +8,11 @@ on:
     paths:
       - ".github/workflows/situation-understanding-benchmark.yml"
       - "backend/tests/conftest.py"
+      - "backend/tests/test_appointment_workspace.py"
+      - "backend/tests/test_situation.py"
+      - "backend/tests/test_persisted_capture_review.py"
+      - "backend/tests/test_longitudinal_messy_care_benchmark.py"
+      - "backend/tests/test_evidence_review_persistence.py"
   workflow_dispatch:
 
 permissions:
