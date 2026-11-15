@@ -278,3 +278,101 @@ def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(m
             db.close()
     finally:
         teardown()
+
+
+def test_companion_care_report_requires_explicit_creation_and_separate_acceptance(monkeypatch):
+    source = "Her sleep has been worse since last Friday."
+    client = setup_client(monkeypatch, lambda text: {"observations": []})
+    try:
+        first = create_session(client, "Caregiver one")
+        headers = {"Authorization": f"Bearer {first['access_token']}"}
+        response = send(client, first, source)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        message_id = body["source_message_id"]
+        assert message_id
+        assert body["written_to_lcr"] is False
+        assert body["persistence"] == "conversation_only"
+
+        missing_confirmation = client.post(
+            f"/api/v1/companion/care-updates/from-message/{message_id}",
+            headers=headers,
+            json={"confirm_care_report": False},
+        )
+        assert missing_confirmation.status_code == 422
+
+        created = client.post(
+            f"/api/v1/companion/care-updates/from-message/{message_id}",
+            headers=headers,
+            json={"confirm_care_report": True},
+        )
+        assert created.status_code == 200, created.text
+        proposal = created.json()["proposal"]
+        assert proposal["status"] == "pending_authorization"
+        assert proposal["proposed_change"]["asserted_value"] == source
+        assert proposal["proposed_change"]["source_quote"] == source
+        assert proposal["proposed_change"]["information_status"] == "caregiver_reported_pending_review"
+        assert created.json()["idempotent_replay"] is False
+
+        replay_create = client.post(
+            f"/api/v1/companion/care-updates/from-message/{message_id}",
+            headers=headers,
+            json={"confirm_care_report": True},
+        )
+        assert replay_create.status_code == 200, replay_create.text
+        assert replay_create.json()["idempotent_replay"] is True
+        assert replay_create.json()["proposal"]["id"] == proposal["id"]
+
+        queued = pending(client, first)
+        assert len(queued) == 1
+        assert queued[0]["id"] == proposal["id"]
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
+        finally:
+            db.close()
+
+        second = create_session(client, "Caregiver two")
+        second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+        cross_person_create = client.post(
+            f"/api/v1/companion/care-updates/from-message/{message_id}",
+            headers=second_headers,
+            json={"confirm_care_report": True},
+        )
+        assert cross_person_create.status_code == 404
+        assert pending(client, second) == []
+        cross_person_review = review(client, second, proposal["id"], {"decision": "accept"})
+        assert cross_person_review.status_code == 404
+
+        accepted = review(client, first, proposal["id"], {"decision": "accept"})
+        assert accepted.status_code == 200, accepted.text
+        accepted_body = accepted.json()
+        assert accepted_body["written_to_lcr"] is True
+        assert accepted_body["decision"] == "accept"
+        assertion_id = accepted_body["assertion_id"]
+        assert assertion_id
+
+        replay_review = review(client, first, proposal["id"], {"decision": "accept"})
+        assert replay_review.status_code == 200, replay_review.text
+        assert replay_review.json()["idempotent_replay"] is True
+        assert replay_review.json()["assertion_id"] == assertion_id
+
+        db = TestingSessionLocal()
+        try:
+            assertion = db.query(CareAssertion).filter_by(id=assertion_id).one()
+            assert assertion.person_id == first["person"]["id"]
+            assert assertion.asserted_value == source
+            assert assertion.assertion_status == "caregiver_reviewed"
+            assert assertion.source_message_id == message_id
+            assert assertion.source_proposal_id == proposal["id"]
+            assert assertion.source_conversation_id == body["session_id"]
+            saved_proposal = db.query(AIOutputLCRProposal).filter_by(id=proposal["id"]).one()
+            assert saved_proposal.status == "accepted"
+            decisions = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal["id"]).all()
+            assert len(decisions) == 1
+            assert decisions[0].decision == "accepted"
+        finally:
+            db.close()
+    finally:
+        teardown()
