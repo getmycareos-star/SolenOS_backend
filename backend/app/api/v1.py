@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -569,12 +569,30 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         or not 8 <= len(capture_idempotency_key) <= 128
     ):
         raise HTTPException(status_code=422, detail="capture_idempotency_key must contain 8 to 128 characters")
-    person_query = db.query(PersonModel).filter(PersonModel.id == person_id)
-    # Serialize all idempotent Daily Care writes per care recipient so
-    # concurrent retries cannot both pass the lookup on PostgreSQL.
-    if event_type == "quick_daily_checkin" or capture_idempotency_key:
-        person_query = person_query.with_for_update()
-    person = person_query.first()
+    # Serialize only retries carrying the same idempotency key. A row lock
+    # on the care-recipient record blocks unrelated reads/writes while background
+    # extraction or reconciliation touches that row, which can stall a caregiver
+    # retry for minutes. PostgreSQL transaction-scoped advisory locks isolate the
+    # retry key without locking the care record itself.
+    quick_check_in = payload.get("quick_check_in")
+    idempotency_lock_value = capture_idempotency_key
+    if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
+        idempotency_lock_value = quick_check_in.get("idempotency_key")
+    if idempotency_lock_value and db.get_bind().dialect.name == "postgresql":
+        lock_identity = (
+            f"solenos-daily-capture:{person_id}:{caregiver_id}:{event_type}:{idempotency_lock_value}"
+        )
+        advisory_lock_key = int.from_bytes(
+            hashlib.sha256(lock_identity.encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": advisory_lock_key},
+        )
+
+    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     caregiver = (
