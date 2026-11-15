@@ -2910,6 +2910,7 @@ def test_correction_recovery_worker_respects_live_lease_and_recovers_expired_rec
             row = db.query(Correction).filter_by(id=correction_id).one()
             row.processing_status = "processing"
             row.processing_started_at = datetime.now(timezone.utc)
+            row.next_retry_at = None
             db.commit()
         finally:
             db.close()
@@ -2930,6 +2931,7 @@ def test_correction_recovery_worker_respects_live_lease_and_recovers_expired_rec
         try:
             row = db.query(Correction).filter_by(id=correction_id).one()
             row.processing_started_at = datetime.now(timezone.utc) - timedelta(minutes=11)
+            row.next_retry_at = None
             db.commit()
         finally:
             db.close()
