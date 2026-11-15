@@ -1272,6 +1272,17 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
         assert replay.json()["processing_status"] == "completed"
         assert calls["count"] == 2
 
+        # A browser reload can lose the original client key. The stable request
+        # fingerprint still prevents an identical correction from being saved twice.
+        reloaded_replay = client.post(
+            "/api/v1/corrections",
+            headers=headers,
+            json={**payload, "idempotency_key": "new-browser-session-key"},
+        )
+        assert reloaded_replay.status_code == 200, reloaded_replay.text
+        assert reloaded_replay.json()["id"] == correction_id
+        assert calls["count"] == 2
+
         changed_payload = {**payload, "corrected_text": "A different correction."}
         conflict = client.post("/api/v1/corrections", headers=headers, json=changed_payload)
         assert conflict.status_code == 409, conflict.text
