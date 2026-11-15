@@ -18,6 +18,8 @@ from app.schemas.change import (
     SituationResponse,
     SituationStateTransitionRequest,
     SituationStateTransitionResponse,
+    SituationDetailResponse,
+    SituationSourceRecord,
     ChangeDetailResponse,
     ChangeConfirmationRequest,
     ChangeConfirmationTransitionResponse,
@@ -530,6 +532,143 @@ def detect_situations_endpoint(
 def list_situations(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_person_scope(request, db, person_id)
     return db.query(Situation).filter(Situation.person_id == person_id).order_by(Situation.created_at.desc()).all()
+
+
+@router.get(
+    "/situations/{person_id}/{situation_id}/detail",
+    response_model=SituationDetailResponse,
+)
+def get_situation_detail(
+    person_id: str,
+    situation_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _require_person_scope(request, db, person_id)
+    situation = db.query(Situation).filter(
+        Situation.id == situation_id,
+        Situation.person_id == person_id,
+    ).first()
+    if situation is None:
+        raise HTTPException(status_code=404, detail="Care situation not found")
+
+    source_ids = set(situation.signal_ids or [])
+    linked_change_ids = set(situation.change_ids or [])
+    linked_pattern_ids = set(situation.pattern_ids or [])
+    linked_changes = []
+    if linked_change_ids:
+        linked_changes = db.query(Change).filter(
+            Change.person_id == person_id,
+            Change.id.in_(linked_change_ids),
+        ).all()
+    linked_patterns = []
+    if linked_pattern_ids:
+        linked_patterns = db.query(Pattern).filter(
+            Pattern.person_id == person_id,
+            Pattern.id.in_(linked_pattern_ids),
+        ).all()
+    for change in linked_changes:
+        source_ids.update(change.evidence_ids or [])
+    for pattern in linked_patterns:
+        source_ids.update(pattern.event_ids or [])
+        linked_change_ids.update(pattern.change_ids or [])
+    if linked_change_ids:
+        for change in db.query(Change).filter(
+            Change.person_id == person_id,
+            Change.id.in_(linked_change_ids),
+        ).all():
+            source_ids.update(change.evidence_ids or [])
+
+    source_records = []
+    events = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id,
+        CareEvent.id.in_(source_ids or {"__none__"}),
+    ).all()
+    for event in events:
+        source_records.append(SituationSourceRecord(
+            id=event.id,
+            source_type="care_record",
+            title=str(event.title or event.event_type or "Care record")[:240],
+            excerpt=str(event.description or "")[:1000] or None,
+            occurred_at=event.occurred_at,
+            recorded_at=getattr(event, "recorded_at", None) or getattr(event, "created_at", None),
+            source_label="Care record",
+            status=str(event.status or ""),
+            evidence_ids=list(event.evidence_ids or []),
+        ))
+        source_ids.update(event.evidence_ids or [])
+
+    assertions = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.id.in_(source_ids or {"__none__"}),
+    ).all()
+    for assertion in assertions:
+        source_records.append(SituationSourceRecord(
+            id=assertion.id,
+            source_type="care_statement",
+            title=f"{assertion.field}: {assertion.asserted_value}"[:240],
+            excerpt=str(assertion.source_text or "")[:1000] or None,
+            occurred_at=assertion.observed_at,
+            recorded_at=assertion.recorded_at,
+            source_label=str(assertion.source_label or "Care statement"),
+            status=str(assertion.assertion_status or ""),
+            evidence_ids=list(assertion.evidence_ids or []),
+            epistemic_status=str(assertion.epistemic_state or ""),
+        ))
+        source_ids.update(assertion.evidence_ids or [])
+        if assertion.source_event_id:
+            source_ids.add(str(assertion.source_event_id))
+
+    observations = db.query(EvidenceObservation).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.id.in_(source_ids or {"__none__"}),
+    ).all()
+    for observation in observations:
+        source_records.append(SituationSourceRecord(
+            id=observation.id,
+            source_type="observation",
+            title=f"{observation.attribute}: {observation.value_text or observation.normalized_value or 'Recorded observation'}"[:240],
+            excerpt=str(observation.source_passage or "")[:1000] or None,
+            occurred_at=observation.observed_at or observation.occurred_at,
+            recorded_at=observation.recorded_at,
+            source_label="Saved observation",
+            status=str(observation.epistemic_status or ""),
+            evidence_ids=[str(observation.evidence_id)] if observation.evidence_id else [],
+            epistemic_status=str(observation.epistemic_status or ""),
+            negated=observation.negated,
+            hedge_marker=observation.hedge_marker,
+            ambiguity_note=observation.ambiguity_note,
+        ))
+        if observation.evidence_id:
+            source_ids.add(str(observation.evidence_id))
+
+    evidence_rows = db.query(Evidence).filter(
+        Evidence.person_id == person_id,
+        Evidence.id.in_(source_ids or {"__none__"}),
+    ).all()
+    for evidence in evidence_rows:
+        source_records.append(SituationSourceRecord(
+            id=evidence.id,
+            source_type="document",
+            title=str(evidence.file_name or evidence.source_type or "Care document")[:240],
+            excerpt=str(evidence.source_text or "")[:1000] or None,
+            occurred_at=evidence.occurred_at,
+            recorded_at=evidence.reported_at or evidence.created_at,
+            source_label=str(evidence.reported_by_label or evidence.source_type or "Care document"),
+            status=str(evidence.evidence_status or ""),
+            evidence_ids=[evidence.id],
+        ))
+
+    source_records.sort(
+        key=lambda item: (item.occurred_at or item.recorded_at or datetime.min.replace(tzinfo=timezone.utc)).isoformat()
+    )
+    context = situation.context if isinstance(situation.context, dict) else {}
+    state_history = context.get("state_history") if isinstance(context.get("state_history"), list) else []
+    return SituationDetailResponse(
+        situation=situation,
+        source_records=source_records,
+        state_history=state_history,
+    )
 
 
 @router.post(
