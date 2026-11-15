@@ -6572,6 +6572,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         caregiver_question_direct_answer = _caregiver_question_extractive_answer(
             user_text, included_model_context_lines
         )
+        care_history_lookup_context = list(dict.fromkeys([
+            *included_model_context_lines,
+            *event_context,
+            *shared_lcr_lines,
+        ]))
         # A literal "what did the caregiver record" request is a source lookup,
         # not a request for generated interpretation. Answer it from the exact
         # authorized caregiver-authored event text before invoking a slow model.
@@ -6584,7 +6589,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             re.IGNORECASE,
         ):
             caregiver_question_direct_answer = _care_history_extractive_answer(
-                user_text, included_model_context_lines
+                user_text, care_history_lookup_context
             )
         caregiver_question_direct_answer_used = bool(caregiver_question_direct_answer)
         base = ""
