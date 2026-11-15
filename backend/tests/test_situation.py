@@ -2018,3 +2018,135 @@ def test_situation_freshness_includes_persisted_contradictions():
         assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
     finally:
         teardown_db()
+
+@pytest.mark.session_security
+def test_caregiver_situation_state_changes_require_linked_sources_and_persist_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Situation state transition person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+        now = datetime.now(timezone.utc)
+
+        with TestingSessionLocal() as db:
+            other_person = Person(id="state-transition-other-person", name="Other person")
+            other_caregiver = Caregiver(
+                id="state-transition-other-caregiver",
+                name="Other caregiver",
+                relationship="Family",
+                person_id=other_person.id,
+            )
+            evidence = Evidence(
+                id="state-transition-evidence",
+                person_id=person_id,
+                type="care_note",
+                source_text="Caregiver reports more help is needed with walking.",
+                uploaded_by_caregiver_id=caregiver_id,
+                reported_by_label="Family caregiver",
+                evidence_status="verified",
+                occurred_at=now,
+            )
+            other_evidence = Evidence(
+                id="state-transition-other-evidence",
+                person_id=other_person.id,
+                type="care_note",
+                source_text="A separate person's private mobility note.",
+                uploaded_by_caregiver_id=other_caregiver.id,
+                reported_by_label="Family caregiver",
+                evidence_status="verified",
+                occurred_at=now,
+            )
+            event = CareEvent(
+                id="state-transition-event",
+                person_id=person_id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=now,
+                title="Walking support observation",
+                description="Caregiver reports more help is needed with walking.",
+                evidence_ids=[evidence.id],
+                created_by_caregiver_id=caregiver_id,
+            )
+            situation = Situation(
+                id="state-transition-situation",
+                person_id=person_id,
+                situation_type=SituationType.UNKNOWN,
+                state=SituationState.ACTIVE,
+                title="Walking support",
+                description="A saved mobility situation.",
+                signal_ids=[event.id],
+                signal_types=["mobility"],
+                temporal_start=now,
+                temporal_end=now,
+                change_ids=[],
+                pattern_ids=[],
+                context={},
+                is_active=True,
+            )
+            db.add_all([other_person, other_caregiver, evidence, other_evidence, event, situation])
+            db.commit()
+            situation_id = situation.id
+
+        transition = client.post(
+            f"/api/v1/change/situations/{person_id}/{situation_id}/state",
+            headers=headers,
+            json={
+                "state": "worsening",
+                "reason": "The caregiver reports more help is needed.",
+                "evidence_ids": ["state-transition-evidence"],
+            },
+        )
+        assert transition.status_code == 200, transition.text
+        transition_body = transition.json()
+        assert transition_body["previous_state"] == "active"
+        assert transition_body["new_state"] == "worsening"
+        assert transition_body["actor_caregiver_id"] == caregiver_id
+        assert transition_body["evidence_ids"] == ["state-transition-evidence"]
+
+        resolved = client.post(
+            f"/api/v1/change/situations/{person_id}/{situation_id}/state",
+            headers=headers,
+            json={
+                "state": "resolved",
+                "reason": "The caregiver confirms this concern has settled.",
+                "evidence_ids": ["state-transition-evidence"],
+            },
+        )
+        assert resolved.status_code == 200, resolved.text
+        assert resolved.json()["previous_state"] == "worsening"
+        assert resolved.json()["new_state"] == "resolved"
+
+        detail = client.get(
+            f"/api/v1/change/situations/{person_id}/{situation_id}/detail",
+            headers=headers,
+        )
+        assert detail.status_code == 200, detail.text
+        history = detail.json()["state_history"]
+        assert [entry["new_state"] for entry in history] == ["worsening", "resolved"]
+        assert all(entry["source"] == "caregiver_confirmed" for entry in history)
+        assert all(entry["evidence_ids"] == ["state-transition-evidence"] for entry in history)
+
+        cross_person = client.post(
+            f"/api/v1/change/situations/{person_id}/{situation_id}/state",
+            headers=headers,
+            json={
+                "state": "active",
+                "reason": "Attempt to attach another person's private note.",
+                "evidence_ids": ["state-transition-other-evidence"],
+            },
+        )
+        assert cross_person.status_code == 422
+        refreshed = client.get(
+            f"/api/v1/change/situations/{person_id}/{situation_id}/detail",
+            headers=headers,
+        )
+        assert refreshed.status_code == 200, refreshed.text
+        assert refreshed.json()["situation"]["state"] == "resolved"
+        assert len(refreshed.json()["state_history"]) == 2
+    finally:
+        teardown_db()
+
