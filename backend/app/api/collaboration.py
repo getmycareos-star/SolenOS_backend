@@ -6452,15 +6452,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             existing_document_ids = set()
             for line in shared_lcr_lines:
                 try:
-                    payload = json.loads(line[line.index("{"):])
-                    if payload.get("source_type") == "document_extractions" and payload.get("source_id"):
-                        existing_document_ids.add(str(payload["source_id"]))
+                    record_payload = json.loads(line[line.index("{"):])
+                    if record_payload.get("source_type") == "document_extractions" and record_payload.get("source_id"):
+                        existing_document_ids.add(str(record_payload["source_id"]))
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
             for document_line in verified_document_context_lines:
                 try:
-                    payload = json.loads(document_line[document_line.index("{"):])
-                    document_id = str(payload.get("source_id") or "")
+                    record_payload = json.loads(document_line[document_line.index("{"):])
+                    document_id = str(record_payload.get("source_id") or "")
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
                 if document_id and document_id not in existing_document_ids:
