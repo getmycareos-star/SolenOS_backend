@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/situation-understanding-benchmark.yml"
+      - "backend/tests/conftest.py"
   workflow_dispatch:
 
 permissions:
