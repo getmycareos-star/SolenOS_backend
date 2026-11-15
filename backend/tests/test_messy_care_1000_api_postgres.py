@@ -339,6 +339,7 @@ def test_100_real_api_care_history_lifecycles_preserve_corrections_conflicts_and
                         "evidence_ids": [first_evidence_id, second_evidence_id],
                         "necessity": "necessary",
                         "necessity_rationale": "The next mobility handoff depends on confirming the current support level.",
+                        "intended_answerer_role": "reporting_caregiver",
                         "context": [{
                             "source_kind": "caregiver_report",
                             "source_id": first_evidence_id,
@@ -584,6 +585,7 @@ def test_postgres_open_question_answer_versions_and_historical_unresolved_retrie
 
             all_questions = client.get(
                 f"/api/v1/uncertainty/questions/{person_id}",
+                params={"status": "answered"},
                 headers=headers,
             )
             assert all_questions.status_code == 200, all_questions.text
