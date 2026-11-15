@@ -573,7 +573,7 @@ def _reconcile_from_change_intelligence(
     elif evidence_ids:
         assertion_candidates = db.query(CareAssertion).filter(
             CareAssertion.person_id == person_id,
-        ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
+        ).order_by(CareAssertion.recorded_at.desc()).all()
         incoming_evidence_ids = {str(value) for value in evidence_ids}
         source_assertions = [
             item for item in assertion_candidates
@@ -602,7 +602,7 @@ def _reconcile_from_change_intelligence(
     if not source_event_id and evidence_ids:
         recent_events = db.query(CareEvent).filter(
             CareEvent.person_id == person_id,
-        ).order_by(CareEvent.occurred_at.desc()).limit(500).all()
+        ).order_by(CareEvent.occurred_at.desc()).all()
         for item in recent_events:
             if linked_ids.intersection(str(value) for value in (item.evidence_ids or [])):
                 linked_ids.add(str(item.id))
@@ -614,7 +614,7 @@ def _reconcile_from_change_intelligence(
     candidate_changes = db.query(Change).filter(
         Change.person_id == person_id,
         Change.is_active.is_(True),
-    ).order_by(Change.created_at.desc()).limit(500).all()
+    ).order_by(Change.created_at.desc()).all()
     linked_changes = [
         item for item in candidate_changes
         if linked_ids.intersection(str(value) for value in (item.evidence_ids or []))
