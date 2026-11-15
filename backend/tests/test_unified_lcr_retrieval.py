@@ -16,6 +16,7 @@ from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
+from app.services.lcr_context import build_lcr_context
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -714,6 +715,68 @@ def test_explicit_year_range_uses_caregiver_local_timezone():
     assert window is not None
     assert window["start"] == "2024-01-01T08:00:00+00:00"
     assert window["end"] == "2025-01-01T07:59:59.999999+00:00"
+
+
+def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text():
+    engine, connection = _sqlite_retrieval_db()
+    now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+    window = _temporal_window("What happened in 2025?", now=now, timezone_name="UTC")
+    try:
+        with connection.begin():
+            connection.execute(Person.__table__.insert(), {"id": "year-person", "name": "Care recipient"})
+            connection.execute(Caregiver.__table__.insert(), {
+                "id": "year-caregiver", "name": "Caregiver", "relationship": "family",
+                "person_id": "year-person",
+            })
+            connection.execute(CareEvent.__table__.insert(), [
+                {
+                    "id": "event-in-2025", "person_id": "year-person",
+                    "event_type": "daily_observation", "status": "recorded",
+                    "occurred_at": datetime(2025, 6, 10, 9, tzinfo=UTC),
+                    "title": "Night waking", "description": "Caregiver recorded repeated waking.",
+                    "evidence_ids": [], "created_by_caregiver_id": "year-caregiver",
+                },
+                {
+                    "id": "event-in-2024", "person_id": "year-person",
+                    "event_type": "daily_observation", "status": "recorded",
+                    "occurred_at": datetime(2024, 12, 31, 9, tzinfo=UTC),
+                    "title": "Night waking", "description": "Caregiver recorded repeated waking.",
+                    "evidence_ids": [], "created_by_caregiver_id": "year-caregiver",
+                },
+            ])
+            session = ConversationSession(
+                id="year-session", person_id="year-person", caregiver_id="year-caregiver", status="active"
+            )
+            db = Session(bind=connection)
+            db.add(session)
+            db.flush()
+            db.add_all([
+                ConversationMessage(
+                    id="message-in-2025", session_id=session.id, role="user",
+                    content="We discussed night waking.", evidence_ids_json="[]",
+                    created_at=datetime(2025, 6, 10, 10, tzinfo=UTC),
+                ),
+                ConversationMessage(
+                    id="message-in-2024", session_id=session.id, role="user",
+                    content="We discussed night waking.", evidence_ids_json="[]",
+                    created_at=datetime(2024, 12, 31, 10, tzinfo=UTC),
+                ),
+            ])
+            db.flush()
+            care_context = build_lcr_context(
+                db, "year-person", caregiver_id="year-caregiver",
+                query="What happened in 2025?", temporal_window=window,
+            )
+            conversation_context = _conversation_context(
+                db, person_id="year-person", caregiver_id="year-caregiver",
+                query="What happened in 2025?", limit=8, temporal_window=window,
+            )
+            db.close()
+        assert {item["id"] for item in care_context["sources"]["events"]["items"]} == {"event-in-2025"}
+        assert {item["id"] for item in conversation_context["items"]} == {"message-in-2025"}
+    finally:
+        connection.close()
+        engine.dispose()
 
 
 def test_temporal_retrieval_uses_calendar_months_not_fixed_30_day_approximation():
