@@ -1676,6 +1676,19 @@ def test_companion_client_turn_retry_replays_original_response_without_duplicate
         first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
         assert first.status_code == 200, first.text
         first_data = first.json()
+        db = TestingSessionLocal()
+        try:
+            assistant_row = db.query(ConversationMessage).filter_by(
+                session_id=first_data["session_id"],
+                role="assistant",
+                client_turn_id=payload["client_turn_id"],
+            ).one()
+            stored_metadata = json.loads(assistant_row.response_metadata_json or "{}")
+            assert stored_metadata["request_sha256"] == hashlib.sha256(
+                payload["text"].encode("utf-8")
+            ).hexdigest()
+        finally:
+            db.close()
         retry = client.post("/api/v1/conversation/message", headers=headers, json=payload)
         assert retry.status_code == 200, retry.text
         replay = retry.json()
