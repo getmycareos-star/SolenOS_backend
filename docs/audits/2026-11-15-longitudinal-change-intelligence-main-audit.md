@@ -82,3 +82,15 @@ A 9/10 rating remains unearned until the end-to-end evidence above is captured.
 - Architecture record: `1f127af1d49223ca6c0ff7b599fb2bdeaf81b58b`.
 
 The repository status endpoint did not provide a successful frontend test/build result for the frontend commit. The backend showed a primary deployment status success, but that is not a pytest or PostgreSQL benchmark result. No build or test pass is claimed.
+
+
+## Additional implementation pass — 11:00 UTC
+
+- **LCR retrieval route:** the authenticated care-continuity context endpoint now composes the unified retrieval layer, including caregiver-scoped prior Companion dialogue marked as conversation context only, and caregiver-timezone-aware explicit temporal windows.
+- **Temporal completeness:** explicit date-window Companion requests now page through up to 20 source pages (50 records per source per page). If more records remain after the ceiling, the retrieval contract retains the outstanding offsets and marks the projection incomplete; the response guard must not describe unseen records as absent.
+- **Temporal paging tests:** added tests for page merging, deterministic offsets, preservation of the separate Companion-context source, successful completion, and fail-closed behavior when the page ceiling is reached.
+- **Delta freshness regression:** added an ORM-level test that creates and updates baselines, changes and situations, then checks that their revisions make a saved Delta run stale.
+- **Revision audit concurrency:** tracked-row updates now acquire the per-record PostgreSQL advisory lock before reading the persisted before-state. The after-state is assembled from that committed snapshot plus the columns changed by the current ORM write, preventing a stale identity-map object from erasing another writer's committed fields in the revision history. A PostgreSQL regression assertion checks that concurrent revision snapshots form a serial before/after chain.
+- **Caregiver-facing Delta safety:** the history panel promotes supported changes only when freshness is explicitly current. Stale, missing, and unchecked freshness remain review-only; a missing freshness result is no longer treated as current.
+
+These are source changes and regression tests, not test results. The PostgreSQL-specific concurrency behavior and the full authenticated route tests still need execution against the configured test database. Production must run the exact current backend commit before these changes can affect caregivers.
