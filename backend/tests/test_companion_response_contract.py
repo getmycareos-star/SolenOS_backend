@@ -1961,7 +1961,7 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
         assert all("Use at most two short sentences" in call[0][-1]["content"] for call in calls[1:])
         assert body["reply"] == (
             "I hear that you're exhausted. "
-            "We can take this one concern at a time, using what you've already shared."
+            "We can take this one concern at a time."
         )
         assert body["ai_generated"] is False
         assert body["response_mode"] == "deterministic_low_capacity_support_fallback"
