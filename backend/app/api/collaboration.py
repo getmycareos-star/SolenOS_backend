@@ -6747,8 +6747,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             not caregiver_question_direct_answer
             and care_history_recall_context
             and re.search(
-                r"\\bwhat\\s+(?:has|did)\\s+(?:(?:the\\s+)?caregiver|i|we|you)\\s+"
-                r"(?:recorded|record|logged|saved|noted)\\b",
+                r"\bwhat\s+(?:has|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
+                r"(?:recorded|record|logged|saved|noted)\b",
                 user_text or "",
                 re.IGNORECASE,
             )
