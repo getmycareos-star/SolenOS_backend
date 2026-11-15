@@ -478,7 +478,7 @@ def persist_source_clarification_questions(
                 and row.subject_id == subject_id
                 and (
                     _clarification_question_key(row.question or "") == normalized
-                    or _question_matches_source_field(row, contexts_to_add)
+                    or _question_matches_source_field(row, contexts_to_add, question_text)
                 )
             ), None)
             if prior_terminal_question is not None:
