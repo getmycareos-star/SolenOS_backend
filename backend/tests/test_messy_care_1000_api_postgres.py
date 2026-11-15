@@ -517,6 +517,18 @@ def test_postgres_open_question_answer_versions_and_historical_unresolved_retrie
                     "subject_id": "historical-mobility",
                     "status": "open",
                     "evidence_ids": evidence_ids[:1],
+                    "necessity": "necessary",
+                    "necessity_rationale": "The appointment preparation depends on knowing whether walking support was required.",
+                    "intended_answerer_role": "reporting_caregiver",
+                    "context": [{
+                        "source_kind": "caregiver_report",
+                        "source_id": evidence_ids[0],
+                        "necessity_assessment": {
+                            "necessity_rationale": "The appointment preparation depends on knowing whether walking support was required.",
+                            "decision_dependency": "The caregiver cannot prepare an accurate mobility handoff until this is clarified.",
+                            "evidence_ids": [evidence_ids[0]],
+                        },
+                    }],
                     "created_by_caregiver_id": caregiver_id,
                 },
             )
@@ -561,6 +573,18 @@ def test_postgres_open_question_answer_versions_and_historical_unresolved_retrie
                         "subject_id": f"historical-thread-{index:02d}",
                         "status": "open",
                         "evidence_ids": [evidence_ids[0]],
+                        "necessity": "necessary",
+                        "necessity_rationale": "The mobility handoff depends on confirming when this was first noticed.",
+                        "intended_answerer_role": "reporting_caregiver",
+                        "context": [{
+                            "source_kind": "caregiver_report",
+                            "source_id": evidence_ids[0],
+                            "necessity_assessment": {
+                                "necessity_rationale": "The mobility handoff depends on confirming when this was first noticed.",
+                                "decision_dependency": "The receiving caregiver cannot establish the timeline until this is clarified.",
+                                "evidence_ids": [evidence_ids[0]],
+                            },
+                        }],
                         "created_by_caregiver_id": caregiver_id,
                     },
                 )
@@ -592,8 +616,15 @@ def test_postgres_open_question_answer_versions_and_historical_unresolved_retrie
             question_rows = {row["id"]: row for row in all_questions.json()}
             assert question_id in question_rows
             assert question_rows[question_id]["status"] == "answered"
-            assert set(historical_ids).issubset(question_rows)
-            assert all(question_rows[item]["status"] == "open" for item in historical_ids)
+            open_questions = client.get(
+                f"/api/v1/uncertainty/questions/{person_id}",
+                params={"status": "open"},
+                headers=headers,
+            )
+            assert open_questions.status_code == 200, open_questions.text
+            open_question_rows = {row["id"]: row for row in open_questions.json()}
+            assert set(historical_ids).issubset(open_question_rows)
+            assert all(open_question_rows[item]["status"] == "open" for item in historical_ids)
 
             # Another person must not be able to retrieve this question or its
             # answer history through the same session-bound API.
