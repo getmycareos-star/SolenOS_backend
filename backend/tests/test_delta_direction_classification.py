@@ -102,3 +102,23 @@ def test_low_significance_confidence_cannot_produce_a_change_candidate():
     )
     assert classification == "uncertain"
     assert candidate is False
+
+
+def test_directional_polarity_requires_an_exact_adverse_measure_label():
+    for subject_id in ("no_pain", "pain_management", "mobility_with_falls"):
+        classification, candidate = _classify(
+            _change(subject_id=subject_id, change_type="increase"),
+            assessment=_assessment(),
+        )
+        assert classification == "uncertain"
+        assert candidate is False
+
+
+def test_known_adverse_measure_aliases_remain_directionally_candidate_only():
+    for subject_id in ("pain_score", "fall_count", "night_waking_frequency"):
+        classification, candidate = _classify(
+            _change(subject_id=subject_id, change_type="increase"),
+            assessment=_assessment(),
+        )
+        assert classification == "potential_worsening"
+        assert candidate is True
