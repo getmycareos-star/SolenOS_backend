@@ -6582,6 +6582,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 if row.role in {"user", "assistant"}
             )
 
+        # The shared projection is authoritative, but a directly retrieved,
+        # person-scoped accepted assertion must not disappear merely because the
+        # projection's bounded candidate scan did not return it. Add only missing
+        # assertion IDs, preserving caregiver attribution and the original status.
+        shared_assertion_ids = set(_context_record_ids(shared_lcr_lines, "source_id"))
+        for assertion_line in assertion_context:
+            try:
+                assertion_payload = json.loads(assertion_line[assertion_line.index("{"):])
+                assertion_id = str(assertion_payload.get("assertion_id") or "")
+            except (ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if not assertion_id or assertion_id in shared_assertion_ids:
+                continue
+            shared_lcr_lines.append(
+                "Caregiver-attributed LCR assertion (status preserved): "
+                + json.dumps({
+                    "source_type": "assertions",
+                    "source_id": assertion_id,
+                    "record": assertion_payload,
+                }, ensure_ascii=False)
+            )
+            shared_assertion_ids.add(assertion_id)
+
         # The shared LCR projection is the single source set for model context.
         # The purpose-specific lists above remain available to deterministic
         # safety validators, but are not duplicated into the prompt.
