@@ -5013,6 +5013,62 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
     return answer
 
 
+def _caregiver_question_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
+    """Quote a saved professional question when the caregiver asks what to raise."""
+    intent = re.search(
+        r"\\b(?:what|which)\\s+(?:question|questions)\\s+(?:should|can|could)\\s+i\\s+(?:raise|ask|bring\\s+up)\\b|"
+        r"\\bwhat\\s+should\\s+i\\s+ask\\s+(?:the\\s+)?(?:healthcare\\s+professional|professional|doctor|clinician|care\\s+team)\\b",
+        user_text or "",
+        re.IGNORECASE,
+    )
+    if not intent:
+        return None
+
+    stop_words = {
+        "what", "which", "question", "questions", "should", "can", "could", "i", "we",
+        "raise", "ask", "bring", "up", "with", "the", "a", "an", "healthcare",
+        "professional", "doctor", "clinician", "care", "team", "about", "for",
+        "mum", "mom", "her", "his", "their", "person", "person's",
+    }
+    query_terms = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold())) - stop_words
+    candidates: list[tuple[int, int, str]] = []
+    for order, line in enumerate(context_lines):
+        brace = (line or "").find("{")
+        if brace < 0:
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("source_type") != "caregiver_question_queue":
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+        role = str(record.get("intended_answerer_role") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+        label = str(record.get("intended_answerer_label") or "").strip().casefold()
+        professional_answerer = role in {"professional", "healthcare_professional", "clinician", "doctor"} or any(
+            term in label for term in ("professional", "doctor", "clinician", "care team")
+        )
+        if not professional_answerer:
+            continue
+        status = str(record.get("status") or "").strip().casefold()
+        if status and status not in {"open", "unresolved"}:
+            continue
+        question = record.get("question")
+        if not isinstance(question, str) or not question.strip():
+            continue
+        question = re.sub(r"\\s+", " ", question).strip()[:350]
+        question_terms = set(re.findall(r"[a-z0-9']{3,}", question.casefold()))
+        overlap = query_terms & question_terms
+        if query_terms and not overlap:
+            continue
+        candidates.append((len(overlap), -order, question))
+
+    if not candidates:
+        return "I couldn't find a saved question for the healthcare professional about that topic in the care record."
+    _, _, question = max(candidates)
+    return f"The saved question for the healthcare professional is: “{question}”"
+
+
 def _care_history_reply_covers_requested_topics(
     user_text: str,
     reply: str,
@@ -6254,31 +6310,49 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "shared_lcr_ref_count": len(source_lcr_record_refs),
             }, separators=(",", ":")),
         )
+        caregiver_question_direct_answer = _caregiver_question_extractive_answer(
+            user_text, included_model_context_lines
+        )
+        caregiver_question_direct_answer_used = bool(caregiver_question_direct_answer)
         base = ""
-        model = "unavailable"
+        model = "deterministic-source-quote" if caregiver_question_direct_answer_used else "unavailable"
         inference_started = _time.perf_counter()
         care_history_fallback_from_outage = False
         try:
-            base, model = _ollama_url()
-            reply = await asyncio.to_thread(
-                _run_companion_inference_with_metrics,
-                companion_request_id,
-                model,
-                model_messages,
-                {"temperature": 0.25, "num_predict": 32 if greeting_only else 512},
-                retrieval_duration_ms,
-            )
-            logger.info(
-                "solenos_companion_stage %s",
-                json.dumps({
-                    "event": "companion_inference_complete",
-                    "request_id": companion_request_id,
-                    "duration_ms": round((_time.perf_counter() - inference_started) * 1000, 2),
-                    "retrieval_duration_ms": retrieval_duration_ms,
-                    "model": model,
-                    "outcome": "success",
-                }, separators=(",", ":")),
-            )
+            if caregiver_question_direct_answer_used:
+                reply = caregiver_question_direct_answer
+                logger.info(
+                    "solenos_companion_stage %s",
+                    json.dumps({
+                        "event": "companion_inference_complete",
+                        "request_id": companion_request_id,
+                        "duration_ms": 0,
+                        "retrieval_duration_ms": retrieval_duration_ms,
+                        "model": model,
+                        "outcome": "source_quoted_caregiver_question",
+                    }, separators=(",", ":")),
+                )
+            else:
+                base, model = _ollama_url()
+                reply = await asyncio.to_thread(
+                    _run_companion_inference_with_metrics,
+                    companion_request_id,
+                    model,
+                    model_messages,
+                    {"temperature": 0.25, "num_predict": 32 if greeting_only else 512},
+                    retrieval_duration_ms,
+                )
+                logger.info(
+                    "solenos_companion_stage %s",
+                    json.dumps({
+                        "event": "companion_inference_complete",
+                        "request_id": companion_request_id,
+                        "duration_ms": round((_time.perf_counter() - inference_started) * 1000, 2),
+                        "retrieval_duration_ms": retrieval_duration_ms,
+                        "model": model,
+                        "outcome": "success",
+                    }, separators=(",", ":")),
+                )
         except HTTPException as inference_error:
             logger.warning(
                 "solenos_companion_stage %s",
@@ -6379,6 +6453,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
         conflict_response = _contradictory_event_evidence_response(user_text, event_context)
         care_history_extractive_fallback_used = care_history_fallback_from_outage
+        if caregiver_question_direct_answer_used:
+            # This is the exact saved, answerer-routed question, not a generated
+            # clinical answer. Keep the response explicitly non-AI and read-only.
+            reply = caregiver_question_direct_answer
         if document_extractive_fallback_used:
             # The model received the verified extraction but failed to use it.
             # Prefer a short, exact source excerpt over a generic or unsupported
@@ -6441,6 +6519,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _caregiver_response_needs_revision(user_text, reply)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
+        if caregiver_question_direct_answer_used:
+            invalid_reply = False
         if invalid_reply and caregiver_guidance:
             # Explicit caregiver-capacity and continuity constraints are part of
             # the response contract, not prompt suggestions. Ask the model to
@@ -6662,6 +6742,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         elif document_extractive_fallback_used:
             verdict = "passed"
             safety_note = "Quoted from the uploaded document. The extracted text has not been independently verified."
+            ai_generated = False
+        elif caregiver_question_direct_answer_used:
+            verdict = "passed"
+            safety_note = "This is a saved caregiver question for a healthcare professional, not an answer from that professional."
             ai_generated = False
         elif care_history_extractive_fallback_used:
             verdict = "passed"
@@ -6995,7 +7079,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "response_mode": (
-            "deterministic_low_capacity_support_fallback"
+            "source_quoted_caregiver_question"
+            if caregiver_question_direct_answer_used
+            else "deterministic_low_capacity_support_fallback"
             if low_capacity_support_fallback_used else "model_or_grounded_fallback"
         ),
         "claim_provenance": claim_provenance,
@@ -7079,7 +7165,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "response_mode": (
-            "deterministic_low_capacity_support_fallback"
+            "source_quoted_caregiver_question"
+            if caregiver_question_direct_answer_used
+            else "deterministic_low_capacity_support_fallback"
             if low_capacity_support_fallback_used else "model_or_grounded_fallback"
         ),
         "written_to_lcr": False,

@@ -1486,6 +1486,109 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
 
 
 
+def test_companion_quotes_saved_professional_question_without_model_inference(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = 0
+
+    def unexpected_qwen(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("A saved professional question must be retrieved without model inference")
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", unexpected_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        event_time = datetime(2026, 10, 25, 8, 0, tzinfo=timezone.utc)
+        report_time = datetime(2026, 10, 25, 9, 0, tzinfo=timezone.utc)
+        question_id = "companion-appetite-professional-question"
+        evidence_id = "companion-appetite-professional-evidence"
+        rationale = "The care review depends on the healthcare professional clarifying whether the appetite change needs follow-up."
+        db = TestingSessionLocal()
+        db.add(Evidence(
+            id=evidence_id,
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="Caregiver reported reduced breakfast appetite; no cause was established.",
+            source_type="caregiver_report",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            occurred_at=event_time,
+            occurred_at_timezone="UTC",
+            reported_at=report_time,
+            collected_at=report_time + timedelta(minutes=5),
+            reported_by_label="Daughter",
+            original_author="Daughter",
+            time_provenance="caregiver_reported",
+        ))
+        db.add(OpenQuestion(
+            id=question_id,
+            person_id=person_id,
+            question="Ask the healthcare professional whether the reduced breakfast appetite needs follow-up.",
+            subject_type="person",
+            subject_id=person_id,
+            status="open",
+            necessity="necessary",
+            necessity_rationale=rationale,
+            priority=Priority.HIGH,
+            intended_answerer_role="professional",
+            intended_answerer_label="Healthcare professional",
+            evidence_ids=[evidence_id],
+            context=[{
+                "source_kind": "caregiver_report",
+                "source_id": evidence_id,
+                "necessity_assessment": {
+                    "necessity_rationale": rationale,
+                    "decision_dependency": "The caregiver needs the professional's clarification before treating the appetite change as understood.",
+                    "evidence_ids": [evidence_id],
+                },
+            }],
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "What question should I raise with the healthcare professional about appetite?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert calls == 0
+        assert body["reply"] == (
+            "The saved question for the healthcare professional is: “Ask the healthcare professional "
+            "whether the reduced breakfast appetite needs follow-up.”"
+        )
+        assert body["ai_generated"] is False
+        assert body["response_mode"] == "source_quoted_caregiver_question"
+        assert body["guard_verdict"] == "passed"
+        assert body["written_to_lcr"] is False
+        assert body["persistence"] == "conversation_only"
+        assert question_id in body["source_lcr_context_ids"]
+        assert body["lcr_context_coverage"]["sources"]["caregiver_question_queue"]["selected_for_answer"] > 0
+        assert "not an answer from that professional" in body["safety_note"]
+
+        check = TestingSessionLocal()
+        try:
+            assert check.query(CareEvent).filter_by(person_id=person_id).count() == 0
+            assert check.query(Evidence).filter_by(person_id=person_id).count() == 1
+            persisted = check.query(ConversationMessage).filter_by(
+                session_id=body["session_id"]
+            ).order_by(ConversationMessage.created_at.asc()).all()
+            assert [row.role for row in persisted] == ["user", "assistant"]
+            assert persisted[-1].content == body["reply"]
+        finally:
+            check.close()
+    finally:
+        teardown()
+
+
 def test_overwhelmed_caregiver_gets_safe_reply_when_qwen_is_unavailable(monkeypatch):
     client = setup_client(monkeypatch)
     calls = 0
