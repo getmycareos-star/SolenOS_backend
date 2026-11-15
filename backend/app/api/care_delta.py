@@ -8,7 +8,7 @@ from sqlalchemy import inspect
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
-from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation
+from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation, TRACKED_TABLES
 from app.models.care import CareEvent, Evidence
 from app.schemas.care_delta import CareDeltaReconcileRequest
 from app.services.delta_engine import reconcile_event
@@ -77,16 +77,7 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
             # well as the original reports. These tables are part of the same
             # revision ledger; omitting them can leave an old comparison marked
             # current after a baseline is superseded or a change is resolved.
-            CareStateRevision.target_type.in_([
-                "care_assertions", "care_events", "evidence",
-                "information_gaps", "open_questions", "contradictions",
-                "baselines", "changes", "situations", "patterns", "corrections",
-                "temporal_facts", "temporal_reference_frames", "temporal_relations",
-                "temporal_contradictions", "observations", "care_windows",
-                "appointments", "care_transitions", "locations", "daily_intelligence",
-                "timezone_contexts", "temporal_relationships", "insights",
-                "uncertainty_assessments",
-            ]),
+            CareStateRevision.target_type.in_(sorted(TRACKED_TABLES)),
             CareStateRevision.changed_at > earliest_run_time,
         ).all()
         context_revision_times = sorted(_as_utc(item[0]) for item in revision_rows if item[0])
