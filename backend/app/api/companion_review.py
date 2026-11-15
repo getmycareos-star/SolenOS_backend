@@ -21,6 +21,11 @@ from app.services.care_continuity_execution import execute_care_continuity_recon
 router = APIRouter(prefix="/companion/care-updates", tags=["companion care updates"])
 
 
+class CompanionCareUpdateCreate(BaseModel):
+    confirm_care_report: bool
+    event_time_text: str | None = Field(default=None, max_length=240)
+
+
 class CompanionCareUpdateReview(BaseModel):
     decision: str
     corrected_text: str | None = Field(default=None, min_length=1, max_length=4000)
@@ -225,6 +230,85 @@ def review_qwen_assistance_proposal(
         "reconciliation": execution,
         "idempotent_replay": False,
     }
+
+
+@router.post("/from-message/{message_id}")
+def create_companion_care_update_from_message(
+    message_id: str,
+    payload: CompanionCareUpdateCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Create a review-only care report from an exact caregiver message after explicit confirmation."""
+    person_id, caregiver_id = _scope(request, db)
+    if payload.confirm_care_report is not True:
+        raise HTTPException(status_code=422, detail="Explicit confirmation that this is a care report is required")
+    source = (
+        db.query(ConversationMessage, ConversationSession)
+        .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+        .filter(
+            ConversationMessage.id == message_id,
+            ConversationMessage.role == "user",
+            ConversationSession.person_id == person_id,
+            ConversationSession.caregiver_id == caregiver_id,
+            ConversationSession.status == "active",
+        )
+        .first()
+    )
+    if source is None:
+        raise HTTPException(status_code=404, detail="The original Companion message was not found")
+    source_message, session = source
+    exact_text = (source_message.content or "").strip()
+    if len(exact_text) < 3 or len(exact_text) > 4000:
+        raise HTTPException(status_code=422, detail="This message is not suitable for a care report")
+
+    existing = db.query(AIOutputLCRProposal).filter(
+        AIOutputLCRProposal.person_id == person_id,
+        AIOutputLCRProposal.caregiver_id == caregiver_id,
+        AIOutputLCRProposal.proposal_type == "companion_care_observation",
+        AIOutputLCRProposal.source_message_id == source_message.id,
+        AIOutputLCRProposal.candidate_index == 0,
+        AIOutputLCRProposal.proposal_version == 1,
+    ).first()
+    if existing is not None:
+        return {"proposal": _proposal_json(existing), "idempotent_replay": True}
+
+    proposal = AIOutputLCRProposal(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        proposal_type="companion_care_observation",
+        proposed_change_json={
+            "subject_type": "person",
+            "subject_id": person_id,
+            "field": "care_observation",
+            "assertion_kind": "time_bound_observation",
+            "asserted_value": exact_text,
+            "source_quote": exact_text,
+            "event_time_text": payload.event_time_text.strip() if payload.event_time_text and payload.event_time_text.strip() else None,
+            "source_message_id": str(source_message.id),
+            "source_conversation_id": str(session.id),
+            "information_status": "caregiver_reported_pending_review",
+            "model_generated_paraphrase_used": False,
+        },
+        source_event_ids_json=[],
+        source_evidence_ids_json=[],
+        rationale="The caregiver explicitly marked the original Companion message as a care report. It remains pending until a separate review decision.",
+        uncertainty_json={"source_grounding": "exact_original_caregiver_message", "event_time": "caregiver_supplied_or_not_supplied"},
+        source_conversation_id=session.id,
+        source_message_id=source_message.id,
+        candidate_index=0,
+        proposal_version=1,
+        status="pending_authorization",
+    )
+    db.add(proposal)
+    try:
+        db.commit()
+        db.refresh(proposal)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="The care report could not be saved for review. Please try again.") from exc
+    return {"proposal": _proposal_json(proposal), "idempotent_replay": False}
 
 
 @router.get("")
