@@ -493,6 +493,9 @@ def test_document_intake_finishes_later_windows_before_failing_an_exhausted_page
 
 def _daily_delta_retry_store(tmp_path, monkeypatch):
     from sqlalchemy.pool import StaticPool
+    # Import the application registry so every referenced ORM table is registered
+    # before SQLite creates the isolated schema.
+    from app.main import app as _application
     from app.core.database import Base
     from app.models.care import Caregiver, CareEvent, Evidence, Person
     from app.models.capture_analysis import CaptureAnalysis
