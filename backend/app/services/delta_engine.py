@@ -502,8 +502,8 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
 
 def _canonical_change_classification(change: Any, *, evidence_complete: bool) -> tuple[str, bool]:
     raw_type = str(getattr(change.change_type, "value", change.change_type) or "").lower()
-    baseline = str(change.baseline_coverage_status or "").lower()
-    current = str(change.current_coverage_status or "").lower()
+    baseline = str(getattr(change.baseline_coverage_status, "value", change.baseline_coverage_status) or "").lower()
+    current = str(getattr(change.current_coverage_status, "value", change.current_coverage_status) or "").lower()
     coverage_complete = baseline in {"covered", "complete", "full", "sufficient"} and current in {
         "covered", "complete", "full", "sufficient"
     }
