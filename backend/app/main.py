@@ -171,7 +171,10 @@ def process_pending_corrections_once(batch_size: int = 20) -> dict:
     try:
         pending_ids = [
             row.id for row in scan.query(CorrectionModel)
-            .filter(CorrectionModel.processing_status == "pending")
+            .filter(
+                CorrectionModel.processing_status == "pending",
+                or_(CorrectionModel.next_retry_at.is_(None), CorrectionModel.next_retry_at <= datetime.now(timezone.utc)),
+            )
             .order_by(CorrectionModel.created_at.asc())
             .limit(batch_size).all()
         ]
