@@ -800,9 +800,35 @@ def next_best_questions(
         Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
     ).all()
     for item in contradictions:
+        # A broad Delta topic can mention medication without representing a
+        # conflict about a current medication instruction. Only a contradiction
+        # explicitly scoped to a medication subject AND an actionable
+        # instruction field may create a professional confirmation task.
+        medication_subject = (
+            str(item.subject_type or "").strip().casefold()
+            in {"medication", "medications"}
+        )
+        normalized_medication_field = " ".join(
+            str(item.field or "")
+            .casefold()
+            .replace("_", " ")
+            .replace("-", " ")
+            .split()
+        )
+        actionable_medication_fields = {
+            "current instruction",
+            "current medication instruction",
+            "medication instruction",
+            "current dose",
+            "prescribed dose",
+            "prescribed dosage",
+            "dosage instructions",
+            "dose",
+            "dosage",
+        }
         is_medication_conflict = (
-            str(item.subject_type or "").strip().casefold() in {"medication", "medications"}
-            or "medication" in str(item.field or "").casefold()
+            medication_subject
+            and normalized_medication_field in actionable_medication_fields
         )
         if is_medication_conflict:
             # A competing current medication instruction is a concrete decision
