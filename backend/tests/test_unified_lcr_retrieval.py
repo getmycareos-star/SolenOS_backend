@@ -235,6 +235,8 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
         assert all(item["is_lcr_assertion"] is False for item in by_id.values())
         assert all(item["is_care_evidence"] is False for item in by_id.values())
         assert by_id["assistant-message"]["role"] == "assistant"
+        assert by_id["own-message"]["source_attribution"] == "caregiver_companion_message"
+        assert by_id["assistant-message"]["source_attribution"] == "solenos_companion_response"
         assert "Private waking detail" not in str(result)
     finally:
         _close_postgres_conversation_db(engine, connection, schema)
