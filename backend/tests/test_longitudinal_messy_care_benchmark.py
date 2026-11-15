@@ -5,6 +5,7 @@ exercise temporal boundaries, incomplete observation coverage, repeated source l
 multiple care domains, idempotent pattern reconciliation, and scoped API access.
 A pass is not clinical validation or evidence of real-patient performance.
 """
+import json
 from datetime import datetime, timedelta, timezone
 import hashlib
 import os
