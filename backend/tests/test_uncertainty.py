@@ -3993,11 +3993,50 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         )
         db.add_all([person, caregiver, reviewing_caregiver, evidence, event, document_evidence])
         db.commit()
+        db.add_all([
+            InformationGap(
+                id="gap-extracted-overnight-wake",
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="overnight_wake",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.NOT_DOCUMENTED,
+                priority=Priority.HIGH,
+                lifecycle_status=GapLifecycleStatus.OPEN,
+                description="The overnight waking frequency and duration need clarification.",
+                evidence_ids=[evidence.id],
+                context=[{
+                    "caregiver_attention_required": True,
+                    "necessity_rationale": "The next overnight care decision depends on understanding the waking pattern.",
+                    "decision_dependency": "The caregiver needs the overnight waking pattern to plan appropriate support.",
+                }],
+            ),
+            InformationGap(
+                id="gap-extracted-medication",
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="medication",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.NOT_DOCUMENTED,
+                priority=Priority.HIGH,
+                lifecycle_status=GapLifecycleStatus.OPEN,
+                description="The reported medication change needs professional confirmation.",
+                evidence_ids=[document_evidence.id],
+                context=[{
+                    "caregiver_attention_required": True,
+                    "necessity_rationale": "The next medication handoff depends on confirming whether a change occurred.",
+                    "decision_dependency": "The caregiver needs the documented medication change confirmed before relying on it.",
+                }],
+            ),
+        ])
+        db.commit()
 
         questions = [
             "How many times did she wake overnight?",
             "Only the first 25 pages were processed; more pages need review.",
-            "How long has this been happening?",
+            "How long has the overnight waking been happening?",
             "How many times did she wake overnight?",
         ]
         first = persist_source_clarification_questions(
@@ -4513,6 +4552,25 @@ def test_daily_capture_and_document_questions_share_lcr_supersession_lifecycle()
         )
         db.add_all([person, caregiver, evidence, event])
         db.commit()
+        db.add(InformationGap(
+            id="finding6-source-lifecycle-sleep-gap",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="sleep_schedule",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="The usual sleep schedule needs confirmation.",
+            evidence_ids=[evidence.id],
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The next care decision depends on the usual sleep schedule.",
+                "decision_dependency": "The caregiver needs the current schedule to plan overnight support.",
+            }],
+        ))
+        db.commit()
 
         daily = persist_source_clarification_questions(
             db, person_id=person.id, caregiver_id=caregiver.id,
@@ -4748,6 +4806,25 @@ def test_source_questions_deduplicate_rephrasing_but_preserve_distinct_time_peri
             created_by_caregiver_id=caregiver.id,
         )
         db.add_all([person, caregiver, evidence, first_event, second_event])
+        db.commit()
+        db.add(InformationGap(
+            id="gap-semantic-overnight-wake",
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="overnight_wake",
+            epistemic_state=EpistemicState.UNKNOWN,
+            gap_reason=GapReason.NOT_DOCUMENTED,
+            priority=Priority.HIGH,
+            lifecycle_status=GapLifecycleStatus.OPEN,
+            description="The overnight waking frequency needs clarification.",
+            evidence_ids=[evidence.id],
+            context=[{
+                "caregiver_attention_required": True,
+                "necessity_rationale": "The next overnight care decision depends on the waking frequency.",
+                "decision_dependency": "The caregiver needs the waking frequency to plan overnight support.",
+            }],
+        ))
         db.commit()
 
         first = persist_source_clarification_questions(
