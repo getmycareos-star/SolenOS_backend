@@ -144,6 +144,13 @@ def test_single_tired_today_is_not_meaningful_no_alert():
         # A single unverified report must NOT be a meaningful-change candidate
         assert changes[0].significance_verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
         assert changes[0].attention_candidate is False
+        assert changes[0].follow_up_candidate is False
+        assessment = db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.id == changes[0].significance_assessment_id
+        ).first()
+        assert assessment is not None
+        assert assessment.verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
+        assert assessment.follow_up_candidate is False
 
         from app.services.situation_formation import detect_situations
         situations = detect_situations(db, person.id, now)
