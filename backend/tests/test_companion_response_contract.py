@@ -1972,7 +1972,7 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
         assert body["source_lcr_context_ids"] == []
         assert body["source_record_refs"] == []
         assert body["lcr_context_coverage"]["answer_context_used"] is False
-        assert "did not pass" in body["safety_note"]
+        assert "couldn't confirm a reliable answer" in body["safety_note"]
         db = TestingSessionLocal()
         try:
             assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
