@@ -37,6 +37,19 @@ def _canonical_question_subject_type(value: object) -> str:
     return "person" if normalized in {"person", "patient"} else normalized
 
 
+def _source_clarification_text(value: object) -> str:
+    """Return bounded-shape plain source text for deterministic question grounding.
+
+    Source text is evidence, not trusted markup. Normalize whitespace only;
+    do not paraphrase, lowercase, or otherwise alter the wording used to check
+    whether a generated clarification is actually supported by its source.
+    Non-text database values are ignored rather than stringified into evidence.
+    """
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
+
+
 def _has_decision_dependency(context) -> bool:
     """Only a structured, explicit current-decision dependency can justify a request."""
     for item in context or []:
@@ -161,6 +174,23 @@ def _clarification_question_key(value: str) -> tuple[str, ...]:
     return tuple(sorted(tokens))
 
 
+def _duration_question_supported_by_source(question: str, source_text: str) -> bool:
+    if not re.search(
+        r"\b(?:how\s+long|since\s+when|for\s+how\s+long|how\s+many\s+(?:days?|weeks?|months?|nights?|hours?))\b",
+        question,
+        re.IGNORECASE,
+    ):
+        return True
+    return bool(re.search(
+        r"\b(?:has|have|had)\s+been\b"
+        r"|\b(?:again|repeatedly|recurring|recurrent|frequently|often|usually|keeps?|continues?|ongoing|still|several|multiple|every|daily|nightly)\b"
+        r"|\bfor\s+\d+\s+(?:days?|weeks?|months?|nights?|hours?)\b"
+        r"|\b\d+\s+(?:times?|falls?|episodes?)\b"
+        r"|\b(?:this|last)\s+(?:week|month|year)\b",
+        source_text,
+        re.IGNORECASE,
+    ))
+
 def persist_source_clarification_questions(
     db: Session,
     *,
@@ -228,6 +258,26 @@ def persist_source_clarification_questions(
     else:
         raise ValueError("Unsupported clarification source type.")
 
+    source_text_parts = []
+    if source_record_type == "care_event":
+        source_text_parts.extend([
+            _source_clarification_text(getattr(source_row, "title", None)),
+            _source_clarification_text(getattr(source_row, "description", None)),
+        ])
+    else:
+        source_text_parts.append(_source_clarification_text(getattr(source_row, "source_text", None)))
+    if linked_ids:
+        linked_evidence_texts = db.query(EvidenceModel.source_text).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(linked_ids),
+        ).all()
+        source_text_parts.extend(
+            _source_clarification_text(row[0])
+            for row in linked_evidence_texts
+            if row and row[0]
+        )
+    source_text_for_grounding = " ".join(part for part in source_text_parts if part)
+
     existing_rows = db.query(OpenQuestionModel).filter(
         OpenQuestionModel.person_id == person_id,
     ).order_by(OpenQuestionModel.asked_at.desc()).all()
@@ -268,6 +318,10 @@ def persist_source_clarification_questions(
         question_text = " ".join(value.strip().split())[:300]
         normalized = _clarification_question_key(question_text)
         if len(question_text) < 5 or not normalized:
+            continue
+        # A duration question requires the original source to describe a repeated
+        # or ongoing issue; one isolated event cannot justify a duration task.
+        if not _duration_question_supported_by_source(question_text, source_text_for_grounding):
             continue
         # Operational extraction warnings belong in the document review panel,
         # not in the caregiver's list of questions.

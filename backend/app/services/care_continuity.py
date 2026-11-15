@@ -800,35 +800,32 @@ def next_best_questions(
         Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
     ).all()
     for item in contradictions:
-        # A broad Delta topic can mention medication without representing a
-        # conflict about a current medication instruction. Only a contradiction
-        # explicitly scoped to a medication subject AND an actionable
-        # instruction field may create a professional confirmation task.
-        medication_subject = (
-            str(item.subject_type or "").strip().casefold()
-            in {"medication", "medications"}
+        contradiction_subject_type = str(item.subject_type or "").strip().casefold()
+        contradiction_field = " ".join(
+            str(item.field or "").casefold().replace("_", " ").replace("-", " ").split()
         )
-        normalized_medication_field = " ".join(
-            str(item.field or "")
-            .casefold()
-            .replace("_", " ")
-            .replace("-", " ")
-            .split()
-        )
-        actionable_medication_fields = {
+        # Only a contradiction explicitly scoped to a medication subject and
+        # an actionable current-instruction field can create a professional
+        # confirmation task. A broad Delta topic label such as
+        # subject_type=delta_engine_report, subject_id=medication, field=medication
+        # remains an internal unresolved conflict, not caregiver work.
+        explicit_medication_instruction_fields = {
             "current instruction",
             "current medication instruction",
-            "medication instruction",
+            "current prescription",
+            "current prescription instruction",
             "current dose",
             "prescribed dose",
-            "prescribed dosage",
-            "dosage instructions",
-            "dose",
-            "dosage",
+            "current frequency",
+            "prescribed frequency",
+            "current route",
+            "prescribed route",
+            "medication status",
+            "current medication status",
         }
         is_medication_conflict = (
-            medication_subject
-            and normalized_medication_field in actionable_medication_fields
+            contradiction_subject_type in {"medication", "medications"}
+            and contradiction_field in explicit_medication_instruction_fields
         )
         if is_medication_conflict:
             # A competing current medication instruction is a concrete decision

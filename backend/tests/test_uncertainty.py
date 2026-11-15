@@ -5210,3 +5210,13 @@ def test_scenario_03_food_intake_date_correction_supersedes_without_erasing_hist
             assert audit.record_metadata["supersedes_observation_id"] == original["id"]
     finally:
         teardown_db()
+
+
+def test_source_clarification_text_normalizes_whitespace_without_inventing_text():
+    from app.services.uncertainty import _source_clarification_text
+
+    assert _source_clarification_text(None) == ""
+    assert _source_clarification_text(123) == ""
+    assert _source_clarification_text("  Patient\\n\\twalked   20 metres.  ") == (
+        "Patient walked 20 metres."
+    )
