@@ -767,6 +767,34 @@ def transition_situation_state(
             for change in pattern_changes:
                 related_source_ids.update(change.evidence_ids or [])
 
+    # Situation signals may reference either evidence rows or care-event rows.
+    # Expand event/assertion/observation links so a caregiver can cite the actual
+    # saved evidence record without confusing it with its containing event.
+    related_source_ids = set(related_source_ids)
+    related_events = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id,
+        CareEvent.id.in_(related_source_ids),
+    ).all() if related_source_ids else []
+    for event in related_events:
+        related_source_ids.update(event.evidence_ids or [])
+
+    related_assertions = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.id.in_(related_source_ids),
+    ).all() if related_source_ids else []
+    for assertion in related_assertions:
+        related_source_ids.update(assertion.evidence_ids or [])
+        if assertion.source_event_id:
+            related_source_ids.add(assertion.source_event_id)
+
+    related_observations = db.query(EvidenceObservation).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.id.in_(related_source_ids),
+    ).all() if related_source_ids else []
+    for observation in related_observations:
+        if observation.evidence_id:
+            related_source_ids.add(observation.evidence_id)
+
     if not set(evidence_ids).issubset(related_source_ids):
         raise HTTPException(
             status_code=422,
