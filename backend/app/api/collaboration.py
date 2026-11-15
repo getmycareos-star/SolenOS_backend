@@ -5021,7 +5021,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
     else:
         return "I couldn't confirm a matching saved care note in the records I retrieved."
 
-    if topics and "medication" in {label for label, _ in topics}:
+    if descriptions and topics and "medication" in {label for label, _ in topics}:
         answer += " This is a caregiver report, not confirmation of the current prescription."
     word_count = len(re.findall(r"[a-z0-9']+", answer.casefold()))
     if word_count > 55:
@@ -6539,7 +6539,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "I can't confirm the prescribed dose from the records retrieved. "
                 "Please check the prescription or ask the prescriber or pharmacist."
             )
-            care_history_extractive_fallback_used = bool(care_history_extractive_answer)
+            medication_dose_recall_source_quote_used = bool(
+                care_history_extractive_answer
+                and care_history_extractive_answer.startswith("The saved notes mention medication:")
+            )
+            care_history_extractive_fallback_used = medication_dose_recall_source_quote_used
         if (
             care_history_extractive_answer
             and not (emergency or unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
@@ -6807,7 +6811,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ai_generated = False
         elif medication_dose_recall_fallback_used:
             verdict = "blocked"
-            safety_note = "This answer quotes a caregiver report and does not confirm the prescribed dose or current medication instructions."
+            safety_note = (
+                "This answer quotes a caregiver report and does not confirm the prescribed dose or current medication instructions."
+                if medication_dose_recall_source_quote_used
+                else "The prescribed dose could not be confirmed from the records retrieved. Check the prescription or contact the prescriber or pharmacist."
+            )
             ai_generated = False
         elif care_history_extractive_fallback_used:
             verdict = "passed"
