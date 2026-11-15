@@ -5922,7 +5922,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 trend_retrieval_query = re.sub(r"\s+", " ", trend_retrieval_query).strip()
             shared_lcr_context = _build_unified_lcr_context_or_422(
-                db, person_id, caregiver_id, limit_per_source=50, query=trend_retrieval_query,
+                db, person_id, caregiver_id,
+                limit_per_source=200 if care_journey_request else 50,
+                query=trend_retrieval_query,
                 include_all_history=care_journey_request,
             )
             # An explicit date window is a complete scan of that requested
@@ -5933,7 +5935,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if _should_fetch_full_lcr_context_pages(shared_lcr_context, care_journey_request):
                 shared_lcr_context = _collect_full_lcr_context_pages(
                     db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
-                    limit_per_source=50, max_pages=4,
+                    limit_per_source=200 if care_journey_request else 50,
+                    max_pages=1 if care_journey_request else 4,
                 )
             shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
