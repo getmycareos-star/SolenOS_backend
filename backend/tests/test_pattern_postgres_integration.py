@@ -5,6 +5,7 @@ It is not a SQLite substitute. All rows are test-scoped and cleaned up after the
 assertions, including when an assertion fails.
 """
 from datetime import datetime, timedelta, timezone
+import json
 import os
 import uuid
 
