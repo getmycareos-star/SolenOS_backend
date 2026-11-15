@@ -1280,9 +1280,10 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             canonical_receipt = delta_result["provenance"]["canonical_change_reconciliation"]
             if canonical_receipt["status"] == "completed":
                 assert canonical_receipt["protected_assertion_count"] > 0
-                assert any(
-                    scoped_person_id == str(person.id) and protected_ids
-                    for scoped_person_id, protected_ids in reconciliation_calls
+                protected_for_event = next(
+                    protected_ids
+                    for scoped_person_id, protected_ids in reversed(reconciliation_calls)
+                    if scoped_person_id == str(person.id) and protected_ids
                 )
                 persisted_protected_ids = {
                     str(row[0]) for row in db.query(CareAssertion.id).filter(
@@ -1290,7 +1291,8 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                         CareAssertion.source_event_id == care_event.id,
                     ).all()
                 }
-                assert persisted_protected_ids
+                assert protected_for_event
+                assert set(protected_for_event).issubset(persisted_protected_ids)
 
         persisted_event_ids = {
             row[0] for row in db.query(CareEvent.id).filter(
