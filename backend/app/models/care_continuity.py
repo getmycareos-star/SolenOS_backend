@@ -131,7 +131,7 @@ class CareDeltaRun(Base):
 
 TRACKED_TABLES = {
     "persons", "caregivers", "evidence", "care_events", "evidence_observations",
-    "care_facts", "care_record_relationships", "evidence_source_relationships",
+    "care_record_relationships", "evidence_source_relationships",
     "temporal_facts", "temporal_reference_frames", "temporal_relations",
     "temporal_contradictions", "observations", "reasoning_memories", "care_windows",
     "appointments", "care_transitions", "locations", "daily_intelligence",
