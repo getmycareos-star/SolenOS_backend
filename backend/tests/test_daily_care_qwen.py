@@ -627,7 +627,7 @@ def test_companion_extracts_notes_from_structured_daily_capture_json_for_history
     assert all(report in answer for report in reports)
     assert "capture_kind" not in answer
     assert "capture_idempotency_key" not in answer
-    assert len(re.findall(r"[a-z0-9']+", answer.casefold())) <= 55
+    assert len(answer.split()) <= 55
     assert collaboration._care_history_reply_covers_requested_topics(question, answer, lines)
     assert not collaboration._contains_unsupported_operational_claim(
         answer, question + "\\n" + "\\n".join(lines), lines
