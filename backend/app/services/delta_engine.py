@@ -16,7 +16,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Caregiver, Evidence
-from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
+from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship, EvidenceObservation
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
 from app.services.care_continuity import has_valid_caregiver_necessity
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
