@@ -772,8 +772,22 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
                 db, person_id="year-person", caregiver_id="year-caregiver",
                 query="What happened in 2025?", limit=8, temporal_window=window,
             )
+            exact_date_window = _temporal_window(
+                "What happened on 2025-06-10?", now=now, timezone_name="UTC"
+            )
+            exact_date_care_context = build_lcr_context(
+                db, "year-person", caregiver_id="year-caregiver",
+                query="What happened on 2025-06-10?", temporal_window=exact_date_window,
+            )
+            exact_date_conversation_context = _conversation_context(
+                db, person_id="year-person", caregiver_id="year-caregiver",
+                query="What happened on 2025-06-10?", limit=8,
+                temporal_window=exact_date_window,
+            )
         assert {item["id"] for item in care_context["sources"]["events"]["items"]} == {"event-in-2025"}
         assert {item["id"] for item in conversation_context["items"]} == {"message-in-2025"}
+        assert {item["id"] for item in exact_date_care_context["sources"]["events"]["items"]} == {"event-in-2025"}
+        assert {item["id"] for item in exact_date_conversation_context["items"]} == {"message-in-2025"}
     finally:
         connection.close()
         engine.dispose()
