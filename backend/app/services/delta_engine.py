@@ -537,13 +537,30 @@ def _canonical_change_classification(
     if not candidate_is_supported:
         return "uncertain", False
 
-    subject = f"{change.subject_type} {change.subject_id}".lower().replace("-", "_").replace(" ", "_")
-    adverse_terms = {
-        "fall", "falls", "night_waking", "night_wakings", "agitation", "pain",
-        "confusion", "missed_medication", "missed_dose", "shortness_of_breath",
-        "incontinence", "wandering", "refusal_to_eat",
+    # Direction is meaningful only for an explicitly recognized adverse
+    # measure. Use exact normalized subject labels, not substring matching:
+    # "no_pain", "pain_management", or "mobility_with_falls" must not inherit
+    # the polarity of the word "pain" or "falls" by accident.
+    def normalize_subject_label(value: Any) -> str:
+        return "_".join(
+            str(value or "").strip().casefold().replace("-", " ").replace("/", " ").split()
+        )
+
+    subject_labels = {
+        normalize_subject_label(change.subject_type),
+        normalize_subject_label(change.subject_id),
     }
-    adverse = any(term in subject for term in adverse_terms)
+    adverse_domains = {
+        "fall", "falls", "fall_count", "fall_frequency",
+        "night_waking", "night_wakings", "night_waking_frequency",
+        "agitation", "agitation_frequency",
+        "pain", "pain_level", "pain_score", "pain_severity",
+        "confusion", "confusion_frequency",
+        "missed_medication", "missed_dose",
+        "shortness_of_breath", "incontinence", "wandering",
+        "refusal_to_eat",
+    }
+    adverse = bool(subject_labels.intersection(adverse_domains))
     categories = {
         "emergence": "new",
         "onset": "new",
