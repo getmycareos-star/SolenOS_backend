@@ -150,7 +150,7 @@ class Correction(Base):
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     idempotency_key = Column(String(128), nullable=True)
     request_sha256 = Column(String(64), nullable=True)
-    processing_status = Column(String(24), nullable=False, default="pending", server_default="pending")
+    processing_status = Column(String(24), nullable=False, default="legacy_unverified", server_default="legacy_unverified")
     processing_attempts = Column(Integer, nullable=False, default=0, server_default="0")
     processing_error = Column(Text, nullable=True)
     care_continuity_execution = Column(JSON, nullable=True)
