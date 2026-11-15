@@ -421,6 +421,8 @@ def source_event_snapshot_hash(event: CareEvent) -> str:
         "person_id": str(event.person_id),
         "created_by_caregiver_id": str(event.created_by_caregiver_id or ""),
         "status": str(event.status or ""),
+        "event_type": str(event.event_type or ""),
+        "time_provenance": str(getattr(event, "time_provenance", "") or ""),
         "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
         "title": str(event.title or ""),
         "description": str(event.description or ""),
