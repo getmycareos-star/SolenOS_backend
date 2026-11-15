@@ -629,7 +629,7 @@ def get_situation_detail(
             source_type="observation",
             title=f"{observation.attribute}: {observation.value_text or observation.normalized_value or 'Recorded observation'}"[:240],
             excerpt=str(observation.source_passage or "")[:1000] or None,
-            occurred_at=observation.observed_at or observation.occurred_at,
+            occurred_at=observation.observed_at or observation.effective_at,
             recorded_at=observation.recorded_at,
             source_label="Saved observation",
             status=str(observation.epistemic_status or ""),
@@ -650,11 +650,11 @@ def get_situation_detail(
         source_records.append(SituationSourceRecord(
             id=evidence.id,
             source_type="document",
-            title=str(evidence.file_name or evidence.source_type or "Care document")[:240],
+            title=str(evidence.type or evidence.source_type or "Care document")[:240],
             excerpt=str(evidence.source_text or "")[:1000] or None,
             occurred_at=evidence.occurred_at,
-            recorded_at=evidence.reported_at or evidence.created_at,
-            source_label=str(evidence.reported_by_label or evidence.source_type or "Care document"),
+            recorded_at=evidence.reported_at or evidence.uploaded_at or evidence.ingested_at,
+            source_label=str(evidence.reported_by_label or evidence.original_author or evidence.source_type or "Care document"),
             status=str(evidence.evidence_status or ""),
             evidence_ids=[evidence.id],
         ))
