@@ -5504,7 +5504,7 @@ def _care_history_reply_covers_requested_topics(
     context_lines: list[str],
 ) -> bool:
     topics = _care_history_requested_topics(user_text)
-    reply_terms = set(re.findall(r"[\\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
+    reply_terms = set(re.findall(r"[\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
     topic_terms = set().union(*(variants for _, variants in topics))
     detail_stopwords = _CARE_HISTORY_STOPWORDS | {
         "mum", "her", "his", "she", "he", "they", "was", "were", "is", "are",
@@ -5532,8 +5532,8 @@ def _care_history_reply_covers_requested_topics(
         description = _care_history_event_text(record)
         if not description:
             continue
-        normalized_description = re.sub(r"\\s+", " ", description.casefold()).strip()
-        terms = set(re.findall(r"[\\w']{3,}", description.casefold(), flags=re.UNICODE))
+        normalized_description = re.sub(r"\s+", " ", description.casefold()).strip()
+        terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
         if not topics:
             generic_source_details.update(terms - detail_stopwords)
             generic_source_phrases.append(normalized_description)
@@ -5542,7 +5542,7 @@ def _care_history_reply_covers_requested_topics(
                 source_details[label].update(terms - topic_terms - detail_stopwords)
                 source_phrases[label].append(normalized_description)
 
-    normalized_reply = re.sub(r"\\s+", " ", (reply or "").casefold()).strip()
+    normalized_reply = re.sub(r"\s+", " ", (reply or "").casefold()).strip()
     if not topics:
         if len(reply_terms & generic_source_details) >= 2:
             return True
