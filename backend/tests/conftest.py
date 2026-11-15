@@ -122,6 +122,21 @@ if "care_record_status_history" not in Base.metadata.tables:
         Column("changed_at", DateTime(timezone=True)),
     )
 
+if "care_decisions" not in Base.metadata.tables:
+    Table(
+        "care_decisions", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("title", String(240), nullable=False),
+        Column("decision_text", Text, nullable=False),
+        Column("decision_status", String(40), nullable=False, server_default="proposed"),
+        Column("decided_at", DateTime(timezone=True)),
+        Column("context", JSON),
+        Column("evidence_ids", JSON),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+    )
+
 if "care_facts" not in Base.metadata.tables:
     Table(
         "care_facts", Base.metadata,
