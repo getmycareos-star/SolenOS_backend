@@ -349,6 +349,11 @@ _SEMANTIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "sleep": ("slept", "sleeping", "waking", "awake", "night", "rest"),
     "waking": ("awake", "sleep", "night"),
     "wandering": ("pacing", "walking", "roaming", "leaving"),
+    # Preserve common mobility inflections so "walking" retrieves a source
+    # sentence that says "walked" (and vice versa).
+    "walking": ("walk", "walked"),
+    "walked": ("walk", "walking"),
+    "walk": ("walking", "walked"),
     "agitation": ("agitated", "distressed", "restless", "upset"),
     "medication": ("medicine", "dose", "tablet", "pill"),
     "medicine": ("medication", "dose", "tablet", "pill"),
