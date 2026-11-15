@@ -401,8 +401,13 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
             assert body.get("ai_generated") is True, body
             assert body.get("provider_status") == "available", body
             assert body.get("written_to_lcr") is False, body
+            assert body.get("care_record_unchanged") is True, body
+            assert body.get("companion_history_unchanged") is True, body
             reply = body.get("reply", "")
             assert 8 <= len(reply.split()) <= 40, reply
+            assert reply.count("?") <= 1, reply
+            assert not re.search(r"(?i)\bhow can i help\b", reply), reply
+            assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", reply), reply
             assert len([part for part in re.split(r"(?<=[.!?])\s+", reply.strip()) if part]) <= 2, reply
             assert re.search(r"\bsolenos\b", reply, re.IGNORECASE), reply
             assert re.search(r"\b(?:care story|care record|care history)\b", reply, re.IGNORECASE), reply
