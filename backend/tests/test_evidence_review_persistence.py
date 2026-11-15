@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -13,7 +13,7 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence, Person
 from app.models.collaboration import EvidenceUpload
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, CareAssertion
 from app.api.care_continuity import _near_duplicate_candidates
 
 engine = create_engine(
@@ -21,6 +21,22 @@ engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+if "care_assertion_revisions" not in Base.metadata.tables:
+    Table(
+        "care_assertion_revisions", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("assertion_id", String(36), ForeignKey("care_assertions.id"), nullable=False),
+        Column("revision_number", Integer, nullable=False),
+        Column("previous_payload", JSON),
+        Column("current_payload", JSON),
+        Column("revision_reason", Text),
+        Column("provenance_id", String(36)),
+        Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("changed_at", DateTime(timezone=True)),
+        UniqueConstraint("assertion_id", "revision_number"),
+    )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
