@@ -184,6 +184,7 @@ class Correction(CorrectionBase):
     processing_error: Optional[str] = None
     processed_at: Optional[datetime] = None
     processing_started_at: Optional[datetime] = None
+    next_retry_at: Optional[datetime] = None
     created_at: datetime
     care_continuity_execution: Optional[dict[str, Any]] = None
 
