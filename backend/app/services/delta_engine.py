@@ -1021,6 +1021,18 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         } for item in unresolved_contradictions],
     }
 
+    history_coverage = {
+        "active_assertions": {"available": len(active_state), "total": active_assertions_total, "omitted": max(0, active_assertions_total - len(active_state))},
+        "prior_events": {"available": len(prior_events), "total": prior_events_total, "omitted": max(0, prior_events_total - len(prior_events))},
+        "prior_evidence": {"available": len(prior_evidence), "total": prior_evidence_total, "omitted": max(0, prior_evidence_total - len(prior_evidence))},
+        "open_gaps": {"available": len(open_gaps), "total": open_gaps_total, "omitted": max(0, open_gaps_total - len(open_gaps))},
+        "open_questions": {"available": len(open_questions), "total": open_questions_total, "omitted": max(0, open_questions_total - len(open_questions))},
+        "unresolved_contradictions": {"available": len(unresolved_contradictions), "total": unresolved_contradictions_total, "omitted": max(0, unresolved_contradictions_total - len(unresolved_contradictions))},
+    }
+    history_coverage["complete"] = all(
+        category["omitted"] == 0 for category in history_coverage.values()
+    )
+
     if not model_enrichment:
         return _reconcile_from_change_intelligence(
             db,
@@ -1056,17 +1068,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "Do not create both a follow-up and a clinical gap for the same missing information; do not create either unless the source identifies a concrete unanswered care requirement or explicitly requests follow-up. "
         "A meal or fluid-intake observation is not itself a diagnosis or symptom: do not infer reduced appetite, dehydration, illness, or a cause from an amount eaten or drunk. "
         "Never duplicate one observation as both a condition and a symptom; preserve the source observation in the event summary unless a distinct, explicitly documented clinical finding exists."
-    )
-    history_coverage = {
-        "active_assertions": {"available": len(active_state), "total": active_assertions_total, "omitted": max(0, active_assertions_total - len(active_state))},
-        "prior_events": {"available": len(prior_events), "total": prior_events_total, "omitted": max(0, prior_events_total - len(prior_events))},
-        "prior_evidence": {"available": len(prior_evidence), "total": prior_evidence_total, "omitted": max(0, prior_evidence_total - len(prior_evidence))},
-        "open_gaps": {"available": len(open_gaps), "total": open_gaps_total, "omitted": max(0, open_gaps_total - len(open_gaps))},
-        "open_questions": {"available": len(open_questions), "total": open_questions_total, "omitted": max(0, open_questions_total - len(open_questions))},
-        "unresolved_contradictions": {"available": len(unresolved_contradictions), "total": unresolved_contradictions_total, "omitted": max(0, unresolved_contradictions_total - len(unresolved_contradictions))},
-    }
-    history_coverage["complete"] = all(
-        category["omitted"] == 0 for category in history_coverage.values()
     )
     user_payload = {
         "history_coverage": history_coverage,
