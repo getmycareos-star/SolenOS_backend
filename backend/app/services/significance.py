@@ -60,24 +60,26 @@ def _evidence_status_from_events(db: Session, events: List[CareEvent], person_id
     evidence_ids = [eid for e in events for eid in (e.evidence_ids or [])]
 
     contradictions = []
-    if evidence_ids:
-        contradiction_rows = (
-            db.query(Contradiction)
-            .filter(
-                Contradiction.person_id == person_id,
-                Contradiction.resolution_status.in_(
-                    ("unresolved", "reopened", "qualified", "partially_resolved")
-                ),
-            )
-            .all()
+    # Conflicts may be linked by evidence IDs or by the same care subject.
+    # Legacy events can legitimately lack evidence IDs, so subject matching
+    # must not be skipped when the source event has no attached evidence.
+    evidence_set = set(evidence_ids)
+    contradiction_rows = (
+        db.query(Contradiction)
+        .filter(
+            Contradiction.person_id == person_id,
+            Contradiction.resolution_status.in_(
+                ("unresolved", "reopened", "qualified", "partially_resolved")
+            ),
         )
-        evidence_set = set(evidence_ids)
-        for c in contradiction_rows:
-            c_ev = set(c.evidence_ids or [])
-            if c_ev and (evidence_set & c_ev):
-                contradictions.append(c)
-            elif c.subject_type == subject_type and c.subject_id == subject_id:
-                contradictions.append(c)
+        .all()
+    )
+    for c in contradiction_rows:
+        c_ev = set(c.evidence_ids or [])
+        if c_ev and evidence_set and (evidence_set & c_ev):
+            contradictions.append(c)
+        elif c.subject_type == subject_type and c.subject_id == subject_id:
+            contradictions.append(c)
     if contradictions:
         return EvidenceStatus.CONTRADICTORY
 
