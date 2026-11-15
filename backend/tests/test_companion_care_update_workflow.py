@@ -364,6 +364,7 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
             assert assertion.person_id == first["person"]["id"]
             assert assertion.asserted_value == source
             assert assertion.assertion_status == "caregiver_reviewed"
+            assert assertion.epistemic_state == "reported"
             assert assertion.source_message_id == message_id
             assert assertion.source_proposal_id == proposal["id"]
             assert assertion.source_conversation_id == body["session_id"]
