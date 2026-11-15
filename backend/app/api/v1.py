@@ -16,6 +16,7 @@ from app.services.change_intelligence_reconciliation import reconcile_person_cha
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.lcr_context import build_lcr_context
 from app.models.anonymous_session import AnonymousSession
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
 from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.models.collaboration import ConsentRecord, EvidenceUpload
@@ -1529,6 +1530,85 @@ def list_insights(person_id: str, request: Request, db: Session = Depends(get_db
     )
 
 
+def _reassess_correction_follow_ups(db: Session, correction_row: CorrectionModel) -> int:
+    """Flag directly linked open follow-ups for review without closing them."""
+    open_states = {
+        "open", "waiting", "deferred", "blocked",
+        "review_abandoned", "pending_closure_verification",
+    }
+    rows = (
+        db.query(OpenLoopRecord)
+        .filter(
+            OpenLoopRecord.person_id == correction_row.person_id,
+            OpenLoopRecord.status.in_(open_states),
+        )
+        .with_for_update()
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    changed = 0
+    event_key_prefix = f"correction:{correction_row.id}:open-loop:"
+    for loop in rows:
+        linked = (
+            str(loop.source_type or "") == str(correction_row.target_type)
+            and str(loop.source_id or "") == str(correction_row.target_id)
+        )
+        if not linked:
+            for item in (loop.evidence or []):
+                if not isinstance(item, dict):
+                    continue
+                source_type = item.get("source_type") or item.get("target_type")
+                source_id = item.get("source_id") or item.get("target_id") or item.get("event_id") or item.get("assertion_id")
+                if str(source_type or "") == str(correction_row.target_type) and str(source_id or "") == str(correction_row.target_id):
+                    linked = True
+                    break
+        if not linked:
+            continue
+
+        idempotency_key = f"{event_key_prefix}{loop.id}"
+        existing_event = db.query(OpenLoopEvent.id).filter(
+            OpenLoopEvent.person_id == correction_row.person_id,
+            OpenLoopEvent.idempotency_key == idempotency_key,
+        ).first()
+        if existing_event:
+            continue
+
+        before = {
+            "status": loop.status,
+            "review_at": loop.review_at.isoformat() if loop.review_at else None,
+            "version": loop.version,
+        }
+        loop.review_at = now
+        loop.updated_at = now
+        loop.version = int(loop.version or 0) + 1
+        after = {
+            "status": loop.status,
+            "review_at": now.isoformat(),
+            "version": loop.version,
+            "review_required": True,
+            "reason": "linked_care_information_was_corrected",
+            "correction_id": correction_row.id,
+        }
+        db.add(OpenLoopEvent(
+            loop_id=loop.id,
+            person_id=loop.person_id,
+            caregiver_id=correction_row.caregiver_id,
+            event_type="source_corrected_requires_review",
+            before_state=before,
+            after_state=after,
+            evidence=[{
+                "kind": "care_record_correction",
+                "correction_id": correction_row.id,
+                "target_type": correction_row.target_type,
+                "target_id": correction_row.target_id,
+            }],
+            idempotency_key=idempotency_key,
+            actor="session_caregiver",
+        ))
+        changed += 1
+    return changed
+
+
 def _correction_request_fingerprint(correction: CorrectionCreate) -> str:
     payload = correction.model_dump(exclude={"idempotency_key"})
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -1564,6 +1644,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
     try:
         engine = LearningEngine(db)
         engine.apply_correction(correction_row, commit=False)
+        _reassess_correction_follow_ups(db, correction_row)
         engine.record_learning_event(
             correction_row.person_id,
             "correction_applied",
