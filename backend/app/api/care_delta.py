@@ -56,7 +56,7 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     rows = db.query(CareDeltaRun).filter(
         CareDeltaRun.person_id == scoped_person_id
-    ).order_by(CareDeltaRun.created_at.desc()).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
+    ).order_by(CareDeltaRun.created_at.desc(), CareDeltaRun.id.desc()).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
     output = []
     for row in rows:
         try:
