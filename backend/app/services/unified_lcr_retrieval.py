@@ -267,6 +267,9 @@ def _conversation_context(
     return {
         "status": "available" if items else "empty",
         "table": "conversation_messages",
+        "is_evidence": False,
+        "is_lcr_assertion": False,
+        "is_care_evidence": False,
         "items": items,
         "returned_count": len(items),
         "candidate_count": candidate_count,
