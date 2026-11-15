@@ -2180,6 +2180,18 @@ def test_care_delta_api_persists_deterministically_without_local_model(monkeypat
     assert payload["provenance"]["model"] == "none"
     assert payload["provenance"]["delta_run_id"]
 
+    invalid = client.post(
+        "/api/v1/care-delta/reconcile",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "person_id": person_id,
+            "source": "postgres_deterministic_delta_acceptance",
+            "content": "",
+            "persist": True,
+        },
+    )
+    assert invalid.status_code == 422, invalid.text
+
     with TestingSessionLocal() as db:
         saved = db.query(CareDeltaRun).filter(
             CareDeltaRun.person_id == person_id,
