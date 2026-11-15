@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, UniqueConstraint, event, inspect as sa_inspect
+from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, JSON, UniqueConstraint, event, inspect as sa_inspect
 from sqlalchemy.sql import func
 import hashlib
 import uuid
@@ -137,6 +137,9 @@ class Insight(Base):
 
 class Correction(Base):
     __tablename__ = "corrections"
+    __table_args__ = (
+        UniqueConstraint("person_id", "idempotency_key", name="uq_corrections_person_idempotency_key"),
+    )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     target_type = Column(String, nullable=False)
@@ -145,4 +148,11 @@ class Correction(Base):
     corrected_text = Column(Text, nullable=False)
     reason = Column(Text, nullable=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    idempotency_key = Column(String(128), nullable=True)
+    request_sha256 = Column(String(64), nullable=True)
+    processing_status = Column(String(24), nullable=False, default="pending", server_default="pending")
+    processing_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    processing_error = Column(Text, nullable=True)
+    care_continuity_execution = Column(JSON, nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
