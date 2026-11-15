@@ -189,6 +189,10 @@ def _conversation_context(
         term for term in re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())
         if term not in _SEARCH_STOPWORDS
     ][:MAX_QUERY_TERMS]
+    if temporal_window:
+        # The requested calendar year belongs to the date filter, not to the
+        # message text. Keep it out of lexical matching and ranking.
+        direct_terms = [term for term in direct_terms if not re.fullmatch(r"20\\d{2}", term)]
     terms = _expanded_search_terms(direct_terms)
     if temporal_window:
         statement = statement.filter(
