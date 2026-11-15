@@ -1952,10 +1952,29 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "I'm exhausted. I don't know what to do anymore."},
+            json={
+                "person_id": person_id,
+                "text": "I'm exhausted. I don't know what to do anymore.",
+                "client_turn_id": "11111111-1111-4111-8111-111111111111",
+            },
         )
         assert response.status_code == 200, response.text
         body = response.json()
+        replay = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "I'm exhausted. I don't know what to do anymore.",
+                "client_turn_id": "11111111-1111-4111-8111-111111111111",
+            },
+        )
+        assert replay.status_code == 200, replay.text
+        replay_body = replay.json()
+        assert replay_body["idempotent_replay"] is True
+        assert replay_body["response_mode"] == "deterministic_low_capacity_support_fallback"
+        assert replay_body["ai_generated"] is False
+        assert replay_body["reply"] == body["reply"]
         assert len(calls) == 3
         assert all("current greeting" not in call[0][-1]["content"].casefold() for call in calls[1:])
         assert all("Use at most two short sentences" in call[0][-1]["content"] for call in calls[1:])
