@@ -2184,6 +2184,17 @@ def test_delta_failure_does_not_fail_persisted_daily_care_capture(monkeypatch):
         finally:
             db.close()
 
+        queued_job_status = client.get(
+            f"/api/v1/assistant/jobs/{receipt['qwen_job_id']}", headers=headers
+        )
+        assert queued_job_status.status_code == 200, queued_job_status.text
+        queued_payload = queued_job_status.json()
+        assert queued_payload["status"] == "queued"
+        assert queued_payload["workflow"] == "daily_capture_delta_reconciliation"
+        assert queued_payload["daily_capture"]["analysis_id"] == analysis_id
+        assert queued_payload["daily_capture"]["longitudinal_processing_status"] == "retrying"
+        assert queued_payload["source_event_ids"] == [receipt["id"]]
+
         def recovered_delta(*args, **kwargs):
             return {"provenance": {"delta_run_id": "delta-retry-run-001"}}
 
@@ -2223,6 +2234,17 @@ def test_delta_failure_does_not_fail_persisted_daily_care_capture(monkeypatch):
             assert len(observations) == 1
         finally:
             db.close()
+
+        completed_job_status = client.get(
+            f"/api/v1/assistant/jobs/{receipt['qwen_job_id']}", headers=headers
+        )
+        assert completed_job_status.status_code == 200, completed_job_status.text
+        completed_payload = completed_job_status.json()
+        assert completed_payload["status"] == "completed"
+        assert completed_payload["daily_capture"]["analysis_id"] == analysis_id
+        assert completed_payload["daily_capture"]["projection_status"] == "verified"
+        assert completed_payload["daily_capture"]["longitudinal_processing_status"] == "completed"
+        assert completed_payload["daily_capture"]["delta_run_id"] == "delta-retry-run-001"
     finally:
         teardown_db()
 
