@@ -59,6 +59,25 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+@pytest.mark.parametrize("query", [
+    "What happened in 2025?",
+    "Show me what happened during 2025",
+    "Summarize the care history over the past 12 months",
+    "What happened on 2025-06-10?",
+])
+def test_broad_temporal_history_questions_request_full_history_paging(query):
+    assert collaboration._is_broad_temporal_history_request(query) is True
+
+
+@pytest.mark.parametrize("query", [
+    "Was she confused in 2025?",
+    "What happened to sleep recently?",
+    "Show me what to do next week",
+])
+def test_non_reconstruction_questions_do_not_force_full_history_paging(query):
+    assert collaboration._is_broad_temporal_history_request(query) is False
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
