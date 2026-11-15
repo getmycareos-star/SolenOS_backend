@@ -2574,3 +2574,95 @@ def test_daily_care_persistence_failure_never_returns_a_saved_receipt(monkeypatc
             db.close()
     finally:
         teardown_db()
+
+
+def test_daily_capture_reconciliation_failure_preserves_successful_extraction_receipt(monkeypatch):
+    """A failed downstream stage must not rewrite an already completed extraction as failed."""
+    from app.services import care_continuity_execution
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night and seemed more unsettled this morning."
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "daily-reconciliation-failure-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert receipt["success"] is True
+        assert receipt["qwen_job_id"]
+
+        db = TestingSessionLocal()
+        try:
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            job.attempt_count = 2
+            db.commit()
+        finally:
+            db.close()
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [{
+                    "subject": "Mum",
+                    "observation": "slept poorly last night",
+                    "source_quote": original_report,
+                    "review_status": "pending_review",
+                    "source_event_id": source_event_id,
+                }],
+                "open_questions": [],
+            }
+
+        def fail_reconciliation(*args, **kwargs):
+            raise RuntimeError("injected longitudinal reconciliation failure")
+
+        monkeypatch.setattr(
+            care_continuity_execution,
+            "execute_care_continuity_reconciliation",
+            fail_reconciliation,
+        )
+        process_daily_capture_job(
+            receipt["qwen_job_id"],
+            monkeypatch,
+            exact_source_candidates,
+            expected_status="failed",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            analysis = db.query(CaptureAnalysis).filter_by(
+                person_id="person-daily-test",
+                caregiver_id="caregiver-daily-test",
+                source_event_id=receipt["id"],
+            ).one()
+            assert analysis.extraction_status == "available"
+            assert analysis.execution_status["extraction"] == "available"
+            assert analysis.execution_status["assessment"] == "available"
+            assert analysis.execution_status["reconciliation"] == "not_completed"
+            assert analysis.execution_status["projection"] == "not_verified"
+            assert analysis.candidates["observations"][0]["observation"] == "slept poorly last night"
+
+            persisted = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+            ).all()
+            assert any(row.value_text == "slept poorly last night" for row in persisted)
+
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            assert job.status == "failed"
+            assert job.result_text is None
+        finally:
+            db.close()
+    finally:
+        teardown_db()
