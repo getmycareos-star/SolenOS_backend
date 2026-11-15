@@ -1024,6 +1024,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
     import json
     from app.models.care import CareEvent, Caregiver, Correction, Evidence
     from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship
+    from app.services.care_continuity import has_valid_caregiver_necessity
     from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
     from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
     from app.services import delta_engine
@@ -1460,12 +1461,31 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).all()
-        # The benchmark's generated clinical-gap questions have no separate,
-        # source-backed necessity assessment. Preserve their InformationGap
-        # records, but do not turn model wording into caregiver tasks.
-        assert actual_questions == [], (
-            f"{scenario['scenario_id']}: unassessed model-generated questions "
-            "must remain internal and must not become caregiver work"
+        # Model-generated clinical-gap wording must not become caregiver work
+        # by itself. A separately persisted medication contradiction may still
+        # create one professional-directed question, but only when its source,
+        # same-person evidence, rationale, and decision dependency all validate.
+        invalid_questions = [
+            question for question in actual_questions
+            if not has_valid_caregiver_necessity(question, db, person.id)
+        ]
+        assert invalid_questions == [], (
+            f"{scenario['scenario_id']}: an open question lacks a valid, "
+            "source-backed necessity assessment"
+        )
+        assert all(question.necessity == "necessary" for question in actual_questions), (
+            f"{scenario['scenario_id']}: an unassessed question became caregiver work"
+        )
+        assert all(
+            question.intended_answerer_role == "professional"
+            and any(
+                isinstance(context, dict) and context.get("source_kind") == "contradiction"
+                for context in (question.context or [])
+            )
+            for question in actual_questions
+        ), (
+            f"{scenario['scenario_id']}: medication contradiction must be directed "
+            "to a qualified professional, not the family caregiver"
         )
 
 
