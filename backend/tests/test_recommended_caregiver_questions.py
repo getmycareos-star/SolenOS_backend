@@ -1098,8 +1098,22 @@ def test_source_clarification_does_not_create_caregiver_work_without_valid_neces
             questions=["What is the current medication dose?"],
         )
 
-        assert persisted == []
-        assert db.query(OpenQuestion).filter(OpenQuestion.person_id == person.id).count() == 0
+        assert len(persisted) == 1
+        question = persisted[0]
+        assert question.necessity == "not_assessed"
+        assert question.priority == Priority.INFORMATIONAL
+        assert question.intended_answerer_role == "not_known"
+        assert question.subject_type == "person"
+        assert question.subject_id == person.id
+        assert question.evidence_ids == [own_source.id]
+        assert foreign_evidence.id not in (question.evidence_ids or [])
+        contexts = question.context or []
+        assert len(contexts) == 1
+        assert contexts[0]["source_record_refs"] == [
+            {"record_type": "evidence", "record_id": own_source.id}
+        ]
+        assert "necessity_assessment" not in contexts[0]
+        assert db.query(OpenQuestion).filter(OpenQuestion.person_id == person.id).count() == 1
         db.rollback()
         db.close()
     finally:
