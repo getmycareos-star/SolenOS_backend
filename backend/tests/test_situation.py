@@ -1715,6 +1715,22 @@ def test_situation_freshness_includes_new_persisted_care_events():
         assert current_after.status_code == 200, current_after.text
         assert current_after.json()["source_freshness"]["status"] == "source_changed_since_assessment"
         assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
+
+        reassessed = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert reassessed.status_code == 200, reassessed.text
+        assert reassessed.json()["status"] == "created"
+        assert reassessed.json()["assessment_id"] != initial.json()["assessment_id"]
+
+        current_after_reassessment = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_after_reassessment.status_code == 200, current_after_reassessment.text
+        assert current_after_reassessment.json()["assessment_id"] == reassessed.json()["assessment_id"]
+        assert current_after_reassessment.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
     finally:
         teardown_db()
 
