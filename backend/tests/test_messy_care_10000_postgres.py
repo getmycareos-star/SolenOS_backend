@@ -355,11 +355,13 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             assert len(events) == EXPECTED_CASE_COUNT
             assert len(expected) == EXPECTED_CASE_COUNT
 
-            # Keep each database transaction bounded. The care-state revision
-            # listener takes a transaction-scoped advisory lock per changed record;
-            # inserting the entire 10,000-event corpus in one transaction exhausts
-            # PostgreSQL's shared lock table. Five histories per transaction retain
-            # the same relational workload while releasing locks between batches.
+            # Keep each database transaction below PostgreSQL's default advisory
+            # lock budget. Each tracked row receives a transaction-scoped revision
+            # lock; even a small multi-history batch can exceed the server's shared
+            # lock table once events, evidence, assertions and related rows are
+            # flushed together. One complete synthetic history per transaction
+            # preserves all ten event cases and their relationships while releasing
+            # every revision lock before the next history.
             def group_by_person(rows):
                 grouped = defaultdict(list)
                 for row in rows:
@@ -375,8 +377,8 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             corrections_by_person = group_by_person(correction_rows)
             questions_by_person = group_by_person(question_rows)
 
-            for offset in range(0, HISTORY_COUNT, 5):
-                batch_people = people[offset:offset + 5]
+            for offset in range(HISTORY_COUNT):
+                batch_people = people[offset:offset + 1]
                 batch_person_ids = [person.id for person in batch_people]
                 db.add_all(batch_people)
                 db.flush()
