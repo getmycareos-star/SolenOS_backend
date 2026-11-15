@@ -669,6 +669,31 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
         engine.dispose()
 
 
+def test_last_year_uses_previous_calendar_year_in_caregiver_timezone():
+    window = _temporal_window(
+        "What happened last year?",
+        now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+        timezone_name="America/Los_Angeles",
+    )
+    assert window is not None
+    assert window["basis"] == "explicit_previous_calendar_year"
+    assert window["timezone"] == "America/Los_Angeles"
+    assert window["start"] == "2025-01-01T08:00:00+00:00"
+    assert window["end"] == "2026-01-01T07:59:59.999999+00:00"
+
+
+def test_this_year_is_bounded_from_local_january_first_through_today():
+    window = _temporal_window(
+        "Show me what changed this year.",
+        now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+        timezone_name="UTC",
+    )
+    assert window is not None
+    assert window["basis"] == "explicit_current_calendar_year"
+    assert window["start"] == "2026-01-01T00:00:00+00:00"
+    assert window["end"].startswith("2026-11-15T23:59:59")
+
+
 def test_temporal_retrieval_uses_calendar_months_not_fixed_30_day_approximation():
     # March 31 minus one calendar month clamps to February 28 in 2026.
     window = _temporal_window(
