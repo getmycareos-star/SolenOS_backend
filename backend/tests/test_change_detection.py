@@ -2989,3 +2989,76 @@ def test_increase_assessment_cannot_be_marked_resolved():
         assert response.status_code == 422
     finally:
         teardown_db()
+
+def test_resolution_rejects_unrelated_same_person_evidence():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.core.change_enums import ChangeDirection, ChangeType
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-resolution-lineage", name="Resolution lineage recipient")
+        caregiver = Caregiver(
+            id="caregiver-resolution-lineage",
+            name="Resolution lineage caregiver",
+            email="resolution-lineage@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        linked_event = CareEvent(
+            id="resolution-linked-event",
+            person_id=person.id,
+            event_type="fall",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=60),
+            title="Earlier event linked to cessation",
+            created_by_caregiver_id=caregiver.id,
+        )
+        unrelated_event = CareEvent(
+            id="resolution-unrelated-event",
+            person_id=person.id,
+            event_type="sleep_observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=2),
+            title="Unrelated event from the same care record",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, linked_event, unrelated_event])
+        db.flush()
+        change = Change(
+            id="resolution-lineage-change",
+            person_id=person.id,
+            subject_type="fall",
+            subject_id="",
+            change_type=ChangeType.CESSATION,
+            change_direction=ChangeDirection.DECREASING,
+            previous_state="Earlier recorded falls",
+            current_state="No falls recorded in a fully covered window",
+            previous_count=3,
+            current_count=0,
+            baseline_coverage_status="covered",
+            current_coverage_status="covered",
+            evidence_ids=[linked_event.id],
+            explanation="Cessation candidate.",
+            confirmation_status="detected",
+            is_active=True,
+        )
+        db.add(change)
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        response = TestClient(app).post(
+            f"/api/v1/change/changes/{person.id}/{change.id}/confirmation",
+            json={
+                "status": "resolved",
+                "reason": "The caregiver confirms resolution.",
+                "evidence_ids": [unrelated_event.id],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 422, response.text
+        assert "source records linked to this change assessment" in response.text
+    finally:
+        teardown_db()
+
