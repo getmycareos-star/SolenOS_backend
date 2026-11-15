@@ -242,10 +242,11 @@ def assess_change(
         and (novelty == 1.0 or recurrence == 1.0 or magnitude_score >= 0.7 or clustering == 1.0)
         and (corroboration_score >= 0.3 or functional_score == 1.0 or persistence_score >= 0.5)
     )
-    follow_up_candidate = (
-        verdict == SignificanceVerdict.MEANINGFUL_CANDIDATE
-        or (verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE and baseline_event_count == 0 and current_count > 0)
-    )
+    # Missing baseline coverage is uncertainty, not a care need. A first
+    # recorded event must not become a follow-up solely because no prior event
+    # exists in the comparison window. Only a meaningful assessment can raise
+    # a follow-up candidate; the evidence and uncertainty remain preserved.
+    follow_up_candidate = verdict == SignificanceVerdict.MEANINGFUL_CANDIDATE
 
     explanation = _build_explanation(
         change, baseline, comparison, events, reporters, evidence_status, verdict,
