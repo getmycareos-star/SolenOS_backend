@@ -819,6 +819,8 @@ def next_best_questions(
             "current instruction",
             "current medication instruction",
             "medication instruction",
+            "medication status",
+            "current medication status",
             "current dose",
             "prescribed dose",
             "prescribed dosage",
