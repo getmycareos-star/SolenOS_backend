@@ -6204,38 +6204,41 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     existing_document_ids.add(document_id)
         if _MEDICATION_DOSE_RECALL_RE.search(user_text or ""):
             medication_recall_context = _medication_dose_recall_context_lines(db, person_id)
-            existing_event_ids = set(_context_record_ids(shared_lcr_lines, "event_id"))
-            existing_evidence_ids = set(_context_record_ids(shared_lcr_lines, "evidence_id"))
-            direct_medication_event_lines: list[str] = []
-            direct_medication_evidence_lines: list[str] = []
-            for line in medication_recall_context["event_lines"]:
-                try:
-                    payload = json.loads(line[line.index("{"):])
-                    event_id = str(payload.get("event_id") or "")
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    continue
-                if event_id and event_id not in existing_event_ids:
-                    direct_medication_event_lines.append(line)
-                    existing_event_ids.add(event_id)
-            for line in medication_recall_context["evidence_lines"]:
-                try:
-                    payload = json.loads(line[line.index("{"):])
-                    evidence_id = str(payload.get("evidence_id") or "")
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    continue
-                if evidence_id and evidence_id not in existing_evidence_ids:
-                    direct_medication_evidence_lines.append(line)
-                    existing_evidence_ids.add(evidence_id)
-            if direct_medication_event_lines:
-                event_context = list(dict.fromkeys([*event_context, *direct_medication_event_lines]))
-            if direct_medication_evidence_lines:
-                evidence_context = list(dict.fromkeys([*evidence_context, *direct_medication_evidence_lines]))
-            if direct_medication_event_lines or direct_medication_evidence_lines:
-                shared_lcr_lines = list(dict.fromkeys([
-                    *shared_lcr_lines,
-                    *direct_medication_event_lines,
-                    *direct_medication_evidence_lines,
-                ]))
+            direct_event_ids = set(_context_record_ids(medication_recall_context["event_lines"], "event_id"))
+            direct_evidence_ids = set(_context_record_ids(medication_recall_context["evidence_lines"], "evidence_id"))
+
+            def without_direct_records(lines: list[str], id_key: str, identifiers: set[str]) -> list[str]:
+                if not identifiers:
+                    return lines
+                retained: list[str] = []
+                for line in lines:
+                    try:
+                        payload = json.loads(line[line.index("{"):])
+                        record_id = str(payload.get(id_key) or "")
+                    except (ValueError, TypeError, json.JSONDecodeError):
+                        retained.append(line)
+                        continue
+                    if record_id not in identifiers:
+                        retained.append(line)
+                return retained
+
+            # Replace ranked/projection variants of these same records with
+            # the exact persisted caregiver wording and its linked evidence.
+            event_context = without_direct_records(event_context, "event_id", direct_event_ids)
+            evidence_context = without_direct_records(evidence_context, "evidence_id", direct_evidence_ids)
+            shared_lcr_lines = without_direct_records(shared_lcr_lines, "event_id", direct_event_ids)
+            shared_lcr_lines = without_direct_records(shared_lcr_lines, "evidence_id", direct_evidence_ids)
+            event_context = list(dict.fromkeys([
+                *event_context, *medication_recall_context["event_lines"],
+            ]))
+            evidence_context = list(dict.fromkeys([
+                *evidence_context, *medication_recall_context["evidence_lines"],
+            ]))
+            shared_lcr_lines = list(dict.fromkeys([
+                *shared_lcr_lines,
+                *medication_recall_context["event_lines"],
+                *medication_recall_context["evidence_lines"],
+            ]))
             lcr_context_coverage["direct_medication_recall"] = {
                 "status": "available" if medication_recall_context["event_lines"] else "no_matching_record",
                 "event_count": len(medication_recall_context["event_lines"]),
