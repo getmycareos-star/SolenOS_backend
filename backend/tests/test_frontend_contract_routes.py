@@ -1920,6 +1920,7 @@ def test_delta_freshness_tracks_real_orm_updates_to_baselines_changes_and_situat
         SituationState, SituationType,
     )
     from app.models.change import Baseline, Change, Situation
+    from app.models.observation_coverage import ObservationCoverage
 
     client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     reviewed_at = datetime.now(timezone.utc) - timedelta(minutes=10)
@@ -1974,7 +1975,23 @@ def test_delta_freshness_tracks_real_orm_updates_to_baselines_changes_and_situat
             change.confirmation_status = "resolved"
             change.is_active = False
             situation.state = SituationState.RESOLVED
+            db.add(ObservationCoverage(
+                person_id=person_id,
+                subject_type="mobility",
+                window_start=reviewed_at - timedelta(days=42),
+                window_end=datetime.now(timezone.utc),
+                coverage_status="covered",
+                source_evidence_ids=[],
+                rationale="The caregiver explicitly documented the observation interval.",
+                recorded_by_caregiver_id=caregiver_id,
+            ))
             db.commit()
+
+            coverage_revisions = db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+                CareStateRevision.target_type == "observation_coverage",
+            ).all()
+            assert len(coverage_revisions) == 1
 
             revisions = db.query(CareStateRevision).filter(
                 CareStateRevision.person_id == person_id,
@@ -1998,7 +2015,7 @@ def test_delta_freshness_tracks_real_orm_updates_to_baselines_changes_and_situat
         assert response.status_code == 200, response.text
         run = next(item for item in response.json() if item["id"] == ids["run"])
         assert run["source_freshness"]["status"] == "stale", run
-        assert run["source_freshness"]["changed_context_count"] >= 3, run
+        assert run["source_freshness"]["changed_context_count"] >= 4, run
         assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
     finally:
         teardown()
