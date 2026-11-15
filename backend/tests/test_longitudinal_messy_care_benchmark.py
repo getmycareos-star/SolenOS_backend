@@ -1783,6 +1783,7 @@ def test_scenario_03_multi_person_medication_conflict_preserves_source_history()
         ).all()
         assert len(medication_questions) == 1
         question = medication_questions[0]
+        assert "current medication status" in question.question.casefold()
         assert question.necessity == "necessary"
         assert getattr(question.priority, "value", question.priority) == "high"
         assert "prescribing clinician or pharmacist" in question.question
