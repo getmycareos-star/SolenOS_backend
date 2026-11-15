@@ -171,15 +171,24 @@ def _conversation_context(
             ConversationMessage.content.ilike(f"%{term}%") for term in terms
         ]))
     bounded_limit = max(1, min(int(limit), MAX_CONVERSATION_CONTEXT_ITEMS))
-    candidate_limit = min(max(bounded_limit * 5, bounded_limit + 1), 100) if terms else bounded_limit
-    rows = (
-        statement.order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
-        .limit(candidate_limit + 1)
-        .all()
+    ordered_statement = statement.order_by(
+        ConversationMessage.created_at.desc(), ConversationMessage.id.desc()
     )
-    items = []
+    # A lexical match can occur in an old conversation. Do not cap the
+    # candidate window at a handful of recent messages: scan every authorized
+    # match and retain only the best bounded results. Unfiltered reads remain
+    # recent-first and bounded to avoid loading an entire chat archive.
+    rows = (
+        ordered_statement.execution_options(stream_results=True).yield_per(200)
+        if terms
+        else ordered_statement.limit(bounded_limit + 1).all()
+    )
+    expanded_only = [term for term in terms if term not in direct_terms]
+    ranked_items: list[tuple[int, str, str, dict[str, Any]]] = []
+    candidate_count = 0
     for message, conversation in rows:
-        items.append({
+        candidate_count += 1
+        item = {
             "id": str(message.id),
             "session_id": str(conversation.id),
             "role": str(message.role or "unknown"),
@@ -197,24 +206,25 @@ def _conversation_context(
                 if str(message.role or "").casefold() == "assistant"
                 else "unknown_conversation_actor"
             ),
-        })
-    if direct_terms:
-        expanded_only = [term for term in terms if term not in direct_terms]
-        items.sort(
-            key=lambda item: (
-                _retrieval_score(item, query or "", direct_terms, expanded_only),
-                item.get("recorded_at") or "",
-            ),
-            reverse=True,
+        }
+        score = (
+            _retrieval_score(item, query or "", direct_terms, expanded_only)
+            if direct_terms else 0
         )
-    items = items[:bounded_limit]
+        ranked_items.append((score, item.get("recorded_at") or "", item["id"], item))
+        if len(ranked_items) > bounded_limit:
+            ranked_items.sort(key=lambda entry: (entry[0], entry[1], entry[2]), reverse=True)
+            ranked_items.pop()
+    items = [entry[3] for entry in ranked_items]
     items.sort(key=lambda item: (item.get("recorded_at") or "", item["id"]))
     return {
         "status": "available" if items else "empty",
         "table": "conversation_messages",
         "items": items,
         "returned_count": len(items),
-        "has_more": len(rows) > len(items),
+        "candidate_count": candidate_count,
+        "candidate_scan_complete": bool(terms),
+        "has_more": candidate_count > len(items),
         "limit": bounded_limit,
         "interpretation_limit": (
             "Prior Companion dialogue is conversational context only. It is not "
