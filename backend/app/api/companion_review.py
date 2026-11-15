@@ -253,6 +253,7 @@ def create_companion_care_update_from_message(
             ConversationSession.caregiver_id == caregiver_id,
             ConversationSession.status == "active",
         )
+        .with_for_update()
         .first()
     )
     if source is None:
