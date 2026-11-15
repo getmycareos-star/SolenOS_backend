@@ -63,7 +63,12 @@ def _evidence_status_from_events(db: Session, events: List[CareEvent], person_id
     if evidence_ids:
         contradiction_rows = (
             db.query(Contradiction)
-            .filter(Contradiction.person_id == person_id)
+            .filter(
+                Contradiction.person_id == person_id,
+                Contradiction.resolution_status.in_(
+                    ("unresolved", "reopened", "qualified", "partially_resolved")
+                ),
+            )
             .all()
         )
         evidence_set = set(evidence_ids)
