@@ -103,9 +103,19 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     try:
         token, person_id, caregiver_id = create_session(client)
+        # Exercise the same scoped name-save endpoint used by CareRecipientNameGate.
+        named = client.patch(
+            "/api/situation",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "display_name": "Mom",
+            },
+        )
+        assert named.status_code == 200, named.text
+        assert named.json()["care_recipient_display_name"] == "Mom"
         db = TestingSessionLocal()
-        # The caregiver completed the one-time name step before using Companion.
-        db.query(Person).filter_by(id=person_id).one().name = "Mom"
         event_time = datetime(2026, 10, 25, 20, 0, tzinfo=timezone.utc)
         report_time = datetime(2026, 10, 26, 8, 15, tzinfo=timezone.utc)
         event = CareEvent(
