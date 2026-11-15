@@ -1313,6 +1313,11 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             assert receipt["provenance"]["engine_version"] == delta_engine.DELTA_ENGINE_VERSION
             assert receipt["provenance"]["source_event_id"] == run.source_event_id
             assert receipt["provenance"]["evidence_ids"] == run.evidence_ids
+            reconciliation_receipt = receipt["provenance"]["canonical_change_reconciliation"]
+            assert reconciliation_receipt["status"] in {"completed", "not_run"}
+            if reconciliation_receipt["status"] == "completed":
+                assert reconciliation_receipt["engine"] == "persisted_change_intelligence_reconciliation"
+                assert reconciliation_receipt["protected_assertion_count"] > 0
             assert "computed_changes" in receipt
             assert "claim_provenance" in receipt
             for change in receipt.get("computed_changes", []):
