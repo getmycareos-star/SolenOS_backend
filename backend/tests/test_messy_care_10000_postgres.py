@@ -355,21 +355,50 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             assert len(events) == EXPECTED_CASE_COUNT
             assert len(expected) == EXPECTED_CASE_COUNT
 
-            db.add_all(people)
-            db.flush()
-            db.add_all(caregivers)
-            db.flush()
-            db.add_all(events)
-            db.flush()
-            db.add_all(evidence_rows)
-            db.flush()
-            db.add_all(duplicate_evidence_rows)
-            db.flush()
-            db.add_all(assertion_rows)
-            db.add_all(contradiction_rows)
-            db.add_all(correction_rows)
-            db.add_all(question_rows)
-            db.commit()
+            # Keep each database transaction bounded. The care-state revision
+            # listener takes a transaction-scoped advisory lock per changed record;
+            # inserting the entire 10,000-event corpus in one transaction exhausts
+            # PostgreSQL's shared lock table. Five histories per transaction retain
+            # the same relational workload while releasing locks between batches.
+            def group_by_person(rows):
+                grouped = defaultdict(list)
+                for row in rows:
+                    grouped[row.person_id].append(row)
+                return grouped
+
+            caregivers_by_person = group_by_person(caregivers)
+            events_by_person = group_by_person(events)
+            evidence_by_person = group_by_person(evidence_rows)
+            duplicate_evidence_by_person = group_by_person(duplicate_evidence_rows)
+            assertions_by_person = group_by_person(assertion_rows)
+            contradictions_by_person = group_by_person(contradiction_rows)
+            corrections_by_person = group_by_person(correction_rows)
+            questions_by_person = group_by_person(question_rows)
+
+            for offset in range(0, HISTORY_COUNT, 5):
+                batch_people = people[offset:offset + 5]
+                batch_person_ids = [person.id for person in batch_people]
+                db.add_all(batch_people)
+                db.flush()
+                for grouped_rows in (
+                    caregivers_by_person,
+                    events_by_person,
+                    evidence_by_person,
+                    duplicate_evidence_by_person,
+                    assertions_by_person,
+                    contradictions_by_person,
+                    corrections_by_person,
+                    questions_by_person,
+                ):
+                    batch_rows = [
+                        row
+                        for person_id in batch_person_ids
+                        for row in grouped_rows.get(person_id, ())
+                    ]
+                    if batch_rows:
+                        db.add_all(batch_rows)
+                        db.flush()
+                db.commit()
 
         # Dispose the writer's connection pool and create a new engine. The next
         # reads cannot succeed from an ORM identity map or a reused DB connection.
@@ -388,6 +417,19 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
 
             by_person = defaultdict(list)
             family_counts = Counter()
+            evidence_by_id = {
+                row.id: row
+                for row in reader.query(Evidence).filter(
+                    Evidence.id.like(f"m10ks{suffix}%")
+                ).all()
+            }
+            assertion_by_id = {
+                row.id: row
+                for row in reader.query(CareAssertion).filter(
+                    (CareAssertion.id.like(f"m10kcl{suffix}%"))
+                    | (CareAssertion.id.like(f"m10kcf{suffix}%"))
+                ).all()
+            }
             for row in persisted:
                 wanted = expected[row.id]
                 assert row.person_id == wanted["person_id"], f"{row.id}: person scope changed"
@@ -402,10 +444,8 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                 assert row.evidence_ids == [wanted["evidence_id"]], (
                     f"{row.id}: source lineage changed"
                 )
-                evidence = reader.query(Evidence).filter(
-                    Evidence.id == wanted["evidence_id"],
-                    Evidence.person_id == wanted["person_id"],
-                ).one()
+                evidence = evidence_by_id[wanted["evidence_id"]]
+                assert evidence.person_id == wanted["person_id"]
                 assert evidence.uploaded_by_caregiver_id == wanted["uploader_id"]
                 if wanted["family"] == "incomplete_history":
                     assert evidence.reported_by_caregiver_id is None
@@ -421,10 +461,8 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     assert metadata.get("extraction_status") == "partial"
                 if wanted["family"] == "incomplete_history":
                     assert metadata.get("temporal_scope") == "historical"
-                claim = reader.query(CareAssertion).filter(
-                    CareAssertion.id == wanted["assertion_id"],
-                    CareAssertion.person_id == wanted["person_id"],
-                ).one()
+                claim = assertion_by_id[wanted["assertion_id"]]
+                assert claim.person_id == wanted["person_id"]
                 assert claim.source_event_id == row.id
                 assert claim.evidence_ids == [wanted["evidence_id"]]
                 assert claim.created_by_caregiver_id == wanted["caregiver_id"]
@@ -468,11 +506,13 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             assert all(row.resolution_status == "unresolved" for row in conflict_records)
             assert all(len(row.source_assertion_ids or []) == 2 for row in conflict_records)
             for conflict in conflict_records:
-                conflict_claims = reader.query(CareAssertion).filter(
-                    CareAssertion.person_id == conflict.person_id,
-                    CareAssertion.id.in_(conflict.source_assertion_ids),
-                ).all()
+                conflict_claims = [
+                    assertion_by_id[claim_id]
+                    for claim_id in conflict.source_assertion_ids
+                    if claim_id in assertion_by_id
+                ]
                 assert len(conflict_claims) == 2
+                assert all(claim.person_id == conflict.person_id for claim in conflict_claims)
                 assert len({claim.asserted_value for claim in conflict_claims}) == 2
             correction_records = reader.query(Correction).filter(
                 Correction.id.like(f"m10kcr%{suffix}%")
