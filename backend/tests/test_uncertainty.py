@@ -4053,8 +4053,8 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         assert len(first) == 2
         assert all(row.person_id == person.id for row in first)
         assert all(row.status == "open" for row in first)
-        assert all(row.necessity == "not_assessed" for row in first)
-        assert all(row.intended_answerer_role == "not_known" for row in first)
+        assert all(row.necessity == "necessary" for row in first)
+        assert all(row.intended_answerer_role == "reporting_caregiver" for row in first)
         assert all(row.evidence_ids == [evidence.id] for row in first)
         assert all(row.context[0]["grounding_status"] == "source_record_linked; question wording not independently verified" for row in first)
         assert all(
