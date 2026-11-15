@@ -237,22 +237,18 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert understood["written_to_lcr"] is False
             assert len(understood["observations"]) == 2
 
-        # Extraction questions must be durable, linked to the saved document,
-        # and visible through the same OpenQuestion store used by the LCR.
+        # A generic extraction suggestion is not automatically caregiver work.
+        # The source-question lifecycle persists a question only when one
+        # unambiguous, evidence-backed LCR gap establishes decision necessity.
         with Session() as db:
-            clarification = db.query(OpenQuestion).filter_by(
+            assert db.query(OpenQuestion).filter_by(
                 person_id=person_id,
                 status="open",
                 question="Was this usual for the person?",
-            ).one()
-            assert clarification.evidence_ids == [evidence_id]
-            assert clarification.created_by_caregiver_id == caregiver_id
-            assert clarification.context[0]["source_kind"] == "document_extraction"
-            assert clarification.context[0]["source_record_refs"] == [
-                {"record_type": "evidence", "record_id": evidence_id}
-            ]
+            ).count() == 0
 
-        # Replaying document understanding must not create a duplicate question.
+        # Replaying document understanding must not promote that same generic
+        # suggestion into an open question.
         with Session() as db:
             replayed = analyze_saved_document(evidence_id, _request(person_id, caregiver_id), db)
             assert replayed["analysis_id"] == analysis_id
@@ -261,7 +257,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                 person_id=person_id,
                 status="open",
                 question="Was this usual for the person?",
-            ).count() == 1
+            ).count() == 0
 
         # Persisted extraction reads and reviews must use hashes, not rerun expensive OCR.
         def unexpected_ocr(*args, **kwargs):
