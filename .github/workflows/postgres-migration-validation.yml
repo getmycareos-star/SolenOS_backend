@@ -734,6 +734,10 @@ jobs:
         run: |
           python -m alembic upgrade head
           python -m pytest tests/test_longitudinal_messy_care_benchmark.py -q
+          # Exercise 1,000 real API write/read assessments and 100 full care-history
+          # lifecycles against PostgreSQL. These tests use fresh HTTP requests and
+          # a fresh SQLAlchemy session for retrieval; they are not mocked.
+          python -m pytest tests/test_messy_care_1000_api_postgres.py -q
 
       - name: Preserve existing freshness policy and assessment rows during schema reconciliation (partial-schema regression)
         env:
