@@ -508,6 +508,8 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
 
 
 def test_daily_capture_does_not_report_longitudinal_processing_complete_when_delta_fails(monkeypatch):
+    import json
+
     client = TestClient(app)
     session = create_session(client, "Delta failure recipient")
     auth = {"Authorization": f"Bearer {session['access_token']}"}
