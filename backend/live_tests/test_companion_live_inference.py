@@ -862,6 +862,34 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         ), distress_reply
 
 
+def test_live_qwen_overwhelm_response_after_mixed_care_history():
+    """Reproduce the production-like multi-domain history that previously returned HTTP 503."""
+    with TestClient(app) as client:
+        session = _create_session(client, "Mixed-history overwhelmed caregiver")
+        for report in (
+            "Mum slept poorly last night and seemed more unsettled this morning.",
+            "Mum barely touched her lunch today. She drank some water, though.",
+            "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose.",
+            "Mum was calmer this evening. She ate a little more at dinner and is now resting.",
+        ):
+            _record_daily_care(client, session, report)
+
+        response = _ask(
+            client,
+            session,
+            "I'm exhausted. I can't keep up with all these updates and I don't know what to do.",
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()
+        reply = result.get("reply", "")
+        assert result.get("ai_generated") is True, result
+        assert result.get("written_to_lcr") is False, result
+        assert 0 < len(reply.split()) <= 80, reply
+        assert len([part for part in re.split(r"(?<=[.!?])\\s+", reply.strip()) if part]) <= 3, reply
+        assert reply.count("?") <= 1, reply
+        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", reply), reply
+
+
 def test_live_qwen_handoff_draft_selects_an_exact_daily_care_lcr_source():
     """Real Qwen may select sources, but every generated handoff section must be verbatim and linked."""
     detail = "Caregiver reported waking around 3 a.m. and needing help settling again."
