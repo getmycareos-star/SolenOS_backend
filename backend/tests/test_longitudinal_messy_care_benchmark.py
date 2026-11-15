@@ -912,6 +912,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             evidence_ids=[matching.id, second_matching.id, unrelated.id],
             persist=True,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
 
         assert qwen_call_options
@@ -972,6 +973,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             evidence_ids=[mention_evidence.id],
             persist=True,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
         assert result["medications"][0]["medication_mention_only"] is True
         assert db.query(CareAssertion).filter(
@@ -1249,6 +1251,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 evidence_ids=[evidence_id],
                 persist=True,
                 created_by_caregiver_id=caregiver.id,
+                model_enrichment=True,
             )
 
         persisted_event_ids = {
@@ -1822,6 +1825,7 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
             evidence_ids=[],
             persist=False,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
 
         coverage = captured["payload"]["history_coverage"]
@@ -1997,3 +2001,82 @@ def test_situation_assessment_downgrades_persisted_delta_change_without_complete
             if item["record_id"] == "change-attention-incomplete"
         )
         assert clarification["category"] == "needs_clarification"
+
+
+def test_delta_does_not_persist_if_source_changes_during_model_inference(monkeypatch):
+    """A correction during inference invalidates the pending comparison before save."""
+    import json
+    from fastapi import HTTPException
+    from app.models.care import Evidence
+    from app.models.care_continuity import CareDeltaRun
+    from app.services import delta_engine
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "delta-source-mutated-during-inference")
+        evidence = Evidence(
+            id="delta-source-mutation-evidence",
+            person_id=person.id,
+            type="note",
+            source_text="Caregiver reported interrupted sleep.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        event = CareEvent(
+            id="delta-source-mutation-event",
+            person_id=person.id,
+            event_type="daily_care_capture",
+            status="recorded",
+            occurred_at=NOW,
+            title="Daily care update",
+            description="Caregiver reported interrupted sleep.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+            time_provenance="caregiver_observed",
+        )
+        db.add_all([evidence, event])
+        db.commit()
+
+        def mutate_source_then_answer(*args, **kwargs):
+            event.description = "Corrected caregiver report: sleep was uninterrupted."
+            db.flush()
+            return json.dumps({
+                "event_summary": "Sleep report corrected",
+                "medications": [],
+                "conditions": [],
+                "symptoms": [],
+                "tests": [],
+                "follow_ups": [],
+                "contradictions": [],
+                "clinical_gaps": [],
+                "caregiver_summary": "The report was corrected.",
+                "clinician_summary": "The source report changed during comparison.",
+            })
+
+        monkeypatch.setattr(
+            delta_engine,
+            "_local_ollama_url",
+            lambda: ("http://127.0.0.1:11434", "delta-source-revalidation-test", 1.0),
+        )
+        monkeypatch.setattr(delta_engine, "qwen_chat", mutate_source_then_answer)
+
+        with pytest.raises(HTTPException) as exc:
+            delta_engine.reconcile_event(
+                db,
+                person_id=person.id,
+                event_date=NOW,
+                source="SolenOS Daily Capture",
+                content="Caregiver reported interrupted sleep.",
+                source_event_id=event.id,
+                evidence_ids=[evidence.id],
+                persist=True,
+                created_by_caregiver_id=caregiver.id,
+                model_enrichment=True,
+            )
+
+        assert exc.value.status_code == 409
+        db.refresh(event)
+        assert event.description == "Caregiver reported interrupted sleep."
+        assert db.query(CareDeltaRun).filter_by(
+            person_id=person.id,
+            source_event_id=event.id,
+        ).count() == 0
+        assert db.query(CareAssertion).filter_by(person_id=person.id).count() == 0
