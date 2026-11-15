@@ -6537,7 +6537,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # and does not claim that any task or record changed.
             reply = (
                 "I hear that you're exhausted. "
-                "We can take this one concern at a time, using what you've already shared."
+                "We can take this one concern at a time."
             )
             invalid_reply = False
             low_capacity_support_fallback_used = True
