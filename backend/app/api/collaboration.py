@@ -4938,7 +4938,7 @@ def _should_use_medication_dose_recall_fallback(
     )
 _CARE_HISTORY_INTENT_PATTERN = re.compile(
     r"\bwhat\s+(?:has|have|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
-    r"(?:recorded|logged|saved|noted)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
+    r"(?:record(?:ed)?|log(?:ged)?|sav(?:e|ed)|not(?:e|ed)|enter(?:ed)?)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
     r"\bwhat\s+(?:new\s+)?dose\s+(?:did|was)\s+(?:the\s+)?(?:doctor|clinician|prescriber)\s+"
     r"(?:prescribe|recommend|change|set)\b",
     re.IGNORECASE,
@@ -6561,6 +6561,20 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         caregiver_question_direct_answer = _caregiver_question_extractive_answer(
             user_text, included_model_context_lines
         )
+        # A literal "what did the caregiver record" request is a source lookup,
+        # not a request for generated interpretation. Answer it from the exact
+        # authorized caregiver-authored event text before invoking a slow model.
+        # Keep broader "what has been recorded" questions on the normal synthesis
+        # path unless inference fails, so this shortcut cannot replace reasoning.
+        if not caregiver_question_direct_answer and re.search(
+            r"\bwhat\s+did\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
+            r"(?:record|log|save|note|enter)\b",
+            user_text or "",
+            re.IGNORECASE,
+        ):
+            caregiver_question_direct_answer = _care_history_extractive_answer(
+                user_text, included_model_context_lines
+            )
         caregiver_question_direct_answer_used = bool(caregiver_question_direct_answer)
         base = ""
         model = "deterministic-source-quote" if caregiver_question_direct_answer_used else "unavailable"
@@ -6577,7 +6591,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "duration_ms": 0,
                         "retrieval_duration_ms": retrieval_duration_ms,
                         "model": model,
-                        "outcome": "source_quoted_caregiver_question",
+                        "outcome": "deterministic_source_grounded_answer",
                     }, separators=(",", ":")),
                 )
             else:
