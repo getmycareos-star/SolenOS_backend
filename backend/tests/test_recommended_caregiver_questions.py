@@ -988,3 +988,81 @@ def test_one_hundred_case_question_gate_benchmark():
         assert all(item["id"] in expected_eligible for item in result["questions"])
     finally:
         teardown()
+
+def test_broad_delta_medication_topic_does_not_create_caregiver_question():
+    setup()
+    try:
+        from app.services.care_continuity import next_best_questions
+
+        db = SessionLocal()
+        person = Person(id="delta-medication-scope-person", name="Scope Person")
+        caregiver = Caregiver(
+            id="delta-medication-scope-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+
+        for evidence_id, text in (
+            ("delta-medication-topic-evidence", "Synthetic unresolved medication topic."),
+            ("vague-medication-field-evidence", "Synthetic medication reference."),
+            ("actionable-medication-evidence", "Two reports conflict about the current medication instruction."),
+        ):
+            db.add(Evidence(
+                id=evidence_id,
+                person_id=person.id,
+                type="caregiver_report",
+                source_text=text,
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="caregiver_report",
+            ))
+
+        db.add_all([
+            Contradiction(
+                id="delta-medication-topic-conflict",
+                person_id=person.id,
+                subject_type="delta_engine_report",
+                subject_id="medication",
+                field="medication",
+                description="Broad Delta topic label; not a medication instruction field.",
+                evidence_ids=["delta-medication-topic-evidence"],
+                source_assertion_ids=[],
+                resolution_status="unresolved",
+            ),
+            Contradiction(
+                id="vague-medication-field-conflict",
+                person_id=person.id,
+                subject_type="medication",
+                subject_id="medication-vague",
+                field="medication",
+                description="Medication is mentioned, but no actionable instruction field is identified.",
+                evidence_ids=["vague-medication-field-evidence"],
+                source_assertion_ids=[],
+                resolution_status="unresolved",
+            ),
+            Contradiction(
+                id="actionable-medication-conflict",
+                person_id=person.id,
+                subject_type="medication",
+                subject_id="medication-actionable",
+                field="current_instruction",
+                description="Two source reports disagree about the current instruction.",
+                evidence_ids=["actionable-medication-evidence"],
+                source_assertion_ids=[],
+                resolution_status="unresolved",
+            ),
+        ])
+        db.flush()
+
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        persisted = db.query(OpenQuestion).filter_by(person_id=person.id, status="open").all()
+
+        assert len(persisted) == 1
+        assert persisted[0].subject_id == "medication-actionable"
+        assert persisted[0].necessity == "necessary"
+        assert persisted[0].intended_answerer_role == "professional"
+        assert {item["source_id"] for item in candidates if item["necessity"] == "necessary"} == {
+            "actionable-medication-conflict"
+        }
+    finally:
+        teardown()
