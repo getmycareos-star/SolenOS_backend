@@ -2820,7 +2820,15 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"\bnegative response\b",
         r"\b(?:effective|ineffective) treatment\b",
         r"\bappointment\s+(?:was\s+)?(?:scheduled|confirmed|cancelled|canceled|rescheduled)\b",
-        r"\b(?:diagnosed with|diagnosis of|prescribed|recommended|ordered)\b",
+        # General supportive language such as "the recommended next step" is
+        # not a clinical-status claim. Keep this guard focused on diagnosis,
+        # prescriptions, and medical orders rather than rejecting ordinary
+        # caregiver-support wording.
+        r"\b(?:diagnosed with|diagnosis of)\b",
+        r"\b(?:prescribed|recommended)\s+(?:a\s+|an\s+|the\s+)?"
+        r"(?:medication|medicine|drug|dose|treatment|therapy|test|scan|procedure|surgery|antibiotic|prescription)\b",
+        r"\bordered\s+(?:a\s+|an\s+|the\s+)?"
+        r"(?:test|scan|lab(?:oratory)?(?: test)?|imaging|procedure|medication|medicine|drug)\b",
         r"\b(?:symptom|symptoms|condition)\s+(?:improved|worsened|resolved)\b",
         r"\b(?:patient|person)\s+(?:responded|improved|worsened)\b",
         r"\b(?:dose|medication|treatment)\s+(?:was|has been|had been)\s+(?:changed|increased|decreased|stopped|started|administered|missed)\b",
