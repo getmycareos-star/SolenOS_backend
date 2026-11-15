@@ -289,6 +289,61 @@ def test_companion_history_is_bounded_across_prior_sessions():
         _close_postgres_conversation_db(engine, connection, schema)
 
 
+
+def test_conversation_search_scans_past_recent_candidate_window():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            person = Person(id="person-search", name="Care recipient")
+            caregiver = Caregiver(
+                id="caregiver-search", name="Caregiver", relationship="family",
+                person_id="person-search",
+            )
+            db.add(person)
+            db.flush()
+            db.add(caregiver)
+            db.flush()
+            old_session = ConversationSession(
+                id="old-search-session", person_id="person-search",
+                caregiver_id="caregiver-search", status="archived",
+            )
+            db.add(old_session)
+            db.flush()
+            old_message = ConversationMessage(
+                id="old-relevant-message", session_id=old_session.id, role="user",
+                content="We discussed sleep and the new medication after the clinic visit.",
+                evidence_ids_json="[]",
+            )
+            db.add(old_message)
+            db.flush()
+            for index in range(125):
+                session = ConversationSession(
+                    id=f"recent-search-session-{index}", person_id="person-search",
+                    caregiver_id="caregiver-search", status="archived",
+                )
+                db.add(session)
+                db.flush()
+                db.add(ConversationMessage(
+                    id=f"recent-sleep-message-{index}", session_id=session.id,
+                    role="user", content=f"Caregiver mentioned sleep was unchanged on routine day {index}.",
+                    evidence_ids_json="[]",
+                ))
+            db.commit()
+
+            result = _conversation_context(
+                db, person_id="person-search", caregiver_id="caregiver-search",
+                query="What did we discuss about sleep and medication?",
+                limit=8,
+            )
+            ids = {item["id"] for item in result["items"]}
+            assert "old-relevant-message" in ids
+            assert result["candidate_count"] == 126
+            assert result["candidate_scan_complete"] is True
+            assert result["has_more"] is True
+    finally:
+        connection.close()
+        engine.dispose()
+
 def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
     engine, connection, schema = _postgres_conversation_db()
     try:
