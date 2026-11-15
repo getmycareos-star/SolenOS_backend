@@ -380,7 +380,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         "delta_reconciliation": delta_status,
         "delta_run_id": result.get("run_id"),
         "delta_reconciliation_error_code": result.get("error_code"),
-        "longitudinal_processing": "completed" if delta_status == "completed" else "incomplete",
+        "longitudinal_processing": "completed" if delta_status in {"completed", "not_applicable"} else "incomplete",
         "longitudinal_processing_error": result.get("error_code"),
     }
     if delta_status == "skipped":
@@ -402,7 +402,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         db.commit()
         return True
 
-    if delta_status != "completed":
+    if delta_status not in {"completed", "not_applicable"}:
         current.status = "failed" if current.attempt_count >= 3 else "queued"
         current.available_at = datetime.now(timezone.utc) + timedelta(seconds=15 * current.attempt_count)
         current.error_code = str(result.get("error_code") or "daily_capture_delta_reconciliation_failed")[:48]
@@ -442,9 +442,9 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         "source_event_id": event_id,
         "source_evidence_id": evidence_id,
         "analysis_id": str(analysis.id),
-        "delta_reconciliation_status": "completed",
+        "delta_reconciliation_status": delta_status,
         "delta_reconciliation_error_code": None,
-        "delta_engine_output_persisted": True,
+        "delta_engine_output_persisted": delta_status == "completed",
         "delta_run_id": result.get("run_id"),
         "delta_reused": bool(result.get("reused")),
         "longitudinal_processing_status": "completed",
