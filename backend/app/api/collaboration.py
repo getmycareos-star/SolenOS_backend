@@ -2388,6 +2388,32 @@ def _lcr_context_chronological_key(line: str) -> tuple[float, str]:
     return (float("inf"), str(payload.get("source_id") or ""))
 
 
+def _is_broad_temporal_history_request(text: str | None) -> bool:
+    """Identify broad history questions whose explicit time window needs paging.
+
+    A calendar-year query such as "What happened in 2025?" is a request to
+    reconstruct that period, not just retrieve the newest bounded slice.
+    Topic-specific questions remain on the ordinary relevance-ranked path.
+    """
+    value = (text or "").strip()
+    if not value:
+        return False
+    asks_for_history = re.search(
+        r"\b(?:what\s+(?:(?:has|was)\s+)?happened|what\s+(?:occurred|took\s+place)|"
+        r"show\s+me|summari[sz]e|give\s+me|tell\s+me)\b",
+        value,
+        re.IGNORECASE,
+    )
+    has_explicit_period = re.search(
+        r"\b(?:20\d{2}|(?:this|last|past|previous)\s+"
+        r"(?:(?:\d+|one|two|three|four|six|a|an)\s+)?"
+        r"(?:days?|weeks?|months?|years?))\b",
+        value,
+        re.IGNORECASE,
+    )
+    return bool(asks_for_history and has_explicit_period)
+
+
 def _collect_full_lcr_context_pages(
     db: Session,
     person_id: str,
@@ -5723,13 +5749,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
             trend_request = bool(_TREND_INTENT_RE.search(user_text))
-            care_journey_request = trend_request or bool(re.search(
-                r"\b(?:care journey|(?:full|complete|whole|entire) (?:care )?history|history of (?:her|his|their|the person's|this person's)? ?"
-                r"(?:care|sleep|appetite|mobility|medication|incidents|appointments)|timeline of (?:the )?care|"
-                r"everything that happened|what has been happening throughout|reconstruct (?:the )?care)\b",
-                user_text,
-                re.IGNORECASE,
-            ))
+            care_journey_request = (
+                trend_request
+                or _is_broad_temporal_history_request(user_text)
+                or bool(re.search(
+                    r"\b(?:care journey|(?:full|complete|whole|entire) (?:care )?history|history of (?:her|his|their|the person's|this person's)? ?"
+                    r"(?:care|sleep|appetite|mobility|medication|incidents|appointments)|timeline of (?:the )?care|"
+                    r"everything that happened|what has been happening throughout|reconstruct (?:the )?care)\b",
+                    user_text,
+                    re.IGNORECASE,
+                ))
+            )
             # Trend evaluation must inspect relevant history before the requested
             # window as context, while the trend guard below counts only records
             # inside the caregiver's stated period. Strip only the temporal phrase
