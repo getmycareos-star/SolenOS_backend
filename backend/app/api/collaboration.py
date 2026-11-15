@@ -5855,7 +5855,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 db, person_id, caregiver_id, limit_per_source=50, query=trend_retrieval_query,
                 include_all_history=care_journey_request,
             )
-            if care_journey_request:
+            # An explicit date window is a complete scan of that requested
+            # period, not a request for only the first ranked page. Fetch
+            # subsequent pages so older events in the same year/month are not
+            # silently omitted when the person has more than 50 matching rows.
+            temporal_window_scan_requested = bool(shared_lcr_context.get("temporal_window"))
+            if care_journey_request or temporal_window_scan_requested:
                 shared_lcr_context = _collect_full_lcr_context_pages(
                     db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
                     limit_per_source=50, max_pages=4,
@@ -5938,6 +5943,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
                 "retrieval_projection_complete": shared_lcr_context.get("retrieval_projection_complete", False),
                 "full_source_scan_requested": care_journey_request,
+                "temporal_window_scan_requested": temporal_window_scan_requested,
+                "temporal_window": shared_lcr_context.get("temporal_window"),
                 "pages_fetched": shared_lcr_context.get("retrieval_contract", {}).get("pages_fetched", 1),
                 "page_limit_reached": shared_lcr_context.get("retrieval_contract", {}).get("page_limit_reached", False),
                 "query_applied": shared_lcr_context["query_applied"],
