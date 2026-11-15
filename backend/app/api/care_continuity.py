@@ -1725,6 +1725,7 @@ def current_care_projection(
     # projection only. The original event remains untouched in source history and
     # the Timeline. Pending/legacy corrections remain visible without replacing it.
     latest_event_corrections: dict[str, dict[str, Any]] = {}
+    latest_completed_event_corrections: dict[str, dict[str, Any]] = {}
     for correction_row in (sources.get("corrections") or {}).get("items", []):
         if correction_row.get("target_type") != "care_event" or not correction_row.get("target_id"):
             continue
@@ -1732,10 +1733,11 @@ def current_care_projection(
         previous = latest_event_corrections.get(target_id)
         if previous is None or str(correction_row.get("created_at") or "") >= str(previous.get("created_at") or ""):
             latest_event_corrections[target_id] = correction_row
-    completed_corrected_event_ids = {
-        target_id for target_id, row in latest_event_corrections.items()
-        if row.get("processing_status") == "completed"
-    }
+        if correction_row.get("processing_status") == "completed":
+            previous_completed = latest_completed_event_corrections.get(target_id)
+            if previous_completed is None or str(correction_row.get("created_at") or "") >= str(previous_completed.get("created_at") or ""):
+                latest_completed_event_corrections[target_id] = correction_row
+    completed_corrected_event_ids = set(latest_completed_event_corrections)
 
     def add(source_name: str, row: dict[str, Any], kind: str, priority: int, *, require_open: bool = False) -> None:
         source_id = str(row.get("id") or "")
@@ -1898,27 +1900,36 @@ def current_care_projection(
             # caregiver-recorded event, not a verified clinical fact.
             add("events", row, "Daily care entry", 6)
 
-    for target_id, correction_row in latest_event_corrections.items():
+    def add_correction_projection(target_id: str, correction_row: dict[str, Any], *, completed: bool) -> None:
         processing_status = str(correction_row.get("processing_status") or "legacy_unverified")
-        is_completed = processing_status == "completed"
+        title = (
+            "Corrected care report" if completed
+            else "Correction awaiting update" if processing_status in {"pending", "processing"}
+            else "Earlier correction needs review"
+        )
         correction_projection = {
             **correction_row,
             "id": correction_row.get("id"),
-            "title": (
-                "Corrected care report" if is_completed
-                else "Correction awaiting update" if processing_status in {"pending", "processing"}
-                else "Earlier correction needs review"
-            ),
+            "title": title,
             "description": str(correction_row.get("corrected_text") or ""),
-            "status": "current" if is_completed else processing_status,
-            "epistemic_status": "caregiver_reported" if is_completed else "uncertain",
+            "status": "current" if completed else processing_status,
+            "epistemic_status": "caregiver_reported" if completed else "uncertain",
             "source_type": "caregiver_correction",
             "source_label": "Caregiver correction",
             "recorded_at": correction_row.get("created_at"),
             "target_type": "care_event",
             "target_id": target_id,
         }
-        add("corrections", correction_projection, correction_projection["title"], 5)
+        add("corrections", correction_projection, title, 5)
+
+    # Keep the last successfully processed correction as current even if a
+    # newer correction is waiting to be reconciled. Never roll the projection
+    # back to the uncorrected event while downstream work is pending.
+    for target_id, correction_row in latest_completed_event_corrections.items():
+        add_correction_projection(target_id, correction_row, completed=True)
+    for target_id, correction_row in latest_event_corrections.items():
+        if correction_row.get("processing_status") != "completed":
+            add_correction_projection(target_id, correction_row, completed=False)
 
     for row in (sources.get("caregiver_observations") or {}).get("items", []):
         add("caregiver_observations", row, "Caregiver observation", 6)
