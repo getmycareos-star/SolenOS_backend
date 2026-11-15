@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import uuid
@@ -27,7 +28,7 @@ from app.services.claim_provenance import build_claim_provenance
 
 logger = logging.getLogger(__name__)
 
-DELTA_ENGINE_VERSION = "2026.11.12.6"
+DELTA_ENGINE_VERSION = "2026.11.15.2"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
@@ -413,10 +414,485 @@ def _source_content_matches_event(content: str, event: CareEvent) -> bool:
     )
 
 
+def source_event_snapshot_hash(event: CareEvent) -> str:
+    """Fingerprint the exact saved event state used by a Delta assessment."""
+    snapshot = {
+        "id": str(event.id),
+        "person_id": str(event.person_id),
+        "created_by_caregiver_id": str(event.created_by_caregiver_id or ""),
+        "status": str(event.status or ""),
+        "event_type": str(event.event_type or ""),
+        "time_provenance": str(getattr(event, "time_provenance", "") or ""),
+        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+        "title": str(event.title or ""),
+        "description": str(event.description or ""),
+        "evidence_ids": sorted(str(value) for value in (event.evidence_ids or [])),
+    }
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _delta_iso(value: Any) -> str | None:
+    return value.isoformat() if hasattr(value, "isoformat") else None
+
+
+def _delta_excerpt(value: Any, limit: int = 280) -> str | None:
+    text = " ".join(str(value or "").split())
+    return text[:limit] if text else None
+
+
+def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str]) -> list[dict[str, Any]]:
+    from app.models.care_continuity import CareAssertion, EvidenceObservation
+
+    ids = list(dict.fromkeys(str(value) for value in (record_ids or []) if value))
+    if not ids:
+        return []
+    events = db.query(CareEvent).filter(CareEvent.person_id == person_id, CareEvent.id.in_(ids)).all()
+    evidence_rows = db.query(Evidence).filter(Evidence.person_id == person_id, Evidence.id.in_(ids)).all()
+    assertions = db.query(CareAssertion).filter(CareAssertion.person_id == person_id, CareAssertion.id.in_(ids)).all()
+    observations = db.query(EvidenceObservation).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.id.in_(ids),
+    ).all()
+    event_by_id = {str(item.id): item for item in events}
+    evidence_by_id = {str(item.id): item for item in evidence_rows}
+    assertion_by_id = {str(item.id): item for item in assertions}
+    observation_by_id = {str(item.id): item for item in observations}
+    references: list[dict[str, Any]] = []
+    for record_id in ids:
+        if record_id in event_by_id:
+            item = event_by_id[record_id]
+            references.append({
+                "record_type": "care_event",
+                "record_id": record_id,
+                "label": str(item.title or item.event_type or "Care update"),
+                "source_excerpt": _delta_excerpt(item.description),
+                "occurred_at": _delta_iso(item.occurred_at),
+                "recorded_at": _delta_iso(getattr(item, "recorded_at", None)),
+            })
+        elif record_id in evidence_by_id:
+            item = evidence_by_id[record_id]
+            references.append({
+                "record_type": "evidence",
+                "record_id": record_id,
+                "label": str(getattr(item, "source_label", None) or getattr(item, "type", None) or "Saved care evidence"),
+                "source_excerpt": _delta_excerpt(getattr(item, "source_text", None)),
+                "recorded_at": _delta_iso(getattr(item, "uploaded_at", None)),
+            })
+        elif record_id in assertion_by_id:
+            item = assertion_by_id[record_id]
+            references.append({
+                "record_type": "care_assertion",
+                "record_id": record_id,
+                "label": f"{item.subject_type} {item.subject_id}".strip(),
+                "source_excerpt": _delta_excerpt(item.source_text or item.asserted_value),
+                "occurred_at": _delta_iso(item.observed_at),
+                "recorded_at": _delta_iso(item.recorded_at),
+            })
+        elif record_id in observation_by_id:
+            item = observation_by_id[record_id]
+            references.append({
+                "record_type": "evidence_observation",
+                "record_id": record_id,
+                "label": f"{item.subject_label} — {item.attribute}",
+                "source_excerpt": _delta_excerpt(item.source_passage),
+                "occurred_at": _delta_iso(item.occurred_at),
+                "recorded_at": _delta_iso(item.recorded_at),
+            })
+    return references
+
+
+def _canonical_change_classification(change: Any, *, evidence_complete: bool) -> tuple[str, bool]:
+    raw_type = str(getattr(change.change_type, "value", change.change_type) or "").lower()
+    baseline = str(getattr(change.baseline_coverage_status, "value", change.baseline_coverage_status) or "").lower()
+    current = str(getattr(change.current_coverage_status, "value", change.current_coverage_status) or "").lower()
+    coverage_complete = baseline in {"covered", "complete", "full", "sufficient"} and current in {
+        "covered", "complete", "full", "sufficient"
+    }
+    verdict = str(getattr(change.significance_verdict, "value", change.significance_verdict) or "").lower()
+    try:
+        confidence = float(change.confidence)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    supported = evidence_complete and coverage_complete and verdict not in {
+        "", "none", "unknown", "insufficient_evidence"
+    } and confidence >= 0.65
+    if not supported:
+        return "uncertain", False
+
+    subject = f"{change.subject_type} {change.subject_id}".lower().replace("-", "_").replace(" ", "_")
+    adverse_terms = {
+        "fall", "falls", "night_waking", "night_wakings", "agitation", "pain",
+        "confusion", "missed_medication", "missed_dose", "shortness_of_breath",
+        "incontinence", "wandering", "refusal_to_eat",
+    }
+    adverse = any(term in subject for term in adverse_terms)
+    categories = {
+        "emergence": "new",
+        "onset": "new",
+        "recovery": "improved",
+        "recurrence": "recurring",
+        "persistence": "persistent",
+        "cessation": "resolved",
+        "disappearance": "resolved",
+        "stabilization": "unchanged",
+    }
+    if raw_type == "increase":
+        return ("worsened" if adverse else "more_frequent"), True
+    if raw_type == "decrease":
+        return ("improved" if adverse else "less_frequent"), True
+    return categories.get(raw_type, "uncertain"), raw_type in categories
+
+
+def _reconcile_from_change_intelligence(
+    db: Session,
+    *,
+    person_id: str,
+    event_date: datetime | None,
+    source: str,
+    content: str,
+    source_event_id: str | None,
+    evidence_ids: list[str],
+    created_by_caregiver_id: str | None,
+    persist: bool,
+    source_event_row: CareEvent | None,
+    source_event_snapshot_sha256: str | None,
+    history_coverage: dict[str, Any],
+    existing_unresolved_care_loops: dict[str, Any],
+) -> dict[str, Any]:
+    from app.models.change import Change
+    from app.models.care_continuity import CareStateRevision
+    from sqlalchemy import func
+    from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+
+    reference_time = event_date or (source_event_row.occurred_at if source_event_row else None) or datetime.now(timezone.utc)
+    source_assertions = []
+    if source_event_id:
+        source_assertions = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.source_event_id == source_event_id,
+        ).all()
+    elif evidence_ids:
+        assertion_candidates = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+        ).order_by(CareAssertion.recorded_at.desc()).all()
+        incoming_evidence_ids = {str(value) for value in evidence_ids}
+        source_assertions = [
+            item for item in assertion_candidates
+            if incoming_evidence_ids.intersection(str(value) for value in (item.evidence_ids or []))
+        ]
+    reconciliation_receipt = None
+    if persist:
+        reconciliation_receipt = reconcile_person_change_intelligence(
+            db,
+            person_id,
+            reference_time=reference_time,
+            protected_assertion_ids=[str(item.id) for item in source_assertions],
+        )
+        db.flush()
+
+    linked_ids = {str(value) for value in evidence_ids if value}
+    if source_event_id:
+        linked_ids.add(str(source_event_id))
+    linked_ids.update(str(item.id) for item in source_assertions)
+    if evidence_ids:
+        source_observations = db.query(EvidenceObservation).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id.in_(evidence_ids),
+        ).all()
+        linked_ids.update(str(item.id) for item in source_observations)
+    if not source_event_id and evidence_ids:
+        recent_events = db.query(CareEvent).filter(
+            CareEvent.person_id == person_id,
+        ).order_by(CareEvent.occurred_at.desc()).all()
+        for item in recent_events:
+            if linked_ids.intersection(str(value) for value in (item.evidence_ids or [])):
+                linked_ids.add(str(item.id))
+
+    total_change_count = db.query(Change).filter(
+        Change.person_id == person_id,
+        Change.is_active.is_(True),
+    ).count()
+    candidate_changes = db.query(Change).filter(
+        Change.person_id == person_id,
+        Change.is_active.is_(True),
+    ).order_by(Change.created_at.desc()).all()
+    linked_changes = [
+        item for item in candidate_changes
+        if linked_ids.intersection(str(value) for value in (item.evidence_ids or []))
+    ]
+    latest_revision_time = db.query(func.max(CareStateRevision.changed_at)).filter(
+        CareStateRevision.person_id == person_id
+    ).scalar()
+    care_state_revision_snapshot = latest_revision_time.isoformat() if latest_revision_time else None
+
+    def validate_source_snapshot() -> None:
+        if source_event_id:
+            current_event = db.query(CareEvent).filter(
+                CareEvent.id == source_event_id,
+                CareEvent.person_id == person_id,
+            ).with_for_update().first()
+            if (
+                current_event is None
+                or current_event.status in {"invalidated", "deleted"}
+                or source_event_snapshot_hash(current_event) != source_event_snapshot_sha256
+            ):
+                db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="The saved care update changed during reconciliation. Retry using the latest record.",
+                )
+        current_evidence = (
+            db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).with_for_update().all()
+            if evidence_ids else []
+        )
+        if evidence_ids and (
+            {str(item.id) for item in current_evidence} != {str(value) for value in evidence_ids}
+            or any(item.evidence_status == "deleted_by_caregiver" for item in current_evidence)
+        ):
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="The source evidence changed during reconciliation. Retry using the latest record.",
+            )
+
+    if persist:
+        existing_runs = db.query(CareDeltaRun).filter(
+            CareDeltaRun.person_id == person_id,
+            CareDeltaRun.source == source,
+            CareDeltaRun.source_event_id == source_event_id,
+        ).order_by(CareDeltaRun.created_at.desc()).all()
+        for existing_run in existing_runs:
+            try:
+                saved_result = json.loads(existing_run.delta_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            saved_provenance = saved_result.get("provenance") or {}
+            if (
+                saved_provenance.get("engine_version") == DELTA_ENGINE_VERSION
+                and saved_provenance.get("source_event_snapshot_sha256") == source_event_snapshot_sha256
+                and saved_provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
+                and [str(value) for value in (saved_provenance.get("evidence_ids") or [])]
+                    == [str(value) for value in evidence_ids]
+            ):
+                validate_source_snapshot()
+                db.commit()
+                saved_provenance["delta_run_id"] = str(existing_run.id)
+                return saved_result
+
+    history_coverage = dict(history_coverage)
+    history_coverage["change_assessments"] = {
+        "available": len(candidate_changes),
+        "total": total_change_count,
+        "omitted": max(0, total_change_count - len(candidate_changes)),
+    }
+    history_coverage["complete"] = bool(history_coverage.get("complete")) and total_change_count <= len(candidate_changes)
+
+    computed_changes: list[dict[str, Any]] = []
+    claim_items: list[dict[str, Any]] = []
+    all_refs: dict[tuple[str, str], dict[str, Any]] = {}
+    for change in linked_changes:
+        change_evidence_ids = [str(value) for value in (change.evidence_ids or []) if value]
+        references = _resolve_delta_source_refs(db, person_id, change_evidence_ids)
+        reference_ids = {str(item["record_id"]) for item in references}
+        evidence_complete = bool(references) and set(change_evidence_ids).issubset(reference_ids)
+        classification, classification_supported = _canonical_change_classification(
+            change,
+            evidence_complete=evidence_complete,
+        )
+        supported = classification_supported and evidence_complete
+        raw_type = str(getattr(change.change_type, "value", change.change_type) or "uncertain")
+        name = str(change.subject_id or change.subject_type or "Care information")
+        previous = change.previous_state
+        current = change.current_state
+        if previous is None and change.previous_count is not None:
+            previous = str(change.previous_count)
+        if current is None and change.current_count is not None:
+            current = str(change.current_count)
+        item = {
+            "domain": str(change.subject_type),
+            "name": name,
+            "change_type": raw_type,
+            "classification": classification,
+            "authoritative_change_type": raw_type,
+            "authoritative_change_id": str(change.id),
+            "previous": previous,
+            "current": current,
+            "certainty": "supported" if supported else "uncertain",
+            "evidence_supported": evidence_complete,
+            "claim_supported": supported,
+            "source_reference_status": "matched" if evidence_complete else "partial",
+            "source_record_refs": references,
+            "comparison_basis": str(change.explanation or "Compared with the saved personal baseline."),
+            "historical_only": False,
+            "baseline_coverage_status": change.baseline_coverage_status,
+            "current_coverage_status": change.current_coverage_status,
+            "attention_candidate": bool(change.attention_candidate),
+            "follow_up_candidate": bool(change.follow_up_candidate),
+            "confidence": change.confidence,
+        }
+        computed_changes.append(item)
+        for reference in references:
+            all_refs[(reference["record_type"], reference["record_id"])] = reference
+        claim_items.append({
+            "text": f"{name}: {classification}",
+            "source_references": references,
+            "support_status": "matched_source_and_state" if supported else "insufficient_evidence",
+            "authoritative_change_id": str(change.id),
+        })
+
+    linked_contradictions = []
+    for item in existing_unresolved_care_loops.get("contradictions", []):
+        contradiction_ids = [str(value) for value in (item.get("evidence_ids") or []) if value]
+        if not linked_ids.intersection(contradiction_ids):
+            continue
+        references = _resolve_delta_source_refs(db, person_id, contradiction_ids)
+        if not references:
+            continue
+        resolved_reference_ids = {str(ref["record_id"]) for ref in references}
+        evidence_complete = set(contradiction_ids).issubset(resolved_reference_ids)
+        conflict_supported = evidence_complete
+        linked_contradictions.append({
+            "topic": str(item.get("subject_id") or item.get("field") or "Conflicting reports"),
+            "reports": [str(ref.get("source_excerpt") or ref.get("label") or "Saved report") for ref in references],
+            "why_conflicting": str(item.get("description") or "The saved reports differ."),
+            "source_record_refs": references,
+            "source_reference_status": "matched" if evidence_complete else "partial",
+        })
+        for reference in references:
+            all_refs[(reference["record_type"], reference["record_id"])] = reference
+        claim_items.append({
+            "text": f"Conflicting reports: {item.get('subject_id') or item.get('field') or 'care information'}",
+            "source_references": references,
+            "support_status": "matched_competing_sources" if conflict_supported else "insufficient_evidence",
+            "authoritative_contradiction_id": str(item.get("id")),
+        })
+        computed_changes.append({
+            "domain": str(item.get("subject_type") or "care"),
+            "name": str(item.get("subject_id") or item.get("field") or "Conflicting reports"),
+            "change_type": "conflicting",
+            "classification": "conflicting" if conflict_supported else "uncertain",
+            "certainty": "supported" if conflict_supported else "uncertain",
+            "evidence_supported": evidence_complete,
+            "claim_supported": conflict_supported,
+            "source_reference_status": "matched" if evidence_complete else "partial",
+            "source_record_refs": references,
+            "comparison_basis": str(item.get("description") or "Saved reports differ."),
+            "historical_only": False,
+            "authoritative_contradiction_id": str(item.get("id")),
+        })
+
+    clinical_gaps = []
+    for item in existing_unresolved_care_loops.get("gaps", []):
+        ids = [str(value) for value in (item.get("evidence_ids") or []) if value]
+        if not linked_ids.intersection(ids):
+            continue
+        references = _resolve_delta_source_refs(db, person_id, ids)
+        clinical_gaps.append({
+            "subject": f"{item.get('subject_type') or ''} {item.get('subject_id') or ''}".strip(),
+            "description": str(item.get("description") or "An open care question needs follow-up."),
+            "source_record_refs": references,
+        })
+        for reference in references:
+            all_refs[(reference["record_type"], reference["record_id"])] = reference
+
+    follow_ups = []
+    for item in existing_unresolved_care_loops.get("questions", []):
+        ids = [str(value) for value in (item.get("evidence_ids") or []) if value]
+        if not linked_ids.intersection(ids):
+            continue
+        references = _resolve_delta_source_refs(db, person_id, ids)
+        follow_ups.append({
+            "question": str(item.get("question") or "A care question remains open."),
+            "status": str(item.get("status") or "open"),
+            "source_record_refs": references,
+        })
+        for reference in references:
+            all_refs[(reference["record_type"], reference["record_id"])] = reference
+
+    supported_count = sum(1 for item in computed_changes if item.get("certainty") == "supported")
+    if supported_count == 1:
+        caregiver_summary = "One care change is supported by saved records."
+    elif supported_count > 1:
+        caregiver_summary = f"{supported_count} care changes are supported by saved records."
+    elif computed_changes:
+        caregiver_summary = "Some comparisons need more information before they can be confirmed."
+    elif history_coverage.get("complete"):
+        caregiver_summary = "The saved records do not establish a change for this update."
+    else:
+        caregiver_summary = "There is not enough earlier information to confirm a change."
+    event_summary = str(source_event_row.title if source_event_row and source_event_row.title else "Daily care update")
+    result: dict[str, Any] = {
+        "event_summary": event_summary,
+        "medications": [],
+        "conditions": [],
+        "symptoms": [],
+        "tests": [],
+        "follow_ups": follow_ups,
+        "contradictions": linked_contradictions,
+        "clinical_gaps": clinical_gaps,
+        "caregiver_summary": caregiver_summary,
+        "clinician_summary": "Deterministic comparison of persisted care-change assessments; no cause inferred.",
+        "computed_changes": computed_changes,
+        "claim_provenance": {"claims": claim_items},
+        "source_record_refs": list(all_refs.values()),
+        "history_coverage": history_coverage,
+        "uncertainty_assessments": [
+            {
+                "subject_type": str(item.get("domain") or "care"),
+                "subject_id": str(item.get("name") or "care information"),
+                "analysis": str(item.get("comparison_basis") or "The available evidence is incomplete."),
+                "evidence_ids": [str(ref["record_id"]) for ref in item.get("source_record_refs", [])],
+            }
+            for item in computed_changes if item.get("certainty") != "supported"
+        ],
+        "provenance": {
+            "person_id": person_id,
+            "created_by_caregiver_id": created_by_caregiver_id,
+            "source": source,
+            "event_date": reference_time.isoformat(),
+            "source_event_id": source_event_id,
+            "evidence_ids": evidence_ids,
+            "source_event_snapshot_sha256": source_event_snapshot_sha256,
+            "care_state_revision_snapshot": care_state_revision_snapshot,
+            "engine_version": DELTA_ENGINE_VERSION,
+            "model_provider": "deterministic_change_intelligence",
+            "model": "none",
+            "persisted": persist,
+            "change_reconciliation_status": "completed" if persist else "not_run",
+            "authoritative_change_ids": [str(item.id) for item in linked_changes],
+            "current_state_authority": "persisted SolenOS change records; no medical conclusion or causal explanation inferred",
+        },
+    }
+
+    if persist:
+        validate_source_snapshot()
+        run = CareDeltaRun(
+            person_id=person_id,
+            source=source,
+            event_date=reference_time,
+            source_event_id=source_event_id,
+            evidence_ids=evidence_ids,
+            delta_json=json.dumps(result, ensure_ascii=False, sort_keys=True, default=str),
+            model_name="deterministic-change-intelligence",
+            created_by_caregiver_id=created_by_caregiver_id,
+        )
+        db.add(run)
+        db.flush()
+        result["provenance"]["delta_run_id"] = str(run.id)
+        run.delta_json = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
+        db.commit()
+    return result
+
+
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
                     evidence_ids: list[str] | None = None, persist: bool = True,
-                    created_by_caregiver_id: str | None = None) -> dict[str, Any]:
+                    created_by_caregiver_id: str | None = None,
+                    model_enrichment: bool = False) -> dict[str, Any]:
     if not content.strip():
         raise HTTPException(status_code=422, detail="Care event content is required.")
     if len(content) > 100_000:
@@ -427,6 +903,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         if {row[0] for row in rows} != set(evidence_ids):
             raise HTTPException(status_code=422, detail="Every evidence ID must belong to this care record.")
     source_event_row = None
+    source_event_snapshot_sha256 = None
     if source_event_id:
         source_event_row = db.query(CareEvent).filter(
             CareEvent.id == source_event_id,
@@ -434,11 +911,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         ).first()
         if source_event_row is None:
             raise HTTPException(status_code=422, detail="source_event_id must belong to this care record.")
+        if source_event_row.status in {"invalidated", "deleted"}:
+            raise HTTPException(status_code=409, detail="The saved care update is no longer active.")
         if not _source_content_matches_event(content, source_event_row):
             raise HTTPException(
                 status_code=422,
                 detail="The reconciliation text does not match the saved care update.",
             )
+        source_event_snapshot_sha256 = source_event_snapshot_hash(source_event_row)
 
     active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
@@ -584,6 +1064,22 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             "source_event_id": source_event_id,
         },
     }
+    if not model_enrichment:
+        return _reconcile_from_change_intelligence(
+            db,
+            person_id=person_id,
+            event_date=event_date,
+            source=source,
+            content=content,
+            source_event_id=source_event_id,
+            evidence_ids=evidence_ids,
+            created_by_caregiver_id=created_by_caregiver_id,
+            persist=persist,
+            source_event_row=source_event_row,
+            source_event_snapshot_sha256=source_event_snapshot_sha256,
+            history_coverage=history_coverage,
+            existing_unresolved_care_loops=existing_unresolved_care_loops,
+        )
     try:
         result = _request_delta_json(
             [
@@ -1054,14 +1550,42 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
 
     if persist:
-        try:
-            incoming_evidence_rows = (
-                db.query(Evidence).filter(
-                    Evidence.person_id == person_id,
-                    Evidence.id.in_(evidence_ids),
-                ).all()
-                if evidence_ids else []
+        # Model inference runs without holding source-row locks. Reacquire and
+        # verify the exact event/evidence snapshot immediately before any
+        # derived assertions are written, so a correction or deletion during
+        # inference cannot produce a stale persisted comparison.
+        if source_event_id:
+            current_source_event = db.query(CareEvent).filter(
+                CareEvent.id == source_event_id,
+                CareEvent.person_id == person_id,
+            ).with_for_update().first()
+            if (
+                current_source_event is None
+                or current_source_event.status in {"invalidated", "deleted"}
+                or source_event_snapshot_hash(current_source_event) != source_event_snapshot_sha256
+            ):
+                db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="The saved care update changed during reconciliation. Retry using the latest record.",
+                )
+        incoming_evidence_rows = (
+            db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).with_for_update().all()
+            if evidence_ids else []
+        )
+        if evidence_ids and (
+            {str(row.id) for row in incoming_evidence_rows} != {str(value) for value in evidence_ids}
+            or any(row.evidence_status == "deleted_by_caregiver" for row in incoming_evidence_rows)
+        ):
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="The source evidence changed during reconciliation. Retry using the latest record.",
             )
+        try:
             incoming_persisted_evidence = [
                 evidence_record_to_uncertainty_item(row)
                 for row in incoming_evidence_rows
@@ -1547,6 +2071,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     result["provenance"] = {
         "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
         "source_event_id": source_event_id, "evidence_ids": evidence_ids,
+        "source_event_snapshot_sha256": source_event_snapshot_sha256,
         "engine_version": DELTA_ENGINE_VERSION,
         "model_provider": "configured_local_ollama", "model": model,
         "persisted": persist, "current_state_authority": "existing SolenOS care-continuity records; this delta is an interpretation, not a verified clinical fact",
