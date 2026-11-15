@@ -768,7 +768,10 @@ def _reconcile_from_change_intelligence(
             "current_coverage_status": change.current_coverage_status,
             "attention_candidate": bool(change.attention_candidate),
             "follow_up_candidate": bool(change.follow_up_candidate),
-            "confidence": (\n                float(significance_assessment.significance_confidence)\n                if significance_assessment is not None else None\n            ),
+            "confidence": (
+                float(significance_assessment.significance_confidence)
+                if significance_assessment is not None else None
+            ),
         }
         computed_changes.append(item)
         for reference in references:
