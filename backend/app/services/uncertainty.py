@@ -342,6 +342,7 @@ def persist_source_clarification_questions(
     )
 
     persisted: List[OpenQuestionModel] = []
+    source_questions_changed = False
     seen: set[tuple[tuple[str, ...], str, str]] = set()
     # Source extraction writes their own immutable revision rows. Suppress the
     # ORM listener while these explicit revisions are recorded, or each insert
@@ -505,6 +506,7 @@ def persist_source_clarification_questions(
                 context["prior_terminal_question_id"] = prior_terminal_question.id
                 context["reassessment_trigger"] = "new_persisted_gap_evidence_or_care_field_after_prior_answer"
         if existing is None:
+            source_questions_changed = True
             existing = OpenQuestionModel(
                 person_id=person_id,
                 question=question_text,
@@ -585,6 +587,7 @@ def persist_source_clarification_questions(
                             matching_context["necessity_assessment"] = new_context["necessity_assessment"]
                 existing.context = contexts
                 if before_state != _open_question_state(existing):
+                    source_questions_changed = True
                     _record_open_question_revision(
                         db, existing, before_state=before_state,
                         change_kind="updated", actor=f"source_workflow:{source_kind}",
@@ -600,7 +603,8 @@ def persist_source_clarification_questions(
     # explicit decision dependencies before the caller commits the source.
     # This never commits and never turns an unassessed extraction question
     # into caregiver work on wording or model confidence alone.
-    reassess_open_question_lifecycle(db, person_id)
+    if source_questions_changed:
+        reassess_open_question_lifecycle(db, person_id)
     db.flush()
     return persisted
 
