@@ -2776,6 +2776,9 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     persisted_change_history_bounded = False
     change_source_state = []
     baseline_source_state = []
+    baseline_source_available = True
+    baseline_source_complete = True
+    relevant_changes = []
     inspector = inspect(db.connection())
     change_table_available = inspector.has_table("changes")
     change_columns = {column["name"] for column in inspector.get_columns("changes")} if change_table_available else set()
@@ -2825,7 +2828,6 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             }
             for change in active_change_rows
         ]
-        relevant_changes = []
         for change in active_change_rows:
             verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
             if verdict not in {"meaningful_candidate", "insufficient_evidence"}:
@@ -2839,10 +2841,36 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         baseline_by_id = {}
         baseline_table_available = inspector.has_table("baselines")
         baseline_columns = {column["name"] for column in inspector.get_columns("baselines")} if baseline_table_available else set()
-        if baseline_ids and {"id", "person_id", "coverage_status", "history_completeness", "is_stable", "is_active", "superseded_by_baseline_id"}.issubset(baseline_columns):
-            baseline_by_id = {
-                str(row.id): row for row in db.query(Baseline).filter(Baseline.person_id == person_id, Baseline.id.in_(baseline_ids), Baseline.is_active.is_(True), Baseline.superseded_by_baseline_id.is_(None)).all()
-            }
+        required_baseline_columns = {
+            "id", "person_id", "coverage_status", "history_completeness",
+            "is_stable", "is_active", "superseded_by_baseline_id",
+        }
+        baseline_schema_available = baseline_table_available and required_baseline_columns.issubset(baseline_columns)
+        baseline_source_available = not relevant_changes or baseline_schema_available
+        if baseline_ids and baseline_schema_available:
+            # Select only the columns needed by the assessment. Querying the
+            # mapped Baseline entity selects every mapped column and can fail
+            # on older, partially migrated tables even when the required
+            # comparison fields are present.
+            baseline_rows = db.query(
+                Baseline.id.label("id"),
+                Baseline.coverage_status.label("coverage_status"),
+                Baseline.history_completeness.label("history_completeness"),
+                Baseline.is_stable.label("is_stable"),
+                Baseline.is_active.label("is_active"),
+                Baseline.superseded_by_baseline_id.label("superseded_by_baseline_id"),
+            ).filter(
+                Baseline.person_id == person_id,
+                Baseline.id.in_(baseline_ids),
+                Baseline.is_active.is_(True),
+                Baseline.superseded_by_baseline_id.is_(None),
+            ).all()
+            baseline_by_id = {str(row.id): row for row in baseline_rows}
+        baseline_source_complete = (
+            baseline_source_available
+            and all(change.baseline_id for change in relevant_changes)
+            and len(baseline_by_id) == len(baseline_ids)
+        )
         baseline_source_state = [
             {
                 "id": str(row.id),
@@ -2851,10 +2879,37 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "is_stable": bool(row.is_stable),
                 "is_active": bool(row.is_active),
                 "superseded_by_baseline_id": row.superseded_by_baseline_id,
-                "updated_at": row.updated_at,
             }
             for row in sorted(baseline_by_id.values(), key=lambda item: str(item.id))
         ]
+        persisted_delta_status = (
+            "insufficient" if not change_table_available
+            else "partial" if persisted_change_history_bounded or not baseline_source_complete
+            else "available"
+        )
+        quality_dimensions.append({
+            "dimension": "persisted_delta_history",
+            "status": persisted_delta_status,
+            "basis": {
+                "change_source_available": change_table_available,
+                "active_changes_examined": len(change_source_state),
+                "change_history_bounded": persisted_change_history_bounded,
+                "baseline_source_available": baseline_source_available,
+                "baseline_references_complete": baseline_source_complete,
+                "referenced_baselines": len(baseline_ids),
+            },
+        })
+        if not change_table_available:
+            quality_blockers.append("persisted_change_history_unavailable")
+        if persisted_change_history_bounded:
+            quality_blockers.append("persisted_change_history_bounded")
+        if relevant_changes and not baseline_source_complete:
+            quality_blockers.append("persisted_change_baseline_incomplete")
+        assessment_quality["status"] = "limitations_present" if quality_blockers else "source_checks_passed"
+        assessment_quality["blocking_limitations"] = quality_blockers
+        assessment_quality["assessment_use_status"] = (
+            "restricted_by_recorded_limitations" if quality_blockers else "bounded_source_review_only"
+        )
         event_ids = sorted({str(event_id) for change in relevant_changes for event_id in (change.evidence_ids or []) if event_id})
         event_by_id = {}
         if event_ids:
@@ -2902,7 +2957,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "change_source_available": change_table_available,
                 "change_history_bounded": persisted_change_history_bounded,
                 "active_changes": change_source_state,
-                "referenced_active_baselines": baseline_source_state,
+                "referenced_baselines": baseline_source_state,
+                "expected_baseline_ids": baseline_ids,
+                "baseline_source_available": baseline_source_available,
+                "baseline_source_complete": baseline_source_complete,
+                "canonical_conflicts": conflict_items,
             },
         ),
         "person_id": str(person_id),
@@ -2918,7 +2977,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "sources_with_records": sum(1 for value in sources.values() if value.get("items")),
             "records_examined": len(all_items),
             "distinct_linked_evidence_ids": len(evidence_ids),
-            "is_complete": not required_missing and not optional_missing and not any(value.get("has_more") for value in sources.values()),
+            "is_complete": (
+                not required_missing
+                and not optional_missing
+                and not any(value.get("has_more") for value in sources.values())
+                and change_table_available
+                and not persisted_change_history_bounded
+                and baseline_source_complete
+            ),
         },
         "domains": domain_sources,
         "cross_domain_source_links": cross_domain_source_links,
@@ -2965,6 +3031,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "bounded_sources": bounded_sources,
                 "persisted_change_source_available": change_table_available,
                 "persisted_change_history_bounded": persisted_change_history_bounded,
+                "persisted_baseline_source_available": baseline_source_available,
+                "persisted_baseline_source_complete": baseline_source_complete,
             },
         ),
         "priorities": attention_items[:50],
@@ -2983,7 +3051,12 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "confidence_assessment": {
             "overall": "not_calibrated",
             "basis": {
-                "source_coverage": "partial" if required_missing or optional_missing else "available",
+                "source_coverage": (
+                    "partial"
+                    if required_missing or optional_missing or not change_table_available
+                    or persisted_change_history_bounded or not baseline_source_complete
+                    else "available"
+                ),
                 "linked_evidence_ids": len(evidence_ids),
                 "records_without_explicit_evidence_link": sum(1 for item in all_items if not item.get("evidence_ids")),
                 "history_coverage": context.get("history_coverage", "bounded_subset"),
