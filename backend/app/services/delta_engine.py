@@ -559,6 +559,8 @@ def _reconcile_from_change_intelligence(
     existing_unresolved_care_loops: dict[str, Any],
 ) -> dict[str, Any]:
     from app.models.change import Change
+    from app.models.care_continuity import CareStateRevision
+    from sqlalchemy import func
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
     reference_time = event_date or (source_event_row.occurred_at if source_event_row else None) or datetime.now(timezone.utc)
@@ -617,6 +619,33 @@ def _reconcile_from_change_intelligence(
         item for item in candidate_changes
         if linked_ids.intersection(str(value) for value in (item.evidence_ids or []))
     ]
+    latest_revision_time = db.query(func.max(CareStateRevision.changed_at)).filter(
+        CareStateRevision.person_id == person_id
+    ).scalar()
+    care_state_revision_snapshot = latest_revision_time.isoformat() if latest_revision_time else None
+
+    if persist:
+        existing_runs = db.query(CareDeltaRun).filter(
+            CareDeltaRun.person_id == person_id,
+            CareDeltaRun.source == source,
+            CareDeltaRun.source_event_id == source_event_id,
+        ).order_by(CareDeltaRun.created_at.desc()).all()
+        for existing_run in existing_runs:
+            try:
+                saved_result = json.loads(existing_run.delta_json or "{}")
+            except (TypeError, ValueError):
+                continue
+            saved_provenance = saved_result.get("provenance") or {}
+            if (
+                saved_provenance.get("engine_version") == DELTA_ENGINE_VERSION
+                and saved_provenance.get("source_event_snapshot_sha256") == source_event_snapshot_sha256
+                and saved_provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
+                and [str(value) for value in (saved_provenance.get("evidence_ids") or [])]
+                    == [str(value) for value in evidence_ids]
+            ):
+                saved_provenance["delta_run_id"] = str(existing_run.id)
+                return saved_result
+
     history_coverage = dict(history_coverage)
     history_coverage["change_assessments"] = {
         "available": len(candidate_changes),
@@ -785,6 +814,7 @@ def _reconcile_from_change_intelligence(
             "source_event_id": source_event_id,
             "evidence_ids": evidence_ids,
             "source_event_snapshot_sha256": source_event_snapshot_sha256,
+            "care_state_revision_snapshot": care_state_revision_snapshot,
             "engine_version": DELTA_ENGINE_VERSION,
             "model_provider": "deterministic_change_intelligence",
             "model": "none",
