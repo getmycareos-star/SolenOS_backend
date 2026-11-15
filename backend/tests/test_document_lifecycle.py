@@ -320,6 +320,12 @@ def test_partial_extraction_retries_saved_original_without_duplicate_upload(clie
         saved = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
         assert saved.sha256 == hashlib.sha256(original).hexdigest()
         assert saved.content == original
+        saved_analysis = db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).one()
+        metadata = saved_analysis.candidates if isinstance(saved_analysis.candidates, dict) else {}
+        assert metadata.get("source_text_sha256") == hashlib.sha256(
+            (saved_analysis.source_text or "").strip().encode("utf-8")
+        ).hexdigest(), "A successful page retry must persist a digest for the exact saved extraction text"
+        assert metadata.get("processed_page_numbers") == [1, 2]
 
 
 def test_real_upload_endpoint_feeds_document_extraction(client):
