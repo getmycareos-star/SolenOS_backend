@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import uuid
@@ -27,7 +28,7 @@ from app.services.claim_provenance import build_claim_provenance
 
 logger = logging.getLogger(__name__)
 
-DELTA_ENGINE_VERSION = "2026.11.12.6"
+DELTA_ENGINE_VERSION = "2026.11.15.1"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
@@ -413,6 +414,22 @@ def _source_content_matches_event(content: str, event: CareEvent) -> bool:
     )
 
 
+def source_event_snapshot_hash(event: CareEvent) -> str:
+    """Fingerprint the exact saved event state used by a Delta assessment."""
+    snapshot = {
+        "id": str(event.id),
+        "person_id": str(event.person_id),
+        "created_by_caregiver_id": str(event.created_by_caregiver_id or ""),
+        "status": str(event.status or ""),
+        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+        "title": str(event.title or ""),
+        "description": str(event.description or ""),
+        "evidence_ids": sorted(str(value) for value in (event.evidence_ids or [])),
+    }
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
                     evidence_ids: list[str] | None = None, persist: bool = True,
@@ -427,6 +444,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         if {row[0] for row in rows} != set(evidence_ids):
             raise HTTPException(status_code=422, detail="Every evidence ID must belong to this care record.")
     source_event_row = None
+    source_event_snapshot_sha256 = None
     if source_event_id:
         source_event_row = db.query(CareEvent).filter(
             CareEvent.id == source_event_id,
@@ -434,11 +452,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         ).first()
         if source_event_row is None:
             raise HTTPException(status_code=422, detail="source_event_id must belong to this care record.")
+        if source_event_row.status in {"invalidated", "deleted"}:
+            raise HTTPException(status_code=409, detail="The saved care update is no longer active.")
         if not _source_content_matches_event(content, source_event_row):
             raise HTTPException(
                 status_code=422,
                 detail="The reconciliation text does not match the saved care update.",
             )
+        source_event_snapshot_sha256 = source_event_snapshot_hash(source_event_row)
 
     active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
@@ -1054,14 +1075,42 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
 
     if persist:
-        try:
-            incoming_evidence_rows = (
-                db.query(Evidence).filter(
-                    Evidence.person_id == person_id,
-                    Evidence.id.in_(evidence_ids),
-                ).all()
-                if evidence_ids else []
+        # Model inference runs without holding source-row locks. Reacquire and
+        # verify the exact event/evidence snapshot immediately before any
+        # derived assertions are written, so a correction or deletion during
+        # inference cannot produce a stale persisted comparison.
+        if source_event_id:
+            current_source_event = db.query(CareEvent).filter(
+                CareEvent.id == source_event_id,
+                CareEvent.person_id == person_id,
+            ).with_for_update().first()
+            if (
+                current_source_event is None
+                or current_source_event.status in {"invalidated", "deleted"}
+                or source_event_snapshot_hash(current_source_event) != source_event_snapshot_sha256
+            ):
+                db.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="The saved care update changed during reconciliation. Retry using the latest record.",
+                )
+        incoming_evidence_rows = (
+            db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).with_for_update().all()
+            if evidence_ids else []
+        )
+        if evidence_ids and (
+            {row.id for row in incoming_evidence_rows} != set(evidence_ids)
+            or any(row.evidence_status == "deleted_by_caregiver" for row in incoming_evidence_rows)
+        ):
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="The source evidence changed during reconciliation. Retry using the latest record.",
             )
+        try:
             incoming_persisted_evidence = [
                 evidence_record_to_uncertainty_item(row)
                 for row in incoming_evidence_rows
@@ -1547,6 +1596,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     result["provenance"] = {
         "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
         "source_event_id": source_event_id, "evidence_ids": evidence_ids,
+        "source_event_snapshot_sha256": source_event_snapshot_sha256,
         "engine_version": DELTA_ENGINE_VERSION,
         "model_provider": "configured_local_ollama", "model": model,
         "persisted": persist, "current_state_authority": "existing SolenOS care-continuity records; this delta is an interpretation, not a verified clinical fact",
