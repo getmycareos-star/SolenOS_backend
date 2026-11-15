@@ -1042,6 +1042,69 @@ def test_companion_rejects_unsupported_language_codes(monkeypatch):
         teardown()
 
 
+@pytest.mark.parametrize(
+    ("language", "question", "report", "reply"),
+    [
+        (
+            "es",
+            "¿Qué hemos registrado sobre el sueño?",
+            "Mamá se despertó varias veces durante la noche.",
+            "El registro dice que mamá se despertó varias veces durante la noche.",
+        ),
+        (
+            "fr",
+            "Qu'est-ce qu'on a noté sur le sommeil ?",
+            "Maman s'est réveillée plusieurs fois pendant la nuit.",
+            "Le dossier indique que maman s'est réveillée plusieurs fois pendant la nuit.",
+        ),
+    ],
+)
+def test_companion_retrieves_original_care_reports_for_spanish_and_french_topics(
+    monkeypatch, language, question, report, reply,
+):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return reply
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            id=f"multilingual-history-{language}",
+            person_id=person_id,
+            event_type="caregiver_report",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Caregiver sleep report",
+            description=report,
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": question, "language": language},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["reply"] == reply
+        assert event_id in body["source_event_ids"]
+        assert report in captured["messages"][0]["content"]
+        assert body["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_companion_context_filter_excludes_unrelated_records_for_specific_question():
     sleep = 'LCR event evidence: {"event_id":"sleep-1","title":"Sleep history","description":"Restless sleep."}'
     household = 'LCR event evidence: {"event_id":"home-1","title":"Unrelated household note 1","description":"Household activity note."}'
