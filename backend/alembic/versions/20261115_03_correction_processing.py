@@ -23,7 +23,7 @@ def upgrade():
     columns = (
         sa.Column("idempotency_key", sa.String(length=128), nullable=True),
         sa.Column("request_sha256", sa.String(length=64), nullable=True),
-        sa.Column("processing_status", sa.String(length=24), nullable=False, server_default="pending"),
+        sa.Column("processing_status", sa.String(length=24), nullable=False, server_default="legacy_unverified"),
         sa.Column("processing_attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("processing_error", sa.Text(), nullable=True),
         sa.Column("care_continuity_execution", sa.JSON(), nullable=True),
