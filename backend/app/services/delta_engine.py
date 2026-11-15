@@ -1053,6 +1053,11 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         return linked_evidence_ids, references
 
 
+    canonical_change_reconciliation = {
+        "status": "not_run",
+        "reason": "no_new_assertions_created",
+    }
+
     if persist:
         try:
             created_assertion_ids: list[str] = []
@@ -1550,15 +1555,10 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     protected_assertion_ids=created_assertion_ids,
                 )
                 db.flush()
-                result["provenance"]["canonical_change_reconciliation"] = {
+                canonical_change_reconciliation = {
                     "status": "completed",
                     "engine": "persisted_change_intelligence_reconciliation",
                     "protected_assertion_count": len(created_assertion_ids),
-                }
-            else:
-                result["provenance"]["canonical_change_reconciliation"] = {
-                    "status": "not_run",
-                    "reason": "no_new_assertions_created",
                 }
         except Exception as exc:
             # Keep the API response generic, but retain the original database or
@@ -1581,6 +1581,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "model_provider": "configured_local_ollama", "model": model,
         "persisted": persist, "current_state_authority": "existing SolenOS care-continuity records; this delta is an interpretation, not a verified clinical fact",
     }
+    result["provenance"]["canonical_change_reconciliation"] = canonical_change_reconciliation
     if persist:
         try:
             # Persist model-detected conflicts with the same source-bound transaction.
