@@ -1630,7 +1630,21 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
     if correction_row.processing_status == "completed":
         return correction_row
 
+    now = datetime.now(timezone.utc)
+    lease_started = correction_row.processing_started_at
+    if lease_started is not None and lease_started.tzinfo is None:
+        lease_started = lease_started.replace(tzinfo=timezone.utc)
+    # A live processing lease prevents duplicate reconciliation across requests
+    # and worker replicas. A crashed worker becomes recoverable after 10 minutes.
+    if (
+        correction_row.processing_status == "processing"
+        and lease_started is not None
+        and lease_started > now - timedelta(minutes=10)
+    ):
+        return correction_row
+
     correction_row.processing_status = "processing"
+    correction_row.processing_started_at = now
     correction_row.processing_attempts = int(correction_row.processing_attempts or 0) + 1
     correction_row.processing_error = None
     correction_row.care_continuity_execution = {
@@ -1673,6 +1687,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
         correction_row.processing_status = "completed"
         correction_row.processing_error = None
         correction_row.processed_at = datetime.now(timezone.utc)
+        correction_row.processing_started_at = None
         execution.update({
             "workflow": "care_record_correction",
             "status": "completed",
@@ -1696,6 +1711,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
         if correction_row is None:
             raise HTTPException(status_code=404, detail="Correction not found") from exc
         correction_row.processing_status = "pending"
+        correction_row.processing_started_at = None
         correction_row.processing_error = "reconciliation_failed"
         correction_row.care_continuity_execution = {
             "workflow": "care_record_correction",
