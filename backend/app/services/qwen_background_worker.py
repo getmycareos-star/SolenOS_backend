@@ -234,6 +234,7 @@ def _reconcile_daily_capture_delta(
                 provenance.get("engine_version") == DELTA_ENGINE_VERSION
                 and provenance.get("source_event_snapshot_sha256") == snapshot_hash
                 and provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
+                and [str(value) for value in (provenance.get("evidence_ids") or [])] == [str(source_evidence_id)]
             ):
                 return {
                     "status": "completed",
