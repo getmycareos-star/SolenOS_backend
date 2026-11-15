@@ -2137,6 +2137,83 @@ def test_source_grounded_observations_survive_reconciliation_retry_without_dupli
         teardown_db()
 
 
+def test_delta_failure_does_not_fail_persisted_daily_care_capture(monkeypatch):
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night."
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [{
+                    "subject": "Mum",
+                    "observation": "slept poorly last night",
+                    "source_quote": original_report,
+                    "source_event_id": source_event_id,
+                }],
+                "open_questions": [],
+            }
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "delta-failure-isolation-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+
+        def unavailable_delta(*args, **kwargs):
+            raise RuntimeError("delta_runtime_unavailable")
+
+        process_daily_capture_job(
+            receipt["qwen_job_id"],
+            monkeypatch,
+            exact_source_candidates,
+            delta_reconciler=unavailable_delta,
+            expected_status="completed",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            analysis = db.query(CaptureAnalysis).filter_by(
+                source_event_id=receipt["id"],
+                person_id="person-daily-test",
+                caregiver_id="caregiver-daily-test",
+            ).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+            ).all()
+            result = json.loads(job.result_text or "{}")
+
+            assert job.status == "completed"
+            assert result["reconciliation_status"] == "completed"
+            assert result["projection_status"] == "verified"
+            assert result["delta_reconciliation_status"] == "failed"
+            assert result["delta_reconciliation_error_code"] == "RuntimeError"
+            assert analysis.execution_status["reconciliation"] == "completed"
+            assert analysis.execution_status["delta_reconciliation"] == "failed"
+            assert len(observations) == 1
+            assert db.query(CareDeltaRun).filter_by(
+                person_id="person-daily-test",
+                source_event_id=receipt["id"],
+            ).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
 def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatch):
 
     setup_db()
