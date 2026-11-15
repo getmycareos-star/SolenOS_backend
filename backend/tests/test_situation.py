@@ -2082,7 +2082,9 @@ def test_caregiver_situation_state_changes_require_linked_sources_and_persist_hi
                 source_event_id="state-transition-event",
                 source_label="Family caregiver",
                 source_text="Caregiver reports more help is needed with walking.",
-                evidence_ids=[evidence.id],
+                # The assertion itself has no direct evidence link; provenance
+                # must resolve through source_event_id to the event's evidence.
+                evidence_ids=[],
                 assertion_status="reported",
                 epistemic_state="reported",
                 observed_at=now,
