@@ -6125,6 +6125,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text,
             re.IGNORECASE,
         ))
+        care_history_recall_context: dict[str, Any] | None = None
         if _is_casual_greeting(user_text):
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
@@ -6290,20 +6291,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     *care_history_recall_context["event_lines"],
                     *care_history_recall_context["evidence_lines"],
                 ]))
-                lcr_context_coverage["direct_care_history_recall"] = {
-                    "status": (
-                        "partial" if care_history_recall_context["has_more"]
-                        else "available" if care_history_recall_context["event_lines"]
-                        else "no_matching_record"
-                    ),
-                    "event_count": len(care_history_recall_context["event_lines"]),
-                    "evidence_count": len(care_history_recall_context["evidence_lines"]),
-                    "history_complete": not care_history_recall_context["has_more"],
-                }
-                if care_history_recall_context["has_more"]:
-                    lcr_context_coverage["retrieval_projection_complete"] = False
-                    lcr_context_coverage["page_limit_reached"] = True
-    
             source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
@@ -6336,6 +6323,20 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     if name != "companion_conversation"
                 },
             }
+        if care_history_recall_context is not None:
+            lcr_context_coverage["direct_care_history_recall"] = {
+                "status": (
+                    "partial" if care_history_recall_context["has_more"]
+                    else "available" if care_history_recall_context["event_lines"]
+                    else "no_matching_record"
+                ),
+                "event_count": len(care_history_recall_context["event_lines"]),
+                "evidence_count": len(care_history_recall_context["evidence_lines"]),
+                "history_complete": not care_history_recall_context["has_more"],
+            }
+            if care_history_recall_context["has_more"]:
+                lcr_context_coverage["retrieval_projection_complete"] = False
+                lcr_context_coverage["page_limit_reached"] = True
             conversation_coverage = lcr_context_coverage.get("sources", {}).get("companion_conversation")
             if isinstance(conversation_coverage, dict):
                 conversation_coverage["selected_for_answer"] = len(conversation_context_lines)
