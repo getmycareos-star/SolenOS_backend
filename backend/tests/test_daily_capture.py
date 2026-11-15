@@ -2848,3 +2848,104 @@ def test_daily_capture_reconciliation_failure_preserves_successful_extraction_re
             db.close()
     finally:
         teardown_db()
+
+def test_correction_recovery_worker_respects_live_lease_and_recovers_expired_receipt(monkeypatch):
+    import app.api.v1 as api_v1
+    import app.main as app_main
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        now = datetime.now(timezone.utc)
+        db = TestingSessionLocal()
+        db.add(CareEvent(
+            id="event-correction-worker",
+            person_id="person-daily-test",
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=now,
+            title="Sleep report",
+            description="She slept very poorly.",
+            created_by_caregiver_id="caregiver-daily-test",
+        ))
+        db.commit()
+        db.close()
+
+        calls = {"count": 0}
+
+        def fail_once(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("injected first-attempt failure")
+            return {
+                "workflow": "care_record_correction",
+                "stages": {"reconciliation": "committed"},
+                "transaction_owner": "caller",
+            }
+
+        monkeypatch.setattr(api_v1, "execute_care_continuity_reconciliation", fail_once)
+        monkeypatch.setattr(app_main, "SessionLocal", TestingSessionLocal)
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        response = client.post(
+            "/api/v1/corrections",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "target_type": "care_event",
+                "target_id": "event-correction-worker",
+                "original_text": "She slept very poorly.",
+                "corrected_text": "She slept poorly for one night; no ongoing pattern is established.",
+                "reason": "The original wording overstated the duration.",
+                "idempotency_key": "correction-worker-recovery-001",
+            },
+        )
+        assert response.status_code == 200, response.text
+        correction_id = response.json()["id"]
+        assert response.json()["processing_status"] == "pending"
+
+        db = TestingSessionLocal()
+        try:
+            row = db.query(Correction).filter_by(id=correction_id).one()
+            row.processing_status = "processing"
+            row.processing_started_at = datetime.now(timezone.utc)
+            db.commit()
+        finally:
+            db.close()
+
+        # A second worker must not process a correction while its lease is live.
+        live = app_main.process_pending_corrections_once()
+        assert live["examined"] == 0
+        db = TestingSessionLocal()
+        try:
+            row = db.query(Correction).filter_by(id=correction_id).one()
+            assert row.processing_attempts == 1
+            assert row.processing_status == "processing"
+        finally:
+            db.close()
+
+        # Simulate a process crash: the lease expires and a later worker recovers it.
+        db = TestingSessionLocal()
+        try:
+            row = db.query(Correction).filter_by(id=correction_id).one()
+            row.processing_started_at = datetime.now(timezone.utc) - timedelta(minutes=11)
+            db.commit()
+        finally:
+            db.close()
+
+        recovered = app_main.process_pending_corrections_once()
+        assert recovered == {"examined": 1, "completed": 1, "pending": 0, "failed": 0}
+        db = TestingSessionLocal()
+        try:
+            row = db.query(Correction).filter_by(id=correction_id).one()
+            assert row.processing_status == "completed"
+            assert row.processing_attempts == 2
+            assert row.processing_started_at is None
+            assert row.processed_at is not None
+            assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
+        finally:
+            db.close()
+        assert calls["count"] == 2
+    finally:
+        teardown_db()
