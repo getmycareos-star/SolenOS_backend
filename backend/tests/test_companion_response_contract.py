@@ -2431,3 +2431,84 @@ def test_operational_guard_rejects_conditional_future_claim_as_a_fact():
     reply = "Mum will be calmer tomorrow."
     assert collaboration._contains_unsupported_operational_claim(reply, source, []) is True
 
+def test_medication_dose_recall_quotes_saved_uncertainty_instead_of_model_completion(monkeypatch):
+    client = setup_client(monkeypatch)
+    model_reply = "The doctor prescribed 10 mg yesterday."
+    monkeypatch.setattr(
+        collaboration,
+        "_ollama_url",
+        lambda: ("http://ollama.test", "qwen-test"),
+    )
+    monkeypatch.setattr(
+        collaboration,
+        "_run_companion_inference_with_metrics",
+        lambda *args, **kwargs: model_reply,
+    )
+    monkeypatch.setattr(
+        collaboration,
+        "_ollama_chat",
+        lambda *args, **kwargs: model_reply,
+    )
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event_time = datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc)
+        description = (
+            "I think the doctor changed Mum's medication yesterday, "
+            "but I can't remember the new dose."
+        )
+        evidence = Evidence(
+            id="medication-dose-recall-evidence",
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=description,
+            source_type="caregiver_report",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            occurred_at=event_time,
+            occurred_at_timezone="UTC",
+            reported_at=event_time,
+            collected_at=event_time,
+            time_provenance="caregiver_reported",
+        )
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=event_time,
+            title="Medication change report",
+            description=description,
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([evidence, event])
+        db.commit()
+        event_id = event.id
+        evidence_id = evidence.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "What new dose did the doctor prescribe for Mum yesterday?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is False
+        assert data["guard_verdict"] == "blocked"
+        assert "can't remember the new dose" in data["reply"].casefold()
+        assert "10 mg" not in data["reply"].casefold()
+        assert "does not confirm the prescribed dose" in data["safety_note"].casefold()
+        assert event_id in data["source_event_ids"]
+        assert evidence_id in data["source_evidence_ids"]
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "conversation_only"
+    finally:
+        teardown()
+
