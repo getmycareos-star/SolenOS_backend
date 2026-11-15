@@ -1848,6 +1848,50 @@ def current_care_projection(
         add("caregiver_observations", row, "Caregiver observation", 6)
     for row in (sources.get("facts") or {}).get("items", []):
         add("facts", row, "Recorded information", 7)
+    # A single saved caregiver report can have both a structured-capture event
+    # and a legacy daily-care wrapper. When both point to the exact same set of
+    # source evidence, present one caregiver event while retaining every source
+    # event ID for traceability. Different evidence sets and same-type events
+    # remain separate; proximity alone never establishes duplication.
+    capture_wrapper_types = {"structured_daily_capture", "daily_care_entry"}
+    capture_groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for current_item in current_items:
+        if current_item.get("source_collection") != "events":
+            continue
+        event_type = str(current_item.get("source_event_type") or "").strip().lower()
+        evidence_key = tuple(sorted({
+            str(value) for value in (current_item.get("evidence_ids") or []) if value
+        }))
+        if event_type not in capture_wrapper_types or not evidence_key:
+            continue
+        capture_groups.setdefault(evidence_key, []).append(current_item)
+
+    merged_capture_item_ids: set[int] = set()
+    for evidence_key, group in capture_groups.items():
+        event_types = {str(item.get("source_event_type") or "").strip().lower() for item in group}
+        if len(group) < 2 or not capture_wrapper_types.issubset(event_types):
+            continue
+        # Keep the richer original description; prefer the structured capture
+        # only as a deterministic tie-breaker. No source event is deleted.
+        primary = max(group, key=lambda item: (
+            len(str(item.get("description") or "").strip()),
+            str(item.get("source_event_type") or "").strip().lower() == "structured_daily_capture",
+        ))
+        generic_titles = {"structured daily capture", "daily care entry", "daily care update"}
+        specific_title = next((
+            str(item.get("title") or "").strip()
+            for item in group
+            if str(item.get("title") or "").strip().casefold() not in generic_titles
+        ), None)
+        primary["title"] = specific_title or "Daily care update"
+        primary["source_event_type"] = "daily_capture_group"
+        primary["source_record_ids"] = list(dict.fromkeys(str(item["id"]) for item in group))
+        primary["evidence_ids"] = list(evidence_key)
+        merged_capture_item_ids.update(id(item) for item in group if item is not primary)
+
+    if merged_capture_item_ids:
+        current_items = [item for item in current_items if id(item) not in merged_capture_item_ids]
+
     observation_rows = (sources.get("evidence_observations") or {}).get("items", [])
     superseded_observation_ids = {
         str(row.get("supersedes_observation_id"))

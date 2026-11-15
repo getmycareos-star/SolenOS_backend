@@ -257,6 +257,13 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
             "created_by_caregiver_id": "caregiver-daily-test",
             "evidence_ids": [evidence.id],
         }
+        structured_wrapper_event = {
+            **event,
+            "id": "grouped-structured-capture-event",
+            "event_type": "structured_daily_capture",
+            "title": "Structured daily capture",
+            "recorded_at": "2026-11-03T09:02:00+00:00",
+        }
         observation = {
             "id": "grouped-source-observation",
             "evidence_id": evidence.id,
@@ -291,7 +298,7 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
                 "missing_required_sources": [],
                 "missing_optional_sources": [],
                 "sources": {
-                    "events": {"items": [event]},
+                    "events": {"items": [event, structured_wrapper_event]},
                     "evidence_observations": {"items": [observation]},
                 },
             },
@@ -300,8 +307,15 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
         projection = care_continuity_api.current_care_projection(
             request=None, limit_per_source=10, db=db
         )
-        event_items = [item for item in projection["items"] if item["id"] == event["id"]]
+        event_items = [
+            item for item in projection["items"]
+            if event["id"] in item.get("source_record_ids", [])
+        ]
         assert len(event_items) == 1
+        assert set(event_items[0]["source_record_ids"]) == {
+            event["id"], structured_wrapper_event["id"]
+        }
+        assert event_items[0]["source_event_type"] == "daily_capture_group"
         assert event_items[0]["evidence_ids"] == [evidence.id]
         assert event_items[0]["source_label"] == "Caregiver"
         assert len(event_items[0]["derived_observations"]) == 1
