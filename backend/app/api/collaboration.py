@@ -5636,9 +5636,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     client_turn_id = payload.client_turn_id.strip() if payload.client_turn_id else None
     if payload.client_turn_id and not client_turn_id:
         raise HTTPException(status_code=422, detail="client_turn_id cannot be blank")
-    request_sha256 = hashlib.sha256(
-        f"{payload.language}\0{user_text}".encode("utf-8")
-    ).hexdigest()
+    # Preserve the existing English idempotency fingerprint so in-flight
+    # retries created before language routing was deployed still replay safely.
+    fingerprint_payload = (
+        user_text if payload.language == "en"
+        else f"{payload.language}\0{user_text}"
+    )
+    request_sha256 = hashlib.sha256(fingerprint_payload.encode("utf-8")).hexdigest()
     replay = _companion_replay_response(
         db,
         client_turn_id=client_turn_id,
