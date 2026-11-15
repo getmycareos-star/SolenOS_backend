@@ -179,7 +179,7 @@ class CorrectionCreate(CorrectionBase):
 class Correction(CorrectionBase):
     id: str
     idempotency_key: Optional[str] = None
-    processing_status: str = "pending"
+    processing_status: str = "legacy_unverified"
     processing_attempts: int = 0
     processing_error: Optional[str] = None
     processed_at: Optional[datetime] = None
