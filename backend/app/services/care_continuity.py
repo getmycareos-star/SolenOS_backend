@@ -718,7 +718,31 @@ def _priority_weight(value: Any) -> int:
     return {"critical": 50, "high": 40, "medium": 30, "low": 20, "informational": 10}.get(str(value), 10)
 
 
-def _question_matches_source_field(question: OpenQuestion, candidate_contexts: list[dict]) -> bool:
+def _question_period_scope(value: str | None) -> tuple[str, ...]:
+    """Keep explicit date/period qualifiers distinct when matching same-field questions."""
+    text = " ".join(str(value or "").casefold().split())
+    patterns = (
+        r"\\b(?:since|before|after|until|through)\\s+(?:(?:last|this|next|previous)\\s+)?"
+        r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+        r"today|yesterday|tomorrow|\\d{4}(?:-\\d{1,2}){0,2})\\b",
+        r"\\b(?:between|from)\\s+(?:last\\s+|this\\s+|next\\s+)?"
+        r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+        r"today|yesterday|tomorrow|\\d{4}(?:-\\d{1,2}){0,2})\\s+"
+        r"(?:and|to|through)\\s+(?:last\\s+|this\\s+|next\\s+)?"
+        r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+        r"today|yesterday|tomorrow|\\d{4}(?:-\\d{1,2}){0,2})\\b",
+        r"\\b(?:today|yesterday|tomorrow|last night|previous night|"
+        r"this morning|this afternoon|this evening|last week|this week|"
+        r"next week|past \\d+ days?|past \\d+ weeks?|past \\d+ months?)\\b",
+    )
+    return tuple(sorted(match for pattern in patterns for match in re.findall(pattern, text)))
+
+
+def _question_matches_source_field(
+    question: OpenQuestion,
+    candidate_contexts: list[dict],
+    candidate_question: str | None = None,
+) -> bool:
     prior_fields = {
         str(context.get("source_field")).strip().casefold()
         for context in (question.context or [])
@@ -729,7 +753,14 @@ def _question_matches_source_field(question: OpenQuestion, candidate_contexts: l
         for context in candidate_contexts
         if isinstance(context, dict) and context.get("source_field")
     }
-    return bool(candidate_fields and prior_fields and candidate_fields.issubset(prior_fields))
+    if not (candidate_fields and prior_fields and candidate_fields.issubset(prior_fields)):
+        return False
+    # Same care field is not sufficient to merge questions about different
+    # dates or periods. An unqualified question and "since Friday" are distinct.
+    if candidate_question is not None:
+        if _question_period_scope(question.question) != _question_period_scope(candidate_question):
+            return False
+    return True
 
 def _question_has_new_grounding(question: OpenQuestion, candidate: Dict[str, Any]) -> bool:
     """A closed system question reopens only for a new persisted source or evidence."""
@@ -1242,7 +1273,7 @@ def next_best_questions(
             if existing is None:
                 existing = next((
                     row for row in active_rows
-                    if _question_matches_source_field(row, candidate_contexts)
+                    if _question_matches_source_field(row, candidate_contexts, clean[\"question\"])
                 ), None)
             existing_before = _open_question_state(existing) if existing is not None else None
             prior_terminal_question = None
