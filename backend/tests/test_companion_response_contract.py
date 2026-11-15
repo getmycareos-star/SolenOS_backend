@@ -91,6 +91,26 @@ def test_explicit_temporal_window_fetches_all_matching_history_pages():
     ) is True
 
 
+def test_medication_dose_recall_never_overrides_higher_priority_safety_guards():
+    request = "What dose did the doctor prescribe?"
+    assert collaboration._should_use_medication_dose_recall_fallback(request) is True
+    assert collaboration._should_use_medication_dose_recall_fallback(
+        request, conflict_response="The saved reports disagree; confirm with the prescriber."
+    ) is False
+    assert collaboration._should_use_medication_dose_recall_fallback(
+        request, missing_measurement_reply="The prescribed dose is not recorded."
+    ) is False
+    assert collaboration._should_use_medication_dose_recall_fallback(
+        request, medication_change_reply="I can't recommend changing a prescribed dose."
+    ) is False
+    assert collaboration._should_use_medication_dose_recall_fallback(
+        request, emergency=True
+    ) is False
+    assert collaboration._should_use_medication_dose_recall_fallback(
+        request, unsupported_trend=True
+    ) is False
+
+
 def test_companion_identity_guidance_does_not_repeat_the_one_time_name_question():
     named = collaboration._care_recipient_identity_guidance("Mom")
     assert '"Mom"' in named
