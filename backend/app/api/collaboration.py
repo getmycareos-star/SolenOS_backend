@@ -93,6 +93,11 @@ def _build_unified_lcr_context_or_422(*args, **kwargs):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _should_fetch_full_lcr_context_pages(context: dict, care_journey_request: bool) -> bool:
+    """Page through broad histories and every explicitly requested temporal window."""
+    return bool(care_journey_request or context.get("temporal_window"))
+
+
 def _attach_caregiver_question_queue(db: Session, person_id: str, context: dict) -> dict:
     """Attach the only approved set of caregiver-facing questions to Companion context."""
     rows = db.query(OpenQuestion).filter(
@@ -5860,7 +5865,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # subsequent pages so older events in the same year/month are not
             # silently omitted when the person has more than 50 matching rows.
             temporal_window_scan_requested = bool(shared_lcr_context.get("temporal_window"))
-            if care_journey_request or temporal_window_scan_requested:
+            if _should_fetch_full_lcr_context_pages(shared_lcr_context, care_journey_request):
                 shared_lcr_context = _collect_full_lcr_context_pages(
                     db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
                     limit_per_source=50, max_pages=4,
