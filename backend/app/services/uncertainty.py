@@ -319,11 +319,7 @@ def persist_source_clarification_questions(
                 ):
                     necessity_gaps.append((gap, rationale.strip(), dependency.strip(), gap_evidence_ids))
         matched_gap = necessity_gaps[0] if len(necessity_gaps) == 1 else None
-        if matched_gap is None and source_kind == "daily_capture_extraction":
-            # Free-text Daily Care suggestions must not become open tasks unless
-            # they resolve a unique, evidence-backed LCR decision dependency.
-            # Document extraction questions remain source-linked review items.
-            continue
+
 
         source_context = {
             "source_kind": source_kind,
