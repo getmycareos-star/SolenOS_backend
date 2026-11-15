@@ -786,3 +786,58 @@ def test_acceleration_pattern_requires_increasing_deltas_and_full_coverage():
         assert "not a calibrated forecast" in " ".join(acceleration[0].alternative_interpretations or [])
     finally:
         teardown_db()
+
+
+def test_decrease_magnitude_is_nonnegative_and_coverage_context_is_accurate():
+    setup_db()
+    try:
+        db, person, caregiver = _seed_person()
+        now = datetime.now(timezone.utc)
+        for index, days_ago in enumerate((120, 110, 100, 90, 80, 70, 60, 50)):
+            _add_event(
+                db, person, caregiver, "routine_observation",
+                f"Historical routine observation {index + 1}", days_ago=days_ago,
+            )
+        _add_event(
+            db, person, caregiver, "routine_observation",
+            "Current routine observation", days_ago=1,
+        )
+        db.add_all([
+            ObservationCoverage(
+                person_id=person.id,
+                subject_type="routine_observation",
+                window_start=now - timedelta(days=180),
+                window_end=now - timedelta(days=42),
+                coverage_status="covered",
+                source_evidence_ids=[],
+                rationale="The historical observation interval was explicitly covered.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                person_id=person.id,
+                subject_type="routine_observation",
+                window_start=now - timedelta(days=42),
+                window_end=now,
+                coverage_status="covered",
+                source_evidence_ids=[],
+                rationale="The current observation interval was explicitly covered.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+
+        from app.services.change_detection import detect_event_changes
+        changes = detect_event_changes(db, person.id, "routine_observation", None, now)
+        db.commit()
+        decrease = next(item for item in changes if item.change_type.value == "decrease")
+        assessment = db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.id == decrease.significance_assessment_id
+        ).one()
+        magnitude = next(item for item in assessment.dimensions if item["name"] == "magnitude")
+        assert 0.0 <= magnitude["score"] <= 1.0
+        assert any(
+            "Both comparison windows have explicit observation-coverage records" in item
+            for item in (assessment.possible_context or [])
+        )
+    finally:
+        teardown_db()
