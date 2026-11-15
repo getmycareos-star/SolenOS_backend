@@ -17,6 +17,8 @@ from app.models.collaboration import CommunityPost, ConversationMessage, Evidenc
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
+from app.models.change import Baseline, Change
+from app.core.change_enums import BaselineType, BaselineConfidence, ChangeType, ChangeDirection
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -1895,5 +1897,79 @@ def test_delta_history_becomes_stale_when_baseline_change_or_situation_is_revise
             assert run["source_freshness"]["status"] == "stale", run
             assert run["source_freshness"]["changed_context_count"] == 3, run
             assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
+    finally:
+        teardown()
+
+
+def test_delta_freshness_ledger_tracks_baseline_and_active_change_mutations(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        reviewed_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        baseline_id = "baseline-before-delta"
+        change_id = "change-before-delta"
+        with TestingSessionLocal() as db:
+            db.add(Baseline(
+                id=baseline_id,
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                baseline_type=BaselineType.PERSONAL_HISTORICAL,
+                window_start=reviewed_at - timedelta(days=30),
+                window_end=reviewed_at,
+                event_count=4,
+                confidence=BaselineConfidence.MODERATE,
+                state_value="usual sleep pattern",
+                is_active=True,
+            ))
+            db.add(Change(
+                id=change_id,
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                change_type=ChangeType.EMERGENCE,
+                change_direction=ChangeDirection.UNKNOWN,
+                previous_state="no reported change",
+                current_state="new sleep disruption report",
+                evidence_ids=[],
+                is_active=True,
+            ))
+            db.commit()
+
+        with TestingSessionLocal() as db:
+            db.add(CareDeltaRun(
+                id="delta-before-baseline-change",
+                person_id=person_id,
+                source="Caregiver report",
+                event_date=reviewed_at,
+                evidence_ids=[],
+                delta_json=json.dumps({"computed_changes": []}),
+                model_name="benchmark-fixture",
+                created_by_caregiver_id=caregiver_id,
+                created_at=reviewed_at,
+            ))
+            db.commit()
+
+        with TestingSessionLocal() as db:
+            baseline = db.query(Baseline).filter_by(id=baseline_id, person_id=person_id).one()
+            baseline.state_value = "updated usual sleep pattern"
+            change = db.query(Change).filter_by(id=change_id, person_id=person_id).one()
+            change.is_active = False
+            db.commit()
+            revisions = db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+                CareStateRevision.target_type.in_(["baselines", "changes"]),
+                CareStateRevision.changed_at > reviewed_at,
+            ).all()
+            assert {row.target_type for row in revisions} == {"baselines", "changes"}
+
+        response = client.get(
+            f"/api/v1/care-delta/runs/{person_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        run = next(item for item in response.json() if item["id"] == "delta-before-baseline-change")
+        assert run["source_freshness"]["status"] == "stale"
+        assert run["source_freshness"]["changed_context_count"] == 2
+        assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
     finally:
         teardown()
