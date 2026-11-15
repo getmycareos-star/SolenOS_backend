@@ -1713,6 +1713,8 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
 @router.post("/corrections", response_model=CorrectionSchema)
 def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
+    if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
+        raise HTTPException(status_code=403, detail="This caregiver can review documents, not correct other care information.")
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
 
     target_models = {
@@ -1790,12 +1792,15 @@ def retry_correction(
     db: Session = Depends(get_db),
 ):
     _require_session_scope(request, db, person_id)
+    if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
+        raise HTTPException(status_code=403, detail="This caregiver can review documents, not process care corrections.")
     correction_row = db.query(CorrectionModel).filter(
         CorrectionModel.id == correction_id,
         CorrectionModel.person_id == person_id,
     ).first()
     if correction_row is None:
         raise HTTPException(status_code=404, detail="Correction not found")
+    _require_session_scope(request, db, person_id, correction_row.caregiver_id)
     return _process_persisted_correction(db, person_id, correction_id)
 
 
