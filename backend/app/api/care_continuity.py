@@ -2109,8 +2109,11 @@ def get_observation_coverage_assessment(
     return result
 
 
-def _situation_source_fingerprint(context: dict[str, Any]) -> str:
-    """Fingerprint the bounded, person-scoped LCR source view without its read clock."""
+def _situation_source_fingerprint(
+    context: dict[str, Any],
+    supplemental_state: dict[str, Any] | None = None,
+) -> str:
+    """Fingerprint every persisted input used by the assessment, excluding read clocks."""
     sources = context.get("sources") or {}
     stable_sources = {
         str(name): {
@@ -2127,7 +2130,8 @@ def _situation_source_fingerprint(context: dict[str, Any]) -> str:
         "missing_required_sources": sorted(context.get("missing_required_sources") or []),
         "missing_optional_sources": sorted(context.get("missing_optional_sources") or []),
         "sources": stable_sources,
-        "scope": "bounded_person_scoped_lcr_context_limit_50",
+        "supplemental_persisted_state": supplemental_state or {},
+        "scope": "bounded_person_scoped_lcr_context_and_delta_state",
     }
     encoded = json.dumps(
         material, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
@@ -2770,6 +2774,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     # Incomplete baseline or source coverage remains clarification-only.
     persisted_change_items = []
     persisted_change_history_bounded = False
+    change_source_state = []
+    baseline_source_state = []
     inspector = inspect(db.connection())
     change_table_available = inspector.has_table("changes")
     change_columns = {column["name"] for column in inspector.get_columns("changes")} if change_table_available else set()
@@ -2791,6 +2797,34 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         )
         persisted_change_history_bounded = len(active_change_rows) > 100
         active_change_rows = active_change_rows[:100]
+        # Fingerprint every active change row, not only candidates selected for
+        # caregiver attention. Rejection, retirement, or a changed verdict must
+        # invalidate an older situation snapshot too.
+        change_source_state = [
+            {
+                "id": str(change.id),
+                "updated_at": change.updated_at,
+                "created_at": change.created_at,
+                "is_active": bool(change.is_active),
+                "superseded_by_change_id": change.superseded_by_change_id,
+                "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "attention_candidate": bool(change.attention_candidate),
+                "follow_up_candidate": bool(change.follow_up_candidate),
+                "confirmation_status": change.confirmation_status,
+                "baseline_id": change.baseline_id,
+                "baseline_coverage_status": change.baseline_coverage_status,
+                "current_coverage_status": change.current_coverage_status,
+                "evidence_ids": list(change.evidence_ids or []),
+                "subject_type": change.subject_type,
+                "subject_id": change.subject_id,
+                "change_type": getattr(change.change_type, "value", change.change_type),
+                "change_direction": getattr(change.change_direction, "value", change.change_direction),
+                "previous_state": change.previous_state,
+                "current_state": change.current_state,
+                "explanation": change.explanation,
+            }
+            for change in active_change_rows
+        ]
         relevant_changes = []
         for change in active_change_rows:
             verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
@@ -2809,6 +2843,18 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             baseline_by_id = {
                 str(row.id): row for row in db.query(Baseline).filter(Baseline.person_id == person_id, Baseline.id.in_(baseline_ids), Baseline.is_active.is_(True), Baseline.superseded_by_baseline_id.is_(None)).all()
             }
+        baseline_source_state = [
+            {
+                "id": str(row.id),
+                "coverage_status": row.coverage_status,
+                "history_completeness": row.history_completeness,
+                "is_stable": bool(row.is_stable),
+                "is_active": bool(row.is_active),
+                "superseded_by_baseline_id": row.superseded_by_baseline_id,
+                "updated_at": row.updated_at,
+            }
+            for row in sorted(baseline_by_id.values(), key=lambda item: str(item.id))
+        ]
         event_ids = sorted({str(event_id) for change in relevant_changes for event_id in (change.evidence_ids or []) if event_id})
         event_by_id = {}
         if event_ids:
@@ -2850,7 +2896,15 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             })
     return {
         "schema_version": "situation-understanding.v1",
-        "source_state_fingerprint": _situation_source_fingerprint(context),
+        "source_state_fingerprint": _situation_source_fingerprint(
+            context,
+            {
+                "change_source_available": change_table_available,
+                "change_history_bounded": persisted_change_history_bounded,
+                "active_changes": change_source_state,
+                "referenced_active_baselines": baseline_source_state,
+            },
+        ),
         "person_id": str(person_id),
         "as_of": context.get("as_of"),
         "assessment_method": "deterministic_composition_of_persisted_lcr_sources",
@@ -2959,8 +3013,11 @@ def get_situation_understanding(request: Request, db: Session = Depends(get_db))
         assessment = json.loads(row["delta_json"])
     except (TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=503, detail="Stored situation assessment is invalid") from exc
-    current_context = build_lcr_context(db, person_id, limit_per_source=50)
-    current_fingerprint = _situation_source_fingerprint(current_context)
+    # Rebuild the same bounded assessment inputs used by reassessment. A
+    # fingerprint of LCR context alone misses changes to Delta Engine decisions
+    # and referenced baselines, even though those records affect care attention.
+    current_assessment = _build_situation_understanding_assessment(db, person_id)
+    current_fingerprint = current_assessment.get("source_state_fingerprint")
     stored_fingerprint = assessment.get("source_state_fingerprint") if isinstance(assessment, dict) else None
     if not stored_fingerprint:
         freshness_status = "legacy_snapshot_unfingerprinted"
