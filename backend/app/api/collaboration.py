@@ -5008,6 +5008,110 @@ def _care_history_event_text(record: dict[str, Any]) -> str:
 
 
 
+def _care_history_recall_context_lines(
+    db: Session,
+    person_id: str,
+    user_text: str,
+    *,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Fetch each requested care-history topic from person-scoped caregiver reports.
+
+    The general LCR context is relevance-ranked and bounded. For an explicit
+    question about what was recorded, that ranking must not hide one requested
+    topic merely because another topic ranked higher. This lookup retrieves
+    matching recorded caregiver events directly and keeps the original report.
+    """
+    topics = _care_history_requested_topics(user_text)
+    terms = sorted({
+        term
+        for _, variants in topics
+        for term in variants
+        if len(term) >= 4
+    })
+    if not topics or not terms:
+        return {"event_lines": [], "evidence_lines": [], "has_more": False}
+
+    bounded_limit = max(1, min(int(limit), 100))
+    topic_predicates = [CareEvent.description.ilike(f"%{term}%") for term in terms]
+    query = (
+        db.query(CareEvent)
+        .filter(
+            CareEvent.person_id == person_id,
+            CareEvent.status == "recorded",
+            CareEvent.created_by_caregiver_id.isnot(None),
+            or_(*topic_predicates),
+        )
+        .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
+    )
+    rows = query.limit(bounded_limit + 1).all()
+    has_more = len(rows) > bounded_limit
+    rows = rows[:bounded_limit]
+
+    event_lines: list[str] = []
+    linked_evidence_ids: list[str] = []
+    for row in rows:
+        caregiver_report = _care_history_event_text({"description": row.description})
+        if not caregiver_report:
+            continue
+        report_terms = set(re.findall(r"[a-z0-9']{3,}", caregiver_report.casefold()))
+        if not any(report_terms.intersection(variants) for _, variants in topics):
+            continue
+        evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
+        linked_evidence_ids.extend(evidence_ids)
+        event_lines.append(
+            "Person-scoped caregiver care-history report: "
+            + json.dumps({
+                "source_type": "events",
+                "event_id": str(row.id),
+                "record": {
+                    "id": str(row.id),
+                    "status": row.status,
+                    "created_by_caregiver_id": str(row.created_by_caregiver_id or ""),
+                    "description": caregiver_report,
+                    "event_type": row.event_type,
+                    "title": row.title,
+                    "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
+                    "evidence_ids": evidence_ids,
+                },
+            }, ensure_ascii=False, default=str)
+        )
+
+    evidence_lines: list[str] = []
+    if linked_evidence_ids:
+        evidence_rows = (
+            db.query(EvidenceModel)
+            .filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.id.in_(list(dict.fromkeys(linked_evidence_ids))),
+            )
+            .all()
+        )
+        for evidence in evidence_rows:
+            evidence_lines.append(
+                "Original evidence linked to the caregiver care-history report: "
+                + json.dumps({
+                    "source_type": "evidence",
+                    "evidence_id": str(evidence.id),
+                    "record": {
+                        "id": str(evidence.id),
+                        "source_text": evidence.source_text,
+                        "source_type": evidence.source_type,
+                        "evidence_kind": evidence.evidence_kind,
+                        "epistemic_status": evidence.epistemic_status,
+                        "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
+                        "reported_at": evidence.reported_at.isoformat() if evidence.reported_at else None,
+                    },
+                }, ensure_ascii=False, default=str)
+            )
+
+    return {
+        "event_lines": event_lines,
+        "evidence_lines": evidence_lines,
+        "has_more": has_more,
+    }
+
+
 def _medication_dose_recall_context_lines(
     db: Session,
     person_id: str,
@@ -6139,7 +6243,68 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         selected_source_counts[selected_source] = selected_source_counts.get(selected_source, 0) + 1
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
-            source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
+            if (
+            _CARE_HISTORY_INTENT_PATTERN.search(user_text or "")
+            and _care_history_requested_topics(user_text)
+        ):
+            care_history_recall_context = _care_history_recall_context_lines(
+                db, person_id, user_text,
+            )
+            direct_event_ids = set(_context_record_ids(
+                care_history_recall_context["event_lines"], "event_id",
+            ))
+            direct_evidence_ids = set(_context_record_ids(
+                care_history_recall_context["evidence_lines"], "evidence_id",
+            ))
+
+            def without_history_records(
+                lines: list[str], id_key: str, identifiers: set[str],
+            ) -> list[str]:
+                if not identifiers:
+                    return lines
+                retained: list[str] = []
+                for line in lines:
+                    try:
+                        payload = json.loads(line[line.index("{"):])
+                        record_id = str(payload.get(id_key) or "")
+                    except (ValueError, TypeError, json.JSONDecodeError):
+                        retained.append(line)
+                        continue
+                    if record_id not in identifiers:
+                        retained.append(line)
+                return retained
+
+            # Replace ranked variants with the exact caregiver-authored reports.
+            event_context = without_history_records(event_context, "event_id", direct_event_ids)
+            evidence_context = without_history_records(evidence_context, "evidence_id", direct_evidence_ids)
+            shared_lcr_lines = without_history_records(shared_lcr_lines, "event_id", direct_event_ids)
+            shared_lcr_lines = without_history_records(shared_lcr_lines, "evidence_id", direct_evidence_ids)
+            event_context = list(dict.fromkeys([
+                *event_context, *care_history_recall_context["event_lines"],
+            ]))
+            evidence_context = list(dict.fromkeys([
+                *evidence_context, *care_history_recall_context["evidence_lines"],
+            ]))
+            shared_lcr_lines = list(dict.fromkeys([
+                *shared_lcr_lines,
+                *care_history_recall_context["event_lines"],
+                *care_history_recall_context["evidence_lines"],
+            ]))
+            lcr_context_coverage["direct_care_history_recall"] = {
+                "status": (
+                    "partial" if care_history_recall_context["has_more"]
+                    else "available" if care_history_recall_context["event_lines"]
+                    else "no_matching_record"
+                ),
+                "event_count": len(care_history_recall_context["event_lines"]),
+                "evidence_count": len(care_history_recall_context["evidence_lines"]),
+                "history_complete": not care_history_recall_context["has_more"],
+            }
+            if care_history_recall_context["has_more"]:
+                lcr_context_coverage["retrieval_projection_complete"] = False
+                lcr_context_coverage["page_limit_reached"] = True
+
+        source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
                 "history_coverage": shared_lcr_context["history_coverage"],
