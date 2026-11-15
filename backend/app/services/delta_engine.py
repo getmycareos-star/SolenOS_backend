@@ -539,9 +539,18 @@ def _canonical_change_classification(change: Any, *, evidence_complete: bool) ->
         "stabilization": "unchanged",
     }
     if raw_type == "increase":
-        return ("worsened" if adverse else "more_frequent"), True
+        if adverse:
+            return "worsened", True
+        # An increase is not inherently better or worse. Without an explicit
+        # domain polarity or frequency measurement, preserve the raw Delta
+        # direction but do not manufacture a caregiver-facing interpretation.
+        return "uncertain", False
     if raw_type == "decrease":
-        return ("improved" if adverse else "less_frequent"), True
+        if adverse:
+            return "improved", True
+        # A decrease can mean improvement (e.g. pain) or deterioration
+        # (e.g. mobility). The subject label alone cannot establish polarity.
+        return "uncertain", False
     return categories.get(raw_type, "uncertain"), raw_type in categories
 
 
