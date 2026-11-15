@@ -16,7 +16,7 @@ from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage, EvidenceUpload
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion, CareDeltaRun
+from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -718,6 +718,52 @@ def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
     finally:
         teardown()
 
+
+
+def test_delta_history_becomes_stale_when_comparison_context_changes_after_review(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        reviewed_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        with TestingSessionLocal() as db:
+            db.add(CareDeltaRun(
+                id="delta-context-freshness",
+                person_id=person_id,
+                source="Caregiver report",
+                event_date=reviewed_at,
+                evidence_ids=[],
+                delta_json=json.dumps({
+                    "computed_changes": [{"baseline_assertion_ids": ["assertion-before"]}]
+                }),
+                model_name="benchmark-fixture",
+                created_by_caregiver_id=caregiver_id,
+                created_at=reviewed_at,
+            ))
+            db.add(CareStateRevision(
+                id="revision-after-delta-review",
+                person_id=person_id,
+                target_type="care_assertions",
+                target_id="assertion-before",
+                revision_number=2,
+                change_kind="updated",
+                before_state=json.dumps({"assertion_status": "reported"}),
+                after_state=json.dumps({"assertion_status": "accepted"}),
+                evidence_ids=[],
+                changed_by_caregiver_id=caregiver_id,
+                changed_at=reviewed_at + timedelta(minutes=1),
+            ))
+            db.commit()
+
+        response = client.get(
+            f"/api/v1/care-delta/runs/{person_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        run = next(item for item in response.json() if item["id"] == "delta-context-freshness")
+        assert run["source_freshness"]["status"] == "stale"
+        assert run["source_freshness"]["changed_context_count"] == 1
+        assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
+    finally:
+        teardown()
 
 
 def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatch):
