@@ -3448,9 +3448,9 @@ def _contains_unsupported_operational_claim(
             right_candidates = [position for position in right_candidates if position >= 0]
             source_clause = source[left:min(right_candidates) if right_candidates else len(source)]
             source_uncertainty = (
-                r"\b(?:may|might|could|possibly|perhaps|uncertain|not sure|"
+                r"\b(?:may|might|could|possibly|perhaps|maybe|hope|uncertain|not sure|"
                 r"don.t know|do not know|whether|cannot confirm|can.t confirm|"
-                r"unable to confirm)\b"
+                r"unable to confirm|if|unless|assuming|provided)\b"
             )
             if re.search(source_uncertainty, source_clause):
                 source_supports_claim = False
