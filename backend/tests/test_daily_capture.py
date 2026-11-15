@@ -1125,6 +1125,109 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
         teardown_db()
 
 
+def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
+    import app.api.v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        now = datetime.now(timezone.utc)
+        db = TestingSessionLocal()
+        db.add(CareEvent(
+            id="event-correction-retry",
+            person_id="person-daily-test",
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=now,
+            title="Medication report",
+            description="She stopped taking her afternoon medication.",
+            created_by_caregiver_id="caregiver-daily-test",
+        ))
+        db.commit()
+        db.close()
+
+        calls = {"count": 0}
+
+        def fail_once(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("injected reconciliation failure")
+            return {
+                "workflow": "care_record_correction",
+                "stages": {"reconciliation": "committed"},
+                "transaction_owner": "caller",
+            }
+
+        monkeypatch.setattr(api_v1, "execute_care_continuity_reconciliation", fail_once)
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        payload = {
+            "person_id": "person-daily-test",
+            "caregiver_id": "caregiver-daily-test",
+            "target_type": "care_event",
+            "target_id": "event-correction-retry",
+            "original_text": "She stopped taking her afternoon medication.",
+            "corrected_text": "She missed one afternoon dose yesterday. She has not stopped taking it.",
+            "reason": "The earlier report was inaccurate.",
+            "idempotency_key": "medication-correction-retry-001",
+        }
+
+        first = client.post("/api/v1/corrections", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_body = first.json()
+        assert first_body["processing_status"] == "pending"
+        assert first_body["processing_attempts"] == 1
+        assert first_body["care_continuity_execution"]["retry_required"] is True
+        correction_id = first_body["id"]
+
+        db = TestingSessionLocal()
+        try:
+            persisted = db.query(Correction).filter_by(id=correction_id).one()
+            assert persisted.processing_status == "pending"
+            assert persisted.processing_attempts == 1
+            assert persisted.care_continuity_execution["status"] == "pending"
+            assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
+            original = db.query(CareEvent).filter_by(id="event-correction-retry").one()
+            assert original.description == "She stopped taking her afternoon medication."
+        finally:
+            db.close()
+
+        # Retry the same request after a simulated process/session boundary.
+        retry = client.post(
+            f"/api/v1/corrections/person-daily-test/{correction_id}/retry",
+            headers=headers,
+        )
+        assert retry.status_code == 200, retry.text
+        retry_body = retry.json()
+        assert retry_body["id"] == correction_id
+        assert retry_body["processing_status"] == "completed"
+        assert retry_body["processing_attempts"] == 2
+        assert retry_body["processed_at"] is not None
+        assert retry_body["care_continuity_execution"]["retry_required"] is False
+
+        # Replaying the same idempotency key returns the same correction, not a
+        # second history item or a second reconciliation side effect.
+        replay = client.post("/api/v1/corrections", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["id"] == correction_id
+        assert replay.json()["processing_status"] == "completed"
+        assert calls["count"] == 2
+
+        changed_payload = {**payload, "corrected_text": "A different correction."}
+        conflict = client.post("/api/v1/corrections", headers=headers, json=changed_payload)
+        assert conflict.status_code == 409, conflict.text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
+            original = db.query(CareEvent).filter_by(id="event-correction-retry").one()
+            assert original.description == "She stopped taking her afternoon medication."
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
 def test_legacy_insight_and_correction_routes_require_scoped_sessions():
     setup_db()
     try:
