@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import Column, DateTime, ForeignKey, String, Table, Text, create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -27,6 +27,25 @@ engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+if "care_facts" not in Base.metadata.tables:
+    Table(
+        "care_facts", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("subject_type", String(80), nullable=False),
+        Column("subject_id", String(36)),
+        Column("fact_type", String(100), nullable=False),
+        Column("fact_value", Text, nullable=False),
+        Column("epistemic_status", String(32), nullable=False, server_default="reported"),
+        Column("effective_at", DateTime(timezone=True)),
+        Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("superseded_by_fact_id", String(36), ForeignKey("care_facts.id")),
+        Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("review_notes", Text),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("updated_at", DateTime(timezone=True)),
+    )
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
