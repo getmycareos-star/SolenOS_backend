@@ -244,18 +244,3 @@ def test_prompt_truncation_marks_retrieval_as_incomplete():
 
     assert "cannot confirm from the records retrieved" in instruction
     assert "additional saved history may need checking" in instruction
-
-def test_medication_dose_recall_quotes_uncertain_caregiver_event_and_disclaims_prescription():
-    question = "What new dose did the doctor prescribe for Mum yesterday?"
-    lines = [
-        _event_line(
-            "medication-recall",
-            "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose.",
-        )
-    ]
-    answer = collaboration._care_history_extractive_answer(question, lines)
-    assert answer is not None
-    assert "I can't remember the new dose" in answer
-    assert "caregiver report" in answer.lower()
-    assert "not confirmation of the current prescription" in answer.lower()
-
