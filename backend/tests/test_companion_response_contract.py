@@ -1050,13 +1050,13 @@ def test_companion_rejects_unsupported_language_codes(monkeypatch):
             "es",
             "¿Qué hemos registrado sobre el sueño?",
             "Mamá se despertó varias veces durante la noche.",
-            "El registro dice que mamá se despertó varias veces durante la noche.",
+            "Las notas guardadas mencionan el sueño.",
         ),
         (
             "fr",
             "Qu'est-ce qu'on a noté sur le sommeil ?",
             "Maman s'est réveillée plusieurs fois pendant la nuit.",
-            "Le dossier indique que maman s'est réveillée plusieurs fois pendant la nuit.",
+            "Les notes enregistrées mentionnent le sommeil.",
         ),
     ],
 )
@@ -1098,7 +1098,8 @@ def test_companion_retrieves_original_care_reports_for_spanish_and_french_topics
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["reply"] == reply
+        assert body["reply"].startswith(reply)
+        assert report in body["reply"], "the localized fallback must preserve the original-language caregiver quotation"
         assert event_id in body["source_event_ids"]
         assert report in captured["messages"][0]["content"]
         assert body["written_to_lcr"] is False
