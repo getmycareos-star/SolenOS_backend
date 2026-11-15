@@ -522,6 +522,12 @@ def _canonical_change_classification(
     coverage_complete = baseline in {"covered", "complete", "full", "sufficient"} and current in {
         "covered", "complete", "full", "sufficient"
     }
+    if (
+        significance_assessment is None
+        or str(getattr(significance_assessment, "target_type", "") or "").casefold() != "change"
+        or str(getattr(significance_assessment, "target_id", "") or "") != str(getattr(change, "id", "") or "")
+    ):
+        return "uncertain", False
     verdict_value = getattr(significance_assessment, "verdict", None)
     verdict = str(getattr(verdict_value, "value", verdict_value) or "").lower()
     try:
@@ -739,6 +745,8 @@ def _reconcile_from_change_intelligence(
             significance_assessment = db.query(SignificanceAssessment).filter(
                 SignificanceAssessment.id == change.significance_assessment_id,
                 SignificanceAssessment.person_id == person_id,
+                SignificanceAssessment.target_type == "change",
+                SignificanceAssessment.target_id == str(change.id),
                 SignificanceAssessment.is_active.is_(True),
             ).first()
         classification, classification_supported = _canonical_change_classification(
