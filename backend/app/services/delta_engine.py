@@ -1020,6 +1020,22 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         } for item in unresolved_contradictions],
     }
 
+    if not model_enrichment:
+        return _reconcile_from_change_intelligence(
+            db,
+            person_id=person_id,
+            event_date=event_date,
+            source=source,
+            content=content,
+            source_event_id=source_event_id,
+            evidence_ids=evidence_ids,
+            created_by_caregiver_id=created_by_caregiver_id,
+            persist=persist,
+            source_event_row=source_event_row,
+            source_event_snapshot_sha256=source_event_snapshot_sha256,
+            history_coverage=history_coverage,
+            existing_unresolved_care_loops=existing_unresolved_care_loops,
+        )
     base_url, model, timeout = _local_ollama_url()
     system_prompt = (
         "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. "
@@ -1064,22 +1080,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             "source_event_id": source_event_id,
         },
     }
-    if not model_enrichment:
-        return _reconcile_from_change_intelligence(
-            db,
-            person_id=person_id,
-            event_date=event_date,
-            source=source,
-            content=content,
-            source_event_id=source_event_id,
-            evidence_ids=evidence_ids,
-            created_by_caregiver_id=created_by_caregiver_id,
-            persist=persist,
-            source_event_row=source_event_row,
-            source_event_snapshot_sha256=source_event_snapshot_sha256,
-            history_coverage=history_coverage,
-            existing_unresolved_care_loops=existing_unresolved_care_loops,
-        )
     try:
         result = _request_delta_json(
             [
