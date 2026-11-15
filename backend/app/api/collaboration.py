@@ -6137,7 +6137,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "outcome": "success",
                 }, separators=(",", ":")),
             )
-        except HTTPException:
+        except HTTPException as inference_error:
             logger.warning(
                 "solenos_companion_stage %s",
                 json.dumps({
@@ -6149,7 +6149,40 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "outcome": "http_error",
                 }, separators=(",", ":")),
             )
-            raise
+            # If inference is unavailable, answer only when the authorized record
+            # itself supports a deterministic, non-clinical response. Never turn
+            # a model outage into an invented answer or a fabricated care action.
+            deterministic_reply = None
+            missing_measurement_fallback = _missing_requested_measurement_response(
+                user_text,
+                [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
+            )
+            medication_safety_fallback = _medication_change_safety_response(user_text)
+            trend_fallback = (
+                _trend_uncertainty_response(trend_assessment)
+                if trend_assessment and not trend_assessment.get("sufficient")
+                else None
+            )
+            conflict_fallback = _contradictory_event_evidence_response(user_text, event_context)
+            if medication_safety_fallback:
+                deterministic_reply = medication_safety_fallback
+            elif missing_measurement_fallback:
+                deterministic_reply = missing_measurement_fallback
+            elif conflict_fallback:
+                deterministic_reply = conflict_fallback
+            elif trend_fallback:
+                deterministic_reply = trend_fallback
+            elif document_question_for_fallback:
+                deterministic_reply = _document_extractive_answer(
+                    user_text, included_model_context_lines
+                )
+            elif not emergency:
+                deterministic_reply = _care_history_extractive_answer(
+                    user_text, included_model_context_lines
+                )
+            if not deterministic_reply:
+                raise
+            reply = deterministic_reply
         except Exception as exc:
             logger.warning(
                 "solenos_companion_stage %s",
