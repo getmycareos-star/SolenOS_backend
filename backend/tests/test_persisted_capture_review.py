@@ -164,6 +164,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
             person_id=session["person"]["id"],
             question="How long has this been happening?",
             status="open",
+            necessity="necessary",
         ).count() == 0
     finally:
         db.close()
