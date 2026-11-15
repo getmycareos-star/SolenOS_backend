@@ -190,17 +190,17 @@ def _source_clarification_text(value: object) -> str:
 
 def _duration_question_supported_by_source(question: str, source_text: str) -> bool:
     if not re.search(
-        r"\\b(?:how\\s+long|since\\s+when|for\\s+how\\s+long|how\\s+many\\s+(?:days?|weeks?|months?|nights?|hours?))\\b",
+        r"\b(?:how\s+long|since\s+when|for\s+how\s+long|how\s+many\s+(?:days?|weeks?|months?|nights?|hours?))\b",
         question,
         re.IGNORECASE,
     ):
         return True
     return bool(re.search(
-        r"\\b(?:has|have|had)\\s+been\\b"
-        r"|\\b(?:again|repeatedly|recurring|recurrent|frequently|often|usually|keeps?|continues?|ongoing|still|several|multiple|every|daily|nightly)\\b"
-        r"|\\bfor\\s+\\d+\\s+(?:days?|weeks?|months?|nights?|hours?)\\b"
-        r"|\\b\\d+\\s+(?:times?|falls?|episodes?)\\b"
-        r"|\\b(?:this|last)\\s+(?:week|month|year)\\b",
+        r"\b(?:has|have|had)\s+been\b"
+        r"|\b(?:again|repeatedly|recurring|recurrent|frequently|often|usually|keeps?|continues?|ongoing|still|several|multiple|every|daily|nightly)\b"
+        r"|\bfor\s+\d+\s+(?:days?|weeks?|months?|nights?|hours?)\b"
+        r"|\b\d+\s+(?:times?|falls?|episodes?)\b"
+        r"|\b(?:this|last)\s+(?:week|month|year)\b",
         source_text,
         re.IGNORECASE,
     ))
