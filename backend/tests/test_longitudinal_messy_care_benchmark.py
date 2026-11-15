@@ -1159,6 +1159,30 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
 
         monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen_chat)
 
+        # Delta-created assertions must be fed into the same persisted change
+        # reconciler that projects the authoritative Living Care Record.
+        from app.services import change_intelligence_reconciliation
+        original_reconcile = change_intelligence_reconciliation.reconcile_person_change_intelligence
+        reconciliation_calls = []
+
+        def track_canonical_reconciliation(
+            session, scoped_person_id, reference_time=None, *, protected_assertion_ids=None
+        ):
+            protected_ids = list(protected_assertion_ids or [])
+            reconciliation_calls.append((str(scoped_person_id), protected_ids))
+            return original_reconcile(
+                session,
+                scoped_person_id,
+                reference_time,
+                protected_assertion_ids=protected_ids,
+            )
+
+        monkeypatch.setattr(
+            change_intelligence_reconciliation,
+            "reconcile_person_change_intelligence",
+            track_canonical_reconciliation,
+        )
+
         original_event = None
         for event_spec in ordered_events:
             event_id = event_spec["id"]
@@ -1241,7 +1265,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 db.flush()
 
             model_result_by_call["value"] = fixture_result(event_spec)
-            delta_engine.reconcile_event(
+            delta_result = delta_engine.reconcile_event(
                 db,
                 person_id=person.id,
                 event_date=occurred_at,
@@ -1253,6 +1277,20 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 created_by_caregiver_id=caregiver.id,
                 model_enrichment=True,
             )
+            canonical_receipt = delta_result["provenance"]["canonical_change_reconciliation"]
+            if canonical_receipt["status"] == "completed":
+                assert canonical_receipt["protected_assertion_count"] > 0
+                assert any(
+                    scoped_person_id == str(person.id) and protected_ids
+                    for scoped_person_id, protected_ids in reconciliation_calls
+                )
+                persisted_protected_ids = {
+                    str(row[0]) for row in db.query(CareAssertion.id).filter(
+                        CareAssertion.person_id == person.id,
+                        CareAssertion.source_event_id == care_event.id,
+                    ).all()
+                }
+                assert persisted_protected_ids
 
         persisted_event_ids = {
             row[0] for row in db.query(CareEvent.id).filter(
