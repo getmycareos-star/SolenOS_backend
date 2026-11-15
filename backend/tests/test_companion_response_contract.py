@@ -278,7 +278,15 @@ def test_conversation_search_finds_old_relevant_turn_after_more_than_40_matches(
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     try:
-        token, person_id, caregiver_id = create_session(TestClient(app))
+        person_id = "conversation-search-person"
+        caregiver_id = "conversation-search-caregiver"
+        db.add(Person(id=person_id, name="Care recipient"))
+        db.flush()
+        db.add(Caregiver(
+            id=caregiver_id, name="Family caregiver", relationship="family",
+            person_id=person_id,
+        ))
+        db.flush()
         session = ConversationSession(
             id="conversation-search-session", person_id=person_id,
             caregiver_id=caregiver_id, status="archived",
