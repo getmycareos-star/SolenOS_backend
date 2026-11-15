@@ -173,11 +173,16 @@ class CorrectionBase(BaseModel):
 
 
 class CorrectionCreate(CorrectionBase):
-    pass
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class Correction(CorrectionBase):
     id: str
+    idempotency_key: Optional[str] = None
+    processing_status: str = "pending"
+    processing_attempts: int = 0
+    processing_error: Optional[str] = None
+    processed_at: Optional[datetime] = None
     created_at: datetime
     care_continuity_execution: Optional[dict[str, Any]] = None
 
