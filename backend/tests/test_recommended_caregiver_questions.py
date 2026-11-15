@@ -1135,3 +1135,50 @@ def test_broad_delta_medication_topic_does_not_create_caregiver_question():
         }
     finally:
         teardown()
+
+
+def test_delta_topic_medication_conflict_stays_internal_without_instruction_field():
+    setup()
+    try:
+        from app.services.care_continuity import next_best_questions
+
+        db = SessionLocal()
+        person = Person(id="delta-med-topic-person", name="Delta Medication Topic")
+        caregiver = Caregiver(
+            id="delta-med-topic-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        evidence = Evidence(
+            id="delta-med-topic-evidence", person_id=person.id,
+            type="caregiver_report",
+            source_text="Historical medication evidence is incomplete.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        )
+        contradiction = Contradiction(
+            id="delta-med-topic-contradiction",
+            person_id=person.id,
+            subject_type="delta_engine_report",
+            subject_id="medication",
+            field="medication",
+            description="Historical medication evidence remains uncertain.",
+            evidence_ids=[evidence.id],
+            source_assertion_ids=[],
+            resolution_status="unresolved",
+        )
+        db.add_all([person, caregiver, evidence, contradiction])
+        db.flush()
+
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        candidate = next(
+            item for item in candidates
+            if item.get("source_id") == contradiction.id
+        )
+        assert candidate["necessity"] == "not_assessed"
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).count() == 0
+        db.close()
+    finally:
+        teardown()
