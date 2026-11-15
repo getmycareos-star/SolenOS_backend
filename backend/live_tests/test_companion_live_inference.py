@@ -28,6 +28,8 @@ from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage, ConversationSession
+from app.models.uncertainty import Contradiction
+from app.services.care_continuity import next_best_questions
 
 
 pytestmark = pytest.mark.skipif(
@@ -898,3 +900,83 @@ def test_live_qwen_handoff_draft_selects_an_exact_daily_care_lcr_source():
         and any(reference.get("source_ref") == target_ref for reference in claim.get("source_references", []))
         for claim in provenance["claims"]
     ), provenance
+
+def test_live_qwen_surfaces_only_the_source_validated_professional_question():
+    """Real Qwen must route a source-backed medication clarification to the professional, not the caregiver."""
+    with TestClient(app) as client:
+        session = _create_session(client, "Live Qwen professional-question evaluator")
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        db = TestingSessionLocal()
+        try:
+            evidence_a = Evidence(
+                id=f"live-medication-report-a-{uuid.uuid4()}",
+                person_id=person_id,
+                type="note",
+                source_text="Caregiver report: the medication instruction was described as 5 mg.",
+                uploaded_by_caregiver_id=caregiver_id,
+                source_type="caregiver_report",
+                evidence_kind="caregiver_report",
+                epistemic_status="caregiver_reported",
+                time_provenance="caregiver_reported",
+            )
+            evidence_b = Evidence(
+                id=f"live-medication-report-b-{uuid.uuid4()}",
+                person_id=person_id,
+                type="note",
+                source_text="A separate caregiver report described the medication instruction as 10 mg.",
+                uploaded_by_caregiver_id=caregiver_id,
+                source_type="caregiver_report",
+                evidence_kind="caregiver_report",
+                epistemic_status="caregiver_reported",
+                time_provenance="caregiver_reported",
+            )
+            db.add_all([evidence_a, evidence_b])
+            db.flush()
+            conflict = Contradiction(
+                id=f"live-medication-conflict-{uuid.uuid4()}",
+                person_id=person_id,
+                subject_type="medication",
+                subject_id="recorded-medication",
+                field="current medication instruction",
+                description="Two caregiver reports disagree about the current instruction.",
+                evidence_ids=[evidence_a.id, evidence_b.id],
+                resolution_status="unresolved",
+            )
+            db.add(conflict)
+            db.commit()
+            expected_question = (
+                "Can the prescribing clinician or pharmacist confirm the current instruction for this medication?"
+            )
+            candidates = next_best_questions(db, person_id, persist=True)
+            assert any(
+                item.get("question") == expected_question
+                and item.get("intended_answerer_role") == "professional"
+                and item.get("persisted_question_id")
+                for item in candidates
+            ), candidates
+            event_count_before = db.query(CareEvent).filter(CareEvent.person_id == person_id).count()
+        finally:
+            db.close()
+
+        response = _ask(
+            client,
+            session,
+            "What should I ask the doctor about the medication?",
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        reply = payload.get("reply", "")
+        assert payload.get("ai_generated") is True, payload
+        assert payload.get("written_to_lcr") is False, payload
+        assert re.search(r"(?i)prescribing clinician|pharmacist|doctor", reply), reply
+        assert re.search(r"(?i)confirm|clarify|current instruction", reply), reply
+        assert len(reply.split()) <= 100, reply
+        assert reply.count("?") <= 1, reply
+
+        db = TestingSessionLocal()
+        try:
+            event_count_after = db.query(CareEvent).filter(CareEvent.person_id == person_id).count()
+            assert event_count_after == event_count_before
+        finally:
+            db.close()
