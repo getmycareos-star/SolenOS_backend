@@ -5592,6 +5592,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     caregiver_question_queue_lines: list[str] = []
     caregiver_question_direct_answer: str | None = None
     caregiver_question_direct_answer_used = False
+    care_history_direct_answer_used = False
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
 
@@ -6739,7 +6740,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         caregiver_question_direct_answer = _caregiver_question_extractive_answer(
             user_text, included_model_context_lines
         )
-        care_history_direct_answer_used = False
         # Explicit requests for what the caregiver recorded are source lookups,
         # not requests for model interpretation. Use the dedicated person-scoped
         # history query so relevance ranking cannot drop one requested topic.
