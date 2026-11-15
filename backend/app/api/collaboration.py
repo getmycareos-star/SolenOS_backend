@@ -5016,8 +5016,8 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
 def _caregiver_question_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
     """Quote a saved professional question when the caregiver asks what to raise."""
     intent = re.search(
-        r"\\b(?:what|which)\\s+(?:question|questions)\\s+(?:should|can|could)\\s+i\\s+(?:raise|ask|bring\\s+up)\\b|"
-        r"\\bwhat\\s+should\\s+i\\s+ask\\s+(?:the\\s+)?(?:healthcare\\s+professional|professional|doctor|clinician|care\\s+team)\\b",
+        r"\b(?:what|which)\\s+(?:question|questions)\\s+(?:should|can|could)\\s+i\\s+(?:raise|ask|bring\\s+up)\\b|"
+        r"\bwhat\\s+should\\s+i\\s+ask\\s+(?:the\\s+)?(?:healthcare\\s+professional|professional|doctor|clinician|care\\s+team)\\b",
         user_text or "",
         re.IGNORECASE,
     )
@@ -5056,7 +5056,7 @@ def _caregiver_question_extractive_answer(user_text: str, context_lines: list[st
         question = record.get("question")
         if not isinstance(question, str) or not question.strip():
             continue
-        question = re.sub(r"\\s+", " ", question).strip()[:350]
+        question = re.sub(r"\s+", " ", question).strip()[:350]
         question_terms = set(re.findall(r"[a-z0-9']{3,}", question.casefold()))
         overlap = query_terms & question_terms
         if query_terms and not overlap:
