@@ -389,10 +389,7 @@ def persist_source_clarification_questions(
                 ):
                     necessity_gaps.append((gap, rationale.strip(), dependency.strip(), gap_evidence_ids))
         matched_gap = necessity_gaps[0] if len(necessity_gaps) == 1 else None
-        if matched_gap is None:
-            # Extraction wording without a unique, evidence-backed LCR decision
-            # dependency remains in source review; it must not become an open task.
-            continue
+
 
         source_context = {
             "source_kind": source_kind,
