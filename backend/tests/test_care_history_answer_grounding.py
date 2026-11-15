@@ -1,6 +1,7 @@
 import json
 
 from app.api.collaboration import (
+    _care_history_event_text,
     _care_history_extractive_answer,
     _care_history_reply_covers_requested_topics,
     _lcr_missing_context_instruction,
@@ -80,6 +81,33 @@ def test_missing_medication_note_does_not_claim_a_caregiver_report_was_quoted():
     assert "couldn't confirm medication" in answer
     assert "caregiver report" not in answer
     assert "current prescription" not in answer
+
+
+def test_structured_history_fallback_excludes_generated_summaries_and_measurement_objects():
+    record = {
+        "description": json.dumps({
+            "summary": "AI-generated summary that was not entered by the caregiver.",
+            "medications": [{"name": "Example medicine", "dose": "10 mg"}],
+            "vitals": [{"name": "blood pressure", "value": "120/80"}],
+        }),
+    }
+
+    assert _care_history_event_text(record) == ""
+
+
+def test_structured_history_fallback_prefers_original_caregiver_capture_text():
+    record = {
+        "description": json.dumps({
+            "summary": "Generated summary must not be repeated.",
+            "original_capture": {
+                "description": "Caregiver's original note about poor sleep.",
+            },
+        }),
+    }
+
+    extracted = _care_history_event_text(record)
+    assert extracted == "Caregiver's original note about poor sleep."
+    assert "Generated summary" not in extracted
 
 
 def test_history_fallback_refuses_to_summarize_when_a_requested_topic_is_missing():
