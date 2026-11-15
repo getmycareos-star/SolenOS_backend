@@ -13,7 +13,7 @@ from app.core.database import Base, get_db
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
-from app.models.collaboration import ConversationMessage
+from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
 
@@ -210,6 +210,64 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
             assert {"record_type": "care_event", "record_id": event_id} in saved_refs
         finally:
             db.close()
+    finally:
+        teardown()
+
+
+
+def test_companion_reuses_prior_assistant_turns_as_non_evidence_context(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "I meant our earlier discussion about Mum's sleep."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        prior = ConversationSession(
+            id="prior-companion-session",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            status="archived",
+        )
+        db.add(prior)
+        db.flush()
+        db.add_all([
+            ConversationMessage(
+                id="prior-caregiver-turn",
+                session_id=prior.id,
+                role="user",
+                content="We discussed Mum's sleep after the appointment.",
+                evidence_ids_json="[]",
+            ),
+            ConversationMessage(
+                id="prior-assistant-turn",
+                session_id=prior.id,
+                role="assistant",
+                content="I said the earlier discussion described Mum's sleep as unsettled.",
+                evidence_ids_json="[]",
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did you mean about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        prompt = captured["messages"][-1]["content"]
+        assert "Prior caregiver message from another Companion session" in prompt
+        assert "We discussed Mum's sleep after the appointment." in prompt
+        assert "Prior SolenOS Companion reply from another session" in prompt
+        assert "I said the earlier discussion described Mum's sleep as unsettled." in prompt
+        assert "conversation context only; not care evidence or an LCR record" in prompt
+        assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
 
