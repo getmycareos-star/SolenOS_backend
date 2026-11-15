@@ -743,18 +743,18 @@ def _question_intent_dimension(value: str | None) -> str | None:
     """Separate distinct clarification intents that happen to share one care field."""
     text = " ".join(str(value or "").casefold().split())
     if re.search(
-        r"\\b(?:how\\s+long|for\\s+how\\s+long|since\\s+when|duration|how\\s+many\\s+"
-        r"(?:days?|weeks?|months?|nights?|hours?))\\b",
+        r"\b(?:how\s+long|for\s+how\s+long|since\s+when|duration|how\s+many\s+"
+        r"(?:days?|weeks?|months?|nights?|hours?))\b",
         text,
     ):
         return "duration"
     if re.search(
-        r"\\b(?:how\\s+many\\s+times|how\\s+often|how\\s+frequently|frequency|"
-        r"how\\s+many\\s+(?:episodes?|falls?|waking\\s+events?))\\b",
+        r"\b(?:how\s+many\s+times|how\s+often|how\s+frequently|frequency|"
+        r"how\s+many\s+(?:episodes?|falls?|waking\s+events?))\b",
         text,
     ):
         return "frequency"
-    if re.search(r"\\b(?:what\\s+is\\s+the\\s+dose|how\\s+much\\s+medication|dosage)\\b", text):
+    if re.search(r"\b(?:what\s+is\s+the\s+dose|how\s+much\s+medication|dosage)\b", text):
         return "dose"
     return None
 
