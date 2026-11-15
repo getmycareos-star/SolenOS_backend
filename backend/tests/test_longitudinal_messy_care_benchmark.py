@@ -2131,3 +2131,59 @@ def test_delta_does_not_persist_if_source_changes_during_model_inference(monkeyp
             source_event_id=event.id,
         ).count() == 0
         assert db.query(CareAssertion).filter_by(person_id=person.id).count() == 0
+
+
+def test_care_delta_api_persists_deterministically_without_local_model(monkeypatch):
+    """The default caregiver-facing Delta route must not wait on local model inference."""
+    from app.models.care_continuity import CareDeltaRun
+    from app.services import delta_engine
+
+    def unexpected_model_call(*args, **kwargs):
+        pytest.fail("default care-delta reconciliation must not call local model inference")
+
+    monkeypatch.setattr(delta_engine, "qwen_chat", unexpected_model_call)
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "delta-api-deterministic")
+        token = issue_session(db, person, caregiver)
+        event = add_event(
+            db,
+            person,
+            caregiver,
+            "daily_observation",
+            1,
+            "Caregiver observed repeated overnight waking",
+        )
+        db.commit()
+        event_id = event.id
+        event_date = event.occurred_at.isoformat()
+        person_id = person.id
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/care-delta/reconcile",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "person_id": person_id,
+            "event_date": event_date,
+            "source": "postgres_deterministic_delta_acceptance",
+            "content": "Caregiver observed repeated overnight waking",
+            "source_event_id": event_id,
+            "evidence_ids": [],
+            "persist": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["event_summary"] == "Caregiver observed repeated overnight waking"
+    assert payload["provenance"]["model_provider"] == "deterministic_change_intelligence"
+    assert payload["provenance"]["model"] == "none"
+    assert payload["provenance"]["delta_run_id"]
+
+    with TestingSessionLocal() as db:
+        saved = db.query(CareDeltaRun).filter(
+            CareDeltaRun.person_id == person_id,
+            CareDeltaRun.source_event_id == event_id,
+            CareDeltaRun.source == "postgres_deterministic_delta_acceptance",
+        ).one()
+        assert saved.model_name == "deterministic-change-intelligence"
+        assert json.loads(saved.delta_json)["provenance"]["delta_run_id"] == str(saved.id)
