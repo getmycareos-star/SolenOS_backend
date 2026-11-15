@@ -2002,3 +2002,33 @@ def test_situation_assessment_downgrades_persisted_delta_change_without_complete
             if item["record_id"] == "change-attention-incomplete"
         )
         assert clarification["category"] == "needs_clarification"
+
+def test_generic_delta_medication_topic_does_not_create_caregiver_task():
+    """A generic medication-topic contradiction is not proof of an active instruction conflict."""
+    from app.models.uncertainty import Contradiction, OpenQuestion
+    from app.services.care_continuity import next_best_questions
+
+    with TestingSessionLocal() as db:
+        person, _caregiver = make_person(db, "generic-medication-topic-conflict")
+        db.add(Contradiction(
+            person_id=person.id,
+            subject_type="delta_engine_report",
+            subject_id="medication",
+            field="medication",
+            description="Historical medication reports differ; current instruction is not established.",
+            evidence_ids=[],
+            source_assertion_ids=[],
+            resolution_status="unresolved",
+        ))
+        db.commit()
+
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        medication_candidates = [
+            item for item in candidates if item.get("source_kind") == "contradiction"
+        ]
+        assert medication_candidates
+        assert all(item.get("necessity") == "not_assessed" for item in medication_candidates)
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).count() == 0
