@@ -4747,7 +4747,7 @@ def _fit_model_context_lines_across_sources(
     return selected_raw, selected_rendered, used_chars, len(selected) < len(lines)
 
 
-_def _care_recipient_identity_guidance(display_name: str | None) -> str:
+def _care_recipient_identity_guidance(display_name: str | None) -> str:
     """Keep the one-time app naming step authoritative; Companion must not re-ask."""
     label = (display_name or "").strip()
     if label.casefold() in {"", "care recipient", "the care recipient", "patient", "the patient", "unknown", "unnamed"}:
