@@ -3222,3 +3222,121 @@ def test_caregiver_confirmed_situation_trajectory_states_are_scoped_and_audited(
         assert "non-empty reason" in empty_reason.text
     finally:
         teardown_db()
+
+
+def test_situation_detail_returns_linked_source_records_with_person_scope():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.core.change_enums import SituationState, SituationType
+        from app.models.change import Situation
+
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-situation-detail", name="Situation detail recipient")
+        caregiver = Caregiver(
+            id="caregiver-situation-detail",
+            name="Situation detail caregiver",
+            email="situation-detail@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="person-situation-detail-other", name="Other situation recipient")
+        other_caregiver = Caregiver(
+            id="caregiver-situation-detail-other",
+            name="Other situation caregiver",
+            email="situation-detail-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.flush()
+        evidence = Evidence(
+            id="situation-detail-evidence",
+            person_id=person.id,
+            type="care_note",
+            source_text="The caregiver recorded a mobility observation for review.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_label="Family caregiver",
+            evidence_status="verified",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=2),
+        )
+        event = CareEvent(
+            id="situation-detail-event",
+            person_id=person.id,
+            event_type="mobility",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=2),
+            title="Mobility observation",
+            description="A caregiver-recorded mobility observation.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        other_event = CareEvent(
+            id="situation-detail-other-event",
+            person_id=other_person.id,
+            event_type="mobility",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=2),
+            title="Other person's mobility observation",
+            created_by_caregiver_id=other_caregiver.id,
+        )
+        situation = Situation(
+            id="situation-detail-record",
+            person_id=person.id,
+            situation_type=SituationType.UNKNOWN,
+            state=SituationState.ACTIVE,
+            title="Mobility situation",
+            description="A saved situation linked to the mobility observation.",
+            signal_ids=[event.id],
+            signal_types=["mobility"],
+            temporal_start=datetime.now(timezone.utc) - timedelta(days=3),
+            temporal_end=datetime.now(timezone.utc) - timedelta(days=2),
+            change_ids=[],
+            pattern_ids=[],
+            context={},
+        )
+        other_situation = Situation(
+            id="situation-detail-other-record",
+            person_id=other_person.id,
+            situation_type=SituationType.UNKNOWN,
+            state=SituationState.ACTIVE,
+            title="Other mobility situation",
+            description="Other person's saved situation.",
+            signal_ids=[other_event.id],
+            signal_types=["mobility"],
+            temporal_start=datetime.now(timezone.utc) - timedelta(days=3),
+            temporal_end=datetime.now(timezone.utc) - timedelta(days=2),
+            change_ids=[],
+            pattern_ids=[],
+            context={},
+        )
+        db.add_all([evidence, event, other_event, situation, other_situation])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        person_id = person.id
+        situation_id = situation.id
+        other_person_id = other_person.id
+        other_situation_id = other_situation.id
+        db.close()
+
+        client = TestClient(app)
+        response = client.get(
+            f"/api/v1/change/situations/{person_id}/{situation_id}/detail",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        detail = response.json()
+        source_ids = {record["id"] for record in detail["source_records"]}
+        assert event.id in source_ids
+        assert evidence.id in source_ids
+        assert any(record["title"] == "Mobility observation" for record in detail["source_records"])
+        assert any("caregiver recorded a mobility observation" in (record["excerpt"] or "") for record in detail["source_records"])
+
+        cross_person = client.get(
+            f"/api/v1/change/situations/{other_person_id}/{other_situation_id}/detail",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert cross_person.status_code == 403
+    finally:
+        teardown_db()
