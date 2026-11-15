@@ -1750,6 +1750,69 @@ def test_situation_freshness_includes_new_persisted_care_events():
     finally:
         teardown_db()
 
+
+@pytest.mark.session_security
+def test_situation_freshness_detects_changes_outside_bounded_lcr_page():
+    """A source change beyond the 50-row LCR page still invalidates the snapshot."""
+    from datetime import timedelta
+
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Bounded History Freshness Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+        reference = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+
+        with TestingSessionLocal() as db:
+            for index in range(51):
+                db.add(CareEvent(
+                    id=f"bounded-freshness-event-{index:03d}",
+                    person_id=person_id,
+                    event_type="mobility",
+                    status="recorded",
+                    occurred_at=reference - timedelta(days=index),
+                    title=f"Recorded mobility update {index}",
+                    description=f"Caregiver recorded mobility update number {index}.",
+                    evidence_ids=[],
+                    created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_observed",
+                ))
+            db.commit()
+
+        initial = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert initial.status_code == 200, initial.text
+
+        with TestingSessionLocal() as db:
+            db.add(CareEvent(
+                id="bounded-freshness-event-older-than-page",
+                person_id=person_id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=reference - timedelta(days=120),
+                title="Older mobility update outside the recent page",
+                description="This persisted source is older than the 50-row LCR page.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_observed",
+            ))
+            db.commit()
+
+        current = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current.status_code == 200, current.text
+        assert current.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+        assert current.json()["source_freshness"]["reassessment_recommended"] is True
+    finally:
+        teardown_db()
+
 @pytest.mark.session_security
 def test_saved_situation_assessment_survives_freshness_rebuild_failure(monkeypatch):
     """A failed freshness check must not hide the last persisted care picture."""
