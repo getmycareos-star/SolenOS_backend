@@ -41,6 +41,7 @@ A regression assertion now requires every supported computed change to carry mat
 - Mounted the panel in `src/components/mvp-workspace/LCRCurrentUnderstanding.tsx`.
 - Extended `scripts/verify-change-intelligence-ui.mts` to guard backend retrieval, evidence requirements, uncertainty/conflict display, stale-source disclosure and primary-LCR mounting.
 - The panel waits for a scoped person ID and uses the session-aware API client. It does not generate or infer changes locally.
+- Saved comparisons are paginated (20 at a time); older records remain retrievable instead of silently disappearing after the first page.
 
 ### Backend — `getmycareos-star/SolenOS_backend`
 
@@ -73,3 +74,11 @@ These items remain open; the changes above do not close them:
 No frontend build, backend test run, PostgreSQL benchmark, live deployment check or production caregiver workflow is claimed as passing in this record. The current change is committed to `main`, but its runtime behavior still requires those checks.
 
 A 9/10 rating remains unearned until the end-to-end evidence above is captured.
+
+## Main commits from this work session
+
+- Frontend main: `a4badc8264487feda290263d866e67c616be9228` (care-change history UI and source-contract guard).
+- Backend main: `707f82326076169819834b186d9a2394d78c436c` (source-reference propagation, benchmark assertion, paginated API and route regression test).
+- Architecture record: `1f127af1d49223ca6c0ff7b599fb2bdeaf81b58b`.
+
+The repository status endpoint did not provide a successful frontend test/build result for the frontend commit. The backend showed a primary deployment status success, but that is not a pytest or PostgreSQL benchmark result. No build or test pass is claimed.
