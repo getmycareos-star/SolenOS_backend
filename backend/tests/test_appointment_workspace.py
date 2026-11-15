@@ -75,10 +75,10 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
     test_client, owner, other = client
     with engine.begin() as connection:
         connection.execute(text("""
-            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            INSERT INTO care_facts (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
             VALUES
-              ('owner-fact', :owner_id, 'sleep_pattern', 'Caregiver-reported sleep changes', 'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-              ('other-fact', :other_id, 'private_detail', 'Other person private care detail', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              ('owner-fact', :owner_id, 'person', :owner_id, 'sleep_pattern', 'Caregiver-reported sleep changes', 'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+              ('other-fact', :other_id, 'person', :other_id, 'private_detail', 'Other person private care detail', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
@@ -325,8 +325,8 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     person_id = session["person"]["id"]
     with engine.begin() as connection:
         connection.execute(text("""
-            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
-            VALUES (:id, :person_id, :type, :value, :status, :created, :updated)
+            INSERT INTO care_facts (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            VALUES (:id, :person_id, 'person', :person_id, :type, :value, :status, :created, :updated)
         """), [
             {"id": "appointment-fact-owned", "person_id": person_id, "type": "caregiver_observation",
              "value": "Family reports sleep has changed", "status": "reported",
@@ -469,8 +469,8 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
             "caregiver_id": owner["caregiver"]["id"],
         })
         connection.execute(text("""
-            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
-            VALUES ('understanding-fact', :person_id, 'mobility', 'Caregiver-reported mobility change',
+            INSERT INTO care_facts (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            VALUES ('understanding-fact', :person_id, 'person', :person_id, 'mobility', 'Caregiver-reported mobility change',
                     'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """), {"person_id": owner["person"]["id"]})
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
@@ -548,8 +548,8 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     # and be represented as a projection delta, not a clinical interpretation.
     with engine.begin() as connection:
         connection.execute(text("""
-            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
-            VALUES ('understanding-fact-2', :person_id, 'daily_function', 'Newly reported support requirement',
+            INSERT INTO care_facts (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            VALUES ('understanding-fact-2', :person_id, 'person', :person_id, 'daily_function', 'Newly reported support requirement',
                     'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """), {"person_id": owner["person"]["id"]})
     check = test_client.get("/api/v1/care-continuity/situation-understanding", headers=headers)
