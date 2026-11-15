@@ -798,6 +798,21 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         assert stored["notes"] == "Daily capture contract test"
         assert stored["medications"][0]["medication_name"] == "Caregiver-reported medication"
 
+        mismatched_delta = client.post(
+            "/api/v1/care-delta/reconcile",
+            headers=auth,
+            json={
+                "person_id": person_id,
+                "source": "Caregiver report",
+                "content": "This fabricated text was not part of the saved Daily Care update.",
+                "source_event_id": saved.json()["id"],
+                "evidence_ids": [],
+                "persist": False,
+            },
+        )
+        assert mismatched_delta.status_code == 422, mismatched_delta.text
+        assert "does not match the saved care update" in mismatched_delta.json()["detail"]
+
         denied = client.get(
             f"/api/v1/events/{person_id}",
             headers={"Authorization": f"Bearer {other_token}"},
