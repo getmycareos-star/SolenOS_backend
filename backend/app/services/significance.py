@@ -162,7 +162,7 @@ def assess_change(
 
     magnitude_score = 0.0
     if relative_change is not None:
-        magnitude_score = min(relative_change / 100.0, 1.0)
+        magnitude_score = min(abs(relative_change) / 100.0, 1.0)
         if math.isinf(relative_change) and current_count > 0:
             magnitude_score = 1.0
 
@@ -229,7 +229,17 @@ def assess_change(
 
     possible_context: List[str] = []
     possible_context.append("continuous persistence is not established by occurrence timestamps alone")
-    possible_context.append("observation coverage is not measured; recorded event rates may reflect documentation changes")
+    if (
+        comparison.get("baseline_coverage_status") == "covered"
+        and comparison.get("current_coverage_status") == "covered"
+    ):
+        possible_context.append(
+            "Both comparison windows have explicit observation-coverage records; this supports comparing recorded rates but does not prove every event was captured."
+        )
+    else:
+        possible_context.append(
+            "Observation coverage is incomplete or unknown; recorded event rates may reflect documentation changes."
+        )
     if evidence_status == EvidenceStatus.REPORTED:
         possible_context.append("observations are caregiver-reported; no clinician verification recorded")
     if functional_score == 0.0:
