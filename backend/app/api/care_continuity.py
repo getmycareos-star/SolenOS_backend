@@ -24,6 +24,7 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
+from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.care_attention_intelligence import build_care_attention_assessment
 from app.services.care_continuity import get_freshness
 from app.models.care import Evidence, Caregiver, CareEvent
@@ -1320,8 +1321,14 @@ def read_lcr_context(
     db: Session = Depends(get_db),
 ):
     """Read one bounded, permission-scoped context projection shared by LCR-facing modules."""
-    person_id, _ = _scoped_identity(request, db)
-    return build_lcr_context(db, person_id, limit_per_source=limit_per_source, query=query)
+    person_id, caregiver_id = _scoped_identity(request, db)
+    return build_unified_lcr_context(
+        db,
+        person_id,
+        caregiver_id,
+        limit_per_source=limit_per_source,
+        query=query,
+    )
 
 
 @router.get("/medications")
