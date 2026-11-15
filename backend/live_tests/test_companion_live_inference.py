@@ -393,78 +393,66 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
         assert re.search(r"\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\b", returning_reply, re.IGNORECASE), returning_reply
         assert len(returning_reply.split()) >= 8, returning_reply
 
-        # Simulate unavailable core history; Qwen must not falsely label the
-        # caregiver new or returning when retrieval coverage is incomplete.
         from app import main as main_module
-        monkeypatch.setattr(
-            main_module,
-            "build_lcr_context",
-            lambda *args, **kwargs: {"sources": {}, "missing_required_sources": ["events"]},
-        )
-        monkeypatch.setattr(
-            main_module,
-            "format_lcr_context_for_prompt",
-            lambda context: "Some required care history sources are unavailable.",
-        )
-        unknown_response = client.post(
-            "/api/lcr/orientation",
-            headers={"Authorization": f"Bearer {new_caregiver['access_token']}"},
-            json={"raw_input": "Hello"},
-        )
-        assert unknown_response.status_code == 200, unknown_response.text
-        unknown_body = unknown_response.json()
-        assert unknown_body.get("ai_generated") is True, unknown_body
-        assert unknown_body.get("provider_status") == "available", unknown_body
-        assert unknown_body.get("written_to_lcr") is False, unknown_body
-        unknown_reply = unknown_body.get("reply", "")
-        assert 8 <= len(unknown_reply.split()) <= 40, unknown_reply
-        assert len([part for part in re.split(r"(?<=[.!?])\s+", unknown_reply.strip()) if part]) <= 2, unknown_reply
-        assert re.search(r"\bsolenos\b", unknown_reply, re.IGNORECASE), unknown_reply
-        assert re.search(r"\b(?:care story|care record|care history)\b", unknown_reply, re.IGNORECASE), unknown_reply
-        assert not re.search(
-            r"\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
-            r"we talked about|first time here|new caregiver|starting from scratch)\b",
-            unknown_reply,
-            re.IGNORECASE,
-        ), unknown_reply
 
-        # Repeat each real inference once to detect stochastic stage leakage,
-        # not merely a single lucky response. Unknown history remains monkeypatched
-        # so the second trial exercises the same fail-closed retrieval condition.
-        repeated_trials = (
+        def assert_orientation(response, expected_stage):
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body.get("ai_generated") is True, body
+            assert body.get("provider_status") == "available", body
+            assert body.get("written_to_lcr") is False, body
+            reply = body.get("reply", "")
+            assert 8 <= len(reply.split()) <= 40, reply
+            assert len([part for part in re.split(r"(?<=[.!?])\\s+", reply.strip()) if part]) <= 2, reply
+            assert re.search(r"\\bsolenos\\b", reply, re.IGNORECASE), reply
+            assert re.search(r"\\b(?:care story|care record|care history)\\b", reply, re.IGNORECASE), reply
+            if expected_stage == "new":
+                assert re.search(r"\\b(?:start|starting|begin|beginning|today|welcome)\\b", reply, re.IGNORECASE), reply
+                assert not re.search(r"\\b(?:welcome back|already underway|your previous updates)\\b", reply, re.IGNORECASE), reply
+            elif expected_stage == "returning":
+                assert re.search(r"\\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\\b", reply, re.IGNORECASE), reply
+                assert not re.search(r"\\b(?:first time here|new caregiver|starting from scratch)\\b", reply, re.IGNORECASE), reply
+            else:
+                assert not re.search(
+                    r"\\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
+                    r"we talked about|first time here|new caregiver|starting from scratch)\\b",
+                    reply,
+                    re.IGNORECASE,
+                ), reply
+
+        # Repeat known-history cases against the real persisted LCR. The unknown
+        # retrieval override is deliberately scoped below and cannot contaminate
+        # these new/returning trials.
+        for trial_session, greeting, expected_stage in (
             (new_caregiver, "Good evening", "new"),
             (returning_caregiver, "Hello again", "returning"),
-            (new_caregiver, "Hello again", "unknown"),
-        )
-        for trial_session, greeting, expected_stage in repeated_trials:
+        ):
             repeated = client.post(
                 "/api/lcr/orientation",
                 headers={"Authorization": f"Bearer {trial_session['access_token']}"},
                 json={"raw_input": greeting},
             )
-            assert repeated.status_code == 200, repeated.text
-            repeated_body = repeated.json()
-            assert repeated_body.get("ai_generated") is True, repeated_body
-            assert repeated_body.get("provider_status") == "available", repeated_body
-            assert repeated_body.get("written_to_lcr") is False, repeated_body
-            repeated_reply = repeated_body.get("reply", "")
-            assert 8 <= len(repeated_reply.split()) <= 40, repeated_reply
-            assert len([part for part in re.split(r"(?<=[.!?])\s+", repeated_reply.strip()) if part]) <= 2, repeated_reply
-            assert re.search(r"\bsolenos\b", repeated_reply, re.IGNORECASE), repeated_reply
-            assert re.search(r"\b(?:care story|care record|care history)\b", repeated_reply, re.IGNORECASE), repeated_reply
-            if expected_stage == "new":
-                assert re.search(r"\b(?:start|starting|begin|beginning|today|welcome)\b", repeated_reply, re.IGNORECASE), repeated_reply
-                assert not re.search(r"\b(?:welcome back|already underway|your previous updates)\b", repeated_reply, re.IGNORECASE), repeated_reply
-            elif expected_stage == "returning":
-                assert re.search(r"\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\b", repeated_reply, re.IGNORECASE), repeated_reply
-                assert not re.search(r"\b(?:first time here|new caregiver|starting from scratch)\b", repeated_reply, re.IGNORECASE), repeated_reply
-            else:
-                assert not re.search(
-                    r"\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
-                    r"we talked about|first time here|new caregiver|starting from scratch)\b",
-                    repeated_reply,
-                    re.IGNORECASE,
-                ), repeated_reply
+            assert_orientation(repeated, expected_stage)
+
+        # Missing required history must remain unknown on two independent calls.
+        with monkeypatch.context() as scoped_patch:
+            scoped_patch.setattr(
+                main_module,
+                "build_lcr_context",
+                lambda *args, **kwargs: {"sources": {}, "missing_required_sources": ["events"]},
+            )
+            scoped_patch.setattr(
+                main_module,
+                "format_lcr_context_for_prompt",
+                lambda context: "Some required care history sources are unavailable.",
+            )
+            assert_orientation(unknown_response, "unknown")
+            repeated_unknown = client.post(
+                "/api/lcr/orientation",
+                headers={"Authorization": f"Bearer {new_caregiver['access_token']}"},
+                json={"raw_input": "Hello again"},
+            )
+            assert_orientation(repeated_unknown, "unknown")
 
         db = TestingSessionLocal()
         try:
