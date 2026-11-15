@@ -2025,11 +2025,28 @@ def _ollama_url() -> tuple[str, str]:
     return base, model
 
 
+def _companion_inference_timeout_seconds() -> float:
+    """Bound caregiver-facing wait time; slower model calls use source-grounded fallback."""
+    try:
+        configured = float(os.getenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "30"))
+    except (TypeError, ValueError):
+        configured = 30.0
+    if not math.isfinite(configured):
+        configured = 30.0
+    return max(5.0, min(configured, 60.0))
+
+
 def _ollama_chat(
     base: str, model: str, messages: list[dict], options: dict | None = None
 ) -> str:
-    # All SolenOS workflows use the same local/private Qwen gateway.
-    return qwen_chat(messages, options=options)
+    # Companion must not block a caregiver for the much longer background
+    # extraction timeout. If the model is slow or unavailable, the route uses
+    # its bounded, source-grounded deterministic response instead.
+    return qwen_chat(
+        messages,
+        timeout=_companion_inference_timeout_seconds(),
+        options=options,
+    )
 
 
 def _run_companion_inference_with_metrics(
