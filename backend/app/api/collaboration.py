@@ -5504,7 +5504,7 @@ def _care_history_reply_covers_requested_topics(
     context_lines: list[str],
 ) -> bool:
     topics = _care_history_requested_topics(user_text)
-    reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
+    reply_terms = set(re.findall(r"[\\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
     topic_terms = set().union(*(variants for _, variants in topics))
     detail_stopwords = _CARE_HISTORY_STOPWORDS | {
         "mum", "her", "his", "she", "he", "they", "was", "were", "is", "are",
