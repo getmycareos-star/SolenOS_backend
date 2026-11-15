@@ -1645,6 +1645,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
 
     correction_row.processing_status = "processing"
     correction_row.processing_started_at = now
+    correction_row.next_retry_at = None
     correction_row.processing_attempts = int(correction_row.processing_attempts or 0) + 1
     correction_row.processing_error = None
     correction_row.care_continuity_execution = {
@@ -1712,6 +1713,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
             raise HTTPException(status_code=404, detail="Correction not found") from exc
         correction_row.processing_status = "pending"
         correction_row.processing_started_at = None
+        correction_row.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=min(15 * (2 ** min(int(correction_row.processing_attempts or 1) - 1, 8)), 3600))
         correction_row.processing_error = "reconciliation_failed"
         correction_row.care_continuity_execution = {
             "workflow": "care_record_correction",
