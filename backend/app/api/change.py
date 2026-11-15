@@ -629,7 +629,7 @@ def get_situation_detail(
             source_type="observation",
             title=f"{observation.attribute}: {observation.value_text or observation.normalized_value or 'Recorded observation'}"[:240],
             excerpt=str(observation.source_passage or "")[:1000] or None,
-            occurred_at=observation.observed_at or observation.effective_at,
+            occurred_at=observation.observed_at or observation.occurred_at,
             recorded_at=observation.recorded_at,
             source_label="Saved observation",
             status=str(observation.epistemic_status or ""),
