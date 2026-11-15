@@ -1129,7 +1129,7 @@ def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch):
             main_module,
             "build_lcr_context",
             lambda *args, **kwargs: {
-                "sources": {},
+                "sources": {"documents": {"returned_count": 1}},
                 "missing_required_sources": ["events"],
             },
         )
