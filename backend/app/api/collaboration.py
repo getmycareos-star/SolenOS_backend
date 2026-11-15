@@ -6568,10 +6568,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             shared_lcr_lines = without_history_records(shared_lcr_lines, "evidence_id", direct_evidence_ids)
             event_context = list(dict.fromkeys([*event_context, *care_history_recall_context["event_lines"]]))
             evidence_context = list(dict.fromkeys([*evidence_context, *care_history_recall_context["evidence_lines"]]))
+            # Exact requested caregiver reports must precede broad ranked
+            # context. The bounded prompt builder keeps earlier lines first;
+            # appending these records can silently drop them when the context
+            # budget is full, even though source IDs are returned separately.
             shared_lcr_lines = list(dict.fromkeys([
-                *shared_lcr_lines,
                 *care_history_recall_context["event_lines"],
                 *care_history_recall_context["evidence_lines"],
+                *shared_lcr_lines,
             ]))
             lcr_context_coverage["direct_care_history_recall"] = {
                 "status": (
