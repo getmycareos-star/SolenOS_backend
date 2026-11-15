@@ -386,6 +386,33 @@ def _match_source_references(
     return list(unique.values())
 
 
+def _source_content_matches_event(content: str, event: CareEvent) -> bool:
+    """Return whether reconciliation input is actually present in its saved source event.
+
+    Daily Capture may send a structured projection of the saved JSON payload, so
+    exact text equality is not the only valid case. A projection is accepted only
+    when every supplied key/value is present unchanged in the persisted payload.
+    """
+    incoming = content.strip()
+    saved_description = str(event.description or "").strip()
+    saved_title = str(event.title or "").strip()
+    if incoming and incoming in {saved_description, saved_title}:
+        return True
+
+    try:
+        incoming_payload = json.loads(incoming)
+        saved_payload = json.loads(saved_description)
+    except (TypeError, ValueError):
+        return False
+
+    if not isinstance(incoming_payload, dict) or not isinstance(saved_payload, dict) or not incoming_payload:
+        return False
+    return all(
+        key in saved_payload and saved_payload[key] == value
+        for key, value in incoming_payload.items()
+    )
+
+
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
                     evidence_ids: list[str] | None = None, persist: bool = True,
@@ -399,8 +426,19 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         rows = db.query(Evidence.id).filter(Evidence.person_id == person_id, Evidence.id.in_(evidence_ids)).all()
         if {row[0] for row in rows} != set(evidence_ids):
             raise HTTPException(status_code=422, detail="Every evidence ID must belong to this care record.")
-    if source_event_id and not db.query(CareEvent.id).filter(CareEvent.id == source_event_id, CareEvent.person_id == person_id).first():
-        raise HTTPException(status_code=422, detail="source_event_id must belong to this care record.")
+    source_event_row = None
+    if source_event_id:
+        source_event_row = db.query(CareEvent).filter(
+            CareEvent.id == source_event_id,
+            CareEvent.person_id == person_id,
+        ).first()
+        if source_event_row is None:
+            raise HTTPException(status_code=422, detail="source_event_id must belong to this care record.")
+        if not _source_content_matches_event(content, source_event_row):
+            raise HTTPException(
+                status_code=422,
+                detail="The reconciliation text does not match the saved care update.",
+            )
 
     active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
@@ -754,12 +792,6 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             Evidence.id.in_(evidence_ids),
         ).all())
     source_evidence_rows = list({str(row.id): row for row in source_evidence_rows}.values())
-    source_event_row = (
-        db.query(CareEvent).filter(
-            CareEvent.person_id == person_id,
-            CareEvent.id == source_event_id,
-        ).first() if source_event_id else None
-    )
     source_evidence_by_id = {str(row.id): row for row in source_evidence_rows}
     prior_event_by_id = {str(row.id): row for row in prior_events}
     active_assertion_by_id = {

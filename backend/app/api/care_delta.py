@@ -1,5 +1,6 @@
 import json
 import hashlib
+from bisect import bisect_right
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
@@ -7,12 +8,18 @@ from sqlalchemy import inspect
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
-from app.models.care_continuity import CareDeltaRun, EvidenceObservation
+from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation
 from app.models.care import CareEvent, Evidence
 from app.schemas.care_delta import CareDeltaReconcileRequest
 from app.services.delta_engine import reconcile_event
 
 router = APIRouter(prefix="/care-delta", tags=["care-delta"])
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _scoped_identity(request: Request, db: Session) -> tuple[str, str]:
@@ -57,6 +64,23 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
     rows = db.query(CareDeltaRun).filter(
         CareDeltaRun.person_id == scoped_person_id
     ).order_by(CareDeltaRun.created_at.desc(), CareDeltaRun.id.desc()).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
+    schema_inspector = inspect(db.get_bind())
+    observation_history_checked = schema_inspector.has_table("evidence_observations")
+    care_state_history_checked = schema_inspector.has_table("care_state_revisions")
+    context_revision_times = []
+    run_times = [row.created_at for row in rows if row.created_at]
+    if care_state_history_checked and run_times:
+        earliest_run_time = min(run_times)
+        revision_rows = db.query(CareStateRevision.changed_at).filter(
+            CareStateRevision.person_id == scoped_person_id,
+            CareStateRevision.target_type.in_([
+                "care_assertions", "care_events", "evidence",
+                "information_gaps", "open_questions", "contradictions",
+            ]),
+            CareStateRevision.changed_at > earliest_run_time,
+        ).all()
+        context_revision_times = sorted(_as_utc(item[0]) for item in revision_rows if item[0])
+
     output = []
     for row in rows:
         try:
@@ -66,8 +90,17 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
         source_ids = [str(value) for value in (row.evidence_ids or []) if value]
         changed_observation_count = 0
         changed_source_count = 0
+        changed_context_count = 0
         freshness_reasons = []
-        observation_history_checked = inspect(db.get_bind()).has_table("evidence_observations")
+        if row.created_at and care_state_history_checked:
+            # A Delta run depends on more than its incoming event. New or revised
+            # assertions, prior events/evidence, open gaps, questions, and
+            # contradictions can all change the comparison basis after it ran.
+            changed_context_count = len(context_revision_times) - bisect_right(
+                context_revision_times, _as_utc(row.created_at)
+            )
+            if changed_context_count:
+                freshness_reasons.append("care_record_context_changed_after_review")
         if row.source_event_id:
             source_event = db.query(CareEvent).filter(
                 CareEvent.person_id == scoped_person_id,
@@ -121,9 +154,10 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
                     changed_source_count += changed_observation_count
                     freshness_reasons.append("source_observation_added_or_corrected_after_review")
         source_freshness = {
-            "status": "stale" if changed_source_count else "current" if (source_ids or row.source_event_id) and observation_history_checked else "not_checked",
+            "status": "stale" if changed_source_count or changed_context_count else "current" if (source_ids or row.source_event_id) and observation_history_checked and care_state_history_checked else "not_checked",
             "changed_source_count": changed_source_count,
             "changed_observation_count": changed_observation_count,
+            "changed_context_count": changed_context_count,
             "reasons": sorted(set(freshness_reasons)),
         }
         output.append({

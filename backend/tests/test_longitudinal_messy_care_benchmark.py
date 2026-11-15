@@ -1742,6 +1742,9 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
             db, person, caregiver, "sleep", 0,
             "New sleep observation",
         )
+        # The supplied source_event_id must point to the exact text being
+        # reconciled; this case tests bounded history, not mismatched attribution.
+        incoming.description = "Caregiver reported interrupted sleep."
         captured = {}
 
         monkeypatch.setattr(
