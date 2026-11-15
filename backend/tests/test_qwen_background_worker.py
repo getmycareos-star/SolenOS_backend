@@ -601,6 +601,7 @@ def test_daily_capture_delta_retry_reuses_saved_sources_and_completes_without_re
 
 def test_daily_capture_delta_retry_stops_when_original_source_is_invalidated(tmp_path, monkeypatch):
     from app.models.care import CareEvent
+    from app.models.capture_analysis import CaptureAnalysis
 
     sessions = _daily_delta_retry_store(tmp_path, monkeypatch)
     db = sessions()
