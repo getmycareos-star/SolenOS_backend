@@ -473,6 +473,34 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
             attention_candidate=True,
             follow_up_candidate=False,
         ))
+        db.add_all([
+            CareEvent(
+                id="lcr-context-owner-event-older",
+                person_id=person_id,
+                event_type="caregiver_observation",
+                status="recorded",
+                occurred_at=datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc),
+                title="Older owner-scoped context event",
+                description="An earlier dated event in the same person's care history.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                attention_candidate=False,
+                follow_up_candidate=False,
+            ),
+            CareEvent(
+                id="lcr-context-owner-event-middle",
+                person_id=person_id,
+                event_type="caregiver_observation",
+                status="recorded",
+                occurred_at=datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc),
+                title="Middle owner-scoped context event",
+                description="A middle dated event in the same person's care history.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                attention_candidate=False,
+                follow_up_candidate=False,
+            ),
+        ])
         db.commit()
         db.close()
 
@@ -490,6 +518,37 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
         own_events = payload["sources"]["events"]["items"]
         assert any(item.get("id") == event_id for item in own_events)
         assert payload["sources"]["events"]["returned_count"] <= 1
+
+        first_history_page = client.get(
+            "/api/v1/care-continuity/context?limit_per_source=1&include_all_history=true",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        second_history_page = client.get(
+            "/api/v1/care-continuity/context?limit_per_source=1&include_all_history=true&source_offsets_json=%7B%22events%22%3A1%7D",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert first_history_page.status_code == 200, first_history_page.text
+        assert second_history_page.status_code == 200, second_history_page.text
+        first_events = first_history_page.json()["sources"]["events"]
+        second_events = second_history_page.json()["sources"]["events"]
+        assert first_events["candidate_scan_complete"] is True
+        assert first_events["candidate_count"] == 3
+        assert first_events["has_more"] is True
+        assert second_events["offset"] == 1
+        assert second_events["candidate_scan_complete"] is True
+        assert len(first_events["items"]) == len(second_events["items"]) == 1
+        assert first_events["items"][0]["id"] != second_events["items"][0]["id"]
+        assert {
+            first_events["items"][0]["id"], second_events["items"][0]["id"]
+        }.issubset({
+            event_id, "lcr-context-owner-event-older", "lcr-context-owner-event-middle"
+        })
+
+        invalid_offsets = client.get(
+            "/api/v1/care-continuity/context?limit_per_source=1&include_all_history=true&source_offsets_json=%7B%22events%22%3A-1%7D",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert invalid_offsets.status_code == 422
 
         current = client.get(
             "/api/v1/care-continuity/current-care?limit_per_source=1",
