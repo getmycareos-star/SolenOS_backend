@@ -688,6 +688,14 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         raise RuntimeError("daily_capture_analysis_disappeared")
     analysis.candidates = candidates
     analysis.extraction_status = extraction_status
+    delta_status = str(delta_reconciliation.get("status") or "failed")
+    longitudinal_processing_status = (
+        "not_applicable"
+        if delta_status == "not_applicable"
+        else "completed"
+        if delta_status == "completed"
+        else "incomplete"
+    )
     analysis.execution_status = {
         "source_preservation": "verified",
         "evidence": "verified",
@@ -698,9 +706,11 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "longitudinal_retrieval": "verified" if projection_status == "verified" else "unavailable",
         "projection": projection_status,
         "reconciliation_run_id": reconciliation.get("run_id"),
-        "delta_reconciliation": delta_reconciliation.get("status", "failed"),
+        "delta_reconciliation": delta_status,
         "delta_run_id": delta_reconciliation.get("run_id"),
         "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
+        "longitudinal_processing": longitudinal_processing_status,
+        "longitudinal_processing_error": delta_reconciliation.get("error_code"),
     }
     current_job.status = "completed"
     current_job.result_text = json.dumps({
@@ -715,10 +725,12 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "assessment_status": assessment_status,
         "reconciliation_status": "completed",
         "projection_status": projection_status,
-        "delta_reconciliation_status": delta_reconciliation.get("status", "failed"),
+        "delta_reconciliation_status": delta_status,
         "delta_run_id": delta_reconciliation.get("run_id"),
         "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
-        "delta_engine_output_persisted": delta_reconciliation.get("status") == "completed",
+        "delta_engine_output_persisted": delta_status == "completed",
+        "longitudinal_processing_status": longitudinal_processing_status,
+        "longitudinal_processing_error": delta_reconciliation.get("error_code"),
         "model_output_written_to_lcr": False,
         "source_grounded_observations_projected": observation_count,
     }, ensure_ascii=False, sort_keys=True)
@@ -741,10 +753,12 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             "review_required": review_status == "required",
             "capture_mode": "structured_quick_check_in" if quick_check_in_capture else (capture_mode or "legacy_natural_language_update"),
             "projection_status": projection_status,
-            "delta_reconciliation_status": delta_reconciliation.get("status", "failed"),
+            "delta_reconciliation_status": delta_status,
             "delta_run_id": delta_reconciliation.get("run_id"),
             "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
-            "delta_engine_output_persisted": delta_reconciliation.get("status") == "completed",
+            "delta_engine_output_persisted": delta_status == "completed",
+            "longitudinal_processing_status": longitudinal_processing_status,
+            "longitudinal_processing_error": delta_reconciliation.get("error_code"),
             "model_output_written_to_lcr": False,
             "source_grounded_observations_projected": observation_count,
         },
