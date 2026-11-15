@@ -212,6 +212,11 @@ def _history_bundle(
             "reason": correction.reason,
             "recorded_at": _iso(correction.created_at),
             "created_by_caregiver_id": str(correction.caregiver_id),
+            "processing_status": correction.processing_status or "pending",
+            "processing_attempts": correction.processing_attempts or 0,
+            "processing_error": correction.processing_error,
+            "processed_at": _iso(correction.processed_at),
+            "care_continuity_execution": correction.care_continuity_execution,
         })
     for item in evidence:
         metadata_value = item.extra_metadata or {}
