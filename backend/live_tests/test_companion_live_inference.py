@@ -403,19 +403,19 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
             assert body.get("written_to_lcr") is False, body
             reply = body.get("reply", "")
             assert 8 <= len(reply.split()) <= 40, reply
-            assert len([part for part in re.split(r"(?<=[.!?])\\s+", reply.strip()) if part]) <= 2, reply
-            assert re.search(r"\\bsolenos\\b", reply, re.IGNORECASE), reply
-            assert re.search(r"\\b(?:care story|care record|care history)\\b", reply, re.IGNORECASE), reply
+            assert len([part for part in re.split(r"(?<=[.!?])\s+", reply.strip()) if part]) <= 2, reply
+            assert re.search(r"\bsolenos\b", reply, re.IGNORECASE), reply
+            assert re.search(r"\b(?:care story|care record|care history)\b", reply, re.IGNORECASE), reply
             if expected_stage == "new":
-                assert re.search(r"\\b(?:start|starting|begin|beginning|today|welcome)\\b", reply, re.IGNORECASE), reply
-                assert not re.search(r"\\b(?:welcome back|already underway|your previous updates)\\b", reply, re.IGNORECASE), reply
+                assert re.search(r"\b(?:start|starting|begin|beginning|today|welcome)\b", reply, re.IGNORECASE), reply
+                assert not re.search(r"\b(?:welcome back|already underway|your previous updates)\b", reply, re.IGNORECASE), reply
             elif expected_stage == "returning":
-                assert re.search(r"\\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\\b", reply, re.IGNORECASE), reply
-                assert not re.search(r"\\b(?:first time here|new caregiver|starting from scratch)\\b", reply, re.IGNORECASE), reply
+                assert re.search(r"\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\b", reply, re.IGNORECASE), reply
+                assert not re.search(r"\b(?:first time here|new caregiver|starting from scratch)\b", reply, re.IGNORECASE), reply
             else:
                 assert not re.search(
-                    r"\\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
-                    r"we talked about|first time here|new caregiver|starting from scratch)\\b",
+                    r"\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
+                    r"we talked about|first time here|new caregiver|starting from scratch)\b",
                     reply,
                     re.IGNORECASE,
                 ), reply
