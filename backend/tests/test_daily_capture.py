@@ -1179,6 +1179,16 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
         assert first_body["processing_attempts"] == 1
         assert first_body["care_continuity_execution"]["retry_required"] is True
         correction_id = first_body["id"]
+        pending_history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=20&offset=0",
+            headers=headers,
+        )
+        assert pending_history.status_code == 200, pending_history.text
+        pending_item = next(
+            row for row in pending_history.json()["records"]
+            if row["source_type"] == "correction" and row["source_id"] == correction_id
+        )
+        assert pending_item["processing_status"] == "pending"
 
         db = TestingSessionLocal()
         try:
@@ -1204,6 +1214,15 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
         assert retry_body["processing_attempts"] == 2
         assert retry_body["processed_at"] is not None
         assert retry_body["care_continuity_execution"]["retry_required"] is False
+        completed_history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=20&offset=0",
+            headers=headers,
+        )
+        completed_item = next(
+            row for row in completed_history.json()["records"]
+            if row["source_type"] == "correction" and row["source_id"] == correction_id
+        )
+        assert completed_item["processing_status"] == "completed"
 
         # Replaying the same idempotency key returns the same correction, not a
         # second history item or a second reconciliation side effect.
