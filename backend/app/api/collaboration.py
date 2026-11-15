@@ -5935,8 +5935,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Distinguish recorded facts, caregiver reports, interpretation, uncertainty, and conflicts. Internal source references are for grounding only; never show their identifiers to the caregiver unless explicitly asked. You may use chat "
             "history to resolve references, but never treat chat history as proof of a care event; assistant statements "
             "are not care evidence. Never invent events, dates, symptoms, diagnoses, medication status, outcomes, "
-            "appointments, actions, owners, deadlines, or trends. If the record does not answer, say the information is "
-            "not recorded. If records conflict, state the conflicting reports and that the disagreement is unresolved. "
+            "appointments, actions, owners, deadlines, or trends. If records conflict, state the conflicting reports "
+            "and that the disagreement is unresolved. The answer must follow the retrieval-completeness instruction "
+            "supplied for this request; a bounded or incomplete retrieval is not evidence that information is absent. "
             "For medication questions, report documented instructions only; never advise starting, stopping, or changing "
             "a medicine or dose. For urgent danger, direct the caregiver to urgent real-world help. Do not claim an action "
             "was completed unless the backend verified it. Never write conversation into the Living Care Record. "
@@ -6084,6 +6085,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         lcr_context_coverage["prompt_context_chars"] = context_chars
         lcr_context_coverage["prompt_context_budget_chars"] = 16000
         missing_context_instruction = _lcr_missing_context_instruction(lcr_context_coverage, context_truncated)
+        # Keep retrieval completeness in the system role as well as the data
+        # message. This prevents a lower-priority prompt or retry instruction
+        # from turning a partial search into a claim that information is absent.
+        model_messages[0]["content"] += " " + missing_context_instruction
         model_messages.append({
             "role": "user",
             "content": (
@@ -6363,9 +6368,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "Keep caregiver reports distinct from verified facts. Do not infer causes, diagnoses, "
                             "medication changes, dates, trends, outcomes, or completed actions. Ask at most one "
                             "focused question, and only if the caregiver_question_queue supplies a relevant question "
-                            "assigned to this caregiver. Do not invent a question or task. If the records do not answer "
-                            "a part of the question, say that part "
-                            "is not recorded. Return only the corrected caregiver-facing answer."
+                            "assigned to this caregiver. Do not invent a question or task. "
+                            + _lcr_missing_context_instruction(lcr_context_coverage, context_truncated)
+                            + " Return only the corrected caregiver-facing answer."
                         ),
                     },
                 ]
