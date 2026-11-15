@@ -162,7 +162,7 @@ def transition_change_confirmation(
     if payload.status in {"confirmed", "rejected", "inconclusive", "resolved"} and not (payload.reason or "").strip():
         raise HTTPException(
             status_code=422,
-            detail="A decision rationale is required for confirmed, rejected, or inconclusive decisions",
+            detail="A decision rationale is required for confirmed, rejected, inconclusive, or resolved decisions",
         )
 
     change = (
@@ -176,10 +176,10 @@ def transition_change_confirmation(
     if not change.is_active or change.superseded_by_change_id:
         raise HTTPException(status_code=409, detail="A superseded change cannot be confirmed or rejected")
     if payload.status == "resolved":
-        if change.change_type not in {ChangeType.CESSATION, ChangeType.DISAPPEARANCE}:
+        if change.change_type != ChangeType.CESSATION:
             raise HTTPException(
                 status_code=422,
-                detail="Only a fully covered cessation assessment can be marked resolved",
+                detail="Only a fully covered cessation candidate can be marked resolved",
             )
         if (
             change.baseline_coverage_status != "covered"
