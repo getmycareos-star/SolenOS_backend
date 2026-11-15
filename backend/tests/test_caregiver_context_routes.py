@@ -952,3 +952,52 @@ def test_claim_evidence_links_reject_duplicates_and_flag_duplicate_content_witho
     )
     assert reviewed_integrity.status_code == 200, reviewed_integrity.text
     assert reviewed_integrity.json()["independent_corroboration_status"] == "reviewed_multiple_distinct_sources_candidate"
+
+
+def test_lcr_context_api_applies_explicit_previous_calendar_year_window():
+    """The real authenticated LCR route must apply temporal filters, not lexical-only search."""
+    client = TestClient(app)
+    session = _session(client, "Temporal history caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+
+    with TestingSessionLocal() as db:
+        db.add_all([
+            CareEvent(
+                id="lcr-temporal-2025-event",
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime(2025, 6, 10, 9, 0, tzinfo=timezone.utc),
+                title="Care observation from 2025",
+                description="A persisted observation in the previous calendar year.",
+                created_by_caregiver_id=caregiver_id,
+            ),
+            CareEvent(
+                id="lcr-temporal-2024-event",
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime(2024, 6, 10, 9, 0, tzinfo=timezone.utc),
+                title="Care observation from 2024",
+                description="A persisted observation outside the previous calendar year.",
+                created_by_caregiver_id=caregiver_id,
+            ),
+        ])
+        db.commit()
+
+    response = client.get(
+        "/api/v1/care-continuity/context",
+        headers=headers,
+        params={"query": "What happened last year?", "limit_per_source": 10},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["temporal_window"]["basis"] == "explicit_previous_calendar_year"
+    event_rows = body["sources"]["events"]["items"]
+    event_ids = {row["id"] for row in event_rows}
+    assert "lcr-temporal-2025-event" in event_ids
+    assert "lcr-temporal-2024-event" not in event_ids
+    assert body["retrieval_contract"]["caregiver_scope_applied"] is True
+    assert body["sources"]["companion_conversation"]["is_evidence"] is False
