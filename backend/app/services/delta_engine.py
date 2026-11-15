@@ -563,22 +563,25 @@ def _reconcile_from_change_intelligence(
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
     reference_time = event_date or (source_event_row.occurred_at if source_event_row else None) or datetime.now(timezone.utc)
+    source_assertions = []
+    if source_event_id:
+        source_assertions = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.source_event_id == source_event_id,
+        ).all()
     reconciliation_receipt = None
     if persist:
         reconciliation_receipt = reconcile_person_change_intelligence(
             db,
             person_id,
             reference_time=reference_time,
+            protected_assertion_ids=[str(item.id) for item in source_assertions],
         )
         db.flush()
 
     linked_ids = {str(value) for value in evidence_ids if value}
     if source_event_id:
         linked_ids.add(str(source_event_id))
-        source_assertions = db.query(CareAssertion).filter(
-            CareAssertion.person_id == person_id,
-            CareAssertion.source_event_id == source_event_id,
-        ).all()
         linked_ids.update(str(item.id) for item in source_assertions)
     if evidence_ids:
         source_observations = db.query(EvidenceObservation).filter(
