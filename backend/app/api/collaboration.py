@@ -2203,6 +2203,7 @@ def _companion_replay_response(
         "claim_provenance": metadata.get("claim_provenance", {"coverage": "not_recorded", "claims": []}),
         "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
         "ai_generated": metadata.get("ai_generated", assistant.guard_verdict == "passed"),
+        "response_mode": metadata.get("response_mode"),
         "written_to_lcr": False,
         "persistence": "conversation_only",
         "idempotent_replay": True,
@@ -2212,6 +2213,8 @@ def _companion_replay_response(
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "guard_verdict": row.guard_verdict,
             "safety_note": row.safety_note,
+            "ai_generated": _stored_response_metadata(row).get("ai_generated"),
+            "response_mode": _stored_response_metadata(row).get("response_mode"),
             "claim_provenance": _stored_claim_provenance(row),
         } for row in history],
     }
@@ -4641,14 +4644,20 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
-def _stored_claim_provenance(row: ConversationMessage) -> dict | None:
-    """Read the immutable claim/source snapshot stored with an assistant turn."""
+def _stored_response_metadata(row: ConversationMessage) -> dict:
+    """Read the immutable response metadata stored with an assistant turn."""
     if row.role != "assistant":
-        return None
+        return {}
     try:
         metadata = json.loads(row.response_metadata_json or "{}")
     except (TypeError, ValueError):
-        return None
+        return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _stored_claim_provenance(row: ConversationMessage) -> dict | None:
+    """Read the immutable claim/source snapshot stored with an assistant turn."""
+    metadata = _stored_response_metadata(row)
     value = metadata.get("claim_provenance")
     return value if isinstance(value, dict) else None
 
@@ -7015,6 +7024,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "guard_verdict": row.guard_verdict,
             "safety_note": row.safety_note,
+            "ai_generated": _stored_response_metadata(row).get("ai_generated"),
+            "response_mode": _stored_response_metadata(row).get("response_mode"),
         } for row in history],
     }
 
@@ -7032,6 +7043,9 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
         "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
+        "ai_generated": _stored_response_metadata(row).get("ai_generated"),
+        "response_mode": _stored_response_metadata(row).get("response_mode"),
+        "safety_note": row.safety_note,
         "claim_provenance": _stored_claim_provenance(row),
     } for row in rows]}
 
