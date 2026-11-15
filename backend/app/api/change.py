@@ -217,6 +217,13 @@ def transition_change_confirmation(
         )
 
     supplied_evidence_ids = list(dict.fromkeys(payload.evidence_ids))
+    if payload.status == "resolved" and not set(supplied_evidence_ids).issubset(
+        set(change.evidence_ids or [])
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Resolution evidence must come from the source records linked to this change assessment",
+        )
     if supplied_evidence_ids:
         valid_event_ids = {
             row[0]
