@@ -8,6 +8,7 @@ from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
+from app.core.change_enums import ChangeType
 from app.schemas.change import (
     BaselineCreate,
     Baseline as BaselineSchema,
@@ -155,10 +156,10 @@ def transition_change_confirmation(
 ):
     """Record an audited caregiver confirmation decision without rewriting source evidence."""
     session = _require_person_scope(request, db, person_id)
-    allowed_statuses = {"awaiting_confirmation", "confirmed", "rejected", "inconclusive"}
+    allowed_statuses = {"awaiting_confirmation", "confirmed", "rejected", "inconclusive", "resolved"}
     if payload.status not in allowed_statuses:
         raise HTTPException(status_code=422, detail="Unsupported confirmation status")
-    if payload.status in {"confirmed", "rejected", "inconclusive"} and not (payload.reason or "").strip():
+    if payload.status in {"confirmed", "rejected", "inconclusive", "resolved"} and not (payload.reason or "").strip():
         raise HTTPException(
             status_code=422,
             detail="A decision rationale is required for confirmed, rejected, or inconclusive decisions",
@@ -174,11 +175,32 @@ def transition_change_confirmation(
         raise HTTPException(status_code=404, detail="Change assessment not found")
     if not change.is_active or change.superseded_by_change_id:
         raise HTTPException(status_code=409, detail="A superseded change cannot be confirmed or rejected")
+    if payload.status == "resolved":
+        if change.change_type not in {ChangeType.CESSATION, ChangeType.DISAPPEARANCE}:
+            raise HTTPException(
+                status_code=422,
+                detail="Only a fully covered cessation assessment can be marked resolved",
+            )
+        if (
+            change.baseline_coverage_status != "covered"
+            or change.current_coverage_status != "covered"
+            or not change.evidence_ids
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="A resolution decision requires complete observation coverage and linked historical source records",
+            )
+        if not payload.evidence_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="A resolution decision must reference the saved source records being reviewed",
+            )
     previous_status = change.confirmation_status or "detected"
     transitions = {
-        "detected": {"awaiting_confirmation", "confirmed", "rejected", "inconclusive"},
-        "awaiting_confirmation": {"confirmed", "rejected", "inconclusive"},
-        "confirmed": {"awaiting_confirmation"},
+        "detected": {"awaiting_confirmation", "confirmed", "rejected", "inconclusive", "resolved"},
+        "awaiting_confirmation": {"confirmed", "rejected", "inconclusive", "resolved"},
+        "confirmed": {"awaiting_confirmation", "resolved"},
+        "resolved": {"awaiting_confirmation"},
         "rejected": {"awaiting_confirmation"},
         "inconclusive": {"awaiting_confirmation"},
     }
