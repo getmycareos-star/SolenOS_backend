@@ -248,7 +248,7 @@ def create_companion_care_update_capture(
         ConversationSession.person_id == person_id,
         ConversationSession.caregiver_id == caregiver_id,
         ConversationSession.status == "active",
-    ).first()
+    ).with_for_update().first()
     if source_message is None:
         raise HTTPException(status_code=404, detail="Your original message could not be found")
     source_text = (source_message.content or "").strip()
