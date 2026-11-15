@@ -3419,13 +3419,13 @@ def _contains_unsupported_operational_claim(
         r"the doctor|the care team|the reminder|the medication|the dose|the test|the result)"
     )
     future_claim = (
-        rf"\b{future_subject}\b[^.!?]{0,80}"
+        rf"\b{future_subject}\b[^.!?]{{0,80}}"
         rf"\b(?:will|shall|is|was|are|were|is going to|are going to|"
         rf"is scheduled|has been scheduled|was scheduled|is planned|has been planned)\b"
-        rf"[^.!?]{0,80}\b{future_time}\b"
-        rf"|\b{future_time}\b[^.!?]{0,80}"
+        rf"[^.!?]{{0,80}}\b{future_time}\b"
+        rf"|\b{future_time}\b[^.!?]{{0,80}}"
         rf"\b(?:appointment|visit|call|review|test|scan|dose|medication|reminder)\b"
-        rf"[^.!?]{0,60}\b(?:will|is scheduled|has been scheduled|is planned)\b"
+        rf"[^.!?]{{0,60}}\b(?:will|is scheduled|has been scheduled|is planned)\b"
     )
     future_match = re.search(future_claim, text)
     if future_match:
