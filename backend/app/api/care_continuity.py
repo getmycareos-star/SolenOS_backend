@@ -1721,6 +1721,21 @@ def current_care_projection(
         authorized_evidence_ids = set(authorized_evidence_by_id)
     current_items: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    # A completed correction supersedes the corrected event in this current-care
+    # projection only. The original event remains untouched in source history and
+    # the Timeline. Pending/legacy corrections remain visible without replacing it.
+    latest_event_corrections: dict[str, dict[str, Any]] = {}
+    for correction_row in (sources.get("corrections") or {}).get("items", []):
+        if correction_row.get("target_type") != "care_event" or not correction_row.get("target_id"):
+            continue
+        target_id = str(correction_row["target_id"])
+        previous = latest_event_corrections.get(target_id)
+        if previous is None or str(correction_row.get("created_at") or "") >= str(previous.get("created_at") or ""):
+            latest_event_corrections[target_id] = correction_row
+    completed_corrected_event_ids = {
+        target_id for target_id, row in latest_event_corrections.items()
+        if row.get("processing_status") == "completed"
+    }
 
     def add(source_name: str, row: dict[str, Any], kind: str, priority: int, *, require_open: bool = False) -> None:
         source_id = str(row.get("id") or "")
@@ -1830,6 +1845,11 @@ def current_care_projection(
             "hedge_marker": row.get("hedge_marker") if source_name == "evidence_observations" else None,
             "ambiguity_note": row.get("ambiguity_note") if source_name == "evidence_observations" else None,
             "extraction_method": row.get("extraction_method") if source_name == "evidence_observations" else None,
+            "target_type": row.get("target_type") if source_name == "corrections" else None,
+            "target_id": row.get("target_id") if source_name == "corrections" else None,
+            "original_text": row.get("original_text") if source_name == "corrections" else None,
+            "corrected_text": row.get("corrected_text") if source_name == "corrections" else None,
+            "processing_status": row.get("processing_status") if source_name == "corrections" else None,
         })
         seen.add((source_name, source_id))
 
@@ -1850,6 +1870,8 @@ def current_care_projection(
     for row in (sources.get("follow_up_links") or {}).get("items", []):
         add("follow_up_links", row, "Follow-up", 4, require_open=True)
     for row in (sources.get("events") or {}).get("items", []):
+        if str(row.get("id") or "") in completed_corrected_event_ids:
+            continue
         event_type = str(row.get("event_type") or "").strip().lower()
         if event_type == "quick_daily_checkin":
             try:
@@ -1875,6 +1897,29 @@ def current_care_projection(
             # no automated attention/follow-up flag was raised. It remains a
             # caregiver-recorded event, not a verified clinical fact.
             add("events", row, "Daily care entry", 6)
+
+    for target_id, correction_row in latest_event_corrections.items():
+        processing_status = str(correction_row.get("processing_status") or "legacy_unverified")
+        is_completed = processing_status == "completed"
+        correction_projection = {
+            **correction_row,
+            "id": correction_row.get("id"),
+            "title": (
+                "Corrected care report" if is_completed
+                else "Correction awaiting update" if processing_status in {"pending", "processing"}
+                else "Earlier correction needs review"
+            ),
+            "description": str(correction_row.get("corrected_text") or ""),
+            "status": "current" if is_completed else processing_status,
+            "epistemic_status": "caregiver_reported" if is_completed else "uncertain",
+            "source_type": "caregiver_correction",
+            "source_label": "Caregiver correction",
+            "recorded_at": correction_row.get("created_at"),
+            "target_type": "care_event",
+            "target_id": target_id,
+        }
+        add("corrections", correction_projection, correction_projection["title"], 5)
+
     for row in (sources.get("caregiver_observations") or {}).get("items", []):
         add("caregiver_observations", row, "Caregiver observation", 6)
     for row in (sources.get("facts") or {}).get("items", []):
