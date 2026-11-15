@@ -636,3 +636,90 @@ def test_postgres_lcr_context_search_handles_native_uncertainty_enums():
             db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
             db.commit()
         engine.dispose()
+
+
+def test_postgres_concurrent_tracked_record_updates_allocate_unique_revision_numbers():
+    """Concurrent ORM writers cannot allocate the same care-state revision number."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"revision-lock-person-{suffix}"
+    caregiver_id = f"revision-lock-caregiver-{suffix}"
+    event_id = f"revision-lock-event-{suffix}"
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Revision lock integration fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Revision lock caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person_id,
+                event_type="daily_observation",
+                status="recorded",
+                occurred_at=REFERENCE_TIME,
+                title="Initial revision-lock fixture",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+        start = Barrier(2)
+
+        def update_title(title):
+            with Session() as db:
+                record = db.query(CareEvent).filter(
+                    CareEvent.id == event_id,
+                    CareEvent.person_id == person_id,
+                ).one()
+                start.wait(timeout=10)
+                record.title = title
+                db.commit()
+                return record.title
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(update_title, "Concurrent writer one")
+            second = pool.submit(update_title, "Concurrent writer two")
+            assert first.result(timeout=20) in {"Concurrent writer one", "Concurrent writer two"}
+            assert second.result(timeout=20) in {"Concurrent writer one", "Concurrent writer two"}
+
+        with Session() as db:
+            revisions = db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+                CareStateRevision.target_type == "care_events",
+                CareStateRevision.target_id == event_id,
+            ).order_by(CareStateRevision.revision_number.asc()).all()
+            assert [row.revision_number for row in revisions] == [1, 2, 3]
+            assert revisions[0].change_kind == "created"
+            assert all(row.change_kind == "updated" for row in revisions[1:])
+            persisted = db.query(CareEvent).filter(
+                CareEvent.id == event_id,
+                CareEvent.person_id == person_id,
+            ).one()
+            assert persisted.title in {"Concurrent writer one", "Concurrent writer two"}
+    finally:
+        with Session() as db:
+            db.execute(
+                text("DELETE FROM care_state_revisions WHERE person_id = :person_id"),
+                {"person_id": person_id},
+            )
+            db.query(CareEvent).filter(
+                CareEvent.id == event_id,
+                CareEvent.person_id == person_id,
+            ).delete(synchronize_session=False)
+            db.query(Caregiver).filter(
+                Caregiver.id == caregiver_id,
+                Caregiver.person_id == person_id,
+            ).delete(synchronize_session=False)
+            db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()
