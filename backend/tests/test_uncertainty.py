@@ -3999,35 +3999,17 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
                 person_id=person.id,
                 subject_type="person",
                 subject_id=person.id,
-                field="overnight_wake_frequency",
+                field="overnight_wake",
                 epistemic_state=EpistemicState.UNKNOWN,
                 gap_reason=GapReason.NOT_DOCUMENTED,
                 priority=Priority.HIGH,
                 lifecycle_status=GapLifecycleStatus.OPEN,
-                description="The overnight waking frequency needs clarification.",
+                description="The overnight waking frequency and duration need clarification.",
                 evidence_ids=[evidence.id],
                 context=[{
                     "caregiver_attention_required": True,
                     "necessity_rationale": "The next overnight care decision depends on understanding the waking pattern.",
                     "decision_dependency": "The caregiver needs the overnight waking pattern to plan appropriate support.",
-                }],
-            ),
-            InformationGap(
-                id="gap-extracted-overnight-waking",
-                person_id=person.id,
-                subject_type="person",
-                subject_id=person.id,
-                field="overnight_wake_duration",
-                epistemic_state=EpistemicState.UNKNOWN,
-                gap_reason=GapReason.NOT_DOCUMENTED,
-                priority=Priority.HIGH,
-                lifecycle_status=GapLifecycleStatus.OPEN,
-                description="The duration of the overnight waking pattern needs clarification.",
-                evidence_ids=[evidence.id],
-                context=[{
-                    "caregiver_attention_required": True,
-                    "necessity_rationale": "The next overnight care decision depends on understanding how long the waking pattern has been occurring.",
-                    "decision_dependency": "The caregiver needs the duration of the waking pattern to plan appropriate overnight support.",
                 }],
             ),
             InformationGap(
@@ -4054,7 +4036,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         questions = [
             "How many times did she wake overnight?",
             "Only the first 25 pages were processed; more pages need review.",
-            "What is the duration of the overnight waking pattern?",
+            "How long has she been waking several times overnight?",
             "How many times did she wake overnight?",
         ]
         first = persist_source_clarification_questions(
