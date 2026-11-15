@@ -8,7 +8,7 @@ from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
-from app.core.change_enums import ChangeType
+from app.core.change_enums import ChangeType, SituationState
 from app.schemas.change import (
     BaselineCreate,
     Baseline as BaselineSchema,
@@ -16,6 +16,8 @@ from app.schemas.change import (
     Pattern as PatternSchema,
     Situation as SituationSchema,
     SituationResponse,
+    SituationStateTransitionRequest,
+    SituationStateTransitionResponse,
     ChangeDetailResponse,
     ChangeConfirmationRequest,
     ChangeConfirmationTransitionResponse,
@@ -528,6 +530,143 @@ def detect_situations_endpoint(
 def list_situations(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_person_scope(request, db, person_id)
     return db.query(Situation).filter(Situation.person_id == person_id).order_by(Situation.created_at.desc()).all()
+
+
+@router.post(
+    "/situations/{person_id}/{situation_id}/state",
+    response_model=SituationStateTransitionResponse,
+)
+def transition_situation_state(
+    person_id: str,
+    situation_id: str,
+    payload: SituationStateTransitionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    session = _require_person_scope(request, db, person_id)
+    if not session.caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver session is required to update a situation")
+
+    situation = db.query(Situation).filter(
+        Situation.id == situation_id,
+        Situation.person_id == person_id,
+    ).with_for_update().first()
+    if situation is None:
+        raise HTTPException(status_code=404, detail="Care situation not found")
+    if not situation.is_active or situation.superseded_by_situation_id:
+        raise HTTPException(status_code=409, detail="A past care situation cannot be updated")
+
+    if payload.state == SituationState.EVOLVED:
+        raise HTTPException(status_code=422, detail="An evolved status is reserved for system reconciliation")
+    previous_state = situation.state
+    if payload.state == previous_state:
+        raise HTTPException(status_code=409, detail="This care situation already has that status")
+
+    transitions = {
+        SituationState.ACTIVE: {
+            SituationState.WORSENING, SituationState.IMPROVING,
+            SituationState.RESOLVED, SituationState.UNKNOWN,
+        },
+        SituationState.WORSENING: {
+            SituationState.ACTIVE, SituationState.IMPROVING,
+            SituationState.RESOLVED, SituationState.UNKNOWN,
+        },
+        SituationState.IMPROVING: {
+            SituationState.ACTIVE, SituationState.WORSENING,
+            SituationState.RESOLVED, SituationState.UNKNOWN,
+        },
+        SituationState.UNKNOWN: {
+            SituationState.ACTIVE, SituationState.WORSENING,
+            SituationState.IMPROVING, SituationState.RESOLVED,
+        },
+        SituationState.RESOLVED: {SituationState.ACTIVE},
+        SituationState.EVOLVED: set(),
+    }
+    if payload.state not in transitions.get(previous_state, set()):
+        raise HTTPException(status_code=409, detail="This care situation cannot move to that status")
+
+    evidence_ids = list(dict.fromkeys(value.strip() for value in payload.evidence_ids if value and value.strip()))
+    if not evidence_ids:
+        raise HTTPException(status_code=422, detail="A situation status change must reference saved source records")
+
+    valid_ids = set()
+    for model in (CareEvent, Evidence, CareAssertion, EvidenceObservation):
+        valid_ids.update(
+            row[0] for row in db.query(model.id).filter(
+                model.person_id == person_id,
+                model.id.in_(evidence_ids),
+            ).all()
+        )
+    if valid_ids != set(evidence_ids):
+        raise HTTPException(status_code=422, detail="Every source record must belong to this care record")
+
+    related_source_ids = set(situation.signal_ids or [])
+    linked_change_ids = list(situation.change_ids or [])
+    if linked_change_ids:
+        linked_changes = db.query(Change).filter(
+            Change.person_id == person_id,
+            Change.id.in_(linked_change_ids),
+        ).all()
+        for change in linked_changes:
+            related_source_ids.update(change.evidence_ids or [])
+
+    linked_pattern_ids = list(situation.pattern_ids or [])
+    if linked_pattern_ids:
+        linked_patterns = db.query(Pattern).filter(
+            Pattern.person_id == person_id,
+            Pattern.id.in_(linked_pattern_ids),
+        ).all()
+        linked_pattern_change_ids = set()
+        for pattern in linked_patterns:
+            related_source_ids.update(pattern.event_ids or [])
+            linked_pattern_change_ids.update(pattern.change_ids or [])
+        if linked_pattern_change_ids:
+            pattern_changes = db.query(Change).filter(
+                Change.person_id == person_id,
+                Change.id.in_(linked_pattern_change_ids),
+            ).all()
+            for change in pattern_changes:
+                related_source_ids.update(change.evidence_ids or [])
+
+    if not set(evidence_ids).issubset(related_source_ids):
+        raise HTTPException(
+            status_code=422,
+            detail="Resolution and trajectory decisions must use records linked to this care situation",
+        )
+
+    now = datetime.now(timezone.utc)
+    context = dict(situation.context) if isinstance(situation.context, dict) else {}
+    history = list(context.get("state_history") or [])
+    reason = payload.reason.strip()
+    history.append({
+        "previous_state": previous_state.value,
+        "new_state": payload.state.value,
+        "actor_caregiver_id": session.caregiver_id,
+        "reason": reason,
+        "evidence_ids": evidence_ids,
+        "recorded_at": now.isoformat(),
+        "source": "caregiver_confirmed",
+    })
+    context["state_history"] = history[-100:]
+    situation.context = context
+    situation.state = payload.state
+
+    try:
+        db.commit()
+        db.refresh(situation)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="The care situation status could not be saved") from exc
+
+    return SituationStateTransitionResponse(
+        situation=situation,
+        previous_state=previous_state,
+        new_state=payload.state,
+        actor_caregiver_id=session.caregiver_id,
+        reason=reason,
+        evidence_ids=evidence_ids,
+        recorded_at=now,
+    )
 
 
 @router.post("/situations/update", response_model=List[SituationSchema])
