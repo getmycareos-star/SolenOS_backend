@@ -121,7 +121,7 @@ jobs:
           PY
           # Simulate a production database whose earlier caregiver-access
           # revision is stamped although this one table is missing.
-          python -m alembic stamp 20261115_01_situation_states
+          python -m alembic stamp 20261115_05_correction_retry_schedule
           python -m alembic upgrade head
           python - <<'PY'
           import os
