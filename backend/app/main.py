@@ -161,44 +161,64 @@ class RequestBodySizeLimitMiddleware:
 
 settings = get_settings()
 
-async def correction_recovery_loop():
-    """Retry durable correction receipts left pending by failed or crashed workers."""
+def process_pending_corrections_once(batch_size: int = 20) -> dict:
+    """Process durable pending receipts and expired worker leases once."""
     from datetime import timedelta
     from app.api.v1 import _process_persisted_correction
 
-    while True:
-        db = SessionLocal()
-        try:
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
-            stale_processing = db.query(CorrectionModel).filter(
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    scan = SessionLocal()
+    try:
+        pending_ids = [
+            row.id for row in scan.query(CorrectionModel)
+            .filter(CorrectionModel.processing_status == "pending")
+            .order_by(CorrectionModel.created_at.asc())
+            .limit(batch_size).all()
+        ]
+        stale_ids = [
+            row.id for row in scan.query(CorrectionModel)
+            .filter(
                 CorrectionModel.processing_status == "processing",
                 CorrectionModel.processing_started_at.is_not(None),
                 CorrectionModel.processing_started_at < cutoff,
             )
-            pending = db.query(CorrectionModel).filter(
-                CorrectionModel.processing_status == "pending"
-            )
-            candidate_ids = [row.id for row in pending.order_by(CorrectionModel.created_at.asc()).limit(20).all()]
-            candidate_ids.extend(
-                row.id for row in stale_processing.order_by(CorrectionModel.processing_started_at.asc()).limit(20).all()
-            )
+            .order_by(CorrectionModel.processing_started_at.asc())
+            .limit(batch_size).all()
+        ]
+    finally:
+        scan.close()
+
+    result = {"examined": 0, "completed": 0, "pending": 0, "failed": 0}
+    for correction_id in dict.fromkeys(pending_ids + stale_ids):
+        result["examined"] += 1
+        db = SessionLocal()
+        try:
+            row = db.query(CorrectionModel).filter(CorrectionModel.id == correction_id).first()
+            if row is None:
+                continue
+            person_id = row.person_id
+            processed = _process_persisted_correction(db, person_id, correction_id)
+            if processed.processing_status == "completed":
+                result["completed"] += 1
+            elif processed.processing_status in {"pending", "processing"}:
+                result["pending"] += 1
+        except Exception:
+            result["failed"] += 1
+            logger.exception("Durable correction recovery failed for %s", correction_id)
+        finally:
             db.close()
-            for correction_id in dict.fromkeys(candidate_ids):
-                worker_db = SessionLocal()
-                try:
-                    row = worker_db.query(CorrectionModel).filter(CorrectionModel.id == correction_id).first()
-                    if row is not None:
-                        _process_persisted_correction(worker_db, row.person_id, row.id)
-                except Exception:
-                    logger.exception("Durable correction recovery failed for %s", correction_id)
-                finally:
-                    worker_db.close()
+    return result
+
+
+async def correction_recovery_loop():
+    """Retry durable correction receipts left pending by failed or crashed workers."""
+    while True:
+        try:
+            process_pending_corrections_once()
         except asyncio.CancelledError:
-            db.close()
             raise
         except Exception:
             logger.exception("Correction recovery scan failed")
-            db.close()
         await asyncio.sleep(15)
 
 
