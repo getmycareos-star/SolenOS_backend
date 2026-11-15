@@ -240,7 +240,7 @@ def test_medication_dose_recall_directly_retrieves_person_scoped_report_and_evid
     client = setup_client(monkeypatch)
     db = None
     try:
-        token, person_id, caregiver_id = create_session(client)
+        _token, person_id, caregiver_id = create_session(client)
         _other_token, other_person_id, other_caregiver_id = create_session(client)
         db = TestingSessionLocal()
         report = "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose."
