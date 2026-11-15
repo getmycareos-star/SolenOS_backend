@@ -6587,16 +6587,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # person-scoped accepted assertion must not disappear merely because the
         # projection's bounded candidate scan did not return it. Add only missing
         # assertion IDs, preserving caregiver attribution and the original status.
-        shared_assertion_ids = set(_context_record_ids(shared_lcr_lines, "source_id"))
         for assertion_line in assertion_context:
             try:
                 assertion_payload = json.loads(assertion_line[assertion_line.index("{"):])
                 assertion_id = str(assertion_payload.get("assertion_id") or "")
             except (ValueError, TypeError, json.JSONDecodeError):
                 continue
-            if not assertion_id or assertion_id in shared_assertion_ids:
+            if not assertion_id:
                 continue
-            shared_lcr_lines.append(
+            attributed_line = (
                 "Caregiver-attributed LCR assertion (status preserved): "
                 + json.dumps({
                     "source_type": "assertions",
@@ -6604,7 +6603,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "record": assertion_payload,
                 }, ensure_ascii=False)
             )
-            shared_assertion_ids.add(assertion_id)
+            projection_index = None
+            for index, projection_line in enumerate(shared_lcr_lines):
+                try:
+                    projection_payload = json.loads(projection_line[projection_line.index("{"):])
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+                if (
+                    str(projection_payload.get("source_id") or "") == assertion_id
+                    and projection_payload.get("source_type") in {"assertions", "care_assertion"}
+                ):
+                    projection_index = index
+                    break
+            if projection_index is None:
+                shared_lcr_lines.append(attributed_line)
+            else:
+                # Preserve the projection's position and source identity while
+                # making caregiver attribution and the unverified status explicit.
+                shared_lcr_lines[projection_index] = attributed_line
 
         # The shared LCR projection is the single source set for model context.
         # The purpose-specific lists above remain available to deterministic
@@ -6769,8 +6785,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # full-history retrieval so ranking in the bounded prompt cannot drop
         # one of the requested topics when inference is unavailable.
         if (
-            not caregiver_question_direct_answer
-            and care_history_recall_context
+            care_history_recall_context
             and re.search(
                 r"\bwhat\s+(?:has|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
                 r"(?:recorded|record|logged|saved|noted)\b",
@@ -6778,10 +6793,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 re.IGNORECASE,
             )
         ):
-            caregiver_question_direct_answer = _care_history_extractive_answer(
+            history_answer = _care_history_extractive_answer(
                 user_text, care_history_recall_context.get("event_lines") or []
             )
-            care_history_direct_answer_used = bool(caregiver_question_direct_answer)
+            if history_answer:
+                # Prefer the dedicated full-history answer over a bounded,
+                # partial prompt extract. Missing topics stay explicitly unknown.
+                caregiver_question_direct_answer = history_answer
+                care_history_direct_answer_used = True
         # A literal "what did the caregiver record" request is a source lookup,
         # not a request for generated interpretation. Answer it from the exact
         # authorized caregiver-authored event text before invoking a slow model.
