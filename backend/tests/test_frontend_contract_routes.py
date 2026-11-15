@@ -473,6 +473,25 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
             attention_candidate=True,
             follow_up_candidate=False,
         ))
+        db.commit()
+        db.close()
+
+        own = client.get(
+            "/api/v1/care-continuity/context?limit_per_source=1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert own.status_code == 200, own.text
+        payload = own.json()
+        assert payload["read_only"] is True
+        assert payload["history_coverage"] == "bounded_recent_subset"
+        assert "schema_status" in payload
+        assert "missing_required_sources" in payload
+        assert "missing_optional_sources" in payload
+        own_events = payload["sources"]["events"]["items"]
+        assert any(item.get("id") == event_id for item in own_events)
+        assert payload["sources"]["events"]["returned_count"] <= 1
+
+        db = TestingSessionLocal()
         db.add_all([
             CareEvent(
                 id="lcr-context-owner-event-older",
@@ -503,21 +522,6 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
         ])
         db.commit()
         db.close()
-
-        own = client.get(
-            "/api/v1/care-continuity/context?limit_per_source=1",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert own.status_code == 200, own.text
-        payload = own.json()
-        assert payload["read_only"] is True
-        assert payload["history_coverage"] == "bounded_recent_subset"
-        assert "schema_status" in payload
-        assert "missing_required_sources" in payload
-        assert "missing_optional_sources" in payload
-        own_events = payload["sources"]["events"]["items"]
-        assert any(item.get("id") == event_id for item in own_events)
-        assert payload["sources"]["events"]["returned_count"] <= 1
 
         first_history_page = client.get(
             "/api/v1/care-continuity/context?limit_per_source=1&include_all_history=true",
