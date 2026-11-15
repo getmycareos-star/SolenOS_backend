@@ -43,6 +43,12 @@ def upgrade():
             "corrections",
             ["person_id", "idempotency_key"],
         )
+    if "uq_corrections_person_request_sha256" not in existing_constraints:
+        op.create_unique_constraint(
+            "uq_corrections_person_request_sha256",
+            "corrections",
+            ["person_id", "request_sha256"],
+        )
 
 
 def downgrade():
