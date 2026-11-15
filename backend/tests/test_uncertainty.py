@@ -3981,7 +3981,17 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
-        db.add_all([person, caregiver, reviewing_caregiver, evidence, event])
+        document_evidence = Evidence(
+            id="evidence-document-question",
+            person_id=person.id,
+            type="document",
+            evidence_kind="document",
+            epistemic_status="documented_record",
+            source_text="The discharge summary records a medication change before discharge.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, reviewing_caregiver, evidence, event, document_evidence])
         db.commit()
 
         questions = [
@@ -4055,15 +4065,16 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             caregiver_id=reviewing_caregiver.id,
             source_kind="document_extraction",
             source_record_type="evidence",
-            source_record_id=evidence.id,
-            evidence_ids=[evidence.id],
+            source_record_id=document_evidence.id,
+            evidence_ids=[document_evidence.id],
             questions=["Was her medication changed before discharge?"],
         )
         db.commit()
         assert len(document_questions) == 1
         assert document_questions[0].created_by_caregiver_id == reviewing_caregiver.id
+        assert document_questions[0].evidence_ids == [document_evidence.id]
         assert document_questions[0].context[0]["source_record_refs"] == [
-            {"record_type": "evidence", "record_id": evidence.id}
+            {"record_type": "evidence", "record_id": document_evidence.id}
         ]
         assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 3
         all_question_revisions = db.query(CareStateRevision).filter(
