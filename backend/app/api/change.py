@@ -634,10 +634,13 @@ def transition_situation_state(
             detail="Resolution and trajectory decisions must use records linked to this care situation",
         )
 
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="A non-empty reason is required for a situation status change")
+
     now = datetime.now(timezone.utc)
     context = dict(situation.context) if isinstance(situation.context, dict) else {}
     history = list(context.get("state_history") or [])
-    reason = payload.reason.strip()
     history.append({
         "previous_state": previous_state.value,
         "new_state": payload.state.value,
