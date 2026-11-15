@@ -4952,7 +4952,7 @@ _CARE_HISTORY_STOPWORDS = {
 
 
 def _care_history_requested_topics(user_text: str) -> list[tuple[str, set[str]]]:
-    tokens = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold()))
+    tokens = set(re.findall(r"[\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE))
     requested = [
         (label, variants)
         for label, variants in _CARE_HISTORY_TOPIC_GROUPS.items()
@@ -5055,7 +5055,7 @@ def _care_history_recall_context_lines(
         caregiver_report = _care_history_event_text({"description": row.description})
         if not caregiver_report:
             continue
-        report_terms = set(re.findall(r"[a-z0-9']{3,}", caregiver_report.casefold()))
+        report_terms = set(re.findall(r"[\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
         if not any(report_terms.intersection(variants) for _, variants in topics):
             continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
@@ -5237,7 +5237,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         description = _care_history_event_text(record)
         if not description:
             continue
-        terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
+        terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
         matched_topics = {
             label for label, variants in topics if terms & variants
         }
