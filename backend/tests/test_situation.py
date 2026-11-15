@@ -1804,3 +1804,51 @@ def test_baseline_freshness_is_partial_schema_safe_and_quality_gated():
         assert assessment["care_attention"]["source_coverage"]["persisted_baseline_source_complete"] is False
     finally:
         teardown_db()
+
+@pytest.mark.session_security
+def test_situation_freshness_includes_persisted_contradictions():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Contradiction Freshness Person")
+        person_id = created["person"]["id"]
+
+        initial = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert initial.status_code == 200, initial.text
+
+        current_before = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_before.status_code == 200, current_before.text
+        assert current_before.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+
+        with TestingSessionLocal() as db:
+            db.add(Contradiction(
+                id="freshness-contradiction",
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id=person_id,
+                field="mobility",
+                description="Two saved reports describe different mobility states.",
+                matching_candidate_ids=[],
+                evidence_ids=[],
+                source_assertion_ids=[],
+                resolution_status="unresolved",
+            ))
+            db.commit()
+
+        current_after = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_after.status_code == 200, current_after.text
+        assert current_after.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+        assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
+    finally:
+        teardown_db()
