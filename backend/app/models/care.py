@@ -157,4 +157,5 @@ class Correction(Base):
     care_continuity_execution = Column(JSON, nullable=True)
     processed_at = Column(DateTime(timezone=True), nullable=True)
     processing_started_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
