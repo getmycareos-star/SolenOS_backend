@@ -917,6 +917,40 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             "source_references": item["source_record_refs"],
         })
 
+    # Keep the deterministic comparison projection in sync with the claim-level
+    # source verification performed above. computed_changes is consumed by the
+    # caregiver UI and persisted in CareDeltaRun; leaving its references empty
+    # would discard the exact provenance already established for each finding.
+    for computed_item in computed:
+        domain = str(computed_item.get("domain") or "")
+        name = _normalise(computed_item.get("name"))
+        matching_items = [
+            item for item in result.get(domain, [])
+            if _normalise(item.get("name")) == name
+        ]
+        if len(matching_items) != 1:
+            computed_item["certainty"] = "uncertain"
+            computed_item["evidence_supported"] = False
+            computed_item["claim_supported"] = False
+            computed_item["source_record_refs"] = []
+            computed_item["provenance_warning"] = (
+                "The comparison could not be linked to one unambiguous source finding."
+            )
+            continue
+        source_item = matching_items[0]
+        computed_item["source_record_refs"] = list(source_item.get("source_record_refs") or [])
+        computed_item["evidence_supported"] = source_item.get("evidence_supported") is True
+        computed_item["claim_supported"] = source_item.get("claim_supported")
+        computed_item["certainty"] = source_item.get("certainty", "uncertain")
+        computed_item["source_reference_status"] = source_item.get("source_reference_status", "not_matched")
+        computed_item["historical_only"] = source_item.get("historical_only") is True
+        if source_item.get("provenance_warning"):
+            computed_item["provenance_warning"] = source_item["provenance_warning"]
+        if not computed_item["source_record_refs"]:
+            computed_item["certainty"] = "uncertain"
+            computed_item["evidence_supported"] = False
+            computed_item["claim_supported"] = False
+
     summary_source_records = []
     if source_event_id:
         summary_source_records.append({
