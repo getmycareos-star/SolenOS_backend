@@ -6272,6 +6272,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     user_text, included_model_context_lines
                 )
                 care_history_fallback_from_outage = bool(deterministic_reply)
+            if (
+                not deterministic_reply
+                and not emergency
+                and "LOW-CAPACITY RESPONSE" in caregiver_guidance
+            ):
+                deterministic_reply = (
+                    "I hear that you're exhausted. "
+                    "We can take this one concern at a time."
+                )
+                low_capacity_support_fallback_used = True
             if not deterministic_reply:
                 raise
             reply = deterministic_reply
@@ -6288,10 +6298,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "error_type": type(exc).__name__,
                 }, separators=(",", ":")),
             )
-            raise HTTPException(
-                status_code=503,
-                detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
-            ) from exc
+            if not emergency and "LOW-CAPACITY RESPONSE" in caregiver_guidance:
+                reply = (
+                    "I hear that you're exhausted. "
+                    "We can take this one concern at a time."
+                )
+                low_capacity_support_fallback_used = True
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                ) from exc
         validation_source = user_text + "\n" + "\n".join(bounded_context)
         document_extractive_answer = _document_extractive_answer(
             user_text,
