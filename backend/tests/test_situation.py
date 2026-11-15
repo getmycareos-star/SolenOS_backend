@@ -1116,7 +1116,7 @@ def test_lcr_orientation_rejects_returning_language_for_new_caregiver(monkeypatc
 
 
 
-@pytest.mark.parametrize("missing_source", ["events", "decisions", "living_record"])
+@pytest.mark.parametrize("missing_source", ["events", "evidence", "facts", "assertions"])
 @pytest.mark.parametrize("invalid_reply", [
     "Welcome to SolenOS. This is your first time here, and your care story starts today.",
     "Welcome back to SolenOS. Your care story is already underway, and we can continue today.",
