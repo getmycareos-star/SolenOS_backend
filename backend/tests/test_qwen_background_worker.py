@@ -677,3 +677,28 @@ def test_daily_capture_delta_retry_fails_closed_after_three_total_attempts(tmp_p
         job_id="daily-delta-job", event_type="daily_capture_delta_reconciliation_retry"
     ).count() == 2
     db.close()
+
+
+def test_daily_capture_delta_retry_completes_when_no_comparison_baseline_applies(tmp_path, monkeypatch):
+    from app.models.capture_analysis import CaptureAnalysis
+
+    sessions = _daily_delta_retry_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        worker,
+        "_reconcile_daily_capture_delta",
+        lambda **kwargs: {"status": "not_applicable", "run_id": None, "error_code": None},
+    )
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    completed = db.query(QwenBackgroundJob).filter_by(id="daily-delta-job").one()
+    assert completed.status == "completed"
+    assert completed.attempt_count == 2
+    result = json.loads(completed.result_text)
+    assert result["delta_reconciliation_status"] == "not_applicable"
+    assert result["delta_engine_output_persisted"] is False
+    assert result["longitudinal_processing_status"] == "completed"
+    analysis = db.query(CaptureAnalysis).filter_by(id="daily-delta-analysis").one()
+    assert analysis.execution_status["delta_reconciliation"] == "not_applicable"
+    assert analysis.execution_status["longitudinal_processing"] == "completed"
+    db.close()
