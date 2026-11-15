@@ -385,6 +385,7 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         follow_up_prompt = "\\n".join(
             str(item.get("content", "")) for item in captured_prompts[-1]
         )
+        assert "Caregiver-attributed LCR assertion" in follow_up_prompt
         assert source in follow_up_prompt
 
         db = TestingSessionLocal()
