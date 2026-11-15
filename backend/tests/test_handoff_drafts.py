@@ -146,6 +146,7 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
     assert all(item["source_id"] != "other-person-fact" for item in body["source_references"])
     assert "MUST NOT LEAK" not in response.text
     assert body["source_statuses"]["community"]["status"] == "not_authorized"
+    assert body["retrieval_complete"] is True, "disabled Community must not make authorized care-record retrieval incomplete"
     assert body["source_statuses"]["documents"]["status"] == "empty"
     with engine.connect() as connection:
         saved = connection.execute(
