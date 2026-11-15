@@ -383,9 +383,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         current_job.error_code = "daily_capture_source_deleted"
         current_job.locked_at = None
         db.add(QwenJobEvent(
-            job_id=current_job_id,
-            person_id=current_person_id,
-            caregiver_id=current_caregiver_id,
+            job_id=current_job.id,
+            person_id=current_job.person_id,
+            caregiver_id=current_job.caregiver_id,
             event_type="daily_capture_source_cancelled",
             from_status="processing",
             to_status="cancelled",
@@ -583,9 +583,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     current_job.locked_at = None
     current_job.error_code = None
     db.add(QwenJobEvent(
-        job_id=current_job_id,
-        person_id=current_person_id,
-        caregiver_id=current_caregiver_id,
+        job_id=current_job.id,
+        person_id=current_job.person_id,
+        caregiver_id=current_job.caregiver_id,
         event_type="daily_capture_extraction_completed",
         from_status="processing",
         to_status="completed",
