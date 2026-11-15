@@ -64,9 +64,47 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/test_care_continuity_execution.py -q
 
-      - name: Upgrade fresh PostgreSQL database to head
+      - name: Seed pre-trajectory PostgreSQL enum before migration
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(text("""
+                  DO $ BEGIN
+                      CREATE TYPE situationstate AS ENUM (
+                          'ACTIVE', 'HISTORICAL', 'RESOLVED', 'EVOLVED', 'UNKNOWN'
+                      );
+                  EXCEPTION WHEN duplicate_object THEN NULL;
+                  END $;
+              """))
+          PY
+
+      - name: Upgrade legacy PostgreSQL schema to head
         working-directory: backend
         run: python -m alembic upgrade head
+
+      - name: Verify caregiver trajectory enum values were migrated
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              values = set(connection.execute(text("""
+                  SELECT enumlabel
+                  FROM pg_enum
+                  WHERE enumtypid = 'situationstate'::regtype
+              """)).scalars())
+          required = {"ACTIVE", "WORSENING", "IMPROVING", "HISTORICAL", "RESOLVED", "EVOLVED", "UNKNOWN"}
+          missing = required - values
+          if missing:
+              raise SystemExit(f"Missing situationstate enum values after migration: {sorted(missing)}")
+          print(f"SITUATION_STATE_ENUM_VALUES={sorted(values)}")
+          PY
 
       - name: Verify appointment idempotency migration downgrade and re-upgrade
         working-directory: backend
