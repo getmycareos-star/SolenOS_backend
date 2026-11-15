@@ -1611,7 +1611,7 @@ def test_lcr_orientation_rejects_client_selected_person_outside_bearer_scope(mon
         teardown_db()
 
 @pytest.mark.session_security
-def test_situation_freshness_includes_persisted_delta_engine_changes(monkeypatch=None):
+def test_situation_freshness_includes_persisted_delta_engine_changes():
     setup_db()
     try:
         from app.core.database import get_db
