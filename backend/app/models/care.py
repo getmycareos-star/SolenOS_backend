@@ -139,6 +139,7 @@ class Correction(Base):
     __tablename__ = "corrections"
     __table_args__ = (
         UniqueConstraint("person_id", "idempotency_key", name="uq_corrections_person_idempotency_key"),
+        UniqueConstraint("person_id", "request_sha256", name="uq_corrections_person_request_sha256"),
     )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
