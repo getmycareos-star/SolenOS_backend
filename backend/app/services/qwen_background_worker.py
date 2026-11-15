@@ -358,11 +358,15 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         CareEvent.person_id == job.person_id,
         CareEvent.created_by_caregiver_id == job.caregiver_id,
     ).first()
+    # Serialize projections for the same evidence row. A retry can be
+    # delivered as a distinct job after a worker crash; locking the source
+    # prevents two jobs from both passing the observation de-duplication check
+    # and inserting duplicate source-span observations concurrently.
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == job.person_id,
         Evidence.uploaded_by_caregiver_id == job.caregiver_id,
-    ).first()
+    ).with_for_update().first()
     if event is None or evidence is None or getattr(evidence, "evidence_status", None) == "deleted_by_caregiver":
         current_job.status = "cancelled"
         current_job.error_code = "daily_capture_source_deleted"
