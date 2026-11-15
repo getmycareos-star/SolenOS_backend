@@ -170,6 +170,12 @@ async def _classify_task(task_text: str, context_text: str) -> str:
 
 async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     """Extract a saved Daily Care report after the caregiver-facing save has committed."""
+    # Copy immutable scope before releasing the claim transaction. The worker
+    # must not hold PostgreSQL row locks while waiting for OCR/model inference.
+    job_id = str(job.id)
+    person_id = str(job.person_id)
+    caregiver_id = str(job.caregiver_id)
+    workflow = str(job.workflow)
     from app.models.care import CareEvent, Evidence
     from app.models.capture_analysis import CaptureAnalysis
     from app.models.care_continuity import EvidenceObservation
@@ -197,17 +203,17 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     evidence_id = evidence_ids[0]
     event = db.query(CareEvent).filter(
         CareEvent.id == event_id,
-        CareEvent.person_id == job.person_id,
+        CareEvent.person_id == person_id,
     ).first()
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
-        Evidence.person_id == job.person_id,
+        Evidence.person_id == person_id,
     ).first()
     if event is None or evidence is None:
         raise ValueError("daily_capture_source_missing")
-    if str(event.created_by_caregiver_id) != str(job.caregiver_id):
+    if str(event.created_by_caregiver_id) != str(caregiver_id):
         raise ValueError("daily_capture_event_caregiver_scope_invalid")
-    if str(evidence.uploaded_by_caregiver_id) != str(job.caregiver_id):
+    if str(evidence.uploaded_by_caregiver_id) != str(caregiver_id):
         raise ValueError("daily_capture_evidence_caregiver_scope_invalid")
     if evidence_id not in {str(value) for value in (event.evidence_ids or [])}:
         raise ValueError("daily_capture_evidence_link_invalid")
@@ -268,15 +274,15 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     source_text = source_text[:12_000]
 
     analysis = db.query(CaptureAnalysis).filter(
-        CaptureAnalysis.person_id == job.person_id,
-        CaptureAnalysis.caregiver_id == job.caregiver_id,
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
         CaptureAnalysis.source_event_id == event_id,
         CaptureAnalysis.source_evidence_id == evidence_id,
     ).order_by(CaptureAnalysis.created_at.desc()).first()
     if analysis is None:
         analysis = CaptureAnalysis(
-            person_id=job.person_id,
-            caregiver_id=job.caregiver_id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
             source_event_id=event_id,
             source_evidence_id=evidence_id,
             source_text=source_text,
@@ -309,6 +315,11 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         }
     db.commit()
     db.refresh(analysis)
+    analysis_id = str(analysis.id)
+    # refresh() starts a new read transaction. Release it before the potentially
+    # slow external inference call below; otherwise an idle transaction can keep
+    # source/job locks alive and block subsequent Daily Care retries.
+    db.rollback()
 
     if quick_check_in_capture:
         # The persisted event/evidence already contains the complete structured
@@ -345,9 +356,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         candidates["open_questions"] = []
 
     current_job = db.query(QwenBackgroundJob).filter(
-        QwenBackgroundJob.id == job.id,
-        QwenBackgroundJob.person_id == job.person_id,
-        QwenBackgroundJob.caregiver_id == job.caregiver_id,
+        QwenBackgroundJob.id == job_id,
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
     ).with_for_update().first()
     if current_job is None or current_job.status == "cancelled":
         db.rollback()
@@ -355,8 +366,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
 
     event = db.query(CareEvent).filter(
         CareEvent.id == event_id,
-        CareEvent.person_id == job.person_id,
-        CareEvent.created_by_caregiver_id == job.caregiver_id,
+        CareEvent.person_id == person_id,
+        CareEvent.created_by_caregiver_id == caregiver_id,
     ).first()
     # Serialize projections for the same evidence row. A retry can be
     # delivered as a distinct job after a worker crash; locking the source
@@ -364,17 +375,17 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     # and inserting duplicate source-span observations concurrently.
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
-        Evidence.person_id == job.person_id,
-        Evidence.uploaded_by_caregiver_id == job.caregiver_id,
+        Evidence.person_id == person_id,
+        Evidence.uploaded_by_caregiver_id == caregiver_id,
     ).with_for_update().first()
     if event is None or evidence is None or getattr(evidence, "evidence_status", None) == "deleted_by_caregiver":
         current_job.status = "cancelled"
         current_job.error_code = "daily_capture_source_deleted"
         current_job.locked_at = None
         db.add(QwenJobEvent(
-            job_id=current_job.id,
-            person_id=current_job.person_id,
-            caregiver_id=current_job.caregiver_id,
+            job_id=current_job_id,
+            person_id=current_person_id,
+            caregiver_id=current_caregiver_id,
             event_type="daily_capture_source_cancelled",
             from_status="processing",
             to_status="cancelled",
@@ -388,8 +399,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     if natural_language_update:
         observation_count = persist_source_grounded_daily_observations(
             db,
-            person_id=job.person_id,
-            caregiver_id=job.caregiver_id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
             evidence_id=evidence_id,
             source_event_id=event_id,
             source_text=source_text,
@@ -401,7 +412,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         # failure cannot roll back the caregiver's captured observations.
         db.flush()
         persisted_observation_count = db.query(EvidenceObservation.id).filter(
-            EvidenceObservation.person_id == job.person_id,
+            EvidenceObservation.person_id == person_id,
             EvidenceObservation.evidence_id == evidence_id,
             EvidenceObservation.extraction_run_id == event_id,
         ).count()
@@ -410,9 +421,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         observation_count = persisted_observation_count
         db.commit()
         current_job = db.query(QwenBackgroundJob).filter(
-            QwenBackgroundJob.id == job.id,
-            QwenBackgroundJob.person_id == job.person_id,
-            QwenBackgroundJob.caregiver_id == job.caregiver_id,
+            QwenBackgroundJob.id == job_id,
+            QwenBackgroundJob.person_id == person_id,
+            QwenBackgroundJob.caregiver_id == caregiver_id,
         ).with_for_update().first()
         if current_job is None or current_job.status == "cancelled":
             db.rollback()
@@ -425,8 +436,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         if questions:
             persist_source_clarification_questions(
                 db,
-                person_id=job.person_id,
-                caregiver_id=job.caregiver_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
                 source_kind="daily_capture_extraction",
                 source_record_type="care_event",
                 source_record_id=event_id,
@@ -436,8 +447,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     logger.info(
         "Daily Care extraction projected workflow=%s job_id=%s capture_mode=%s "
         "candidate_count=%s observation_count=%s source_text_length=%s",
-        job.workflow,
-        job.id,
+        workflow,
+        job_id,
         capture_mode,
         candidate_count,
         observation_count,
@@ -450,9 +461,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     review_status = "not_required" if quick_check_in_capture or natural_language_update or not candidate_count else "required"
     reconciliation = execute_care_continuity_reconciliation(
         db,
-        job.person_id,
+        person_id,
         workflow="daily_care_entry",
-        source_caregiver_id=job.caregiver_id,
+        source_caregiver_id=caregiver_id,
         source_event_id=event_id,
         source_evidence_id=evidence_id,
         reconcile_lcr=True,
@@ -491,8 +502,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     projection_query = " ".join(part for part in projection_query_parts if part)[:1000]
     lcr_context = build_lcr_context(
         db,
-        job.person_id,
-        caregiver_id=job.caregiver_id,
+        person_id,
+        caregiver_id=caregiver_id,
         query=projection_query,
         limit_per_source=50,
     )
@@ -522,7 +533,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     )
     evidence_has_correct_author = bool(
         projected_evidence
-        and str(projected_evidence.get("uploaded_by_caregiver_id")) == str(job.caregiver_id)
+        and str(projected_evidence.get("uploaded_by_caregiver_id")) == str(caregiver_id)
     )
     projection_status = (
         "verified"
@@ -533,9 +544,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         raise RuntimeError("daily_capture_lcr_projection_or_evidence_lineage_not_verified")
 
     analysis = db.query(CaptureAnalysis).filter(
-        CaptureAnalysis.id == analysis.id,
-        CaptureAnalysis.person_id == job.person_id,
-        CaptureAnalysis.caregiver_id == job.caregiver_id,
+        CaptureAnalysis.id == analysis_id,
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
     ).with_for_update().first()
     if analysis is None:
         raise RuntimeError("daily_capture_analysis_disappeared")
@@ -572,9 +583,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     current_job.locked_at = None
     current_job.error_code = None
     db.add(QwenJobEvent(
-        job_id=current_job.id,
-        person_id=current_job.person_id,
-        caregiver_id=current_job.caregiver_id,
+        job_id=current_job_id,
+        person_id=current_person_id,
+        caregiver_id=current_caregiver_id,
         event_type="daily_capture_extraction_completed",
         from_status="processing",
         to_status="completed",
