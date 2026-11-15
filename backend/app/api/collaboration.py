@@ -4695,6 +4695,19 @@ def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str
         token for token in _expanded_search_terms(query_tokens)
         if token not in _DOCUMENT_ANSWER_STOPWORDS
     }
+    # Caregivers and documents commonly use different grammatical forms for
+    # the same care topic (for example, "walking" in the question and "walked"
+    # in a discharge summary). Expand only within explicit care-domain groups;
+    # do not use fuzzy matching that could attach an unrelated sentence.
+    document_topic_groups = (
+        {"walk", "walked", "walking", "walker", "mobility", "frame", "transfer", "transfers"},
+        {"eat", "eats", "ate", "eaten", "eating", "appetite", "meal", "meals", "food"},
+        {"sleep", "slept", "sleeping", "rest", "rested", "woke", "waking", "overnight", "night"},
+        {"drink", "drank", "drunk", "drinking", "water", "hydration", "fluid", "fluids"},
+    )
+    for group in document_topic_groups:
+        if query_terms & group:
+            query_terms.update(group)
     candidates: list[tuple[int, int, str]] = []
     has_extracted_text = False
     order = 0
