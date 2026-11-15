@@ -630,5 +630,5 @@ def test_companion_extracts_notes_from_structured_daily_capture_json_for_history
     assert len(answer.split()) <= 55
     assert collaboration._care_history_reply_covers_requested_topics(question, answer, lines)
     assert not collaboration._contains_unsupported_operational_claim(
-        answer, question + "\\n" + "\\n".join(lines), lines
+        answer, question + "\n" + "\n".join(lines), lines
     )
