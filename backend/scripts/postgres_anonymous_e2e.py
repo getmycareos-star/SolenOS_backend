@@ -35,6 +35,30 @@ if not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
     raise SystemExit("Refusing PostgreSQL E2E smoke: DATABASE_URL must be PostgreSQL.")
 
 
+def _diagnose_postgres_activity():
+    """Print blocking database sessions when a real HTTP request stalls."""
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(text("""
+                SELECT pid, state, wait_event_type, wait_event,
+                       pg_blocking_pids(pid) AS blocking_pids,
+                       EXTRACT(EPOCH FROM (now() - query_start))::integer AS query_age_seconds,
+                       left(query, 500) AS query
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                ORDER BY query_start NULLS LAST
+                LIMIT 20
+            """)).mappings().all()
+            print(
+                "POSTGRES_ACTIVITY_ON_HTTP_TIMEOUT "
+                + json.dumps([dict(row) for row in rows], default=str),
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"POSTGRES_ACTIVITY_DIAGNOSTIC_FAILED {type(exc).__name__}: {exc}", flush=True)
+
+
 def request(method: str, path: str, *, body=None, token: str | None = None):
     data = None if body is None else json.dumps(body).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -52,6 +76,10 @@ def request(method: str, path: str, *, body=None, token: str | None = None):
         except json.JSONDecodeError:
             decoded = payload.decode("utf-8", "replace")
         return exc.code, decoded
+    except TimeoutError:
+        print(f"HTTP_REQUEST_TIMEOUT {method} {path}", flush=True)
+        _diagnose_postgres_activity()
+        raise
 
 
 def upload_request(fields: dict[str, str], filename: str, content: bytes, token: str):
@@ -150,7 +178,10 @@ def stop_server(process):
         process.kill()
         process.wait(timeout=5)
     if process.returncode not in (0, -15):
-        raise RuntimeError(f"Uvicorn exited with code {process.returncode}")
+        detail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
+        raise RuntimeError(
+            f"Uvicorn exited with code {process.returncode}; server log tail follows:\n{detail}"
+        )
 
 
 def require(condition, message):
