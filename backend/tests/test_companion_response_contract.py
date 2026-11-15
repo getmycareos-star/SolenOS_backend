@@ -987,6 +987,61 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+@pytest.mark.parametrize(
+    ("language", "expected_instruction", "reply"),
+    [
+        ("en", "Respond to the caregiver in English", "I can help you understand the saved care information."),
+        ("es", "Respond to the caregiver in Spanish", "Puedo ayudarte a entender la información de cuidado guardada."),
+        ("fr", "Respond to the caregiver in French", "Je peux vous aider à comprendre les informations de soins enregistrées."),
+    ],
+)
+def test_companion_uses_selected_language_without_changing_care_record_boundary(
+    monkeypatch, language, expected_instruction, reply,
+):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return reply
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "Can you help me understand the saved care information?",
+                "language": language,
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == reply
+        assert expected_instruction in captured["messages"][0]["content"]
+        assert "Keep all clinical meaning, uncertainty, negation, dates, quantities" in captured["messages"][0]["content"]
+        assert response.json()["written_to_lcr"] is False
+        assert response.json()["persistence"] == "conversation_only"
+    finally:
+        teardown()
+
+
+def test_companion_rejects_unsupported_language_codes(monkeypatch):
+    client = setup_client(monkeypatch)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Hello", "language": "de"},
+        )
+        assert response.status_code == 422
+    finally:
+        teardown()
+
+
 def test_companion_context_filter_excludes_unrelated_records_for_specific_question():
     sleep = 'LCR event evidence: {"event_id":"sleep-1","title":"Sleep history","description":"Restless sleep."}'
     household = 'LCR event evidence: {"event_id":"home-1","title":"Unrelated household note 1","description":"Household activity note."}'
