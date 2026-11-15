@@ -6117,6 +6117,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         base, model = _ollama_url()
         inference_started = _time.perf_counter()
+        care_history_fallback_from_outage = False
         try:
             reply = await asyncio.to_thread(
                 _run_companion_inference_with_metrics,
@@ -6180,6 +6181,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 deterministic_reply = _care_history_extractive_answer(
                     user_text, included_model_context_lines
                 )
+                care_history_fallback_from_outage = bool(deterministic_reply)
             if not deterministic_reply:
                 raise
             reply = deterministic_reply
@@ -6218,7 +6220,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         medication_change_reply = _medication_change_safety_response(user_text)
         unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
         conflict_response = _contradictory_event_evidence_response(user_text, event_context)
-        care_history_extractive_fallback_used = False
+        care_history_extractive_fallback_used = care_history_fallback_from_outage
         if document_extractive_fallback_used:
             # The model received the verified extraction but failed to use it.
             # Prefer a short, exact source excerpt over a generic or unsupported
