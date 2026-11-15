@@ -157,6 +157,16 @@ def _clarification_question_key(value: str) -> tuple[str, ...]:
         "woke": "wake",
         "awakened": "wake",
         "awakes": "wake",
+        "times": "frequency",
+        "changed": "change",
+        "changing": "change",
+        "slept": "sleep",
+        "sleeping": "sleep",
+        "walking": "walk",
+        "walked": "walk",
+        "using": "use",
+        "used": "use",
+        "usually": "usual",
         "regimen": "schedule",
         "regimens": "schedule",
         "currently": "current",
@@ -194,6 +204,27 @@ def _duration_question_supported_by_source(question: str, source_text: str) -> b
         source_text,
         re.IGNORECASE,
     ))
+
+def _source_question_supported_by_source(question: str, source_text: str) -> bool:
+    """Keep only questions whose meaningful wording is anchored in the saved source."""
+    if not isinstance(source_text, str) or not source_text.strip():
+        return False
+    is_duration_question = bool(re.search(
+        r"\b(?:how\s+long|since\s+when|for\s+how\s+long|how\s+many\s+(?:days?|weeks?|months?|nights?|hours?))\b",
+        question,
+        re.IGNORECASE,
+    ))
+    if is_duration_question:
+        return _duration_question_supported_by_source(question, source_text)
+
+    question_terms = set(_clarification_question_key(question))
+    source_terms = set(_clarification_question_key(source_text))
+    if not question_terms:
+        return False
+    overlap = question_terms.intersection(source_terms)
+    if len(question_terms) == 1:
+        return bool(overlap)
+    return len(overlap) >= 2 and (len(overlap) / len(question_terms)) >= 0.6
 
 def persist_source_clarification_questions(
     db: Session,
@@ -323,9 +354,9 @@ def persist_source_clarification_questions(
         normalized = _clarification_question_key(question_text)
         if len(question_text) < 5 or not normalized:
             continue
-        # A duration question requires the original source to describe a repeated
-        # or ongoing issue; one isolated event cannot justify a duration task.
-        if not _duration_question_supported_by_source(question_text, source_text_for_grounding):
+        # Source extraction may suggest review questions, but unsupported
+        # wording must not become caregiver work or a persistent open question.
+        if not _source_question_supported_by_source(question_text, source_text_for_grounding):
             continue
         # Operational extraction warnings belong in the document review panel,
         # not in the caregiver's list of questions.
