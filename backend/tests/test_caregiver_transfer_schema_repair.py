@@ -8,13 +8,13 @@ from alembic.runtime.migration import MigrationContext
 
 def _load_repair_migration():
     backend_dir = Path(__file__).resolve().parents[1]
-    path = backend_dir / "alembic" / "versions" / "20261115_05_repair_caregiver_responsibility_transfers.py"
+    path = backend_dir / "alembic" / "versions" / "20261115_06_repair_caregiver_responsibility_transfers.py"
     spec = spec_from_file_location("repair_caregiver_transfers_migration", path)
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.revision == "20261115_05_repair_caregiver_responsibility_transfers"
-    assert module.down_revision == "20261115_04_correction_processing_lease"
+    assert module.revision == "20261115_06_repair_caregiver_responsibility_transfers"
+    assert module.down_revision == "20261115_05_correction_retry_schedule"
     return module
 
 
