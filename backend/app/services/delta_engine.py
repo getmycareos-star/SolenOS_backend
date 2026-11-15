@@ -752,29 +752,33 @@ def _reconcile_from_change_intelligence(
         references = _resolve_delta_source_refs(db, person_id, contradiction_ids)
         if not references:
             continue
+        resolved_reference_ids = {str(ref["record_id"]) for ref in references}
+        evidence_complete = set(contradiction_ids).issubset(resolved_reference_ids)
+        conflict_supported = evidence_complete
         linked_contradictions.append({
             "topic": str(item.get("subject_id") or item.get("field") or "Conflicting reports"),
             "reports": [str(ref.get("source_excerpt") or ref.get("label") or "Saved report") for ref in references],
             "why_conflicting": str(item.get("description") or "The saved reports differ."),
             "source_record_refs": references,
-            "source_reference_status": "matched",
+            "source_reference_status": "matched" if evidence_complete else "partial",
         })
         for reference in references:
             all_refs[(reference["record_type"], reference["record_id"])] = reference
         claim_items.append({
             "text": f"Conflicting reports: {item.get('subject_id') or item.get('field') or 'care information'}",
             "source_references": references,
-            "support_status": "matched_competing_sources",
+            "support_status": "matched_competing_sources" if conflict_supported else "insufficient_evidence",
             "authoritative_contradiction_id": str(item.get("id")),
         })
         computed_changes.append({
             "domain": str(item.get("subject_type") or "care"),
             "name": str(item.get("subject_id") or item.get("field") or "Conflicting reports"),
             "change_type": "conflicting",
-            "classification": "conflicting",
-            "certainty": "supported",
-            "evidence_supported": True,
-            "claim_supported": True,
+            "classification": "conflicting" if conflict_supported else "uncertain",
+            "certainty": "supported" if conflict_supported else "uncertain",
+            "evidence_supported": evidence_complete,
+            "claim_supported": conflict_supported,
+            "source_reference_status": "matched" if evidence_complete else "partial",
             "source_record_refs": references,
             "comparison_basis": str(item.get("description") or "Saved reports differ."),
             "historical_only": False,
