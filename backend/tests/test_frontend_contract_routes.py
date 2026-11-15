@@ -16,7 +16,7 @@ from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage, EvidenceUpload
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, CareDeltaRun
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -678,6 +678,35 @@ def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
             "content": "Cross-record access must fail.",
         })
         assert denied.status_code == 403
+
+        with TestingSessionLocal() as db:
+            for index in range(2):
+                db.add(CareDeltaRun(
+                    id=f"delta-page-{index}",
+                    person_id=person_id,
+                    source="Caregiver report",
+                    event_date=datetime(2026, 10, 24, 9, index, tzinfo=timezone.utc),
+                    evidence_ids=[],
+                    delta_json=json.dumps({"computed_changes": []}),
+                    model_name="benchmark-fixture",
+                    created_by_caregiver_id=caregiver_id,
+                    created_at=datetime(2026, 10, 24, 9, index, tzinfo=timezone.utc),
+                ))
+            db.commit()
+
+        first_page = client.get(
+            f"/api/v1/care-delta/runs/{person_id}?limit=1&offset=0",
+            headers=auth,
+        )
+        second_page = client.get(
+            f"/api/v1/care-delta/runs/{person_id}?limit=1&offset=1",
+            headers=auth,
+        )
+        assert first_page.status_code == 200, first_page.text
+        assert second_page.status_code == 200, second_page.text
+        assert len(first_page.json()) == 1
+        assert len(second_page.json()) == 1
+        assert first_page.json()[0]["id"] != second_page.json()[0]["id"]
 
         history = client.get(f"/api/v1/care-delta/runs/{other_person_id}", headers=auth)
         assert history.status_code == 403
