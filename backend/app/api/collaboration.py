@@ -5256,6 +5256,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # Emergency responses bypass the retrieval branch; initialize shared prompt
     # context before that branch so the common response path is always safe.
     conversation_context_lines: list[str] = []
+    low_capacity_support_fallback_used = False
 
     conversation_context_lines = []
 
@@ -6529,6 +6530,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 reply = care_history_extractive_answer
                 invalid_reply = False
                 care_history_extractive_fallback_used = True
+        if invalid_reply and "LOW-CAPACITY RESPONSE" in caregiver_guidance:
+            # A failed model repair must not leave an explicitly overwhelmed
+            # caregiver with no response. This is a narrow, non-clinical fallback:
+            # it reflects only the caregiver's current words, cites no LCR facts,
+            # and does not claim that any task or record changed.
+            reply = (
+                "I hear that you're exhausted. "
+                "We can take this one concern at a time, using what you've already shared."
+            )
+            invalid_reply = False
+            low_capacity_support_fallback_used = True
         if invalid_reply:
             failed_rules = []
             if not isinstance(reply, str) or not reply.strip():
@@ -6578,11 +6590,34 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             verdict = "passed"
             safety_note = "Quoted from saved caregiver entries. This is not a clinical interpretation."
             ai_generated = False
+        elif low_capacity_support_fallback_used:
+            verdict = "passed"
+            safety_note = (
+                "A brief supportive reply was used because the generated answer did not pass "
+                "SolenOS grounding checks. It does not summarize or change the care record."
+            )
+            ai_generated = False
         else:
             verdict = "passed"
             safety_note = None
             ai_generated = True
         evidence_ids = source_evidence_ids
+
+    if low_capacity_support_fallback_used:
+        # This response is based only on the caregiver's current message. Do not
+        # attach retrieved care records as if they supported a record summary.
+        source_event_ids = []
+        source_evidence_ids = []
+        source_document_analysis_ids = []
+        source_appointment_ids = []
+        source_assertion_ids = []
+        source_lcr_context_ids = []
+        source_freshness_assessment_ids = []
+        source_lcr_record_refs = []
+        evidence_ids = []
+        validated_aggregates = []
+        if isinstance(lcr_context_coverage, dict):
+            lcr_context_coverage["answer_context_used"] = False
 
     # Persist only after a valid model response or the safety guard response exists.
     # This is conversation history, not LCR evidence. A failed inference leaves no
@@ -6881,6 +6916,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "freshness_source_status": freshness_source_status,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
+        "response_mode": (
+            "deterministic_low_capacity_support_fallback"
+            if low_capacity_support_fallback_used else "model_or_grounded_fallback"
+        ),
         "claim_provenance": claim_provenance,
     }
     turn_timestamp = datetime.now(timezone.utc)
