@@ -11,7 +11,7 @@ import app.api.v1 as api_v1_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care import Evidence
+from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.uncertainty import OpenQuestion
 
@@ -514,17 +514,27 @@ def test_daily_capture_does_not_report_longitudinal_processing_complete_when_del
     session = create_session(client, "Delta failure recipient")
     auth = {"Authorization": f"Bearer {session['access_token']}"}
 
-    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
-        "observations": [],
-        "open_questions": [],
-        "possible_safety_flags": [],
-    })
+    extraction_calls = {"count": 0}
+
+    def extract_candidates_once(*args, **kwargs):
+        extraction_calls["count"] += 1
+        return {
+            "observations": [],
+            "open_questions": [],
+            "possible_safety_flags": [],
+        }
+
+    monkeypatch.setattr(api_v1_module, "extract_review_candidates", extract_candidates_once)
     from app.services import qwen_background_worker
 
+    delta_results = iter([
+        {"status": "failed", "error_code": "delta_store_unavailable"},
+        {"status": "completed", "run_id": "delta-retry-run-1", "reused": False},
+    ])
     monkeypatch.setattr(
         qwen_background_worker,
         "_reconcile_daily_capture_delta",
-        lambda **kwargs: {"status": "failed", "error_code": "delta_store_unavailable"},
+        lambda **kwargs: next(delta_results),
     )
 
     saved = client.post(
@@ -561,5 +571,29 @@ def test_daily_capture_does_not_report_longitudinal_processing_complete_when_del
         assert result["delta_engine_output_persisted"] is False
         assert result["longitudinal_processing_status"] == "retrying"
         assert result["longitudinal_processing_error"] == "delta_store_unavailable"
+        event_ids_before_retry = db.query(CareEvent.id).filter_by(
+            person_id=session["person"]["id"]
+        ).all()
+        evidence_ids_before_retry = db.query(Evidence.id).filter_by(
+            person_id=session["person"]["id"]
+        ).all()
+        assert extraction_calls["count"] == 1
+    finally:
+        db.close()
+
+    # The retry reuses the persisted source event/evidence and runs Delta only.
+    assert process_daily_capture_job(body["qwen_job_id"], monkeypatch) is True
+    db = TestSessionLocal()
+    try:
+        analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
+        job = db.query(QwenBackgroundJob).filter_by(id=body["qwen_job_id"]).one()
+        assert job.workflow == "daily_capture_delta_reconciliation"
+        assert job.status == "completed"
+        assert analysis.execution_status["delta_reconciliation"] == "completed"
+        assert analysis.execution_status["longitudinal_processing"] == "completed"
+        assert analysis.execution_status["delta_run_id"] == "delta-retry-run-1"
+        assert extraction_calls["count"] == 1
+        assert db.query(CareEvent.id).filter_by(person_id=session["person"]["id"]).all() == event_ids_before_retry
+        assert db.query(Evidence.id).filter_by(person_id=session["person"]["id"]).all() == evidence_ids_before_retry
     finally:
         db.close()
