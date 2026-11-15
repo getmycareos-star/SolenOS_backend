@@ -237,20 +237,14 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert understood["written_to_lcr"] is False
             assert len(understood["observations"]) == 2
 
-        # Extraction questions must be durable, linked to the saved document,
-        # and visible through the same OpenQuestion store used by the LCR.
+        # An extraction-only question without a unique, evidence-backed LCR
+        # decision dependency must not become a caregiver task.
         with Session() as db:
-            clarification = db.query(OpenQuestion).filter_by(
+            assert db.query(OpenQuestion).filter_by(
                 person_id=person_id,
                 status="open",
                 question="Was this usual for the person?",
-            ).one()
-            assert clarification.evidence_ids == [evidence_id]
-            assert clarification.created_by_caregiver_id == caregiver_id
-            assert clarification.context[0]["source_kind"] == "document_extraction"
-            assert clarification.context[0]["source_record_refs"] == [
-                {"record_type": "evidence", "record_id": evidence_id}
-            ]
+            ).count() == 0
 
         # Replaying document understanding must not create a duplicate question.
         with Session() as db:
@@ -261,7 +255,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                 person_id=person_id,
                 status="open",
                 question="Was this usual for the person?",
-            ).count() == 1
+            ).count() == 0
 
         # Persisted extraction reads and reviews must use hashes, not rerun expensive OCR.
         def unexpected_ocr(*args, **kwargs):
