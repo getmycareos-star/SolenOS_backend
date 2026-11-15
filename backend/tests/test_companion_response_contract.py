@@ -2131,3 +2131,9 @@ def test_operational_guard_rejects_future_claim_mentioned_as_uncertain_in_source
     reply = "Mum will be calmer tomorrow."
     assert collaboration._contains_unsupported_operational_claim(reply, source, []) is True
 
+
+def test_operational_guard_rejects_conditional_future_claim_as_a_fact():
+    source = "Mum will be calmer tomorrow if she sleeps well."
+    reply = "Mum will be calmer tomorrow."
+    assert collaboration._contains_unsupported_operational_claim(reply, source, []) is True
+
