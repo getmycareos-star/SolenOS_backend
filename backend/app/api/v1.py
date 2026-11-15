@@ -1529,6 +1529,106 @@ def list_insights(person_id: str, request: Request, db: Session = Depends(get_db
     )
 
 
+def _correction_request_fingerprint(correction: CorrectionCreate) -> str:
+    payload = correction.model_dump(exclude={"idempotency_key"})
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _process_persisted_correction(db: Session, person_id: str, correction_id: str) -> CorrectionModel:
+    correction_row = (
+        db.query(CorrectionModel)
+        .filter(
+            CorrectionModel.id == correction_id,
+            CorrectionModel.person_id == person_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if correction_row is None:
+        raise HTTPException(status_code=404, detail="Correction not found")
+    if correction_row.processing_status == "completed":
+        return correction_row
+
+    correction_row.processing_status = "processing"
+    correction_row.processing_attempts = int(correction_row.processing_attempts or 0) + 1
+    correction_row.processing_error = None
+    correction_row.care_continuity_execution = {
+        "workflow": "care_record_correction",
+        "status": "processing",
+        "stages": {"correction": "committed", "reconciliation": "processing"},
+        "retry_required": True,
+    }
+    db.commit()
+
+    try:
+        engine = LearningEngine(db)
+        engine.apply_correction(correction_row, commit=False)
+        engine.record_learning_event(
+            correction_row.person_id,
+            "correction_applied",
+            (
+                f"Corrected {correction_row.target_type}: "
+                f"{correction_row.original_text} -> {correction_row.corrected_text}"
+            ),
+            "correction",
+            source_id=correction_row.id,
+            caregiver_id=correction_row.caregiver_id,
+            commit=False,
+        )
+        engine.after_save(correction_row.person_id)
+        execution = execute_care_continuity_reconciliation(
+            db,
+            correction_row.person_id,
+            workflow="care_record_correction",
+            source_caregiver_id=correction_row.caregiver_id,
+            correction_id=correction_row.id,
+        )
+        execution = dict(execution or {})
+        stages = dict(execution.get("stages") or {})
+        if any(value in {"pending", "failed", "not_completed"} for value in stages.values()):
+            raise RuntimeError("care_continuity_reconciliation_incomplete")
+
+        correction_row.processing_status = "completed"
+        correction_row.processing_error = None
+        correction_row.processed_at = datetime.now(timezone.utc)
+        execution.update({
+            "workflow": "care_record_correction",
+            "status": "completed",
+            "stages": {**stages, "correction": "committed", "reconciliation": "committed"},
+            "retry_required": False,
+        })
+        correction_row.care_continuity_execution = execution
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Correction %s remains pending after reconciliation failure", correction_id)
+        correction_row = (
+            db.query(CorrectionModel)
+            .filter(
+                CorrectionModel.id == correction_id,
+                CorrectionModel.person_id == person_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if correction_row is None:
+            raise HTTPException(status_code=404, detail="Correction not found") from exc
+        correction_row.processing_status = "pending"
+        correction_row.processing_error = "reconciliation_failed"
+        correction_row.care_continuity_execution = {
+            "workflow": "care_record_correction",
+            "status": "pending",
+            "stages": {"correction": "committed", "reconciliation": "pending"},
+            "retry_required": True,
+            "failure_code": "reassessment_pending",
+        }
+        db.commit()
+
+    db.refresh(correction_row)
+    return correction_row
+
+
 @router.post("/corrections", response_model=CorrectionSchema)
 def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
@@ -1549,68 +1649,73 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
     if target is None:
         raise HTTPException(status_code=404, detail="The correction target was not found in this care record")
 
-    db_correction = CorrectionModel(**correction.model_dump())
+    request_sha256 = _correction_request_fingerprint(correction)
+    idempotency_key = correction.idempotency_key or f"legacy-{request_sha256}"
+    existing = db.query(CorrectionModel).filter(
+        CorrectionModel.person_id == correction.person_id,
+        CorrectionModel.idempotency_key == idempotency_key,
+    ).first()
+    if existing is not None:
+        if existing.request_sha256 != request_sha256:
+            raise HTTPException(status_code=409, detail="This correction idempotency key was already used for different content")
+        if existing.processing_status != "completed":
+            existing = _process_persisted_correction(db, correction.person_id, existing.id)
+        return existing
+
+    db_correction = CorrectionModel(
+        **correction.model_dump(exclude={"idempotency_key"}),
+        idempotency_key=idempotency_key,
+        request_sha256=request_sha256,
+        processing_status="pending",
+        processing_attempts=0,
+        care_continuity_execution={
+            "workflow": "care_record_correction",
+            "status": "pending",
+            "stages": {"correction": "pending", "reconciliation": "pending"},
+            "retry_required": True,
+        },
+    )
     db.add(db_correction)
     try:
-        db.flush()
         db.commit()
+        db.refresh(db_correction)
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(CorrectionModel).filter(
+            CorrectionModel.person_id == correction.person_id,
+            CorrectionModel.idempotency_key == idempotency_key,
+        ).first()
+        if existing is None:
+            raise HTTPException(status_code=503, detail="The correction could not be saved. Retry safely.")
+        if existing.request_sha256 != request_sha256:
+            raise HTTPException(status_code=409, detail="This correction idempotency key was already used for different content")
+        return existing
     except Exception as exc:
         db.rollback()
         logger.exception("Correction receipt could not be persisted")
         raise HTTPException(
             status_code=503,
-            detail="The correction receipt could not be saved. Retry after refreshing the record.",
+            detail="The correction receipt could not be saved. Retry safely.",
         ) from exc
 
-    execution = {
-        "workflow": "care_record_correction",
-        "status": "pending",
-        "stages": {"correction": "committed", "reconciliation": "pending"},
-        "retry_required": True,
-        "failure_code": "reassessment_pending",
-    }
-    try:
-        engine = LearningEngine(db)
-        engine.apply_correction(db_correction, commit=False)
-        engine.record_learning_event(
-            db_correction.person_id,
-            "correction_applied",
-            f"Corrected {correction.target_type}: {correction.original_text} -> {correction.corrected_text}",
-            "correction",
-            source_id=db_correction.id,
-            caregiver_id=correction.caregiver_id,
-            commit=False,
-        )
-        engine.after_save(db_correction.person_id)
-        execution = execute_care_continuity_reconciliation(
-            db,
-            db_correction.person_id,
-            workflow="care_record_correction",
-            source_caregiver_id=correction.caregiver_id,
-            correction_id=db_correction.id,
-        )
-        db.commit()
-        execution.setdefault("stages", {})["correction"] = "committed"
-        execution["stages"]["reconciliation"] = "committed"
-        execution["status"] = "committed"
-        execution["retry_required"] = False
-    except Exception:
-        db.rollback()
-        logger.exception(
-            "Correction receipt %s persisted; care-record reassessment remains pending",
-            db_correction.id,
-        )
-        execution = {
-            "workflow": "care_record_correction",
-            "status": "pending",
-            "stages": {"correction": "committed", "reconciliation": "pending"},
-            "retry_required": True,
-            "failure_code": "reassessment_pending",
-        }
+    return _process_persisted_correction(db, correction.person_id, db_correction.id)
 
-    db.refresh(db_correction)
-    db_correction.care_continuity_execution = execution
-    return db_correction
+
+@router.post("/corrections/{person_id}/{correction_id}/retry", response_model=CorrectionSchema)
+def retry_correction(
+    person_id: str,
+    correction_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _require_session_scope(request, db, person_id)
+    correction_row = db.query(CorrectionModel).filter(
+        CorrectionModel.id == correction_id,
+        CorrectionModel.person_id == person_id,
+    ).first()
+    if correction_row is None:
+        raise HTTPException(status_code=404, detail="Correction not found")
+    return _process_persisted_correction(db, person_id, correction_id)
 
 
 @router.get("/corrections/{person_id}", response_model=List[CorrectionSchema])
