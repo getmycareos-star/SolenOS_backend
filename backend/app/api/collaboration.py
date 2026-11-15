@@ -4892,7 +4892,9 @@ _CARE_HISTORY_TOPIC_GROUPS = {
 }
 _CARE_HISTORY_INTENT_PATTERN = re.compile(
     r"\bwhat\s+(?:has|have|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
-    r"(?:recorded|logged|saved|noted)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b",
+    r"(?:recorded|logged|saved|noted)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
+    r"\bwhat\s+(?:new\s+)?dose\s+(?:did|was)\s+(?:the\s+)?(?:doctor|clinician|prescriber)\s+"
+    r"(?:prescribe|recommend|change|set)\b",
     re.IGNORECASE,
 )
 _CARE_HISTORY_STOPWORDS = {
@@ -5015,6 +5017,8 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
                 + ", but I can't summarize them reliably from the records retrieved."
             )
         return "I found saved care notes, but I can't summarize them reliably from the records retrieved."
+    if topics and "medication" in {label for label, _ in topics}:
+        answer += " This is a caregiver report, not confirmation of the current prescription."
     return answer
 
 
