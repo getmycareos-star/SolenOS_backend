@@ -1578,3 +1578,34 @@ def test_situation_alternative_confidence_is_not_invented_from_pattern_strength(
     assert alternatives[0]["confidence_status"] == "not_calibrated"
     assert "may reflect recording cadence" in alternatives[0]["interpretation"]
 
+@pytest.mark.session_security
+def test_lcr_orientation_rejects_client_selected_person_outside_bearer_scope(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        first_session, first_headers = create_authenticated_session(client, "First Orientation Person")
+        second_session, _ = create_authenticated_session(client, "Second Orientation Person")
+        inference_calls = []
+
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+
+        def fake_qwen(base, model, messages, options=None):
+            inference_calls.append(messages)
+            return "Welcome to SolenOS. What would you like to record today?"
+
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+        response = client.post(
+            "/api/lcr/orientation",
+            headers=first_headers,
+            json={
+                "raw_input": "Hi",
+                "person_id": second_session["person"]["id"],
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert inference_calls == []
+        assert first_session["person"]["id"] != second_session["person"]["id"]
+    finally:
+        teardown_db()
