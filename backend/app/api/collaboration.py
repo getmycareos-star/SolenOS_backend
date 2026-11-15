@@ -4765,7 +4765,7 @@ def _care_recipient_identity_guidance(display_name: str | None) -> str:
     )
 
 
-DOCUMENT_INTENT_PATTERN = re.compile(
+_DOCUMENT_INTENT_PATTERN = re.compile(
     r"\b(?:uploaded document|document|file|attachment|letter|pdf|"
     r"discharge summary|discharge paperwork|care plan|clinic note|clinical note|"
     r"referral letter|prescription|lab result|test result|scan report|medical record)\b",
