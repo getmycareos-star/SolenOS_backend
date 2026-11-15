@@ -178,6 +178,7 @@ def stop_server(process):
         process.kill()
         process.wait(timeout=5)
     if process.returncode not in (0, -15):
+        log_path = Path("/tmp/solenos-postgres-e2e-uvicorn.log")
         detail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
         raise RuntimeError(
             f"Uvicorn exited with code {process.returncode}; server log tail follows:\n{detail}"
