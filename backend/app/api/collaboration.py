@@ -6519,11 +6519,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 missing_measurement_reply=missing_measurement_fallback,
                 medication_change_reply=medication_safety_fallback,
             ):
+                history_source_lines = list(dict.fromkeys([
+                    *included_model_context_lines,
+                    *event_context,
+                    *shared_lcr_lines,
+                ]))
                 reply = _care_history_extractive_answer(
-                    user_text, included_model_context_lines
+                    user_text, history_source_lines
                 ) or (
                     "I can't confirm the prescribed dose from the records retrieved. "
-                    "Please check the prescription or ask the prescriber or pharmacist."
+                    "A caregiver report does not confirm the prescribed dose or current medication instructions. "
+                    "Please check the prescription or contact the prescriber or pharmacist."
                 )
                 care_history_fallback_from_outage = bool(
                     reply.startswith("The saved notes mention medication:")
@@ -6583,9 +6589,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # let the model restate an old observation as a recent trend or imply
             # direction indirectly. Return the evidence-derived limit directly.
             reply = _trend_uncertainty_response(trend_assessment)
+        history_source_lines = list(dict.fromkeys([
+            *included_model_context_lines,
+            *event_context,
+            *shared_lcr_lines,
+        ]))
         care_history_extractive_answer = _care_history_extractive_answer(
             user_text,
-            included_model_context_lines,
+            history_source_lines,
         )
         medication_dose_recall_fallback_used = _should_use_medication_dose_recall_fallback(
             user_text,
@@ -6878,7 +6889,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             safety_note = (
                 "This answer quotes a caregiver report and does not confirm the prescribed dose or current medication instructions."
                 if medication_dose_recall_source_quote_used
-                else "The prescribed dose could not be confirmed from the records retrieved. Check the prescription or contact the prescriber or pharmacist."
+                else "The prescribed dose could not be confirmed from the records retrieved. A caregiver report does not confirm the prescribed dose or current medication instructions. Check the prescription or contact the prescriber or pharmacist."
             )
             ai_generated = False
         elif care_history_extractive_fallback_used:
