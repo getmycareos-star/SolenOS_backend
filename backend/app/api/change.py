@@ -812,6 +812,15 @@ def transition_situation_state(
         if assertion.source_event_id:
             related_source_ids.add(assertion.source_event_id)
 
+    # Resolve events discovered through assertion provenance as well; their
+    # evidence may be the only valid source attached to the situation.
+    linked_events = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id,
+        CareEvent.id.in_(related_source_ids),
+    ).all() if related_source_ids else []
+    for event in linked_events:
+        related_source_ids.update(event.evidence_ids or [])
+
     related_observations = db.query(EvidenceObservation).filter(
         EvidenceObservation.person_id == person_id,
         EvidenceObservation.id.in_(related_source_ids),
