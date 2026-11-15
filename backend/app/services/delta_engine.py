@@ -503,22 +503,38 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
     return references
 
 
-def _canonical_change_classification(change: Any, *, evidence_complete: bool) -> tuple[str, bool]:
+def _canonical_change_classification(
+    change: Any,
+    *,
+    evidence_complete: bool,
+    significance_assessment: Any | None = None,
+) -> tuple[str, bool]:
+    """Classify only an evidence-grounded significance candidate.
+
+    Change.confidence is intentionally uncalibrated and is not the significance
+    score. The active linked SignificanceAssessment is the only accepted source
+    for verdict and significance confidence. A candidate remains a candidate;
+    it is never promoted to a confirmed clinical state.
+    """
     raw_type = str(getattr(change.change_type, "value", change.change_type) or "").lower()
     baseline = str(getattr(change.baseline_coverage_status, "value", change.baseline_coverage_status) or "").lower()
     current = str(getattr(change.current_coverage_status, "value", change.current_coverage_status) or "").lower()
     coverage_complete = baseline in {"covered", "complete", "full", "sufficient"} and current in {
         "covered", "complete", "full", "sufficient"
     }
-    verdict = str(getattr(change.significance_verdict, "value", change.significance_verdict) or "").lower()
+    verdict_value = getattr(significance_assessment, "verdict", None)
+    verdict = str(getattr(verdict_value, "value", verdict_value) or "").lower()
     try:
-        confidence = float(change.confidence)
+        confidence = float(getattr(significance_assessment, "significance_confidence", None))
     except (TypeError, ValueError):
         confidence = 0.0
-    supported = evidence_complete and coverage_complete and verdict not in {
-        "", "none", "unknown", "insufficient_evidence"
-    } and confidence >= 0.65
-    if not supported:
+    candidate_is_supported = (
+        evidence_complete
+        and coverage_complete
+        and verdict == "meaningful_candidate"
+        and confidence >= 0.65
+    )
+    if not candidate_is_supported:
         return "uncertain", False
 
     subject = f"{change.subject_type} {change.subject_id}".lower().replace("-", "_").replace(" ", "_")
@@ -531,26 +547,17 @@ def _canonical_change_classification(change: Any, *, evidence_complete: bool) ->
     categories = {
         "emergence": "new",
         "onset": "new",
-        "recovery": "improved",
+        "recovery": "potential_improvement",
         "recurrence": "recurring",
         "persistence": "persistent",
-        "cessation": "resolved",
-        "disappearance": "resolved",
+        "cessation": "potential_resolution",
+        "disappearance": "potential_resolution",
         "stabilization": "unchanged",
     }
     if raw_type == "increase":
-        if adverse:
-            return "worsened", True
-        # An increase is not inherently better or worse. Without an explicit
-        # domain polarity or frequency measurement, preserve the raw Delta
-        # direction but do not manufacture a caregiver-facing interpretation.
-        return "uncertain", False
+        return ("potential_worsening", True) if adverse else ("uncertain", False)
     if raw_type == "decrease":
-        if adverse:
-            return "improved", True
-        # A decrease can mean improvement (e.g. pain) or deterioration
-        # (e.g. mobility). The subject label alone cannot establish polarity.
-        return "uncertain", False
+        return ("potential_improvement", True) if adverse else ("uncertain", False)
     return categories.get(raw_type, "uncertain"), raw_type in categories
 
 
@@ -571,6 +578,7 @@ def _reconcile_from_change_intelligence(
     existing_unresolved_care_loops: dict[str, Any],
 ) -> dict[str, Any]:
     from app.models.change import Change
+    from app.models.significance import SignificanceAssessment
     from app.models.care_continuity import CareStateRevision
     from sqlalchemy import func
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
@@ -709,10 +717,20 @@ def _reconcile_from_change_intelligence(
         references = _resolve_delta_source_refs(db, person_id, change_evidence_ids)
         reference_ids = {str(item["record_id"]) for item in references}
         evidence_complete = bool(references) and set(change_evidence_ids).issubset(reference_ids)
+        significance_assessment = None
+        if change.significance_assessment_id:
+            significance_assessment = db.query(SignificanceAssessment).filter(
+                SignificanceAssessment.id == change.significance_assessment_id,
+                SignificanceAssessment.person_id == person_id,
+                SignificanceAssessment.is_active.is_(True),
+            ).first()
         classification, classification_supported = _canonical_change_classification(
             change,
             evidence_complete=evidence_complete,
+            significance_assessment=significance_assessment,
         )
+        # This projection is an evidence-grounded candidate, not a caregiver-
+        # or professional-confirmed clinical state.
         supported = classification_supported and evidence_complete
         raw_type = str(getattr(change.change_type, "value", change.change_type) or "uncertain")
         name = str(change.subject_id or change.subject_type or "Care information")
@@ -731,9 +749,17 @@ def _reconcile_from_change_intelligence(
             "authoritative_change_id": str(change.id),
             "previous": previous,
             "current": current,
-            "certainty": "supported" if supported else "uncertain",
+            "certainty": "candidate" if supported else "uncertain",
             "evidence_supported": evidence_complete,
             "claim_supported": supported,
+            "significance_verdict": (
+                str(getattr(significance_assessment.verdict, "value", significance_assessment.verdict))
+                if significance_assessment is not None else None
+            ),
+            "significance_confidence": (
+                float(significance_assessment.significance_confidence)
+                if significance_assessment is not None else None
+            ),
             "source_reference_status": "matched" if evidence_complete else "partial",
             "source_record_refs": references,
             "comparison_basis": str(change.explanation or "Compared with the saved personal baseline."),
@@ -742,7 +768,7 @@ def _reconcile_from_change_intelligence(
             "current_coverage_status": change.current_coverage_status,
             "attention_candidate": bool(change.attention_candidate),
             "follow_up_candidate": bool(change.follow_up_candidate),
-            "confidence": change.confidence,
+            "confidence": (\n                float(significance_assessment.significance_confidence)\n                if significance_assessment is not None else None\n            ),
         }
         computed_changes.append(item)
         for reference in references:
@@ -750,7 +776,7 @@ def _reconcile_from_change_intelligence(
         claim_items.append({
             "text": f"{name}: {classification}",
             "source_references": references,
-            "support_status": "matched_source_and_state" if supported else "insufficient_evidence",
+            "support_status": "matched_source_and_significance_candidate" if supported else "insufficient_evidence",
             "authoritative_change_id": str(change.id),
         })
 
