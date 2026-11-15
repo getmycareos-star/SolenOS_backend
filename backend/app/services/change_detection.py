@@ -300,7 +300,7 @@ def detect_event_changes(
             Change.is_active.is_(True),
             Change.change_type.in_((
                 ChangeType.INCREASE, ChangeType.DECREASE,
-                ChangeType.EMERGENCE, ChangeType.RECURRENCE,
+                ChangeType.EMERGENCE, ChangeType.RECURRENCE, ChangeType.CESSATION,
             )),
             Change.confirmation_status.in_(("detected", "awaiting_confirmation")),
         )
