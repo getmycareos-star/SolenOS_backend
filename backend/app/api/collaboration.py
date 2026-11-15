@@ -6035,7 +6035,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 if assertion_id in existing_assertion_ids:
                     continue
                 existing_assertion_ids.add(assertion_id)
-                assertion_context.append("Caregiver-approved LCR assertion (source-attributed): " + json.dumps({
+                assertion_context.append("Caregiver-attributed LCR assertion (caregiver-approved; source-attributed): " + json.dumps({
                     "assertion_id": assertion_id, "field": assertion.field,
                     "value": assertion.asserted_value, "assertion_kind": assertion.assertion_kind,
                     "source_label": assertion.source_label,
