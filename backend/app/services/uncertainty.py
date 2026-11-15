@@ -185,7 +185,7 @@ def _source_clarification_text(value: object) -> str:
         item = quick_check_in.get("note")
         if isinstance(item, str) and item.strip():
             parts.append(item.strip())
-    return " ".join(dict.fromkeys(parts)) if parts else raw
+    return " ".join(dict.fromkeys(parts)) if parts else ""
 
 
 def _duration_question_supported_by_source(question: str, source_text: str) -> bool:
