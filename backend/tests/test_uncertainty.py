@@ -3966,7 +3966,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             type="note",
             evidence_kind="caregiver_report",
             epistemic_status="caregiver_reported",
-            source_text="She has been waking several times overnight.",
+            source_text="She has been waking several times overnight for the past two weeks.",
             uploaded_by_caregiver_id=caregiver.id,
             reported_by_caregiver_id=caregiver.id,
         )
@@ -3977,7 +3977,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             status="recorded",
             occurred_at=datetime.now(timezone.utc),
             title="Daily care report",
-            description="She has been waking several times overnight.",
+            description="She has been waking several times overnight for the past two weeks.",
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
@@ -3999,12 +3999,12 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
                 person_id=person.id,
                 subject_type="person",
                 subject_id=person.id,
-                field="overnight_wake",
+                field="overnight_wake_frequency",
                 epistemic_state=EpistemicState.UNKNOWN,
                 gap_reason=GapReason.NOT_DOCUMENTED,
                 priority=Priority.HIGH,
                 lifecycle_status=GapLifecycleStatus.OPEN,
-                description="The overnight waking frequency and duration need clarification.",
+                description="The overnight waking frequency needs clarification.",
                 evidence_ids=[evidence.id],
                 context=[{
                     "caregiver_attention_required": True,
@@ -4017,7 +4017,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
                 person_id=person.id,
                 subject_type="person",
                 subject_id=person.id,
-                field="overnight_waking",
+                field="overnight_wake_duration",
                 epistemic_state=EpistemicState.UNKNOWN,
                 gap_reason=GapReason.NOT_DOCUMENTED,
                 priority=Priority.HIGH,
@@ -4054,7 +4054,7 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         questions = [
             "How many times did she wake overnight?",
             "Only the first 25 pages were processed; more pages need review.",
-            "How long has the overnight waking been happening?",
+            "What is the duration of the overnight waking pattern?",
             "How many times did she wake overnight?",
         ]
         first = persist_source_clarification_questions(
