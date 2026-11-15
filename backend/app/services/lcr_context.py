@@ -378,6 +378,12 @@ _SEARCH_STOPWORDS = {
     "her", "his", "our", "your", "been", "getting", "over", "into",
     "journey", "complete", "full", "whole", "timeline", "overview", "everything",
     "give", "tell", "show", "summarize", "summary", "history", "care",
+    # Generic temporal-question verbs describe the requested operation, not a
+    # care topic. Keeping them as lexical predicates makes questions such as
+    # "What happened last week?" miss every record unless its text literally
+    # contains "happened".
+    "happened", "happen", "occurred", "occur", "event", "events",
+    "changed", "change", "changes", "anything",
 }
 
 
