@@ -1503,12 +1503,18 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).all()
-        # The benchmark's generated clinical-gap questions have no separate,
-        # source-backed necessity assessment. Preserve their InformationGap
-        # records, but do not turn model wording into caregiver tasks.
-        assert actual_questions == [], (
-            f"{scenario['scenario_id']}: unassessed model-generated questions "
-            "must remain internal and must not become caregiver work"
+        # A scenario may also contain a genuine, source-backed decision
+        # dependency (for example, conflicting medication instructions). Those
+        # questions must remain actionable. The invariant is that no unassessed
+        # model-generated gap or question becomes caregiver work.
+        from app.services.care_continuity import has_valid_caregiver_necessity
+        invalid_questions = [
+            question for question in actual_questions
+            if not has_valid_caregiver_necessity(question, db, person.id)
+        ]
+        assert invalid_questions == [], (
+            f"{scenario['scenario_id']}: open caregiver questions must each have "
+            "an explicit necessity assessment, decision dependency and same-record evidence"
         )
 
 
