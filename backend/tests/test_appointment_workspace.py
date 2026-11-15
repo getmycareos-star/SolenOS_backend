@@ -1065,6 +1065,12 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
     assert body["person_scope_verified"] is True
     assert body["read_only"] is True
     assert body["updates_lcr"] is False
+    shared_lcr = body["living_care_record_context"]
+    assert shared_lcr["person_id"] == owner["person"]["id"]
+    assert shared_lcr["read_only"] is True
+    assert shared_lcr["retrieval_strategy"] == "person_scoped_full_source_scan"
+    assert {"facts", "events", "evidence", "assertions"}.issubset(shared_lcr["sources"])
+    assert shared_lcr["retrieval_scan_complete"] is True
     assert body["source_coverage"] == {
         "care_facts": "empty",
         "care_events": "empty",
