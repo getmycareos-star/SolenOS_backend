@@ -472,19 +472,9 @@ def persist_source_clarification_questions(
                 if item.get("source_kind") == source_kind
                 and str(item.get("source_id") or "") == str(source_record_id)
             ), None)
-            existing_source_refs = {
-                json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-                for item in (existing_source_context or {}).get("source_record_refs", [])
-                if isinstance(item, dict)
-            }
-            requested_source_refs = {
-                json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-                for item in source_refs
-            }
             existing_evidence_ids = set(str(value) for value in (existing.evidence_ids or []))
             if (
                 existing.question == question_text
-                and requested_source_refs.issubset(existing_source_refs)
                 and set(assessed_evidence_ids).issubset(existing_evidence_ids)
                 and (not matched_gap or existing.necessity == "necessary")
             ):
