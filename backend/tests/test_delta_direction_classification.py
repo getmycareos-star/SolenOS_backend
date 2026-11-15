@@ -6,6 +6,7 @@ from app.services.delta_engine import _canonical_change_classification
 def _change(*, subject_type="care_domain", subject_id="mobility", change_type="increase"):
     # Change.confidence is deliberately uncalibrated in production.
     return SimpleNamespace(
+        id="change-1",
         change_type=change_type,
         baseline_coverage_status="covered",
         current_coverage_status="covered",
@@ -16,10 +17,12 @@ def _change(*, subject_type="care_domain", subject_id="mobility", change_type="i
     )
 
 
-def _assessment(*, verdict="meaningful_candidate", confidence=0.95):
+def _assessment(*, verdict="meaningful_candidate", confidence=0.95, target_type="change", target_id="change-1"):
     return SimpleNamespace(
         verdict=verdict,
         significance_confidence=confidence,
+        target_type=target_type,
+        target_id=target_id,
         is_active=True,
     )
 
@@ -82,6 +85,33 @@ def test_change_without_linked_significance_assessment_is_uncertain():
     # A legacy significance_verdict or Change.confidence must not substitute
     # for the active linked SignificanceAssessment.
     classification, candidate = _classify(_change(subject_id="night_waking"))
+    assert classification == "uncertain"
+    assert candidate is False
+
+
+def test_significance_assessment_for_another_change_cannot_support_this_change():
+    classification, candidate = _classify(
+        _change(subject_id="night_waking"),
+        assessment=_assessment(target_id="different-change"),
+    )
+    assert classification == "uncertain"
+    assert candidate is False
+
+
+def test_non_change_significance_assessment_cannot_support_a_change():
+    classification, candidate = _classify(
+        _change(subject_id="night_waking"),
+        assessment=_assessment(target_type="care_assertion"),
+    )
+    assert classification == "uncertain"
+    assert candidate is False
+
+
+def test_significance_assessment_without_target_link_cannot_support_a_change():
+    classification, candidate = _classify(
+        _change(subject_id="night_waking"),
+        assessment=_assessment(target_id=None),
+    )
     assert classification == "uncertain"
     assert candidate is False
 
