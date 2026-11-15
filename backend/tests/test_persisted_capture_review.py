@@ -142,7 +142,6 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         json={
             "person_id": session["person"]["id"],
             "caregiver_id": session["caregiver"]["id"],
-            "capture_kind": "natural_language_update",
             "notes": source,
             "medications": [],
             "vitals": [],
