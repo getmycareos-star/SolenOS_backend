@@ -4914,9 +4914,9 @@ def _care_history_event_text(record: dict[str, Any]) -> str:
     try:
         payload = json.loads(raw_description)
     except (TypeError, ValueError, json.JSONDecodeError):
-        return re.sub(r"\\s+", " ", raw_description).strip()
+        return re.sub(r"\s+", " ", raw_description).strip()
     if not isinstance(payload, dict):
-        return re.sub(r"\\s+", " ", raw_description).strip()
+        return re.sub(r"\s+", " ", raw_description).strip()
 
     sources = [payload]
     original_capture = payload.get("original_capture")
@@ -4948,8 +4948,8 @@ def _care_history_event_text(record: dict[str, Any]) -> str:
                     f"{field}: " + json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
                 )
     if not extracted:
-        return re.sub(r"\\s+", " ", raw_description).strip()
-    return re.sub(r"\\s+", " ", " ".join(dict.fromkeys(extracted))).strip()
+        return re.sub(r"\s+", " ", raw_description).strip()
+    return re.sub(r"\s+", " ", " ".join(dict.fromkeys(extracted))).strip()
 
 
 def _care_history_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
