@@ -1449,6 +1449,14 @@ def test_companion_never_asks_multiple_questions_in_one_reply():
         "What was recorded about sleep and lunch?",
         "The caregiver reported poor sleep and that lunch was barely touched.",
     )
+    assert collaboration._caregiver_response_needs_revision(
+        "I'm exhausted. I don't know what to do anymore.",
+        "I hear you. This is a lot. We can take one concern at a time.",
+    )
+    assert not collaboration._caregiver_response_needs_revision(
+        "I'm exhausted. I don't know what to do anymore.",
+        "I hear that you're exhausted. We can take this one concern at a time.",
+    )
 
 def test_companion_recognizes_common_care_document_names():
     assert collaboration._is_document_question("What does the discharge summary say about walking?")
