@@ -4937,60 +4937,42 @@ def _care_history_requested_topics(user_text: str) -> list[tuple[str, set[str]]]
 
 
 def _care_history_event_text(record: dict[str, Any]) -> str:
-    """Extract caregiver-entered prose, never generated summaries or opaque JSON."""
+    """Extract only caregiver-entered prose from a persisted care-event payload."""
     raw_description = record.get("description")
     if not isinstance(raw_description, str) or not raw_description.strip():
         return ""
     try:
         payload = json.loads(raw_description)
     except (TypeError, ValueError, json.JSONDecodeError):
-        return re.sub(r"\\s+", " ", raw_description).strip()
-    if isinstance(payload, str):
-        return re.sub(r"\\s+", " ", payload).strip()
+        return re.sub(r"\s+", " ", raw_description).strip()
     if not isinstance(payload, dict):
-        return ""
-
-    sources: list[tuple[dict[str, Any], bool]] = []
-    original_capture = payload.get("original_capture")
-    if isinstance(original_capture, dict):
-        sources.append((original_capture, True))
-    sources.append((payload, False))
+        return re.sub(r"\s+", " ", raw_description).strip()
 
     extracted: list[str] = []
-    for source, is_original_capture in sources:
-        fields = (
-            "notes", "note", "observation", "details", "care_notes",
-            "original_text", "raw_text", "caregiver_text",
-        )
-        if is_original_capture:
-            fields = (*fields, "description")
-        for field in fields:
-            value = source.get(field)
+    original_capture = payload.get("original_capture")
+    if isinstance(original_capture, dict):
+        for field in ("notes", "description", "note", "text"):
+            value = original_capture.get(field)
             if isinstance(value, str) and value.strip():
                 extracted.append(value.strip())
 
-        observations = source.get("observations")
-        if isinstance(observations, list):
-            extracted.extend(
-                value.strip() for value in observations
-                if isinstance(value, str) and value.strip()
-            )
+    # Daily Capture's top-level notes and quick-check-in note are caregiver
+    # input. Generated summaries and structured measurement objects are not
+    # treated as caregiver prose and must not be quoted by this fallback.
+    notes = payload.get("notes")
+    if isinstance(notes, str) and notes.strip():
+        extracted.append(notes.strip())
+    quick_check_in = payload.get("quick_check_in")
+    if isinstance(quick_check_in, dict):
+        for field in ("note", "notes"):
+            value = quick_check_in.get(field)
+            if isinstance(value, str) and value.strip():
+                extracted.append(value.strip())
 
-        quick_check_in = source.get("quick_check_in")
-        if isinstance(quick_check_in, dict):
-            for field in ("note", "notes"):
-                value = quick_check_in.get(field)
-                if isinstance(value, str) and value.strip():
-                    extracted.append(value.strip())
-            selected_areas = quick_check_in.get("selected_areas")
-            if isinstance(selected_areas, list) and selected_areas:
-                labels = [str(value).strip() for value in selected_areas if str(value).strip()]
-                if labels:
-                    extracted.append("Selected care areas: " + ", ".join(labels))
+    return re.sub(r"\s+", " ", " ".join(dict.fromkeys(extracted))).strip()
 
-    if not extracted:
-        return ""
-    return re.sub(r"\\s+", " ", " ".join(dict.fromkeys(extracted))).strip()
+
+
 
 def _care_history_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
     """Return only caregiver-authored event descriptions relevant to a history question."""
