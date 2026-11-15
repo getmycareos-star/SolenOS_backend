@@ -47,7 +47,11 @@ def _source_clarification_text(value: object) -> str:
     """
     if not isinstance(value, str):
         return ""
-    return " ".join(value.split())
+    # Some extraction/OCR providers encode line breaks as literal escape
+    # sequences instead of actual whitespace. Normalize only those controls;
+    # never decode arbitrary backslash escapes or rewrite source wording.
+    normalized = value.replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
+    return " ".join(normalized.split())
 
 
 def _has_decision_dependency(context) -> bool:
@@ -383,12 +387,10 @@ def persist_source_clarification_questions(
                     necessity_gaps.append((gap, rationale.strip(), dependency.strip(), gap_evidence_ids))
         matched_gap = necessity_gaps[0] if len(necessity_gaps) == 1 else None
 
-        # A source-extraction question is not caregiver work merely because
-        # the model proposed it. Persist it only when one unambiguous, open,
-        # same-person LCR gap has explicit decision necessity and valid evidence.
-        if matched_gap is None:
-            continue
-
+        # A source-grounded question may be retained for review even when
+        # no decision dependency has been established. In that case it remains
+        # informational (necessity=not_assessed; no assigned answerer). Only a
+        # single, evidence-backed LCR gap can promote it to caregiver work.
         source_context = {
             "source_kind": source_kind,
             "source_id": source_record_id,
