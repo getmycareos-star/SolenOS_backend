@@ -134,7 +134,7 @@ def test_single_tired_today_is_not_meaningful_no_alert():
         app.dependency_overrides[get_db] = override_get_db
         db, person, caregiver = _seed_person()
         now = datetime.now(timezone.utc)
-        _add_event(db, person, caregiver, "fatigue", "Mom seemed tired today", days_ago=0)
+        event = _add_event(db, person, caregiver, "fatigue", "Mom seemed tired today", days_ago=0)
 
         from app.services.change_detection import detect_event_changes
         changes = detect_event_changes(db, person.id, "fatigue", None, now)
@@ -144,6 +144,15 @@ def test_single_tired_today_is_not_meaningful_no_alert():
         # A single unverified report must NOT be a meaningful-change candidate
         assert changes[0].significance_verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
         assert changes[0].attention_candidate is False
+        assert changes[0].follow_up_candidate is False
+        assessment = db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.id == changes[0].significance_assessment_id
+        ).one()
+        assert assessment.verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
+        assert assessment.follow_up_candidate is False
+        persisted_event = db.query(CareEvent).filter_by(id=event.id).one()
+        assert persisted_event.attention_candidate is False
+        assert persisted_event.follow_up_candidate is False
 
         from app.services.situation_formation import detect_situations
         situations = detect_situations(db, person.id, now)
