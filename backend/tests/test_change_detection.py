@@ -3208,5 +3208,17 @@ def test_caregiver_confirmed_situation_trajectory_states_are_scoped_and_audited(
             headers={"Authorization": f"Bearer {token}"},
         )
         assert unlinked_evidence.status_code == 422
+
+        empty_reason = client.post(
+            url,
+            json={
+                "state": "active",
+                "reason": "   ",
+                "evidence_ids": [source.id],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert empty_reason.status_code == 422
+        assert "non-empty reason" in empty_reason.text
     finally:
         teardown_db()
