@@ -142,6 +142,46 @@ def test_full_history_projection_returns_more_than_fifty_matches_in_one_scan():
         _close_postgres_conversation_db(engine, connection, schema)
 
 
+def test_full_history_projection_discloses_more_than_two_hundred_matches():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            db.add(Person(id="partial-person", name="Care recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id="partial-caregiver", name="Caregiver", relationship="family",
+                person_id="partial-person",
+            ))
+            db.flush()
+            now = datetime.now(UTC)
+            db.add_all([
+                CareEvent(
+                    id=f"sleep-overflow-{index}", person_id="partial-person",
+                    event_type="daily_observation", status="recorded",
+                    occurred_at=now - timedelta(days=index),
+                    title=f"Sleep history {index}",
+                    description=f"Caregiver recorded sleep observation {index}.",
+                    evidence_ids=[], created_by_caregiver_id="partial-caregiver",
+                )
+                for index in range(205)
+            ])
+            db.commit()
+            from app.services.lcr_context import _load_source_schema
+            _load_source_schema.cache_clear()
+            context = build_lcr_context(
+                db, "partial-person", caregiver_id="partial-caregiver",
+                query="sleep", limit_per_source=200, include_all_history=True,
+            )
+        events = context["sources"]["events"]
+        assert events["candidate_count"] == 205
+        assert events["returned_count"] == 200
+        assert events["has_more"] is True
+        assert events["returned_history_complete"] is False
+        assert context["retrieval_projection_complete"] is False
+    finally:
+        _close_postgres_conversation_db(engine, connection, schema)
+
+
 def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
     engine, connection, schema = _postgres_conversation_db()
     metadata = ConversationSession.metadata
