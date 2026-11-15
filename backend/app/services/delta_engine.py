@@ -1102,7 +1102,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             if evidence_ids else []
         )
         if evidence_ids and (
-            {row.id for row in incoming_evidence_rows} != set(evidence_ids)
+            {str(row.id) for row in incoming_evidence_rows} != {str(value) for value in evidence_ids}
             or any(row.evidence_status == "deleted_by_caregiver" for row in incoming_evidence_rows)
         ):
             db.rollback()
