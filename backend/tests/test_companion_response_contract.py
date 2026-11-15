@@ -1244,8 +1244,8 @@ def test_companion_temporal_question_retrieves_events_without_literal_temporal_v
         now = datetime.now(timezone.utc)
         event = CareEvent(
             person_id=person_id, event_type="daily_note", status="recorded",
-            occurred_at=now - timedelta(days=2), title="Quieter night",
-            description="Caregiver reported that Mum had a quieter night yesterday.",
+            occurred_at=now - timedelta(days=8), title="Quieter night",
+            description="Caregiver reported that Mum had a quieter night last week.",
             evidence_ids=[], created_by_caregiver_id=caregiver_id,
             time_provenance="caregiver_reported",
         )
