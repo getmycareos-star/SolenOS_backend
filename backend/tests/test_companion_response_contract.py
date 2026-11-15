@@ -1864,7 +1864,7 @@ def test_companion_revises_overloaded_answer_before_persisting(monkeypatch):
         assert response.json()["reply"] == "We can focus on the one concern that matters most right now. You do not need to handle everything today."
         assert len(calls) == 2
         assert "Revise your previous answer" in calls[1][0][-1]["content"]
-        assert "no more than three short sentences" in calls[1][0][-1]["content"]
+        assert "Use at most two short sentences" in calls[1][0][-1]["content"]
         assert "Do not ask the caregiver to repeat information already provided" in calls[1][0][-1]["content"]
     finally:
         teardown()
@@ -1949,7 +1949,7 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
         assert response.status_code == 503, response.text
         assert len(calls) == 3
         assert all("current greeting" not in call[0][-1]["content"].casefold() for call in calls[1:])
-        assert all("no more than three short sentences" in call[0][-1]["content"] for call in calls[1:])
+        assert all("Use at most two short sentences" in call[0][-1]["content"] for call in calls[1:])
     finally:
         teardown()
 
