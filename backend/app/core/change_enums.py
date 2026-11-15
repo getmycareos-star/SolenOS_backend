@@ -49,6 +49,8 @@ class PatternStrength(str, Enum):
 
 class SituationState(str, Enum):
     ACTIVE = "active"
+    WORSENING = "worsening"
+    IMPROVING = "improving"
     HISTORICAL = "historical"
     RESOLVED = "resolved"
     EVOLVED = "evolved"
