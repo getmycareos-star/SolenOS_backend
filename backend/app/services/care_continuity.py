@@ -819,12 +819,18 @@ def next_best_questions(
             "current instruction",
             "current medication instruction",
             "medication instruction",
+            "current prescription",
+            "current prescription instruction",
             "current dose",
             "prescribed dose",
             "prescribed dosage",
             "dosage instructions",
             "dose",
             "dosage",
+            "current frequency",
+            "prescribed frequency",
+            "current route",
+            "prescribed route",
         }
         is_medication_conflict = (
             medication_subject
