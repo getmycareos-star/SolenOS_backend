@@ -5580,7 +5580,7 @@ def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) ->
 
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
-    """Generate a context-grounded Companion response; chat never writes care facts."""
+    """Generate a context-grounded Companion response; ordinary chat never writes care facts."""
     companion_request_started = _time.perf_counter()
     companion_request_id = getattr(request.state, "request_id", None)
     person_id, caregiver_id = _scope(request, db)
@@ -7643,8 +7643,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
-    # Conversation is not a care-capture channel. Any new care information
-    # must be added through Daily Care or Documents and their evidence workflow.
+    # Ordinary conversation remains separate from care facts. A caregiver may
+    # explicitly mark this persisted source message as a care report through the
+    # separate review endpoint; that creates a pending proposal, never an assertion.
     care_update_candidates = []
     history = (
         db.query(ConversationMessage)
