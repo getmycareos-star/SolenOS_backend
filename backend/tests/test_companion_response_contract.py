@@ -1101,6 +1101,7 @@ def test_companion_retrieves_original_care_reports_for_spanish_and_french_topics
         assert body["reply"].startswith(reply)
         assert report in body["reply"], "the localized fallback must preserve the original-language caregiver quotation"
         assert event_id in body["source_event_ids"]
+        assert body["lcr_context_coverage"]["direct_care_history_recall"]["event_count"] == 1
         assert report in captured["messages"][0]["content"]
         assert body["written_to_lcr"] is False
     finally:
