@@ -13,12 +13,12 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion, EvidenceObservation
+from app.models.care_continuity import CareAssertion, CareDeltaRun, EvidenceObservation
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
-from app.models.uncertainty import OpenQuestion
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
+from app.models.uncertainty import OpenQuestion
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.services.learning import LearningEngine
 
@@ -30,14 +30,16 @@ engine = create_engine(
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def process_daily_capture_job(job_id, monkeypatch, extractor, *, expected_status="completed"):
-    from app.services import qwen_background_worker
+def process_daily_capture_job(job_id, monkeypatch, extractor, *, expected_status="completed", delta_reconciler=None):
+    from app.services import qwen_background_worker, delta_engine
 
     # Queue delays are intentional in production. Tests advance the persisted job
     # clock explicitly so the worker executes deterministically without sleeping.
     make_daily_capture_job_runnable(job_id)
     monkeypatch.setattr(qwen_background_worker, "SessionLocal", TestingSessionLocal)
     monkeypatch.setattr(qwen_background_worker, "extract_review_candidates", extractor)
+    if delta_reconciler is not None:
+        monkeypatch.setattr(delta_engine, "reconcile_event", delta_reconciler)
     processed = asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
     db = TestingSessionLocal()
     try:
@@ -812,6 +814,9 @@ def test_quick_daily_checkin_persists_uncertainty_without_inference(monkeypatch)
         assert analysis.extraction_status == "not_applicable"
         assert analysis.execution_status["extraction"] == "not_applicable"
         assert analysis.execution_status["review"] == "not_required"
+        assert analysis.execution_status["delta_reconciliation"] == "not_applicable"
+        assert analysis.execution_status.get("delta_run_id") is None
+        assert db.query(CareDeltaRun).filter_by(source_event_id=response.json()["id"]).count() == 0
         assert analysis.candidates == {"observations": [], "open_questions": []}
         assert job.status == "completed"
         assert '"capture_mode": "structured_quick_check_in"' in job.result_text
@@ -1120,187 +1125,6 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
         db = TestingSessionLocal()
         try:
             assert db.query(Correction).count() == 1
-        finally:
-            db.close()
-    finally:
-        teardown_db()
-
-
-def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
-    import app.api.v1 as api_v1
-
-    setup_db()
-    try:
-        seed_person_and_caregiver()
-        now = datetime.now(timezone.utc)
-        db = TestingSessionLocal()
-        db.add(CareEvent(
-            id="event-correction-retry",
-            person_id="person-daily-test",
-            event_type="structured_daily_capture",
-            status="recorded",
-            occurred_at=now,
-            title="Medication report",
-            description="She stopped taking her afternoon medication.",
-            created_by_caregiver_id="caregiver-daily-test",
-        ))
-        db.add(OpenLoopRecord(
-            id="loop-correction-retry",
-            person_id="person-daily-test",
-            caregiver_id="caregiver-daily-test",
-            loop_type="follow_up",
-            title="Confirm medication information",
-            description="Check whether the afternoon medication was stopped.",
-            status="open",
-            outcome_status="outcome_unknown",
-            source_type="care_event",
-            source_id="event-correction-retry",
-            source_fingerprint=hashlib.sha256(b"event-correction-retry").hexdigest(),
-            evidence=[],
-            uncertainty="unknown",
-            missing_information=[],
-            options=[],
-            version=1,
-        ))
-        db.commit()
-        db.close()
-
-        calls = {"count": 0}
-
-        def fail_once(*args, **kwargs):
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise RuntimeError("injected reconciliation failure")
-            return {
-                "workflow": "care_record_correction",
-                "stages": {"reconciliation": "committed"},
-                "transaction_owner": "caller",
-            }
-
-        monkeypatch.setattr(api_v1, "execute_care_continuity_reconciliation", fail_once)
-        client = TestClient(app)
-        headers = session_headers("person-daily-test", "caregiver-daily-test")
-        payload = {
-            "person_id": "person-daily-test",
-            "caregiver_id": "caregiver-daily-test",
-            "target_type": "care_event",
-            "target_id": "event-correction-retry",
-            "original_text": "She stopped taking her afternoon medication.",
-            "corrected_text": "She missed one afternoon dose yesterday. She has not stopped taking it.",
-            "reason": "The earlier report was inaccurate.",
-            "idempotency_key": "medication-correction-retry-001",
-        }
-
-        first = client.post("/api/v1/corrections", headers=headers, json=payload)
-        assert first.status_code == 200, first.text
-        first_body = first.json()
-        assert first_body["processing_status"] == "pending"
-        assert first_body["processing_attempts"] == 1
-        assert first_body["care_continuity_execution"]["retry_required"] is True
-        correction_id = first_body["id"]
-        pending_history = client.get(
-            "/api/v1/daily-care/intelligence/history?limit=20&offset=0",
-            headers=headers,
-        )
-        assert pending_history.status_code == 200, pending_history.text
-        pending_item = next(
-            row for row in pending_history.json()["records"]
-            if row["source_type"] == "correction" and row["source_id"] == correction_id
-        )
-        assert pending_item["processing_status"] == "pending"
-        pending_current = client.get("/api/v1/care-continuity/current-care", headers=headers)
-        assert pending_current.status_code == 200, pending_current.text
-        pending_items = pending_current.json()["items"]
-        assert any(row["id"] == "event-correction-retry" for row in pending_items)
-        assert any(
-            row.get("source_collection") == "corrections"
-            and row.get("target_id") == "event-correction-retry"
-            and row.get("processing_status") == "pending"
-            for row in pending_items
-        )
-
-        db = TestingSessionLocal()
-        try:
-            persisted = db.query(Correction).filter_by(id=correction_id).one()
-            assert persisted.processing_status == "pending"
-            assert persisted.processing_attempts == 1
-            assert persisted.care_continuity_execution["status"] == "pending"
-            assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
-            original = db.query(CareEvent).filter_by(id="event-correction-retry").one()
-            assert original.description == "She stopped taking her afternoon medication."
-        finally:
-            db.close()
-
-        # Retry the same request after a simulated process/session boundary.
-        retry = client.post(
-            f"/api/v1/corrections/person-daily-test/{correction_id}/retry",
-            headers=headers,
-        )
-        assert retry.status_code == 200, retry.text
-        retry_body = retry.json()
-        assert retry_body["id"] == correction_id
-        assert retry_body["processing_status"] == "completed"
-        assert retry_body["processing_attempts"] == 2
-        assert retry_body["processed_at"] is not None
-        assert retry_body["care_continuity_execution"]["retry_required"] is False
-        completed_history = client.get(
-            "/api/v1/daily-care/intelligence/history?limit=20&offset=0",
-            headers=headers,
-        )
-        completed_item = next(
-            row for row in completed_history.json()["records"]
-            if row["source_type"] == "correction" and row["source_id"] == correction_id
-        )
-        assert completed_item["processing_status"] == "completed"
-        completed_current = client.get("/api/v1/care-continuity/current-care", headers=headers)
-        assert completed_current.status_code == 200, completed_current.text
-        completed_items = completed_current.json()["items"]
-        assert not any(row["id"] == "event-correction-retry" for row in completed_items)
-        corrected_projection = next(
-            row for row in completed_items
-            if row.get("source_collection") == "corrections"
-            and row.get("target_id") == "event-correction-retry"
-        )
-        assert corrected_projection["description"] == payload["corrected_text"]
-        assert corrected_projection["epistemic_status"] == "caregiver_reported"
-
-        # Replaying the same idempotency key returns the same correction, not a
-        # second history item or a second reconciliation side effect.
-        replay = client.post("/api/v1/corrections", headers=headers, json=payload)
-        assert replay.status_code == 200, replay.text
-        assert replay.json()["id"] == correction_id
-        assert replay.json()["processing_status"] == "completed"
-        assert calls["count"] == 2
-
-        # A browser reload can lose the original client key. The stable request
-        # fingerprint still prevents an identical correction from being saved twice.
-        reloaded_replay = client.post(
-            "/api/v1/corrections",
-            headers=headers,
-            json={**payload, "idempotency_key": "new-browser-session-key"},
-        )
-        assert reloaded_replay.status_code == 200, reloaded_replay.text
-        assert reloaded_replay.json()["id"] == correction_id
-        assert calls["count"] == 2
-
-        changed_payload = {**payload, "corrected_text": "A different correction."}
-        conflict = client.post("/api/v1/corrections", headers=headers, json=changed_payload)
-        assert conflict.status_code == 409, conflict.text
-
-        db = TestingSessionLocal()
-        try:
-            assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
-            original = db.query(CareEvent).filter_by(id="event-correction-retry").one()
-            assert original.description == "She stopped taking her afternoon medication."
-            loop = db.query(OpenLoopRecord).filter_by(id="loop-correction-retry").one()
-            assert loop.status == "open"
-            assert loop.review_at is not None
-            assert loop.version == 2
-            event = db.query(OpenLoopEvent).filter_by(
-                loop_id=loop.id,
-                event_type="source_corrected_requires_review",
-            ).one()
-            assert event.evidence[0]["correction_id"] == correction_id
         finally:
             db.close()
     finally:
@@ -2122,6 +1946,16 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             worker_result = json.loads(completed_job.result_text or "{}")
             assert worker_result.get("capture_mode") == "natural_language_update", worker_result
             assert worker_result.get("observation_count") == 2, worker_result
+            assert worker_result.get("delta_reconciliation_status") == "completed", worker_result
+            delta_run = db.query(CareDeltaRun).filter_by(
+                person_id="person-daily-test",
+                source_event_id=event.id,
+                source="SolenOS Daily Capture",
+            ).one()
+            assert delta_run.evidence_ids == [evidence.id]
+            assert analysis.execution_status["delta_reconciliation"] == "completed"
+            assert str(analysis.execution_status["delta_run_id"]) == str(delta_run.id)
+            assert str(worker_result["delta_run_id"]) == str(delta_run.id)
             observations = db.query(EvidenceObservation).filter_by(
                 person_id="person-daily-test",
                 evidence_id=evidence.id,
@@ -2257,7 +2091,324 @@ def test_source_grounded_observations_survive_reconciliation_retry_without_dupli
             assert len(persisted_after_retry) == 1
             completed_job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
             assert completed_job.status == "completed"
-            assert json.loads(completed_job.result_text)["observation_count"] == 1
+            completed_result = json.loads(completed_job.result_text)
+            assert completed_result["observation_count"] == 1
+            assert completed_result["delta_reconciliation_status"] == "completed"
+            assert db.query(CareDeltaRun).filter_by(
+                source_event_id=receipt["id"],
+                person_id="person-daily-test",
+                source="SolenOS Daily Capture",
+            ).count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_delta_failure_does_not_fail_persisted_daily_care_capture(monkeypatch):
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night."
+
+        extraction_calls = {"count": 0}
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            extraction_calls["count"] += 1
+            assert source_text == original_report
+            return {
+                "observations": [{
+                    "subject": "Mum",
+                    "observation": "slept poorly last night",
+                    "source_quote": original_report,
+                    "source_event_id": source_event_id,
+                }],
+                "open_questions": [],
+            }
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "delta-failure-isolation-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+
+        def unavailable_delta(*args, **kwargs):
+            raise RuntimeError("delta_runtime_unavailable")
+
+        process_daily_capture_job(
+            receipt["qwen_job_id"],
+            monkeypatch,
+            exact_source_candidates,
+            delta_reconciler=unavailable_delta,
+            expected_status="queued",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            analysis = db.query(CaptureAnalysis).filter_by(
+                source_event_id=receipt["id"],
+                person_id="person-daily-test",
+                caregiver_id="caregiver-daily-test",
+            ).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+            ).all()
+            result = json.loads(job.result_text or "{}")
+            analysis_id = analysis.id
+
+            assert job.workflow == "daily_capture_delta_reconciliation"
+            assert job.status == "queued"
+            assert result["reconciliation_status"] == "completed"
+            assert result["projection_status"] == "verified"
+            assert result["delta_reconciliation_status"] == "failed"
+            assert result["delta_reconciliation_error_code"] == "RuntimeError"
+            assert analysis.execution_status["reconciliation"] == "completed"
+            assert analysis.execution_status["delta_reconciliation"] == "failed"
+            assert analysis.execution_status["longitudinal_processing"] == "retrying"
+            assert len(observations) == 1
+            assert db.query(CareDeltaRun).filter_by(
+                person_id="person-daily-test",
+                source_event_id=receipt["id"],
+            ).count() == 0
+        finally:
+            db.close()
+
+        queued_job_status = client.get(
+            f"/api/v1/assistant/jobs/{receipt['qwen_job_id']}", headers=headers
+        )
+        assert queued_job_status.status_code == 200, queued_job_status.text
+        queued_payload = queued_job_status.json()
+        assert queued_payload["status"] == "queued"
+        assert queued_payload["workflow"] == "daily_capture_delta_reconciliation"
+        assert queued_payload["daily_capture"]["analysis_id"] == analysis_id
+        assert queued_payload["daily_capture"]["longitudinal_processing_status"] == "retrying"
+        assert queued_payload["source_event_ids"] == [receipt["id"]]
+
+        def recovered_delta(*args, **kwargs):
+            return {"provenance": {"delta_run_id": "delta-retry-run-001"}}
+
+        process_daily_capture_job(
+            receipt["qwen_job_id"],
+            monkeypatch,
+            exact_source_candidates,
+            delta_reconciler=recovered_delta,
+            expected_status="completed",
+        )
+        assert extraction_calls["count"] == 1
+
+        db = TestingSessionLocal()
+        try:
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            analysis = db.query(CaptureAnalysis).filter_by(
+                source_event_id=receipt["id"],
+                person_id="person-daily-test",
+                caregiver_id="caregiver-daily-test",
+            ).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+            ).all()
+            assert job.workflow == "daily_capture_delta_reconciliation"
+            assert job.status == "completed"
+            result = json.loads(job.result_text or "{}")
+            assert result["projection_status"] == "verified"
+            assert result["observation_count"] >= 1
+            assert result["delta_engine_output_persisted"] is True
+            assert result["longitudinal_processing_status"] == "completed"
+            assert result["delta_run_id"] == "delta-retry-run-001"
+            assert analysis.id == analysis_id
+            assert analysis.execution_status["delta_reconciliation"] == "completed"
+            assert analysis.execution_status["delta_run_id"] == "delta-retry-run-001"
+            assert analysis.execution_status["longitudinal_processing"] == "completed"
+            assert len(observations) == 1
+        finally:
+            db.close()
+
+        completed_job_status = client.get(
+            f"/api/v1/assistant/jobs/{receipt['qwen_job_id']}", headers=headers
+        )
+        assert completed_job_status.status_code == 200, completed_job_status.text
+        completed_payload = completed_job_status.json()
+        assert completed_payload["status"] == "completed"
+        assert completed_payload["daily_capture"]["analysis_id"] == analysis_id
+        assert completed_payload["daily_capture"]["projection_status"] == "verified"
+        assert completed_payload["daily_capture"]["longitudinal_processing_status"] == "completed"
+        assert completed_payload["daily_capture"]["delta_run_id"] == "delta-retry-run-001"
+    finally:
+        teardown_db()
+
+
+def test_daily_capture_delta_retry_budget_is_bounded_without_reextracting(monkeypatch):
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night."
+        extraction_calls = {"count": 0}
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            extraction_calls["count"] += 1
+            assert source_text == original_report
+            return {
+                "observations": [{
+                    "subject": "Mum",
+                    "observation": "slept poorly last night",
+                    "source_quote": original_report,
+                    "source_event_id": source_event_id,
+                }],
+                "open_questions": [],
+            }
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "delta-retry-budget-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+
+        def unavailable_delta(*args, **kwargs):
+            raise RuntimeError("delta_runtime_unavailable")
+
+        process_daily_capture_job(
+            receipt["qwen_job_id"], monkeypatch, exact_source_candidates,
+            delta_reconciler=unavailable_delta, expected_status="queued",
+        )
+        process_daily_capture_job(
+            receipt["qwen_job_id"], monkeypatch, exact_source_candidates,
+            delta_reconciler=unavailable_delta, expected_status="queued",
+        )
+        process_daily_capture_job(
+            receipt["qwen_job_id"], monkeypatch, exact_source_candidates,
+            delta_reconciler=unavailable_delta, expected_status="failed",
+        )
+
+        assert extraction_calls["count"] == 1
+        db = TestingSessionLocal()
+        try:
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            analysis = db.query(CaptureAnalysis).filter_by(
+                source_event_id=receipt["id"],
+                person_id="person-daily-test",
+                caregiver_id="caregiver-daily-test",
+            ).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+            ).all()
+            result = json.loads(job.result_text or "{}")
+            assert job.status == "failed"
+            assert job.attempt_count == 3
+            assert job.error_code == "RuntimeError"
+            assert analysis.execution_status["longitudinal_processing"] == "failed"
+            assert analysis.execution_status["longitudinal_processing_error"] == "RuntimeError"
+            assert result["longitudinal_processing_status"] == "failed"
+            assert result["longitudinal_processing_error"] == "RuntimeError"
+            assert len(observations) == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_withdrawn_daily_capture_source_cancels_delta_retry(monkeypatch):
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night."
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [{
+                    "subject": "Mum",
+                    "observation": "slept poorly last night",
+                    "source_quote": original_report,
+                    "source_event_id": source_event_id,
+                }],
+                "open_questions": [],
+            }
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "capture_kind": "natural_language_update",
+                "capture_idempotency_key": "withdrawn-source-delta-retry-001",
+                "notes": original_report,
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+
+        def unavailable_delta(*args, **kwargs):
+            raise RuntimeError("delta_runtime_unavailable")
+
+        process_daily_capture_job(
+            receipt["qwen_job_id"], monkeypatch, exact_source_candidates,
+            delta_reconciler=unavailable_delta, expected_status="queued",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            event = db.query(CareEvent).filter_by(id=receipt["id"]).one()
+            event.status = "invalidated"
+            db.commit()
+        finally:
+            db.close()
+
+        def delta_must_not_run(*args, **kwargs):
+            raise AssertionError("Delta must not run after its source event is withdrawn")
+
+        process_daily_capture_job(
+            receipt["qwen_job_id"], monkeypatch, exact_source_candidates,
+            delta_reconciler=delta_must_not_run, expected_status="cancelled",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            analysis = db.query(CaptureAnalysis).filter_by(
+                source_event_id=receipt["id"],
+                person_id="person-daily-test",
+                caregiver_id="caregiver-daily-test",
+            ).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=receipt["evidence_ids"][0],
+            ).all()
+            assert job.status == "cancelled"
+            assert job.error_code == "daily_capture_source_unavailable"
+            assert analysis.execution_status["delta_reconciliation"] == "skipped"
+            assert analysis.execution_status["longitudinal_processing"] == "cancelled"
+            assert len(observations) == 1
+            assert db.query(CareDeltaRun).filter_by(
+                person_id="person-daily-test",
+                source_event_id=receipt["id"],
+            ).count() == 0
         finally:
             db.close()
     finally:
@@ -2844,6 +2995,187 @@ def test_daily_capture_reconciliation_failure_preserves_successful_extraction_re
             job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
             assert job.status == "failed"
             assert job.result_text is None
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
+    import app.api.v1 as api_v1
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        now = datetime.now(timezone.utc)
+        db = TestingSessionLocal()
+        db.add(CareEvent(
+            id="event-correction-retry",
+            person_id="person-daily-test",
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=now,
+            title="Medication report",
+            description="She stopped taking her afternoon medication.",
+            created_by_caregiver_id="caregiver-daily-test",
+        ))
+        db.add(OpenLoopRecord(
+            id="loop-correction-retry",
+            person_id="person-daily-test",
+            caregiver_id="caregiver-daily-test",
+            loop_type="follow_up",
+            title="Confirm medication information",
+            description="Check whether the afternoon medication was stopped.",
+            status="open",
+            outcome_status="outcome_unknown",
+            source_type="care_event",
+            source_id="event-correction-retry",
+            source_fingerprint=hashlib.sha256(b"event-correction-retry").hexdigest(),
+            evidence=[],
+            uncertainty="unknown",
+            missing_information=[],
+            options=[],
+            version=1,
+        ))
+        db.commit()
+        db.close()
+
+        calls = {"count": 0}
+
+        def fail_once(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("injected reconciliation failure")
+            return {
+                "workflow": "care_record_correction",
+                "stages": {"reconciliation": "committed"},
+                "transaction_owner": "caller",
+            }
+
+        monkeypatch.setattr(api_v1, "execute_care_continuity_reconciliation", fail_once)
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        payload = {
+            "person_id": "person-daily-test",
+            "caregiver_id": "caregiver-daily-test",
+            "target_type": "care_event",
+            "target_id": "event-correction-retry",
+            "original_text": "She stopped taking her afternoon medication.",
+            "corrected_text": "She missed one afternoon dose yesterday. She has not stopped taking it.",
+            "reason": "The earlier report was inaccurate.",
+            "idempotency_key": "medication-correction-retry-001",
+        }
+
+        first = client.post("/api/v1/corrections", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_body = first.json()
+        assert first_body["processing_status"] == "pending"
+        assert first_body["processing_attempts"] == 1
+        assert first_body["care_continuity_execution"]["retry_required"] is True
+        correction_id = first_body["id"]
+        pending_history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=20&offset=0",
+            headers=headers,
+        )
+        assert pending_history.status_code == 200, pending_history.text
+        pending_item = next(
+            row for row in pending_history.json()["records"]
+            if row["source_type"] == "correction" and row["source_id"] == correction_id
+        )
+        assert pending_item["processing_status"] == "pending"
+        pending_current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert pending_current.status_code == 200, pending_current.text
+        pending_items = pending_current.json()["items"]
+        assert any(row["id"] == "event-correction-retry" for row in pending_items)
+        assert any(
+            row.get("source_collection") == "corrections"
+            and row.get("target_id") == "event-correction-retry"
+            and row.get("processing_status") == "pending"
+            for row in pending_items
+        )
+
+        db = TestingSessionLocal()
+        try:
+            persisted = db.query(Correction).filter_by(id=correction_id).one()
+            assert persisted.processing_status == "pending"
+            assert persisted.processing_attempts == 1
+            assert persisted.care_continuity_execution["status"] == "pending"
+            assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
+            original = db.query(CareEvent).filter_by(id="event-correction-retry").one()
+            assert original.description == "She stopped taking her afternoon medication."
+        finally:
+            db.close()
+
+        # Retry the same request after a simulated process/session boundary.
+        retry = client.post(
+            f"/api/v1/corrections/person-daily-test/{correction_id}/retry",
+            headers=headers,
+        )
+        assert retry.status_code == 200, retry.text
+        retry_body = retry.json()
+        assert retry_body["id"] == correction_id
+        assert retry_body["processing_status"] == "completed"
+        assert retry_body["processing_attempts"] == 2
+        assert retry_body["processed_at"] is not None
+        assert retry_body["care_continuity_execution"]["retry_required"] is False
+        completed_history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=20&offset=0",
+            headers=headers,
+        )
+        completed_item = next(
+            row for row in completed_history.json()["records"]
+            if row["source_type"] == "correction" and row["source_id"] == correction_id
+        )
+        assert completed_item["processing_status"] == "completed"
+        completed_current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert completed_current.status_code == 200, completed_current.text
+        completed_items = completed_current.json()["items"]
+        assert not any(row["id"] == "event-correction-retry" for row in completed_items)
+        corrected_projection = next(
+            row for row in completed_items
+            if row.get("source_collection") == "corrections"
+            and row.get("target_id") == "event-correction-retry"
+        )
+        assert corrected_projection["description"] == payload["corrected_text"]
+        assert corrected_projection["epistemic_status"] == "caregiver_reported"
+
+        # Replaying the same idempotency key returns the same correction, not a
+        # second history item or a second reconciliation side effect.
+        replay = client.post("/api/v1/corrections", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["id"] == correction_id
+        assert replay.json()["processing_status"] == "completed"
+        assert calls["count"] == 2
+
+        # A browser reload can lose the original client key. The stable request
+        # fingerprint still prevents an identical correction from being saved twice.
+        reloaded_replay = client.post(
+            "/api/v1/corrections",
+            headers=headers,
+            json={**payload, "idempotency_key": "new-browser-session-key"},
+        )
+        assert reloaded_replay.status_code == 200, reloaded_replay.text
+        assert reloaded_replay.json()["id"] == correction_id
+        assert calls["count"] == 2
+
+        changed_payload = {**payload, "corrected_text": "A different correction."}
+        conflict = client.post("/api/v1/corrections", headers=headers, json=changed_payload)
+        assert conflict.status_code == 409, conflict.text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
+            original = db.query(CareEvent).filter_by(id="event-correction-retry").one()
+            assert original.description == "She stopped taking her afternoon medication."
+            loop = db.query(OpenLoopRecord).filter_by(id="loop-correction-retry").one()
+            assert loop.status == "open"
+            assert loop.review_at is not None
+            assert loop.version == 2
+            event = db.query(OpenLoopEvent).filter_by(
+                loop_id=loop.id,
+                event_type="source_corrected_requires_review",
+            ).one()
+            assert event.evidence[0]["correction_id"] == correction_id
         finally:
             db.close()
     finally:
