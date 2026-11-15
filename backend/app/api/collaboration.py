@@ -6304,7 +6304,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     lcr_context_coverage["retrieval_projection_complete"] = False
                     lcr_context_coverage["page_limit_reached"] = True
     
-        source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
+            source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
                 "history_coverage": shared_lcr_context["history_coverage"],
