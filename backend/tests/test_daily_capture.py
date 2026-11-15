@@ -13,7 +13,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion, EvidenceObservation
+from app.models.care_continuity import CareAssertion, CareDeltaRun, EvidenceObservation
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
@@ -29,14 +29,49 @@ engine = create_engine(
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def process_daily_capture_job(job_id, monkeypatch, extractor, *, expected_status="completed"):
-    from app.services import qwen_background_worker
+def _fake_delta_reconcile_event(db, **kwargs):
+    from app.services.delta_engine import DELTA_ENGINE_VERSION, source_event_snapshot_hash
+
+    event = db.query(CareEvent).filter_by(id=kwargs["source_event_id"]).one()
+    result = {
+        "provenance": {
+            "engine_version": DELTA_ENGINE_VERSION,
+            "source_event_snapshot_sha256": source_event_snapshot_hash(event),
+            "delta_run_id": None,
+        },
+        "computed_changes": [],
+    }
+    run = CareDeltaRun(
+        person_id=kwargs["person_id"],
+        source=kwargs["source"],
+        event_date=kwargs["event_date"],
+        source_event_id=kwargs["source_event_id"],
+        evidence_ids=kwargs["evidence_ids"],
+        delta_json=json.dumps(result, ensure_ascii=False, sort_keys=True),
+        model_name="test-delta-model",
+        created_by_caregiver_id=kwargs.get("created_by_caregiver_id"),
+    )
+    db.add(run)
+    db.flush()
+    result["provenance"]["delta_run_id"] = run.id
+    run.delta_json = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    db.commit()
+    return result
+
+
+def process_daily_capture_job(job_id, monkeypatch, extractor, *, expected_status="completed", delta_reconciler=None):
+    from app.services import qwen_background_worker, delta_engine
 
     # Queue delays are intentional in production. Tests advance the persisted job
     # clock explicitly so the worker executes deterministically without sleeping.
     make_daily_capture_job_runnable(job_id)
     monkeypatch.setattr(qwen_background_worker, "SessionLocal", TestingSessionLocal)
     monkeypatch.setattr(qwen_background_worker, "extract_review_candidates", extractor)
+    monkeypatch.setattr(
+        delta_engine,
+        "reconcile_event",
+        delta_reconciler or _fake_delta_reconcile_event,
+    )
     processed = asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
     db = TestingSessionLocal()
     try:
@@ -811,6 +846,9 @@ def test_quick_daily_checkin_persists_uncertainty_without_inference(monkeypatch)
         assert analysis.extraction_status == "not_applicable"
         assert analysis.execution_status["extraction"] == "not_applicable"
         assert analysis.execution_status["review"] == "not_required"
+        assert analysis.execution_status["delta_reconciliation"] == "not_applicable"
+        assert analysis.execution_status.get("delta_run_id") is None
+        assert db.query(CareDeltaRun).filter_by(source_event_id=response.json()["id"]).count() == 0
         assert analysis.candidates == {"observations": [], "open_questions": []}
         assert job.status == "completed"
         assert '"capture_mode": "structured_quick_check_in"' in job.result_text
@@ -1940,6 +1978,16 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             worker_result = json.loads(completed_job.result_text or "{}")
             assert worker_result.get("capture_mode") == "natural_language_update", worker_result
             assert worker_result.get("observation_count") == 2, worker_result
+            assert worker_result.get("delta_reconciliation_status") == "completed", worker_result
+            delta_run = db.query(CareDeltaRun).filter_by(
+                person_id="person-daily-test",
+                source_event_id=event.id,
+                source="SolenOS Daily Capture",
+            ).one()
+            assert delta_run.evidence_ids == [evidence.id]
+            assert analysis.execution_status["delta_reconciliation"] == "completed"
+            assert str(analysis.execution_status["delta_run_id"]) == str(delta_run.id)
+            assert str(worker_result["delta_run_id"]) == str(delta_run.id)
             observations = db.query(EvidenceObservation).filter_by(
                 person_id="person-daily-test",
                 evidence_id=evidence.id,
@@ -2075,7 +2123,14 @@ def test_source_grounded_observations_survive_reconciliation_retry_without_dupli
             assert len(persisted_after_retry) == 1
             completed_job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
             assert completed_job.status == "completed"
-            assert json.loads(completed_job.result_text)["observation_count"] == 1
+            completed_result = json.loads(completed_job.result_text)
+            assert completed_result["observation_count"] == 1
+            assert completed_result["delta_reconciliation_status"] == "completed"
+            assert db.query(CareDeltaRun).filter_by(
+                source_event_id=receipt["id"],
+                person_id="person-daily-test",
+                source="SolenOS Daily Capture",
+            ).count() == 1
         finally:
             db.close()
     finally:
