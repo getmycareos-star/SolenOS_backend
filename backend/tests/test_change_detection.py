@@ -2776,3 +2776,216 @@ def test_numeric_observation_change_with_zero_prior_value_has_no_relative_ratio(
         db.close()
     finally:
         teardown_db()
+
+
+def test_cessation_candidate_requires_complete_coverage_and_retains_historical_evidence():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-cessation-coverage", name="Cessation coverage recipient")
+        caregiver = Caregiver(
+            id="caregiver-cessation-coverage",
+            name="Cessation coverage caregiver",
+            email="cessation-coverage@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        now = datetime.now(timezone.utc)
+        historical_events = []
+        for index, days_ago in enumerate((130, 100, 70)):
+            event = CareEvent(
+                person_id=person.id,
+                event_type="routine_observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=days_ago),
+                title=f"Historical routine observation {index + 1}",
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add(event)
+            historical_events.append(event)
+        db.flush()
+        db.add_all([
+            ObservationCoverage(
+                person_id=person.id,
+                subject_type="routine_observation",
+                window_start=now - timedelta(days=180),
+                window_end=now - timedelta(days=42),
+                coverage_status="covered",
+                source_evidence_ids=[],
+                rationale="The historical observation interval was explicitly covered.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                person_id=person.id,
+                subject_type="routine_observation",
+                window_start=now - timedelta(days=42),
+                window_end=now,
+                coverage_status="covered",
+                source_evidence_ids=[],
+                rationale="The current observation interval was explicitly covered.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+
+        from app.services.change_detection import detect_event_changes
+        changes = detect_event_changes(db, person.id, "routine_observation", None, now)
+        db.commit()
+
+        cessation = next(change for change in changes if change.change_type.value == "cessation")
+        assert cessation.previous_count == 3
+        assert cessation.current_count == 0
+        assert cessation.baseline_coverage_status == "covered"
+        assert cessation.current_coverage_status == "covered"
+        assert set(cessation.evidence_ids) == {event.id for event in historical_events}
+        assert cessation.confirmation_status == "detected"
+        assert "not proof" in cessation.explanation.lower()
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_caregiver_can_confirm_only_a_fully_covered_cessation_as_resolved():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.core.change_enums import ChangeDirection, ChangeType
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-resolved-transition", name="Resolved transition recipient")
+        caregiver = Caregiver(
+            id="caregiver-resolved-transition",
+            name="Resolved transition caregiver",
+            email="resolved-transition@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        event = CareEvent(
+            id="resolved-transition-event",
+            person_id=person.id,
+            event_type="fall",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=60),
+            title="Earlier recorded fall",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add(event)
+        db.flush()
+        cessation = Change(
+            id="resolved-transition-change",
+            person_id=person.id,
+            subject_type="fall",
+            subject_id="",
+            change_type=ChangeType.CESSATION,
+            change_direction=ChangeDirection.DECREASING,
+            previous_state="Three recorded falls in the historical window",
+            current_state="No falls recorded in the fully covered current window",
+            previous_count=3,
+            current_count=0,
+            baseline_coverage_status="covered",
+            current_coverage_status="covered",
+            evidence_ids=[event.id],
+            explanation="Cessation candidate for caregiver review.",
+            confirmation_status="detected",
+            is_active=True,
+        )
+        db.add(cessation)
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        client = TestClient(app)
+        url = f"/api/v1/change/changes/{person.id}/{cessation.id}/confirmation"
+        response = client.post(
+            url,
+            json={
+                "status": "resolved",
+                "reason": "The caregiver confirmed the previously recurring issue has resolved.",
+                "evidence_ids": [event.id],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["new_status"] == "resolved"
+
+        db = TestingSessionLocal()
+        saved = db.query(Change).filter(Change.id == cessation.id).one()
+        transition = db.query(ChangeConfirmationEvent).filter(
+            ChangeConfirmationEvent.change_id == cessation.id
+        ).one()
+        assert saved.confirmation_status == "resolved"
+        assert transition.new_status == "resolved"
+        assert transition.actor_caregiver_id == caregiver.id
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_increase_assessment_cannot_be_marked_resolved():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.core.change_enums import ChangeDirection, ChangeType
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-not-cessation", name="Not cessation recipient")
+        caregiver = Caregiver(
+            id="caregiver-not-cessation",
+            name="Not cessation caregiver",
+            email="not-cessation@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        event = CareEvent(
+            id="not-cessation-event",
+            person_id=person.id,
+            event_type="fall",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=2),
+            title="Recent recorded fall",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add(event)
+        db.flush()
+        change = Change(
+            id="not-cessation-change",
+            person_id=person.id,
+            subject_type="fall",
+            subject_id="",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            previous_state="Earlier recorded falls",
+            current_state="More recorded falls",
+            previous_count=1,
+            current_count=3,
+            baseline_coverage_status="covered",
+            current_coverage_status="covered",
+            evidence_ids=[event.id],
+            explanation="Increase candidate.",
+            confirmation_status="detected",
+            is_active=True,
+        )
+        db.add(change)
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            f"/api/v1/change/changes/{person.id}/{change.id}/confirmation",
+            json={
+                "status": "resolved",
+                "reason": "The caregiver says the issue resolved.",
+                "evidence_ids": [event.id],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 422
+    finally:
+        teardown_db()
