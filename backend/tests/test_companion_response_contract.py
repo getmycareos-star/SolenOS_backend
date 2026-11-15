@@ -1731,6 +1731,9 @@ def test_caregiver_interaction_guidance_reduces_work_for_overwhelmed_caregiver()
     assert "Do not produce a checklist" in guidance
     assert "single most consequential next concern" in guidance
     assert "Do not diagnose caregiver burnout" in guidance
+    assert "do not invent one" in guidance
+    assert "Do not speculate about the care recipient's condition" in guidance
+    assert "Prefer present-tense wording" in guidance
 
 
 def test_caregiver_interaction_guidance_handles_distress_without_forcing_workflow():
