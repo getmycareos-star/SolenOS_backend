@@ -3450,7 +3450,7 @@ def _contains_unsupported_operational_claim(
             source_uncertainty = (
                 r"\b(?:may|might|could|possibly|perhaps|uncertain|not sure|"
                 r"don.t know|do not know|whether|cannot confirm|can.t confirm|"
-                r"unable to confirm)\\b"
+                r"unable to confirm)\b"
             )
             if re.search(source_uncertainty, source_clause):
                 source_supports_claim = False
