@@ -188,6 +188,20 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
                     evidence_ids_json="[]",
                 ),
             ])
+            # Insert the current fact first so PostgreSQL can enforce the
+            # immediate self-referencing supersession foreign key.
+            db.execute(metadata.tables["care_facts"].insert(), [
+                {
+                    "id": "sleep-fact-current", "person_id": "person-a",
+                    "subject_type": "person", "subject_id": "person-a",
+                    "fact_type": "sleep_pattern", "fact_value": "Recent sleep report described fewer interruptions.",
+                    "epistemic_status": "reported", "effective_at": datetime.now(UTC) - timedelta(days=6),
+                    "recorded_at": datetime.now(UTC) - timedelta(days=6),
+                    "created_at": datetime.now(UTC) - timedelta(days=6),
+                    "superseded_by_fact_id": None,
+                    "created_by_caregiver_id": "caregiver-a",
+                },
+            ])
             db.execute(metadata.tables["care_facts"].insert(), [
                 {
                     "id": "sleep-fact-old", "person_id": "person-a",
@@ -197,16 +211,6 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
                     "recorded_at": datetime.now(UTC) - timedelta(days=45),
                     "created_at": datetime.now(UTC) - timedelta(days=45),
                     "superseded_by_fact_id": "sleep-fact-current",
-                    "created_by_caregiver_id": "caregiver-a",
-                },
-                {
-                    "id": "sleep-fact-current", "person_id": "person-a",
-                    "subject_type": "person", "subject_id": "person-a",
-                    "fact_type": "sleep_pattern", "fact_value": "Recent sleep report described fewer interruptions.",
-                    "epistemic_status": "reported", "effective_at": datetime.now(UTC) - timedelta(days=6),
-                    "recorded_at": datetime.now(UTC) - timedelta(days=6),
-                    "created_at": datetime.now(UTC) - timedelta(days=6),
-                    "superseded_by_fact_id": None,
                     "created_by_caregiver_id": "caregiver-a",
                 },
             ])
