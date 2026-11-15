@@ -137,7 +137,7 @@ TRACKED_TABLES = {
     "appointments", "care_transitions", "locations", "daily_intelligence",
     "timezone_contexts", "temporal_relationships", "insights", "information_gaps",
     "care_assertions", "open_questions", "contradictions", "uncertainty_assessments",
-    "baselines", "changes", "patterns", "situations", "corrections",
+    "baselines", "changes", "patterns", "situations", "corrections", "observation_coverage",
 }
 
 
