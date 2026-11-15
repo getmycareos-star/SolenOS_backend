@@ -311,14 +311,29 @@ def persist_source_clarification_questions(
                 gap_evidence_ids = list(dict.fromkeys(
                     str(value) for value in (gap.evidence_ids or []) if value
                 ))
+                if not gap_evidence_ids:
+                    continue
+                valid_gap_evidence_ids = {
+                    str(row[0]) for row in db.query(EvidenceModel.id).filter(
+                        EvidenceModel.person_id == person_id,
+                        EvidenceModel.id.in_(gap_evidence_ids),
+                    ).all()
+                }
+                if valid_gap_evidence_ids != set(gap_evidence_ids):
+                    continue
                 if (
                     assessment.get("caregiver_attention_required") is True
                     and isinstance(rationale, str) and rationale.strip()
                     and isinstance(dependency, str) and dependency.strip()
-                    and gap_evidence_ids
                 ):
                     necessity_gaps.append((gap, rationale.strip(), dependency.strip(), gap_evidence_ids))
         matched_gap = necessity_gaps[0] if len(necessity_gaps) == 1 else None
+
+        # A source-extraction question is not caregiver work merely because
+        # the model proposed it. Persist it only when one unambiguous, open,
+        # same-person LCR gap has explicit decision necessity and valid evidence.
+        if matched_gap is None:
+            continue
 
         source_context = {
             "source_kind": source_kind,
