@@ -327,6 +327,12 @@ def test_partial_extraction_retries_saved_original_without_duplicate_upload(clie
         ).hexdigest(), "A successful page retry must persist a digest for the exact saved extraction text"
         assert metadata.get("processed_page_numbers") == [1, 2]
 
+    third = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert third.status_code == 201, third.text
+    assert third.json()["analysis_id"] == analysis_id
+    assert third.json()["extraction_status"] == "available"
+    assert state["calls"] == [(1, 1), (1, 2), (2, 2)], "A completed retry must remain idempotent after reload"
+
 
 def test_real_upload_endpoint_feeds_document_extraction(client):
     test_client, session = client
