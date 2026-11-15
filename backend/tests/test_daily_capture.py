@@ -29,36 +29,6 @@ engine = create_engine(
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def _fake_delta_reconcile_event(db, **kwargs):
-    from app.services.delta_engine import DELTA_ENGINE_VERSION, source_event_snapshot_hash
-
-    event = db.query(CareEvent).filter_by(id=kwargs["source_event_id"]).one()
-    result = {
-        "provenance": {
-            "engine_version": DELTA_ENGINE_VERSION,
-            "source_event_snapshot_sha256": source_event_snapshot_hash(event),
-            "delta_run_id": None,
-        },
-        "computed_changes": [],
-    }
-    run = CareDeltaRun(
-        person_id=kwargs["person_id"],
-        source=kwargs["source"],
-        event_date=kwargs["event_date"],
-        source_event_id=kwargs["source_event_id"],
-        evidence_ids=kwargs["evidence_ids"],
-        delta_json=json.dumps(result, ensure_ascii=False, sort_keys=True),
-        model_name="test-delta-model",
-        created_by_caregiver_id=kwargs.get("created_by_caregiver_id"),
-    )
-    db.add(run)
-    db.flush()
-    result["provenance"]["delta_run_id"] = run.id
-    run.delta_json = json.dumps(result, ensure_ascii=False, sort_keys=True)
-    db.commit()
-    return result
-
-
 def process_daily_capture_job(job_id, monkeypatch, extractor, *, expected_status="completed", delta_reconciler=None):
     from app.services import qwen_background_worker, delta_engine
 
@@ -67,11 +37,8 @@ def process_daily_capture_job(job_id, monkeypatch, extractor, *, expected_status
     make_daily_capture_job_runnable(job_id)
     monkeypatch.setattr(qwen_background_worker, "SessionLocal", TestingSessionLocal)
     monkeypatch.setattr(qwen_background_worker, "extract_review_candidates", extractor)
-    monkeypatch.setattr(
-        delta_engine,
-        "reconcile_event",
-        delta_reconciler or _fake_delta_reconcile_event,
-    )
+    if delta_reconciler is not None:
+        monkeypatch.setattr(delta_engine, "reconcile_event", delta_reconciler)
     processed = asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id))
     db = TestingSessionLocal()
     try:
