@@ -83,7 +83,7 @@ def test_companion_identity_guidance_does_not_repeat_the_one_time_name_question(
     named = collaboration._care_recipient_identity_guidance("Mom")
     assert '"Mom"' in named
     assert "use this label consistently" in named.casefold()
-    assert "do not ask the caregiver for the person's name again" in named
+    assert "do not ask the caregiver for the person's name again" in named.casefold()
 
     unnamed = collaboration._care_recipient_identity_guidance("Care recipient")
     assert "naming step handles this separately" in unnamed
