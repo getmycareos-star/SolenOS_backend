@@ -890,9 +890,9 @@ def test_live_qwen_overwhelm_response_after_mixed_care_history():
             assert result.get("source_event_ids") == [], result
             assert result.get("source_evidence_ids") == [], result
         assert 0 < len(reply.split()) <= 80, reply
-        assert len([part for part in re.split(r"(?<=[.!?])\\s+", reply.strip()) if part]) <= 3, reply
+        assert len([part for part in re.split(r"(?<=[.!?])\s+", reply.strip()) if part]) <= 2, reply
         assert reply.count("?") <= 1, reply
-        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", reply), reply
+        assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", reply), reply
 
 
 def test_live_qwen_handoff_draft_selects_an_exact_daily_care_lcr_source():
