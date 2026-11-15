@@ -190,7 +190,13 @@ def _conversation_context(
             "interpretation_limit": "Dialogue is not independent care evidence or an accepted LCR assertion.",
             "is_lcr_assertion": False,
             "is_care_evidence": False,
-            "source_attribution": "caregiver_companion_message",
+            "source_attribution": (
+                "caregiver_companion_message"
+                if str(message.role or "").casefold() == "user"
+                else "solenos_companion_response"
+                if str(message.role or "").casefold() == "assistant"
+                else "unknown_conversation_actor"
+            ),
         })
     if direct_terms:
         expanded_only = [term for term in terms if term not in direct_terms]
