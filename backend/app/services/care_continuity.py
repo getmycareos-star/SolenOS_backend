@@ -722,18 +722,18 @@ def _question_period_scope(value: str | None) -> tuple[str, ...]:
     """Keep explicit date/period qualifiers distinct when matching same-field questions."""
     text = " ".join(str(value or "").casefold().split())
     patterns = (
-        r"\\b(?:since|before|after|until|through)\\s+(?:(?:last|this|next|previous)\\s+)?"
+        r"\b(?:since|before|after|until|through)\s+(?:(?:last|this|next|previous)\s+)?"
         r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-        r"today|yesterday|tomorrow|\\d{4}(?:-\\d{1,2}){0,2})\\b",
-        r"\\b(?:between|from)\\s+(?:last\\s+|this\\s+|next\\s+)?"
+        r"today|yesterday|tomorrow|\d{4}(?:-\d{1,2}){0,2})\b",
+        r"\b(?:between|from)\s+(?:last\s+|this\s+|next\s+)?"
         r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-        r"today|yesterday|tomorrow|\\d{4}(?:-\\d{1,2}){0,2})\\s+"
-        r"(?:and|to|through)\\s+(?:last\\s+|this\\s+|next\\s+)?"
+        r"today|yesterday|tomorrow|\d{4}(?:-\d{1,2}){0,2})\s+"
+        r"(?:and|to|through)\s+(?:last\s+|this\s+|next\s+)?"
         r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-        r"today|yesterday|tomorrow|\\d{4}(?:-\\d{1,2}){0,2})\\b",
-        r"\\b(?:today|yesterday|tomorrow|last night|previous night|"
+        r"today|yesterday|tomorrow|\d{4}(?:-\d{1,2}){0,2})\b",
+        r"\b(?:today|yesterday|tomorrow|last night|previous night|"
         r"this morning|this afternoon|this evening|last week|this week|"
-        r"next week|past \\d+ days?|past \\d+ weeks?|past \\d+ months?)\\b",
+        r"next week|past \d+ days?|past \d+ weeks?|past \d+ months?)\b",
     )
     return tuple(sorted(match for pattern in patterns for match in re.findall(pattern, text)))
 
@@ -1273,7 +1273,7 @@ def next_best_questions(
             if existing is None:
                 existing = next((
                     row for row in active_rows
-                    if _question_matches_source_field(row, candidate_contexts, clean[\"question\"])
+                    if _question_matches_source_field(row, candidate_contexts, clean["question"])
                 ), None)
             existing_before = _open_question_state(existing) if existing is not None else None
             prior_terminal_question = None
@@ -1284,7 +1284,7 @@ def next_best_questions(
                     if row.status in {"answered", "declined", "closed"}
                     and (
                         " ".join(str(row.question or "").casefold().split()) == normalized_candidate_question
-                        or _question_matches_source_field(row, candidate_contexts)
+                        or _question_matches_source_field(row, candidate_contexts, clean["question"])
                     )
                 ), None)
                 if prior_terminal_question is not None and not _question_has_new_grounding(prior_terminal_question, candidate_with_contexts):
