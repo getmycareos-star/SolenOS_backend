@@ -13,7 +13,7 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceObservation, CareAssertion
-from app.models.change import Situation, Change
+from app.models.change import Situation, Change, Baseline
 from app.models.uncertainty import OpenQuestion, Contradiction, InformationGap
 from app.core.change_enums import SituationType, SituationState, ChangeType, ChangeDirection, SignificanceVerdict
 from app.core.uncertainty_enums import Priority
@@ -1703,5 +1703,104 @@ def test_saved_situation_assessment_survives_freshness_rebuild_failure(monkeypat
         assert body["source_freshness"]["status"] == "freshness_check_unavailable"
         assert body["source_freshness"]["reassessment_recommended"] is True
         assert "potentially out of date" in body["source_freshness"]["limitation"]
+    finally:
+        teardown_db()
+
+@pytest.mark.session_security
+def test_baseline_freshness_is_partial_schema_safe_and_quality_gated():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Baseline Freshness Person")
+        person_id = created["person"]["id"]
+
+        with TestingSessionLocal() as db:
+            db.add(Baseline(
+                id="freshness-baseline",
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id=person_id,
+                window_start=datetime(2026, 10, 1, tzinfo=timezone.utc),
+                window_end=datetime(2026, 10, 15, tzinfo=timezone.utc),
+                event_count=3,
+                state_value="usual",
+                coverage_status="covered",
+                history_completeness="complete",
+                is_stable=True,
+                is_active=True,
+            ))
+            db.add(Change(
+                id="freshness-baseline-change",
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id=person_id,
+                change_type=ChangeType.TRANSITION,
+                change_direction=ChangeDirection.UNKNOWN,
+                previous_state="Previously recorded state",
+                current_state="Newly recorded state",
+                baseline_id="freshness-baseline",
+                evidence_ids=[],
+                explanation="A persisted Delta Engine candidate references the baseline.",
+                significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                attention_candidate=True,
+                follow_up_candidate=False,
+                confirmation_status="detected",
+                is_active=True,
+                baseline_coverage_status="covered",
+                current_coverage_status="covered",
+            ))
+            db.commit()
+            # Simulate a legacy schema that has the required comparison fields
+            # but lacks an optional mapped column. The assessment must select
+            # only the columns it actually needs.
+            db.connection().exec_driver_sql("ALTER TABLE baselines DROP COLUMN updated_at")
+            db.commit()
+
+        initial = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert initial.status_code == 200, initial.text
+        assert initial.json()["assessment"]["care_attention"]["source_coverage"]["persisted_baseline_source_complete"] is True
+
+        current_before = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_before.status_code == 200, current_before.text
+        assert current_before.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+
+        with TestingSessionLocal() as db:
+            db.connection().exec_driver_sql(
+                "UPDATE baselines SET is_stable = 0 WHERE id = ?",
+                ("freshness-baseline",),
+            )
+            db.commit()
+
+        current_after = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_after.status_code == 200, current_after.text
+        assert current_after.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+
+        with TestingSessionLocal() as db:
+            db.connection().exec_driver_sql(
+                "UPDATE baselines SET is_active = 0 WHERE id = ?",
+                ("freshness-baseline",),
+            )
+            db.commit()
+
+        incomplete = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert incomplete.status_code == 200, incomplete.text
+        assessment = incomplete.json()["assessment"]
+        assert assessment["coverage"]["is_complete"] is False
+        assert "persisted_change_baseline_incomplete" in assessment["assessment_quality"]["blocking_limitations"]
+        assert assessment["care_attention"]["source_coverage"]["persisted_baseline_source_complete"] is False
     finally:
         teardown_db()
