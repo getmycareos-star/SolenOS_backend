@@ -800,9 +800,30 @@ def next_best_questions(
         Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
     ).all()
     for item in contradictions:
+        contradiction_subject_type = str(item.subject_type or "").strip().casefold()
+        contradiction_field = " ".join(
+            str(item.field or "").casefold().replace("_", " ").replace("-", " ").split()
+        )
+        # Only a contradiction explicitly scoped to a medication subject and
+        # an actionable current-instruction field can create a professional
+        # confirmation task. A broad Delta topic label such as
+        # subject_type=delta_engine_report, subject_id=medication, field=medication
+        # remains an internal unresolved conflict, not caregiver work.
+        explicit_medication_instruction_fields = {
+            "current instruction",
+            "current medication instruction",
+            "current prescription",
+            "current prescription instruction",
+            "current dose",
+            "prescribed dose",
+            "current frequency",
+            "prescribed frequency",
+            "current route",
+            "prescribed route",
+        }
         is_medication_conflict = (
-            str(item.subject_type or "").strip().casefold() in {"medication", "medications"}
-            or "medication" in str(item.field or "").casefold()
+            contradiction_subject_type in {"medication", "medications"}
+            and contradiction_field in explicit_medication_instruction_fields
         )
         if is_medication_conflict:
             # A competing current medication instruction is a concrete decision
