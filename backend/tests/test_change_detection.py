@@ -3062,3 +3062,151 @@ def test_resolution_rejects_unrelated_same_person_evidence():
     finally:
         teardown_db()
 
+
+
+def test_caregiver_confirmed_situation_trajectory_states_are_scoped_and_audited():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.core.change_enums import SituationState, SituationType
+        from app.models.change import Situation
+        from app.models.care_continuity import CareStateRevision
+
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-situation-trajectory", name="Situation trajectory recipient")
+        caregiver = Caregiver(
+            id="caregiver-situation-trajectory",
+            name="Situation trajectory caregiver",
+            email="situation-trajectory@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="person-situation-trajectory-other", name="Other recipient")
+        other_caregiver = Caregiver(
+            id="caregiver-situation-trajectory-other",
+            name="Other caregiver",
+            email="situation-trajectory-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.flush()
+        now = datetime.now(timezone.utc)
+        source = CareEvent(
+            id="situation-trajectory-source",
+            person_id=person.id,
+            event_type="fall",
+            status="recorded",
+            occurred_at=now - timedelta(days=3),
+            title="Recorded fall observation",
+            created_by_caregiver_id=caregiver.id,
+        )
+        other_source = CareEvent(
+            id="situation-trajectory-other-source",
+            person_id=other_person.id,
+            event_type="fall",
+            status="recorded",
+            occurred_at=now - timedelta(days=3),
+            title="Other person's fall observation",
+            created_by_caregiver_id=other_caregiver.id,
+        )
+        situation = Situation(
+            id="situation-trajectory-record",
+            person_id=person.id,
+            situation_type=SituationType.UNKNOWN,
+            state=SituationState.ACTIVE,
+            title="Recorded mobility concern",
+            description="A situation linked to recorded fall observations.",
+            signal_ids=[source.id],
+            signal_types=["fall"],
+            temporal_start=now - timedelta(days=7),
+            temporal_end=now - timedelta(days=3),
+            change_ids=[],
+            pattern_ids=[],
+            context={},
+        )
+        other_situation = Situation(
+            id="situation-trajectory-other-record",
+            person_id=other_person.id,
+            situation_type=SituationType.UNKNOWN,
+            state=SituationState.ACTIVE,
+            title="Other person's mobility concern",
+            signal_ids=[other_source.id],
+            signal_types=["fall"],
+            temporal_start=now - timedelta(days=7),
+            temporal_end=now - timedelta(days=3),
+            change_ids=[],
+            pattern_ids=[],
+            context={},
+        )
+        db.add_all([source, other_source, situation, other_situation])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        person_id = person.id
+        situation_id = situation.id
+        db.close()
+
+        client = TestClient(app)
+        url = f"/api/v1/change/situations/{person_id}/{situation_id}/state"
+        states = ["worsening", "improving", "resolved", "active", "unknown"]
+        reasons = [
+            "The caregiver reports the situation has worsened based on the linked record.",
+            "The caregiver reports improvement based on the linked record.",
+            "The caregiver confirms the situation has resolved.",
+            "The caregiver is reopening the situation for continued review.",
+            "The caregiver cannot determine the current trajectory.",
+        ]
+        for state, reason in zip(states, reasons):
+            response = client.post(
+                url,
+                json={"state": state, "reason": reason, "evidence_ids": [source.id]},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["new_state"] == state
+
+        final = client.get(
+            f"/api/v1/change/situations/{person_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert final.status_code == 200, final.text
+        saved = next(item for item in final.json() if item["id"] == situation_id)
+        assert saved["state"] == "unknown"
+        history = saved["context"]["state_history"]
+        assert [item["new_state"] for item in history] == states
+        assert all(item["source"] == "caregiver_confirmed" for item in history)
+        assert all(item["evidence_ids"] == [source.id] for item in history)
+
+        db = TestingSessionLocal()
+        revisions = db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person_id,
+            CareStateRevision.target_type == "situations",
+            CareStateRevision.target_id == situation_id,
+        ).all()
+        assert len(revisions) == 6  # create plus five caregiver-confirmed transitions
+        db.close()
+
+        cross_person = client.post(
+            f"/api/v1/change/situations/{other_person.id}/{other_situation.id}/state",
+            json={
+                "state": "resolved",
+                "reason": "Attempt to update another person's situation.",
+                "evidence_ids": [other_source.id],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert cross_person.status_code == 403
+
+        unlinked_evidence = client.post(
+            url,
+            json={
+                "state": "improving",
+                "reason": "Attempt to use another person's source record.",
+                "evidence_ids": [other_source.id],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert unlinked_evidence.status_code == 422
+    finally:
+        teardown_db()
