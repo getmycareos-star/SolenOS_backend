@@ -6972,8 +6972,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     user_text, included_model_context_lines
                 )
             elif not emergency:
-                deterministic_reply = _care_history_extractive_answer(
-                    user_text, included_model_context_lines
+                deterministic_reply = (
+                    _care_history_extractive_answer(user_text, included_model_context_lines)
+                    if payload.language == "en"
+                    else _localized_care_history_extractive_answer(
+                        user_text, included_model_context_lines, payload.language
+                    )
                 )
                 care_history_fallback_from_outage = bool(deterministic_reply)
             if (
@@ -7024,8 +7028,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     *event_context,
                     *shared_lcr_lines,
                 ]))
-                reply = _care_history_extractive_answer(
-                    user_text, history_source_lines
+                reply = (
+                    _care_history_extractive_answer(user_text, history_source_lines)
+                    if payload.language == "en"
+                    else _localized_care_history_extractive_answer(
+                        user_text, history_source_lines, payload.language
+                    )
                 ) or (
                     "I can't confirm the prescribed dose from the records retrieved. "
                     "A caregiver report does not confirm the prescribed dose or current medication instructions. "
@@ -7095,9 +7103,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             *event_context,
             *shared_lcr_lines,
         ]))
-        care_history_extractive_answer = _care_history_extractive_answer(
-            user_text,
-            history_source_lines,
+        care_history_extractive_answer = (
+            _care_history_extractive_answer(user_text, history_source_lines)
+            if payload.language == "en"
+            else _localized_care_history_extractive_answer(
+                user_text, history_source_lines, payload.language
+            )
         )
         medication_dose_recall_fallback_used = _should_use_medication_dose_recall_fallback(
             user_text,
@@ -7117,7 +7128,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
             medication_dose_recall_source_quote_used = bool(
                 care_history_extractive_answer
-                and care_history_extractive_answer.startswith("The saved notes mention medication:")
+                and (
+                    care_history_extractive_answer.startswith("The saved notes mention medication:")
+                    if payload.language == "en"
+                    else "«" in care_history_extractive_answer
+                )
             )
             care_history_extractive_fallback_used = medication_dose_recall_source_quote_used
         if (
