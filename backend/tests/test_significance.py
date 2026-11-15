@@ -244,6 +244,48 @@ def test_contradictory_observations_preserved_not_collapsed():
         teardown_db()
 
 
+def test_resolved_contradiction_no_longer_blocks_current_significance():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.uncertainty import Contradiction
+        from app.services.change_detection import detect_event_changes
+
+        app.dependency_overrides[get_db] = override_get_db
+        db, person, caregiver = _seed_person()
+        now = datetime.now(timezone.utc)
+        event = _add_event(
+            db, person, caregiver, "confusion",
+            "Caregiver reported one episode of confusion",
+            days_ago=1,
+            evidence_text="Caregiver reported one episode of confusion.",
+        )
+        db.add(Contradiction(
+            person_id=person.id,
+            subject_type="confusion",
+            subject_id="",
+            field="reported_state",
+            description="Historical conflict that has since been resolved.",
+            evidence_ids=list(event.evidence_ids or []),
+            matching_candidate_ids=[event.id],
+            source_assertion_ids=[],
+            resolution_status="resolved",
+        ))
+        db.commit()
+
+        changes = detect_event_changes(db, person.id, "confusion", None, now)
+        assert len(changes) == 1
+        assessment = db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.id == changes[0].significance_assessment_id
+        ).one()
+        assert assessment.evidence_status == EvidenceStatus.REPORTED
+        assert assessment.verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
+        assert assessment.follow_up_candidate is False
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_professional_claim_in_source_text_does_not_verify_authority():
     setup_db()
     try:
