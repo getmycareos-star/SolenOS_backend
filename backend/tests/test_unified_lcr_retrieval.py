@@ -101,6 +101,47 @@ def _close_postgres_conversation_db(engine, connection, schema):
     engine.dispose()
 
 
+def test_full_history_projection_returns_more_than_fifty_matches_in_one_scan():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            db.add(Person(id="wide-person", name="Care recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id="wide-caregiver", name="Caregiver", relationship="family",
+                person_id="wide-person",
+            ))
+            db.flush()
+            now = datetime.now(UTC)
+            db.add_all([
+                CareEvent(
+                    id=f"sleep-event-{index}", person_id="wide-person",
+                    event_type="daily_observation", status="recorded",
+                    occurred_at=now - timedelta(days=index),
+                    title=f"Sleep history {index}",
+                    description=f"Caregiver recorded sleep observation {index}.",
+                    evidence_ids=[], created_by_caregiver_id="wide-caregiver",
+                )
+                for index in range(75)
+            ])
+            db.commit()
+            from app.services.lcr_context import _load_source_schema
+            _load_source_schema.cache_clear()
+            context = build_lcr_context(
+                db, "wide-person", caregiver_id="wide-caregiver",
+                query="sleep", limit_per_source=200, include_all_history=True,
+            )
+        events = context["sources"]["events"]
+        assert events["limit"] == 200
+        assert events["candidate_count"] == 75
+        assert events["returned_count"] == 75
+        assert events["candidate_scan_complete"] is True
+        assert events["has_more"] is False
+        assert events["returned_history_complete"] is True
+    finally:
+        _close_postgres_conversation_db(engine, connection, schema)
+
+
 def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
     engine, connection, schema = _postgres_conversation_db()
     metadata = ConversationSession.metadata
