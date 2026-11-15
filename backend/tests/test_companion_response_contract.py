@@ -1447,7 +1447,14 @@ def test_overwhelmed_caregiver_gets_safe_reply_when_qwen_is_unavailable(monkeypa
     def unavailable_qwen(base, model, messages, options=None):
         nonlocal calls
         calls += 1
-        raise collaboration.HTTPException(status_code=503, detail="Qwen unavailable")
+        raise collaboration.HTTPException(
+            status_code=504,
+            detail={
+                "code": "inference_timeout",
+                "reason": "socket_timeout",
+                "message": "SolenOS AI assistance is unavailable.",
+            },
+        )
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", unavailable_qwen)
