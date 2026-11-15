@@ -119,7 +119,7 @@ def _temporal_window(
     # A year mentioned as a time range is not a lexical search term. Treat
     # "in 2025" / "during 2025" as the complete calendar year so old records
     # are not lost behind the recent-history limit.
-    year_match = re.search(r"\\b(?:in|during|for)\\s+(20\\d{2})\\b", text)
+    year_match = re.search(r"\b(?:in|during|for)\s+(20\d{2})\b", text)
     if year_match:
         selected_year = int(year_match.group(1))
         return date_window(date(selected_year, 1, 1), date(selected_year, 12, 31))
