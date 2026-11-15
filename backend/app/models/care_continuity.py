@@ -208,8 +208,13 @@ def _version_care_state(session, flush_context, instances):
             or getattr(obj, "created_by_caregiver_id", None)
             or getattr(obj, "caregiver_id", None)
         )
-        if table == "open_questions" and session.get_bind().dialect.name == "postgresql":
-            lock_key = f"care-state-revision:open_questions:{person_id}:{target_id}"
+        # Serialize revision allocation for every tracked target. Without this
+        # transaction-scoped lock, concurrent edits can both read the same MAX
+        # revision_number and one care-record transaction will fail the unique
+        # constraint instead of recording its change. The lock is scoped to the
+        # person, table, and target, so unrelated records remain concurrent.
+        if session.get_bind().dialect.name == "postgresql":
+            lock_key = f"care-state-revision:{table}:{person_id}:{target_id}"
             session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
                 {"lock_key": lock_key},
