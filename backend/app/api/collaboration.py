@@ -4952,11 +4952,22 @@ _CARE_HISTORY_STOPWORDS = {
 
 def _care_history_requested_topics(user_text: str) -> list[tuple[str, set[str]]]:
     tokens = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold()))
-    return [
+    requested = [
         (label, variants)
         for label, variants in _CARE_HISTORY_TOPIC_GROUPS.items()
         if tokens & variants
     ]
+    # "Appetite" is commonly recorded as a concrete meal observation rather
+    # than with the word appetite itself. When the caregiver asks about
+    # appetite, include meal names so a note such as "barely touched lunch"
+    # is retrieved as relevant source evidence.
+    if "appetite" in tokens:
+        requested = [
+            (label, variants | {"breakfast", "lunch", "dinner", "supper"})
+            if label == "appetite" else (label, variants)
+            for label, variants in requested
+        ]
+    return requested
 
 
 def _care_history_event_text(record: dict[str, Any]) -> str:
