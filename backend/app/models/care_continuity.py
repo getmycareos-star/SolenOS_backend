@@ -14,7 +14,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index
 )
 from sqlalchemy.sql import func
-from sqlalchemy import event, inspect, text
+from sqlalchemy import event, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.core.database import Base
@@ -210,7 +210,29 @@ def _version_care_state(session, flush_context, instances):
         seen.add(marker)
         is_new = obj in session.new
         is_deleted = obj in session.deleted
-        before_state = None if is_new else _snapshot(obj, before=True)
+        # Serialize revision allocation and snapshot reads for every tracked
+        # target. The lock is scoped to one person/table/record, so unrelated
+        # care records remain concurrent.
+        if session.get_bind().dialect.name == "postgresql":
+            lock_key = f"care-state-revision:{table}:{person_id}:{target_id}"
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+                {"lock_key": lock_key},
+            )
+        # ORM history can be stale when two sessions loaded the same row before
+        # either writer committed. Read the persisted row after acquiring the
+        # target lock so the audit's before_state reflects the immediately
+        # preceding committed revision, not the stale identity-map snapshot.
+        if is_new:
+            before_state = None
+        else:
+            persisted = session.execute(
+                select(obj.__table__).where(obj.__table__.c.id == target_id)
+            ).mappings().first()
+            before_state = (
+                {key: _json_value(value) for key, value in dict(persisted).items()}
+                if persisted is not None else _snapshot(obj, before=True)
+            )
         after_state = None if is_deleted else _snapshot(obj)
         evidence_ids = [] if is_deleted else (getattr(obj, "evidence_ids", None) or [])
         caregiver_id = (
@@ -218,17 +240,6 @@ def _version_care_state(session, flush_context, instances):
             or getattr(obj, "created_by_caregiver_id", None)
             or getattr(obj, "caregiver_id", None)
         )
-        # Serialize revision allocation for every tracked target. Without this
-        # transaction-scoped lock, concurrent edits can both read the same MAX
-        # revision_number and one care-record transaction will fail the unique
-        # constraint instead of recording its change. The lock is scoped to the
-        # person, table, and target, so unrelated records remain concurrent.
-        if session.get_bind().dialect.name == "postgresql":
-            lock_key = f"care-state-revision:{table}:{person_id}:{target_id}"
-            session.execute(
-                text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
-                {"lock_key": lock_key},
-            )
         with session.no_autoflush:
             latest = (
                 session.query(CareStateRevision.revision_number)
