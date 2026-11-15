@@ -46,6 +46,75 @@ def test_follow_up_excerpt_links_only_matching_evidence_not_every_run_evidence_i
     }]
 
 
+def test_source_content_binding_accepts_exact_saved_event_text():
+    event = SimpleNamespace(
+        id="event-exact",
+        title="Saved sleep note",
+        description="Caregiver reported interrupted sleep.",
+    )
+    assert delta_engine._source_content_matches_event(
+        "Caregiver reported interrupted sleep.", event
+    )
+
+
+def test_source_content_binding_accepts_only_unchanged_structured_capture_projection():
+    saved = {
+        "notes": "Mum woke three times overnight.",
+        "medications": [{"name": "Example medicine", "dose": "5 mg"}],
+        "capture_idempotency_key": "capture-12345678",
+    }
+    event = SimpleNamespace(
+        id="event-structured",
+        title="Daily care capture",
+        description=json.dumps(saved),
+    )
+    projection = json.dumps({"notes": saved["notes"], "medications": saved["medications"]})
+    assert delta_engine._source_content_matches_event(projection, event)
+
+
+def test_source_content_binding_rejects_changed_or_unrelated_content():
+    event = SimpleNamespace(
+        id="event-mismatch",
+        title="Saved sleep note",
+        description=json.dumps({"notes": "Mum woke three times overnight."}),
+    )
+    assert not delta_engine._source_content_matches_event(
+        "Caregiver reported that Mum slept peacefully.", event
+    )
+    assert not delta_engine._source_content_matches_event(
+        json.dumps({"notes": "Mum slept peacefully."}), event
+    )
+    assert not delta_engine._source_content_matches_event("{}", event)
+
+
+def test_reconcile_rejects_content_not_bound_to_the_supplied_source_event():
+    from unittest.mock import Mock
+
+    event = SimpleNamespace(
+        id="event-bound",
+        person_id="person-bound",
+        title="Saved sleep note",
+        description="Caregiver reported interrupted sleep.",
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = event
+
+    with pytest.raises(HTTPException) as exc:
+        delta_engine.reconcile_event(
+            db,
+            person_id="person-bound",
+            event_date=None,
+            source="caregiver report",
+            content="Caregiver reported that Mum slept peacefully.",
+            source_event_id="event-bound",
+            persist=False,
+        )
+
+    assert exc.value.status_code == 422
+    assert "does not match the saved care update" in exc.value.detail
+    assert db.query.call_count == 1
+
+
 def test_generic_excerpt_cannot_create_a_source_link():
     refs = _match_source_references(
         "Yes",
