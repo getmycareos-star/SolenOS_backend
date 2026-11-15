@@ -497,9 +497,6 @@ def test_document_intake_finishes_later_windows_before_failing_an_exhausted_page
 
 def _daily_delta_retry_store(tmp_path, monkeypatch):
     from sqlalchemy.pool import StaticPool
-    # Import the application registry so every referenced ORM table is registered
-    # before SQLite creates the isolated schema.
-    from app.main import app as _application
     from app.core.database import Base
     from app.models.care import Caregiver, CareEvent, Evidence, Person
     from app.models.capture_analysis import CaptureAnalysis
@@ -510,8 +507,18 @@ def _daily_delta_retry_store(tmp_path, monkeypatch):
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # Register the specific models before creating the isolated schema.
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            Person.__table__,
+            Caregiver.__table__,
+            Evidence.__table__,
+            CareEvent.__table__,
+            CaptureAnalysis.__table__,
+            QwenBackgroundJob.__table__,
+            QwenJobEvent.__table__,
+        ],
+    )
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
     monkeypatch.setattr(worker, "SessionLocal", sessions)
 
