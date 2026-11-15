@@ -1850,55 +1850,6 @@ def test_qwen_grounding_guard_allows_supportive_recommendations_but_blocks_medic
     )
 
 
-def test_delta_history_becomes_stale_when_baseline_change_or_situation_is_revised(monkeypatch):
-    """Baseline, active-change, and situation revisions must invalidate saved Delta runs."""
-    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
-    try:
-        reviewed_at = datetime.now(timezone.utc) - timedelta(hours=2)
-        target_types = ("baselines", "changes", "situations")
-        with TestingSessionLocal() as db:
-            for index, target_type in enumerate(target_types):
-                db.add(CareDeltaRun(
-                    id=f"delta-{target_type}-freshness",
-                    person_id=person_id,
-                    source="Caregiver report",
-                    event_date=reviewed_at,
-                    evidence_ids=[],
-                    delta_json=json.dumps({"computed_changes": []}),
-                    model_name="benchmark-fixture",
-                    created_by_caregiver_id=caregiver_id,
-                    created_at=reviewed_at,
-                ))
-                db.add(CareStateRevision(
-                    id=f"revision-{target_type}-after-delta",
-                    person_id=person_id,
-                    target_type=target_type,
-                    target_id=f"record-{index}",
-                    revision_number=2,
-                    change_kind="updated",
-                    before_state=json.dumps({"status": "active"}),
-                    after_state=json.dumps({"status": "superseded_or_resolved"}),
-                    evidence_ids=[],
-                    changed_by_caregiver_id=caregiver_id,
-                    changed_at=reviewed_at + timedelta(minutes=index + 1),
-                ))
-            db.commit()
-
-        response = client.get(
-            f"/api/v1/care-delta/runs/{person_id}",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert response.status_code == 200, response.text
-        runs = {item["id"]: item for item in response.json()}
-        for target_type in target_types:
-            run = runs[f"delta-{target_type}-freshness"]
-            assert run["source_freshness"]["status"] == "stale", run
-            assert run["source_freshness"]["changed_context_count"] == 3, run
-            assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
-    finally:
-        teardown()
-
-
 def test_delta_freshness_tracks_real_orm_updates_to_baselines_changes_and_situations(monkeypatch):
     """The ORM revision listener, not hand-inserted audit fixtures, invalidates Delta."""
     from app.core.change_enums import (
