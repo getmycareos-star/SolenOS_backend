@@ -79,6 +79,18 @@ def test_non_reconstruction_questions_do_not_force_full_history_paging(query):
     assert collaboration._is_broad_temporal_history_request(query) is False
 
 
+def test_explicit_temporal_window_fetches_all_matching_history_pages():
+    assert collaboration._should_fetch_full_lcr_context_pages(
+        {"temporal_window": {"basis": "explicit_calendar_year"}}, False
+    ) is True
+    assert collaboration._should_fetch_full_lcr_context_pages(
+        {"temporal_window": None}, False
+    ) is False
+    assert collaboration._should_fetch_full_lcr_context_pages(
+        {"temporal_window": None}, True
+    ) is True
+
+
 def test_companion_identity_guidance_does_not_repeat_the_one_time_name_question():
     named = collaboration._care_recipient_identity_guidance("Mom")
     assert '"Mom"' in named
