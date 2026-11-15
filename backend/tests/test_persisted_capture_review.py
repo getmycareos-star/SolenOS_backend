@@ -505,3 +505,57 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
         assert analysis.execution_status["longitudinal_retrieval"] == "verified"
     finally:
         db.close()
+
+
+def test_daily_capture_does_not_report_longitudinal_processing_complete_when_delta_fails(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Delta failure recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+        "observations": [],
+        "open_questions": [],
+        "possible_safety_flags": [],
+    })
+    from app.services import qwen_background_worker
+
+    monkeypatch.setattr(
+        qwen_background_worker,
+        "_reconcile_daily_capture_delta",
+        lambda **kwargs: {"status": "failed", "error_code": "delta_store_unavailable"},
+    )
+
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": "Caregiver reports a change in sleep.",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    process_daily_capture_job(body["qwen_job_id"], monkeypatch)
+
+    db = TestSessionLocal()
+    try:
+        analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
+        assert analysis.execution_status["reconciliation"] == "completed"
+        assert analysis.execution_status["delta_reconciliation"] == "failed"
+        assert analysis.execution_status["longitudinal_processing"] == "incomplete"
+        assert analysis.execution_status["longitudinal_processing_error"] == "delta_store_unavailable"
+
+        from app.models.qwen_background_job import QwenBackgroundJob
+        job = db.query(QwenBackgroundJob).filter_by(id=body["qwen_job_id"]).one()
+        result = json.loads(job.result_text)
+        assert result["reconciliation_status"] == "completed"
+        assert result["delta_reconciliation_status"] == "failed"
+        assert result["delta_engine_output_persisted"] is False
+        assert result["longitudinal_processing_status"] == "incomplete"
+        assert result["longitudinal_processing_error"] == "delta_store_unavailable"
+    finally:
+        db.close()
