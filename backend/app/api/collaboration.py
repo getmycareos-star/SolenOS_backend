@@ -5100,6 +5100,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
 
     user_text = payload.text.strip()
+    # Always initialize optional prompt sections before any conditional retrieval path.
+    conversation_context_lines: list[str] = []
+    caregiver_question_queue_lines: list[str] = []
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
 
