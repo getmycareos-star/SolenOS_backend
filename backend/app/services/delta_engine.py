@@ -665,7 +665,14 @@ def _reconcile_from_change_intelligence(
     latest_revision_time = db.query(func.max(CareStateRevision.changed_at)).filter(
         CareStateRevision.person_id == person_id
     ).scalar()
-    care_state_revision_snapshot = latest_revision_time.isoformat() if latest_revision_time else None
+    revision_count = db.query(func.count(CareStateRevision.id)).filter(
+        CareStateRevision.person_id == person_id
+    ).scalar() or 0
+    # Include the append-only revision count as well as its timestamp. Multiple
+    # revisions created in one transaction can share the same changed_at value.
+    care_state_revision_snapshot = (
+        f"{revision_count}:{latest_revision_time.isoformat() if latest_revision_time else 'none'}"
+    )
 
     def validate_source_snapshot() -> None:
         if source_event_id:
@@ -698,6 +705,21 @@ def _reconcile_from_change_intelligence(
             raise HTTPException(
                 status_code=409,
                 detail="The source evidence changed during reconciliation. Retry using the latest record.",
+            )
+        current_revision_time = db.query(func.max(CareStateRevision.changed_at)).filter(
+            CareStateRevision.person_id == person_id
+        ).scalar()
+        current_revision_count = db.query(func.count(CareStateRevision.id)).filter(
+            CareStateRevision.person_id == person_id
+        ).scalar() or 0
+        current_revision_snapshot = (
+            f"{current_revision_count}:{current_revision_time.isoformat() if current_revision_time else 'none'}"
+        )
+        if current_revision_snapshot != care_state_revision_snapshot:
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="The saved care history changed during comparison. Retry using the latest care record.",
             )
 
     if persist:
