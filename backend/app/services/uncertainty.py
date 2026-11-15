@@ -376,20 +376,13 @@ def persist_source_clarification_questions(
         # Only inherit necessity from one unambiguous, same-record LCR gap
         # that already carries a structured decision dependency and evidence.
         # Source extraction wording or model confidence alone never qualifies.
-        question_tokens = {
-            token for token in re.findall(r"[a-z0-9]+", question_text.casefold())
-            if len(token) > 2
-        }
+        question_tokens = set(_clarification_question_key(question_text))
         necessity_gaps = []
         for gap in db.query(InformationGapModel).filter(
             InformationGapModel.person_id == person_id,
             InformationGapModel.lifecycle_status == GapLifecycleStatus.OPEN,
         ).all():
-            field_tokens = {
-                token for token in re.findall(
-                    r"[a-z0-9]+", (gap.field or "").replace("_", " ").casefold()
-                ) if len(token) > 2
-            }
+            field_tokens = set(_clarification_question_key((gap.field or "").replace("_", " ")))
             if not field_tokens or not field_tokens.issubset(question_tokens):
                 continue
             for assessment in (gap.context or []):
@@ -468,7 +461,7 @@ def persist_source_clarification_questions(
                 row for row in active_rows
                 if row.subject_type == subject_type
                 and row.subject_id == subject_id
-                and _question_matches_source_field(row, contexts_to_add)
+                and _question_matches_source_field(row, contexts_to_add, question_text)
             ), None)
         candidate_grounding = {
             "source_ids": [matched_gap[0].id] if matched_gap else [source_record_id],
