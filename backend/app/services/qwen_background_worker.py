@@ -178,7 +178,8 @@ def _reconcile_daily_capture_delta(
 ) -> dict[str, Any]:
     """Run the existing Delta Engine for a queued, persisted Daily Care capture."""
     from app.models.care import CareEvent, Evidence
-    from app.models.care_continuity import CareDeltaRun
+    from app.models.care_continuity import CareDeltaRun, CareStateRevision
+    from sqlalchemy import func
     from app.services.delta_engine import (
         DELTA_ENGINE_VERSION,
         reconcile_event,
@@ -209,6 +210,10 @@ def _reconcile_daily_capture_delta(
             return {"status": "failed", "error_code": "source_description_missing"}
 
         snapshot_hash = source_event_snapshot_hash(event)
+        latest_revision_time = delta_db.query(func.max(CareStateRevision.changed_at)).filter(
+            CareStateRevision.person_id == person_id
+        ).scalar()
+        care_state_revision_snapshot = latest_revision_time.isoformat() if latest_revision_time else None
         existing_runs = (
             delta_db.query(CareDeltaRun)
             .filter(
@@ -228,6 +233,7 @@ def _reconcile_daily_capture_delta(
             if (
                 provenance.get("engine_version") == DELTA_ENGINE_VERSION
                 and provenance.get("source_event_snapshot_sha256") == snapshot_hash
+                and provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
             ):
                 return {
                     "status": "completed",
