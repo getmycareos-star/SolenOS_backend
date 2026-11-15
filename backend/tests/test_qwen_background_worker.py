@@ -629,3 +629,40 @@ def test_daily_capture_delta_retry_stops_when_original_source_is_invalidated(tmp
         job_id="daily-delta-job", event_type="daily_capture_delta_retry_cancelled"
     ).count() == 1
     db.close()
+
+
+def test_daily_capture_delta_retry_fails_closed_after_three_total_attempts(tmp_path, monkeypatch):
+    from app.models.capture_analysis import CaptureAnalysis
+
+    sessions = _daily_delta_retry_store(tmp_path, monkeypatch)
+    calls = []
+
+    def fail_reconciliation(**kwargs):
+        calls.append(kwargs)
+        return {"status": "failed", "error_code": "temporary_delta_failure"}
+
+    monkeypatch.setattr(worker, "_reconcile_daily_capture_delta", fail_reconciliation)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    queued = db.query(QwenBackgroundJob).filter_by(id="daily-delta-job").one()
+    assert queued.status == "queued"
+    assert queued.attempt_count == 2
+    queued.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+    db.close()
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    failed = db.query(QwenBackgroundJob).filter_by(id="daily-delta-job").one()
+    assert failed.status == "failed"
+    assert failed.attempt_count == 3
+    assert failed.error_code == "temporary_delta_failure"
+    assert failed.completed_at is None
+    analysis = db.query(CaptureAnalysis).filter_by(id="daily-delta-analysis").one()
+    assert analysis.execution_status["longitudinal_processing"] == "failed"
+    assert len(calls) == 2
+    assert db.query(QwenJobEvent).filter_by(
+        job_id="daily-delta-job", event_type="daily_capture_delta_reconciliation_retry"
+    ).count() == 2
+    db.close()
