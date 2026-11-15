@@ -346,7 +346,10 @@ def test_100_real_api_care_history_lifecycles_preserve_corrections_conflicts_and
                             "necessity_assessment": {
                                 "necessity_rationale": "The next mobility handoff depends on confirming the current support level.",
                                 "decision_dependency": "The receiving caregiver cannot prepare the transfer plan until the current mobility support is confirmed.",
-                                "evidence_ids": [first_evidence_id, second_evidence_id],
+                                # This context points to first_evidence_id as its source_id.
+                                # Keep its source-level evidence set exact; the question
+                                # itself separately retains both reports for comparison.
+                                "evidence_ids": [first_evidence_id],
                             },
                         }],
                         "created_by_caregiver_id": uploader_id,
