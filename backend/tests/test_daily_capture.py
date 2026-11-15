@@ -189,6 +189,11 @@ def test_daily_capture_persists_one_authorized_source_across_history_and_lcr():
         )
         assert reassessed.status_code == 200, reassessed.text
         assessment = reassessed.json()["assessment"]
+        # A first-time caregiver report with no prior baseline remains saved
+        # evidence; it must not be projected as an unresolved follow-up or priority.
+        assert assessment["open_loops"]["count"] == 0
+        assert assessment["care_attention"]["counts"]["needs_attention_now"] == 0
+        assert assessment["care_attention"]["counts"]["important_to_address"] == 0
         assessed_records = [
             item for item in assessment["current_care_reality"]["records"]
             if item.get("id") == event_id
