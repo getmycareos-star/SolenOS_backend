@@ -257,7 +257,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         # appointment preparation; the legacy arrays below remain for compatibility.
         canonical_lcr_context = build_lcr_context(
             db, person_id, caregiver_id=caregiver_id,
-            limit_per_source=100, include_all_history=True,
+            limit_per_source=40, include_all_history=True,
         )
     except Exception:
         logger.exception("Shared LCR retrieval failed for appointment preparation")
