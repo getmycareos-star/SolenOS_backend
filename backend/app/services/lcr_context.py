@@ -479,7 +479,7 @@ def build_lcr_context(
     then return a ranked per-source subset. Ordinary current-care reads remain
     bounded to recent records. Unavailable sources are explicitly marked.
     """
-    limit = max(1, min(int(limit_per_source), 50))
+    limit = max(1, min(int(limit_per_source), 200))
     direct_terms = [
         term for term in dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold()))
         if term not in _SEARCH_STOPWORDS
