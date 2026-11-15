@@ -535,6 +535,9 @@ def review_companion_care_update(
                 ),
                 commit=False,
             )
+            # This is the caregiver's own exact report, not an AI interpretation.
+            # Keep it reported even though the review proposal provides lineage.
+            assertion.epistemic_state = "reported"
             assertion.assertion_status = "caregiver_reviewed"
             assertion_id = assertion.id
         else:
