@@ -642,3 +642,53 @@ def test_shared_coordinator_rejects_unknown_execution_stage_before_reconciliatio
 
     reconciled.assert_not_called()
     db.commit.assert_not_called()
+
+
+def test_care_state_lock_order_is_stable_for_reversed_new_record_collections():
+    from app.models.care_continuity import _ordered_care_state_candidates
+
+    first = SimpleNamespace(
+        __table__=SimpleNamespace(name="care_events"),
+        person_id="person-1",
+        id="event-a",
+    )
+    second = SimpleNamespace(
+        __table__=SimpleNamespace(name="care_events"),
+        person_id="person-1",
+        id="event-b",
+    )
+    third = SimpleNamespace(
+        __table__=SimpleNamespace(name="care_assertions"),
+        person_id="person-1",
+        id="assertion-a",
+    )
+
+    forward = _ordered_care_state_candidates([first, second, third])
+    reverse = _ordered_care_state_candidates([third, second, first])
+
+    assert forward == reverse
+    assert [item.id for item in forward] == [
+        "assertion-a", "event-a", "event-b",
+    ]
+
+
+def test_care_state_lock_order_assigns_ids_before_sorting_new_records():
+    from app.models.care_continuity import _ordered_care_state_candidates
+
+    first = SimpleNamespace(
+        __table__=SimpleNamespace(name="care_events"),
+        person_id="person-1",
+        id=None,
+    )
+    second = SimpleNamespace(
+        __table__=SimpleNamespace(name="care_events"),
+        person_id="person-1",
+        id=None,
+    )
+
+    ordered = _ordered_care_state_candidates([second, first])
+
+    assert first.id
+    assert second.id
+    assert first.id != second.id
+    assert [item.id for item in ordered] == sorted([first.id, second.id])
