@@ -5505,7 +5505,6 @@ def _care_history_reply_covers_requested_topics(
 ) -> bool:
     topics = _care_history_requested_topics(user_text)
     reply_terms = set(re.findall(r"[\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
-    topic_terms = set().union(*(variants for _, variants in topics))
     detail_stopwords = _CARE_HISTORY_STOPWORDS | {
         "mum", "her", "his", "she", "he", "they", "was", "were", "is", "are",
         "a", "an", "to", "of", "at", "on", "in", "some", "though", "now",
@@ -5539,7 +5538,11 @@ def _care_history_reply_covers_requested_topics(
             generic_source_phrases.append(normalized_description)
         for label, variants in topics:
             if terms & variants:
-                source_details[label].update(terms - topic_terms - detail_stopwords)
+                # Evaluate detail overlap against this topic's vocabulary only.
+                # Removing every requested topic's terms globally can erase the
+                # very words that distinguish one quoted observation from another
+                # (for example, "ate" in a dinner report when appetite is also asked).
+                source_details[label].update(terms - variants - detail_stopwords)
                 source_phrases[label].append(normalized_description)
 
     normalized_reply = re.sub(r"\s+", " ", (reply or "").casefold()).strip()
