@@ -278,3 +278,61 @@ def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(m
             db.close()
     finally:
         teardown()
+
+
+def test_companion_exact_message_capture_requires_explicit_acceptance(monkeypatch):
+    source = "She woke up three times overnight and seemed more unsettled."
+    client = setup_client(monkeypatch, lambda text: {"observations": []})
+    try:
+        first = create_session(client, "Caregiver capture")
+        headers = {"Authorization": "Bearer " + first["access_token"]}
+        sent = client.post("/api/v1/conversation/message", headers=headers, json={
+            "person_id": first["person"]["id"], "text": source,
+        })
+        assert sent.status_code == 200, sent.text
+        body = sent.json()
+        assert body["source_message_id"]
+        assert body["written_to_lcr"] is False
+
+        before = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert before.status_code == 200, before.text
+        assert source not in before.text
+
+        prepared = client.post("/api/v1/companion/care-updates/capture", headers=headers, json={
+            "source_message_id": body["source_message_id"],
+        })
+        assert prepared.status_code == 200, prepared.text
+        proposal = prepared.json()["proposal"]
+        assert proposal["status"] == "pending_authorization"
+        assert proposal["proposed_change"]["asserted_value"] == source
+        assert proposal["proposed_change"]["source_quote"] == source
+        assert proposal["proposed_change"]["model_generated_paraphrase_used"] is False
+
+        still_pending = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert still_pending.status_code == 200, still_pending.text
+        assert source not in still_pending.text
+
+        accepted = review(client, first, proposal["id"], {"decision": "accept"})
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["written_to_lcr"] is True
+        assert accepted.json()["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
+
+        after = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert after.status_code == 200, after.text
+        assert source in after.text
+
+        replay = client.post("/api/v1/companion/care-updates/capture", headers=headers, json={
+            "source_message_id": body["source_message_id"],
+        })
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+
+        second = create_session(client, "Different caregiver")
+        denied = client.post(
+            "/api/v1/companion/care-updates/capture",
+            headers={"Authorization": "Bearer " + second["access_token"]},
+            json={"source_message_id": body["source_message_id"]},
+        )
+        assert denied.status_code == 404
+    finally:
+        teardown()
