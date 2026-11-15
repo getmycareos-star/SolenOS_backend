@@ -494,15 +494,7 @@ def persist_source_clarification_questions(
                 existing.question == question_text
                 and requested_source_refs.issubset(existing_source_refs)
                 and set(assessed_evidence_ids).issubset(existing_evidence_ids)
-                and (
-                    not matched_gap
-                    or (
-                        existing.necessity == "necessary"
-                        and existing.necessity_rationale == necessity_rationale
-                        and existing.priority == priority
-                        and existing.intended_answerer_role == "reporting_caregiver"
-                    )
-                )
+                and (not matched_gap or existing.necessity == "necessary")
             )
             if replay_is_unchanged:
                 persisted.append(existing)
