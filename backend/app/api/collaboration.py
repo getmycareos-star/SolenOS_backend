@@ -5714,13 +5714,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             conversation_items = [
                 item for item in conversation_source.get("items", [])
                 if isinstance(item, dict)
-                and str(item.get("role") or "").casefold() == "user"
+                and str(item.get("role") or "").casefold() in {"user", "assistant"}
                 and isinstance(item.get("content"), str)
                 and item["content"].strip()
-            ][-3:]
+            ][-6:]
             conversation_context_lines = [
-                "Prior caregiver message from another Companion session "
-                "(conversation context only; not care evidence or an LCR record): "
+                (
+                    "Prior caregiver message from another Companion session "
+                    "(conversation context only; not care evidence or an LCR record): "
+                    if str(item.get("role") or "").casefold() == "user"
+                    else "Prior SolenOS Companion reply from another session "
+                    "(conversation context only; not care evidence or an LCR record): "
+                )
                 + item["content"].strip()[:600]
                 for item in conversation_items
             ]
