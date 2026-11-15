@@ -2103,3 +2103,16 @@ def test_companion_uses_source_grounded_history_when_qwen_is_unavailable(monkeyp
         assert data["persistence"] == "conversation_only"
     finally:
         teardown()
+
+
+def test_operational_guard_allows_benign_time_reference_in_overwhelm_reassurance():
+    source = "I'm exhausted. I can't keep up with all these updates and I don't know what to do."
+    reply = "You don't have to solve everything tonight. We can take one thing at a time."
+    assert collaboration._contains_unsupported_operational_claim(reply, source, []) is False
+
+
+def test_operational_guard_still_rejects_unsupported_future_care_claim():
+    source = "I'm exhausted. I can't keep up with all these updates and I don't know what to do."
+    reply = "Mum will be calmer tomorrow."
+    assert collaboration._contains_unsupported_operational_claim(reply, source, []) is True
+
