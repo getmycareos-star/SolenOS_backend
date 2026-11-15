@@ -566,7 +566,8 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
             json={"person_id": person_id, "text": "What does the uploaded document say?"},
         )
         assert response.status_code == 200, response.text
-        assert response.json()["ai_generated"] is True
+        assert response.json()["ai_generated"] is False
+        assert "uploaded document" in (response.json().get("safety_note") or "").casefold()
         assert evidence_id in response.json()["source_evidence_ids"]
 
         user_payload = captured["messages"][-1]["content"]
