@@ -2822,6 +2822,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     baseline_source_state = []
     baseline_source_available = True
     baseline_source_complete = True
+    baseline_ids = []
+    baseline_by_id = {}
     relevant_changes = []
     inspector = inspect(db.connection())
     change_table_available = inspector.has_table("changes")
