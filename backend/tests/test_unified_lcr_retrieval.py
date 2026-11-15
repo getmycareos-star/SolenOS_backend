@@ -694,6 +694,28 @@ def test_this_year_is_bounded_from_local_january_first_through_today():
     assert window["end"].startswith("2026-11-15T23:59:59")
 
 
+def test_explicit_year_query_scans_the_full_calendar_year():
+    window = _temporal_window(
+        "What happened in 2025?",
+        now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+        timezone_name="UTC",
+    )
+    assert window is not None
+    assert window["start"] == "2025-01-01T00:00:00+00:00"
+    assert window["end"] == "2025-12-31T23:59:59.999999+00:00"
+
+
+def test_explicit_year_range_uses_caregiver_local_timezone():
+    window = _temporal_window(
+        "Show me the care history during 2024.",
+        now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+        timezone_name="America/Los_Angeles",
+    )
+    assert window is not None
+    assert window["start"] == "2024-01-01T08:00:00+00:00"
+    assert window["end"] == "2025-01-01T07:59:59.999999+00:00"
+
+
 def test_temporal_retrieval_uses_calendar_months_not_fixed_30_day_approximation():
     # March 31 minus one calendar month clamps to February 28 in 2026.
     window = _temporal_window(
