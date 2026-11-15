@@ -233,7 +233,19 @@ def _version_care_state(session, flush_context, instances):
                 {key: _json_value(value) for key, value in dict(persisted).items()}
                 if persisted is not None else _snapshot(obj, before=True)
             )
-        after_state = None if is_deleted else _snapshot(obj)
+        if is_deleted:
+            after_state = None
+        elif is_new:
+            after_state = _snapshot(obj)
+        else:
+            # Preserve unchanged columns from the latest persisted row. The
+            # in-memory object may have been loaded before another writer
+            # committed while this transaction waited for the target lock.
+            after_state = dict(before_state or {})
+            for column in state.mapper.columns:
+                key = column.key
+                if state.attrs[key].history.has_changes():
+                    after_state[key] = _json_value(getattr(obj, key, None))
         evidence_ids = [] if is_deleted else (getattr(obj, "evidence_ids", None) or [])
         caregiver_id = (
             getattr(obj, "updated_by_caregiver_id", None)
