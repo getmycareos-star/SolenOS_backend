@@ -1318,16 +1318,40 @@ def read_lcr_context(
     request: Request,
     limit_per_source: int = Query(default=20, ge=1, le=50),
     query: str | None = Query(default=None, max_length=500),
+    include_all_history: bool = Query(default=False),
+    source_offsets_json: str | None = Query(default=None, max_length=4000),
     db: Session = Depends(get_db),
 ):
-    """Read one bounded, permission-scoped context projection shared by LCR-facing modules."""
+    """Read person-scoped LCR context, with explicit full-history paging when requested."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    source_offsets: dict[str, int] = {}
+    if source_offsets_json:
+        try:
+            parsed_offsets = json.loads(source_offsets_json)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail="source_offsets_json must be a JSON object of non-negative integer offsets") from exc
+        if not isinstance(parsed_offsets, dict) or len(parsed_offsets) > 100:
+            raise HTTPException(status_code=422, detail="source_offsets_json must be a JSON object with at most 100 sources")
+        for source_name, offset in parsed_offsets.items():
+            if (
+                not isinstance(source_name, str)
+                or not source_name.strip()
+                or isinstance(offset, bool)
+                or not isinstance(offset, int)
+                or offset < 0
+            ):
+                raise HTTPException(status_code=422, detail="Each source offset must have a non-empty source name and a non-negative integer value")
+            source_offsets[source_name] = offset
+    if source_offsets and not include_all_history and not query:
+        raise HTTPException(status_code=422, detail="Source pagination requires an explicit history or search request")
     return build_unified_lcr_context(
         db,
         person_id,
         caregiver_id,
         limit_per_source=limit_per_source,
         query=query,
+        include_all_history=include_all_history,
+        source_offsets=source_offsets,
     )
 
 
