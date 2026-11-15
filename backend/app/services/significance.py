@@ -253,6 +253,7 @@ def assess_change(
     # preserve the same boundary instead of reintroducing a task downstream.
     isolated_unverified_report = (
         current_count == 1
+        and evidence_status == EvidenceStatus.REPORTED
         and recurrence == 0.0
         and functional_score == 0.0
         and corroboration_score < 0.3
