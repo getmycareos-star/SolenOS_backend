@@ -1117,8 +1117,12 @@ def test_lcr_orientation_rejects_returning_language_for_new_caregiver(monkeypatc
 
 
 @pytest.mark.parametrize("missing_source", ["events", "decisions", "living_record"])
+@pytest.mark.parametrize("invalid_reply", [
+    "Welcome to SolenOS. This is your first time here, and your care story starts today.",
+    "Welcome back to SolenOS. Your care story is already underway, and we can continue today.",
+])
 @pytest.mark.session_security
-def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch, missing_source):
+def test_lcr_orientation_does_not_invent_status_for_incomplete_history(monkeypatch, missing_source, invalid_reply):
     setup_db()
     try:
         from app.core.database import get_db
@@ -1141,7 +1145,7 @@ def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch, m
         captured = {}
         calls = []
         outputs = iter([
-            "Welcome to SolenOS. This is your first time here, and your care story starts today.",
+            invalid_reply,
             "Welcome to SolenOS. We can start with the care story you want to keep track of today.",
         ])
         monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
@@ -1159,7 +1163,11 @@ def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch, m
         assert "NEW CARE RECORD" not in captured["prompt"]
         assert len(calls) == 2
         assert "Do not claim the caregiver is new or returning" in calls[1][-1]["content"]
-        assert "first time here" not in response.json()["reply"].casefold()
+        final_reply = response.json()["reply"].casefold()
+        assert not any(
+            marker in final_reply
+            for marker in ("first time here", "new caregiver", "starting from scratch", "welcome back", "already underway")
+        ), final_reply
         assert response.json()["ai_generated"] is True
     finally:
         teardown_db()
