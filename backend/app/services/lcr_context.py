@@ -485,8 +485,8 @@ def build_lcr_context(
         if term not in _SEARCH_STOPWORDS
     ][:8]
     if temporal_window:
-        # A calendar year is part of the date constraint, not a word that must
-        # also appear in the care note's prose.
+        # Calendar-year and ISO-date tokens belong to the temporal filter, not
+        # to the care note's prose.
         direct_terms = [term for term in direct_terms if not re.fullmatch(r"20\d{2}(?:-\d{2}-\d{2})?", term)]
     terms = _expanded_search_terms(direct_terms)
     bind = db.get_bind()
