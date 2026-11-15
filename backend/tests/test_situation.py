@@ -1665,3 +1665,43 @@ def test_situation_freshness_includes_persisted_delta_engine_changes():
         assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
     finally:
         teardown_db()
+
+@pytest.mark.session_security
+def test_saved_situation_assessment_survives_freshness_rebuild_failure(monkeypatch):
+    """A failed freshness check must not hide the last persisted care picture."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Freshness Failure Person")
+        person_id = created["person"]["id"]
+
+        saved = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["assessment"]["person_id"] == person_id
+
+        def fail_freshness_rebuild(*args, **kwargs):
+            raise RuntimeError("simulated bounded source refresh failure")
+
+        monkeypatch.setattr(
+            "app.api.care_continuity._build_situation_understanding_assessment",
+            fail_freshness_rebuild,
+        )
+        response = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["assessment"]["person_id"] == person_id
+        assert body["assessment_id"] == saved.json()["assessment_id"]
+        assert body["source_freshness"]["status"] == "freshness_check_unavailable"
+        assert body["source_freshness"]["reassessment_recommended"] is True
+        assert "potentially out of date" in body["source_freshness"]["limitation"]
+    finally:
+        teardown_db()
