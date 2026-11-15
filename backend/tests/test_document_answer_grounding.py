@@ -110,3 +110,21 @@ def test_broad_document_question_returns_only_extracted_sentences():
     assert answer == (
         "The uploaded document says: “Mary ate half of her breakfast today. Mary woke twice overnight.”"
     )
+
+def test_document_question_matches_walked_when_caregiver_asks_about_walking():
+    context = [
+        _document_line(
+            "Discharge summary. Patient walked 20 metres with a frame on 12 October."
+        )
+    ]
+
+    answer = _document_extractive_answer(
+        "What does the discharge summary say about walking?",
+        context,
+    )
+
+    assert answer == (
+        "The uploaded document says: "
+        "“Patient walked 20 metres with a frame on 12 October.”"
+    )
+
