@@ -6759,8 +6759,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         conflict_response = _contradictory_event_evidence_response(user_text, event_context)
         care_history_extractive_fallback_used = care_history_fallback_from_outage
         if caregiver_question_direct_answer_used:
-            # This is the exact saved, answerer-routed question, not a generated
-            # clinical answer. Keep the response explicitly non-AI and read-only.
+            # This answer is a direct lookup of authorized saved source text,
+            # not a generated clinical interpretation. Keep it explicitly
+            # non-AI and read-only.
             reply = caregiver_question_direct_answer
         if document_extractive_fallback_used:
             # The model received the verified extraction but failed to use it.
