@@ -3,6 +3,7 @@ import json
 from app.api.collaboration import (
     _care_history_extractive_answer,
     _care_history_reply_covers_requested_topics,
+    _lcr_missing_context_instruction,
 )
 
 
@@ -148,3 +149,39 @@ def test_history_fallback_is_limited_to_explicit_record_retrieval_questions():
         "Should I change her medication?",
         context,
     ) is None
+
+
+
+def test_incomplete_retrieval_never_turns_missing_results_into_absence_claims():
+    instruction = _lcr_missing_context_instruction(
+        {
+            "retrieval_projection_complete": False,
+            "page_limit_reached": True,
+        },
+        context_truncated=False,
+    )
+
+    assert "cannot confirm from the records retrieved" in instruction
+    assert "do not say the information is not recorded" in instruction
+    assert "additional saved history may need checking" in instruction
+
+
+def test_complete_retrieval_uses_bounded_absence_language_without_claiming_nonoccurrence():
+    instruction = _lcr_missing_context_instruction(
+        {"retrieval_projection_complete": True, "page_limit_reached": False},
+        context_truncated=False,
+    )
+
+    assert "not present in the retrieved care record" in instruction
+    assert "do not infer that the event did not occur" in instruction
+    assert "cannot confirm from the records retrieved" not in instruction
+
+
+def test_prompt_truncation_marks_retrieval_as_incomplete():
+    instruction = _lcr_missing_context_instruction(
+        {"retrieval_projection_complete": True, "page_limit_reached": False},
+        context_truncated=True,
+    )
+
+    assert "cannot confirm from the records retrieved" in instruction
+    assert "additional saved history may need checking" in instruction
