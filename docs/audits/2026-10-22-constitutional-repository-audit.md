@@ -173,7 +173,7 @@ Relevant commits:
 
 ### Remaining verified limitations
 
-- Backend and frontend test commands have **not** been executed. The current GitHub commit-status endpoint returns no backend checks, and the frontend commits show Vercel build-rate-limit failures, not a successful build. The execution container cannot resolve `github.com`, so it cannot clone dependencies or run the repository test suites locally.
+- Backend and frontend test commands have **not** been executed. The current GitHub commit-status endpoint returns no backend checks, and the frontend commits show deployment rate-limit failures, not a successful build. The execution container cannot resolve `github.com`, so it cannot clone dependencies or run the repository test suites locally.
 - Several older frontend direct fetches target legacy `/api/*` paths such as telemetry, policy/consent, extraction, TTS, and ops/devtools APIs. They are not routes mounted by the current FastAPI `main.py`; they must not be considered operational merely because the UI code exists. Their active-build usage and replacement/removal still require a separate endpoint-by-endpoint audit.
 - The new GET projection reconstructs the visible note timeline from persisted relational `Evidence` and `CareEvent` rows. It does not make the legacy file-based ACS/CRS persistence durable in this FastAPI backend. Open questions, synthesis, and prior reasoning are not stored by this route and are not reconstructed.
 - Live Railway migration, authentication, persistence-after-restart, and browser end-to-end behavior remain unverified.
