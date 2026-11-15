@@ -4895,6 +4895,24 @@ _MEDICATION_DOSE_RECALL_RE = re.compile(
     r"(?:prescribe|recommend|change|set)\b",
     re.IGNORECASE,
 )
+
+def _should_use_medication_dose_recall_fallback(
+    user_text: str,
+    *,
+    emergency: bool = False,
+    unsupported_trend: bool = False,
+    conflict_response: str | None = None,
+    missing_measurement_reply: str | None = None,
+    medication_change_reply: str | None = None,
+) -> bool:
+    """Use caregiver-report extraction only when no higher-priority safety guard applies."""
+    return bool(_MEDICATION_DOSE_RECALL_RE.search(user_text)) and not (
+        emergency
+        or unsupported_trend
+        or bool(conflict_response)
+        or bool(missing_measurement_reply)
+        or bool(medication_change_reply)
+    )
 _CARE_HISTORY_INTENT_PATTERN = re.compile(
     r"\bwhat\s+(?:has|have|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
     r"(?:recorded|logged|saved|noted)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
@@ -6505,7 +6523,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text,
             included_model_context_lines,
         )
-        medication_dose_recall_fallback_used = bool(_MEDICATION_DOSE_RECALL_RE.search(user_text))
+        medication_dose_recall_fallback_used = _should_use_medication_dose_recall_fallback(
+            user_text,
+            emergency=emergency,
+            unsupported_trend=unsupported_trend,
+            conflict_response=conflict_response,
+            missing_measurement_reply=missing_measurement_reply,
+            medication_change_reply=medication_change_reply,
+        )
         if medication_dose_recall_fallback_used:
             # Medication recall is answered from the caregiver-authored report,
             # never from model completion. A report that says the dose is
