@@ -2693,6 +2693,26 @@ def test_duplicate_open_clarification_question_is_suppressed_but_answered_questi
         assert duplicate_with_other_claim.status_code == 422, duplicate_with_other_claim.text
         assert "equivalent unanswered clarification question already exists" in duplicate_with_other_claim.text
 
+        identity_question = {
+            "person_id": person.id,
+            "question": "What is the name of the patient?",
+            "subject_type": "patient",
+            "subject_id": person.id,
+            "status": "open",
+            "priority": "informational",
+            "necessity": "not_assessed",
+            "evidence_ids": [],
+            "context": [],
+        }
+        identity_created = client.post("/api/v1/uncertainty/questions", json=identity_question)
+        assert identity_created.status_code == 200, identity_created.text
+        duplicate_identity_alias = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**identity_question, "subject_type": "person"},
+        )
+        assert duplicate_identity_alias.status_code == 422, duplicate_identity_alias.text
+        assert "equivalent unanswered clarification question already exists" in duplicate_identity_alias.text
+
         reopened = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={"status": "open"},

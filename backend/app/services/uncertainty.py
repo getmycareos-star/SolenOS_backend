@@ -32,6 +32,11 @@ from app.core.uncertainty_enums import (
 )
 
 
+def _canonical_question_subject_type(value: object) -> str:
+    normalized = str(value or "").strip().casefold()
+    return "person" if normalized in {"person", "patient"} else normalized
+
+
 def _has_decision_dependency(context) -> bool:
     """Only a structured, explicit current-decision dependency can justify a request."""
     for item in context or []:
@@ -697,7 +702,10 @@ class UncertaintyEngine:
             ).first()
             if claim is None:
                 raise ValueError("A linked claim must belong to the same care record.")
-            if claim.subject_type != payload["subject_type"] or claim.subject_id != payload["subject_id"]:
+            if (
+                _canonical_question_subject_type(claim.subject_type) != _canonical_question_subject_type(payload["subject_type"])
+                or str(claim.subject_id) != str(payload["subject_id"])
+            ):
                 raise ValueError("A clarification question must use the linked claim's subject scope.")
         if payload.get("necessity", "not_assessed") == "necessary":
             # A human-facing request must be grounded in persisted evidence,
@@ -753,11 +761,13 @@ class UncertaintyEngine:
         # different claim record. Claim IDs are provenance links, not separate
         # caregiver questions. Answered/declined questions may be asked again.
         question_key = re.sub(r"[\W_]+", " ", question_text.casefold()).strip()
+        question_subject_type = _canonical_question_subject_type(payload["subject_type"])
+        subject_type_aliases = ("person", "patient") if question_subject_type == "person" else (payload["subject_type"],)
         existing_open = (
             self.db.query(OpenQuestionModel)
             .filter(
                 OpenQuestionModel.person_id == scoped_person_id,
-                OpenQuestionModel.subject_type == payload["subject_type"],
+                OpenQuestionModel.subject_type.in_(subject_type_aliases),
                 OpenQuestionModel.subject_id == payload["subject_id"],
                 OpenQuestionModel.status.in_(["open", "unresolved"]),
             )

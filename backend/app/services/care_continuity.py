@@ -17,6 +17,22 @@ from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority, ResolutionMechanism
 
+def _canonical_question_subject_type(value: Any) -> str:
+    normalized = str(value or "").strip().casefold()
+    return "person" if normalized in {"person", "patient"} else normalized
+
+
+def _same_question_subject_scope(left_type: Any, left_id: Any, right_type: Any, right_id: Any) -> bool:
+    return (
+        _canonical_question_subject_type(left_type) == _canonical_question_subject_type(right_type)
+        and str(left_id or "") == str(right_id or "")
+    )
+
+
+def _question_subject_aliases(value: Any) -> tuple[str, ...]:
+    return ("person", "patient") if _canonical_question_subject_type(value) == "person" else (str(value),)
+
+
 CAREGIVER_VISIBLE_ANSWERER_ROLES = frozenset({
     "person_receiving_care", "reporting_caregiver", "other_caregiver", "professional",
 })
@@ -77,12 +93,10 @@ def has_valid_caregiver_necessity(
                 return False
             if (
                 getattr(question, "subject_type", None)
-                and claim.subject_type != question.subject_type
-            ):
-                return False
-            if (
-                getattr(question, "subject_id", None)
-                and claim.subject_id != question.subject_id
+                and not _same_question_subject_scope(
+                    claim.subject_type, claim.subject_id,
+                    question.subject_type, question.subject_id,
+                )
             ):
                 return False
             # The claim anchors the question to the same care subject. Its
@@ -155,8 +169,10 @@ def has_valid_caregiver_necessity(
                 ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
                     source_row
-                    and source_row.subject_type == getattr(question, "subject_type", None)
-                    and source_row.subject_id == getattr(question, "subject_id", None)
+                    and _same_question_subject_scope(
+                        source_row.subject_type, source_row.subject_id,
+                        getattr(question, "subject_type", None), getattr(question, "subject_id", None),
+                    )
                 )
                 if source_row:
                     source_record_evidence_ids.update(str(value) for value in (source_row.evidence_ids or []) if value)
@@ -204,8 +220,10 @@ def has_valid_caregiver_necessity(
                 ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
                     source_row
-                    and source_row.subject_type == getattr(question, "subject_type", None)
-                    and source_row.subject_id == getattr(question, "subject_id", None)
+                    and _same_question_subject_scope(
+                        source_row.subject_type, source_row.subject_id,
+                        getattr(question, "subject_type", None), getattr(question, "subject_id", None),
+                    )
                 )
                 if source_row:
                     source_record_evidence_ids.update(str(value) for value in (source_row.evidence_ids or []) if value)
@@ -217,8 +235,10 @@ def has_valid_caregiver_necessity(
                 ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
                     source_row
-                    and source_row.subject_type == getattr(question, "subject_type", None)
-                    and source_row.subject_id == getattr(question, "subject_id", None)
+                    and _same_question_subject_scope(
+                        source_row.subject_type, source_row.subject_id,
+                        getattr(question, "subject_type", None), getattr(question, "subject_id", None),
+                    )
                     and get_freshness(
                         source_row,
                         reviewed_at=_latest_assertion_review_at(db, source_row),
@@ -238,8 +258,10 @@ def has_valid_caregiver_necessity(
                 ).first() if isinstance(source_id, str) else None
                 source_record_exists = bool(
                     source_row
-                    and str(source_row.subject_type or "patient") == getattr(question, "subject_type", None)
-                    and str(source_row.subject_id or scoped_person_id) == getattr(question, "subject_id", None)
+                    and _same_question_subject_scope(
+                        source_row.subject_type or "patient", source_row.subject_id or scoped_person_id,
+                        getattr(question, "subject_type", None), getattr(question, "subject_id", None),
+                    )
                 )
                 if source_row:
                     source_record_evidence_ids.update(str(value) for value in (
@@ -298,8 +320,8 @@ def prioritize_caregiver_questions(questions, ordinary_limit=2):
     for row in rows:
         key = (
             " ".join((row.question or "").casefold().split()),
-            row.subject_type,
-            row.subject_id,
+            _canonical_question_subject_type(row.subject_type),
+            str(row.subject_id or ""),
         )
         if key in seen:
             continue
@@ -1113,7 +1135,11 @@ def next_best_questions(
     # Collapse identical questions from repeated stale assertions while retaining every source.
     deduplicated: Dict[tuple, Dict[str, Any]] = {}
     for item in candidates:
-        key = (item["question"], item["subject_type"], item["subject_id"])
+        key = (
+            item["question"],
+            _canonical_question_subject_type(item["subject_type"]),
+            str(item["subject_id"] or ""),
+        )
         if key not in deduplicated:
             item["source_ids"] = item.get("source_ids") or [item["source_id"]]
             item["_source_contexts"] = [candidate_source_context(item)]
@@ -1176,11 +1202,11 @@ def next_best_questions(
         # Persist only after a separate, explicit necessity assessment has marked it necessary.
         if persist and clean.get("necessity") == "necessary":
             candidate_contexts = list(item.get("_source_contexts") or [])
-            subject_key = (clean["subject_type"], clean["subject_id"])
+            subject_key = (_canonical_question_subject_type(clean["subject_type"]), str(clean["subject_id"]))
             if subject_key not in matching_rows_cache:
                 matching_rows_cache[subject_key] = db.query(OpenQuestion).filter(
                     OpenQuestion.person_id == person_id,
-                    OpenQuestion.subject_type == clean["subject_type"],
+                    OpenQuestion.subject_type.in_(_question_subject_aliases(clean["subject_type"])),
                     OpenQuestion.subject_id == clean["subject_id"],
                 ).order_by(OpenQuestion.asked_at.desc()).with_for_update().all()
             matching_rows = matching_rows_cache[subject_key]
