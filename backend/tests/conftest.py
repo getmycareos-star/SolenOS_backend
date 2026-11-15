@@ -36,6 +36,92 @@ if "care_assertion_revisions" not in Base.metadata.tables:
 
 # SQLite create_all() fixtures need the same core LCR tables as the production
 # migration chain. These definitions are test-only schema mirrors.
+if "living_care_records" not in Base.metadata.tables:
+    Table(
+        "living_care_records", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False, unique=True),
+        Column("record_status", String(32), nullable=False, server_default="active"),
+        Column("schema_version", String(40), nullable=False, server_default="lcr.v1"),
+        Column("created_at", DateTime(timezone=True)),
+        Column("updated_at", DateTime(timezone=True)),
+        Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+    )
+
+if "care_record_versions" not in Base.metadata.tables:
+    Table(
+        "care_record_versions", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+        Column("version_number", Integer, nullable=False),
+        Column("change_set_id", String(36)),
+        Column("record_digest", String(128)),
+        Column("snapshot_payload", JSON, nullable=False),
+        Column("created_at", DateTime(timezone=True)),
+        Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("reason", Text),
+        UniqueConstraint("care_record_id", "version_number"),
+    )
+
+if "care_record_snapshots" not in Base.metadata.tables:
+    Table(
+        "care_record_snapshots", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+        Column("version_id", String(36), ForeignKey("care_record_versions.id")),
+        Column("as_of", DateTime(timezone=True), nullable=False),
+        Column("snapshot_payload", JSON, nullable=False),
+        Column("record_digest", String(128)),
+        Column("created_at", DateTime(timezone=True)),
+        Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+    )
+
+if "record_provenance" not in Base.metadata.tables:
+    Table(
+        "record_provenance", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("care_record_id", String(36), ForeignKey("living_care_records.id")),
+        Column("source_type", String(80), nullable=False),
+        Column("source_id", String(36)),
+        Column("author_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("author_label", String(240)),
+        Column("method", String(80), nullable=False, server_default="manual"),
+        Column("recorded_at", DateTime(timezone=True)),
+        Column("occurred_at", DateTime(timezone=True)),
+        Column("effective_from", DateTime(timezone=True)),
+        Column("effective_to", DateTime(timezone=True)),
+        Column("reason", Text),
+        Column("metadata", JSON),
+        Column("created_at", DateTime(timezone=True)),
+    )
+
+if "record_provenance_links" not in Base.metadata.tables:
+    Table(
+        "record_provenance_links", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("provenance_id", String(36), ForeignKey("record_provenance.id"), nullable=False),
+        Column("target_type", String(100), nullable=False),
+        Column("target_id", String(36), nullable=False),
+        Column("relationship", String(40), nullable=False, server_default="originates"),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    )
+
+if "care_record_status_history" not in Base.metadata.tables:
+    Table(
+        "care_record_status_history", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+        Column("previous_status", String(32)),
+        Column("new_status", String(32), nullable=False),
+        Column("reason", Text),
+        Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+        Column("changed_at", DateTime(timezone=True)),
+    )
+
 if "care_facts" not in Base.metadata.tables:
     Table(
         "care_facts", Base.metadata,
