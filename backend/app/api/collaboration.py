@@ -6323,20 +6323,20 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     if name != "companion_conversation"
                 },
             }
-        if care_history_recall_context is not None:
-            lcr_context_coverage["direct_care_history_recall"] = {
-                "status": (
-                    "partial" if care_history_recall_context["has_more"]
-                    else "available" if care_history_recall_context["event_lines"]
-                    else "no_matching_record"
-                ),
-                "event_count": len(care_history_recall_context["event_lines"]),
-                "evidence_count": len(care_history_recall_context["evidence_lines"]),
-                "history_complete": not care_history_recall_context["has_more"],
-            }
-            if care_history_recall_context["has_more"]:
-                lcr_context_coverage["retrieval_projection_complete"] = False
-                lcr_context_coverage["page_limit_reached"] = True
+            if care_history_recall_context is not None:
+                lcr_context_coverage["direct_care_history_recall"] = {
+                    "status": (
+                        "partial" if care_history_recall_context["has_more"]
+                        else "available" if care_history_recall_context["event_lines"]
+                        else "no_matching_record"
+                    ),
+                    "event_count": len(care_history_recall_context["event_lines"]),
+                    "evidence_count": len(care_history_recall_context["evidence_lines"]),
+                    "history_complete": not care_history_recall_context["has_more"],
+                }
+                if care_history_recall_context["has_more"]:
+                    lcr_context_coverage["retrieval_projection_complete"] = False
+                    lcr_context_coverage["page_limit_reached"] = True
             conversation_coverage = lcr_context_coverage.get("sources", {}).get("companion_conversation")
             if isinstance(conversation_coverage, dict):
                 conversation_coverage["selected_for_answer"] = len(conversation_context_lines)
