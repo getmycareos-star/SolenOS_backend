@@ -815,6 +815,58 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
         engine.dispose()
 
 
+def test_postgres_companion_temporal_query_scans_entire_window_before_returning_bounded_page():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+        window = _temporal_window(
+            "What happened in 2025?", now=now, timezone_name="UTC"
+        )
+        with Session(bind=connection) as db:
+            person = Person(id="temporal-scan-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="temporal-scan-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            session = ConversationSession(
+                id="temporal-scan-session", person_id=person.id,
+                caregiver_id=caregiver.id, status="archived",
+            )
+            db.add(session)
+            db.flush()
+            db.add_all([
+                ConversationMessage(
+                    id=f"temporal-message-{index:02d}", session_id=session.id,
+                    role="user", content=f"Care history entry {index}.",
+                    evidence_ids_json="[]",
+                    created_at=datetime(2025, 1, 1, tzinfo=UTC) + timedelta(days=index * 25),
+                )
+                for index in range(12)
+            ])
+            db.add(ConversationMessage(
+                id="outside-temporal-window", session_id=session.id,
+                role="user", content="This is outside the requested year.",
+                evidence_ids_json="[]",
+                created_at=datetime(2024, 12, 31, tzinfo=UTC),
+            ))
+            db.commit()
+            result = _conversation_context(
+                db, person_id=person.id, caregiver_id=caregiver.id,
+                query="What happened in 2025?", limit=8, temporal_window=window,
+            )
+        assert result["candidate_count"] == 12
+        assert result["candidate_scan_complete"] is True
+        assert result["has_more"] is True
+        assert len(result["items"]) == 8
+        assert "outside-temporal-window" not in {item["id"] for item in result["items"]}
+    finally:
+        _close_postgres_conversation_db(engine, connection, schema)
+
+
 def test_temporal_retrieval_uses_calendar_months_not_fixed_30_day_approximation():
     # March 31 minus one calendar month clamps to February 28 in 2026.
     window = _temporal_window(
