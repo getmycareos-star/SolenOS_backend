@@ -13,9 +13,9 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceObservation, CareAssertion
-from app.models.change import Situation
+from app.models.change import Situation, Change
 from app.models.uncertainty import OpenQuestion, Contradiction, InformationGap
-from app.core.change_enums import SituationType, SituationState
+from app.core.change_enums import SituationType, SituationState, ChangeType, ChangeDirection, SignificanceVerdict
 from app.core.uncertainty_enums import Priority
 from app.schemas.situation import SituationInput
 from app.services.situation import process_situation_input
@@ -1607,5 +1607,61 @@ def test_lcr_orientation_rejects_client_selected_person_outside_bearer_scope(mon
         assert response.status_code == 403, response.text
         assert inference_calls == []
         assert first_session["person"]["id"] != second_session["person"]["id"]
+    finally:
+        teardown_db()
+
+@pytest.mark.session_security
+def test_situation_freshness_includes_persisted_delta_engine_changes(monkeypatch=None):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Delta Freshness Person")
+        person_id = created["person"]["id"]
+
+        initial = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert initial.status_code == 200, initial.text
+        assert initial.json()["status"] == "created"
+
+        current_before = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_before.status_code == 200, current_before.text
+        assert current_before.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+
+        with TestingSessionLocal() as db:
+            db.add(Change(
+                id="freshness-delta-change",
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id=person_id,
+                change_type=ChangeType.TRANSITION,
+                change_direction=ChangeDirection.UNKNOWN,
+                previous_state="Previously recorded state",
+                current_state="Newly recorded state",
+                evidence_ids=[],
+                explanation="A persisted Delta Engine candidate was added after the snapshot.",
+                significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                attention_candidate=True,
+                follow_up_candidate=False,
+                confirmation_status="detected",
+                is_active=True,
+                baseline_coverage_status="covered",
+                current_coverage_status="covered",
+            ))
+            db.commit()
+
+        current_after = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_after.status_code == 200, current_after.text
+        assert current_after.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+        assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
     finally:
         teardown_db()
