@@ -1730,3 +1730,31 @@ def test_record_reference_guard_does_not_treat_plain_language_as_identifier():
     plain_language = "No handoff details were supplied; share the notes to organize."
     assert not _contains_unsupported_record_reference(plain_language, "No matching recorded context was found.")
     assert _contains_unsupported_record_reference("The source is evidence-abc123.", "")
+
+def test_qwen_grounding_guard_allows_supportive_recommendations_but_blocks_medical_orders():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    assert not _contains_unsupported_care_claim(
+        "The recommended next step is to pause and focus on one thing.",
+        "",
+    )
+    assert not _contains_unsupported_care_claim(
+        "I recommend taking a moment to rest if you can.",
+        "",
+    )
+    assert _contains_unsupported_care_claim(
+        "The clinician recommended a medication change.",
+        "The caregiver did not report a medication change.",
+    )
+    assert _contains_unsupported_care_claim(
+        "The doctor prescribed a medication.",
+        "No prescription information was provided.",
+    )
+    assert _contains_unsupported_care_claim(
+        "The doctor ordered a scan.",
+        "No scan or imaging order was recorded.",
+    )
+    assert _contains_unsupported_care_claim(
+        "Mum was diagnosed with dementia.",
+        "No diagnosis was supplied.",
+    )
