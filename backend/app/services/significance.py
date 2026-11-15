@@ -153,6 +153,11 @@ def assess_change(
     baseline_event_count = (baseline.event_count if baseline else 0)
     current_count = change.current_count or 0
     evidence_ids = list(change.evidence_ids or [])
+    reporter_ids = list(dict.fromkeys(
+        str(event.created_by_caregiver_id)
+        for event in events
+        if event.created_by_caregiver_id
+    ))
     reporters = _resolve_reporters(db, events)
 
     magnitude_score = 0.0
@@ -177,8 +182,9 @@ def assess_change(
     functional = _functional_impact(events)
     functional_score = 1.0 if functional else 0.0
 
-    # Repeated records from one reporter are not independent corroboration.
-    corroboration_score = min((len(set(reporters)) - 1) / 2.0, 1.0) if reporters else 0.0
+    # Distinct caregiver identities, not display names, establish independent
+    # reporting. Two caregivers can legitimately share the same name.
+    corroboration_score = min((len(reporter_ids) - 1) / 2.0, 1.0) if reporter_ids else 0.0
 
     associations = _contextual_associations(db, person_id, events, now)
     contextual_score = 1.0 if associations else 0.0
