@@ -73,9 +73,19 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
         earliest_run_time = min(run_times)
         revision_rows = db.query(CareStateRevision.changed_at).filter(
             CareStateRevision.person_id == scoped_person_id,
+            # Delta comparisons depend on the active change and baseline state as
+            # well as the original reports. These tables are part of the same
+            # revision ledger; omitting them can leave an old comparison marked
+            # current after a baseline is superseded or a change is resolved.
             CareStateRevision.target_type.in_([
                 "care_assertions", "care_events", "evidence",
                 "information_gaps", "open_questions", "contradictions",
+                "baselines", "changes", "situations", "patterns", "corrections",
+                "temporal_facts", "temporal_reference_frames", "temporal_relations",
+                "temporal_contradictions", "observations", "care_windows",
+                "appointments", "care_transitions", "locations", "daily_intelligence",
+                "timezone_contexts", "temporal_relationships", "insights",
+                "uncertainty_assessments",
             ]),
             CareStateRevision.changed_at > earliest_run_time,
         ).all()
@@ -93,9 +103,9 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
         changed_context_count = 0
         freshness_reasons = []
         if row.created_at and care_state_history_checked:
-            # A Delta run depends on more than its incoming event. New or revised
-            # assertions, prior events/evidence, open gaps, questions, and
-            # contradictions can all change the comparison basis after it ran.
+            # A Delta run depends on more than its incoming event. Any persisted
+            # care-state revision can change the comparison basis, including
+            # active changes, baselines, and situation threads.
             changed_context_count = len(context_revision_times) - bisect_right(
                 context_revision_times, _as_utc(row.created_at)
             )
