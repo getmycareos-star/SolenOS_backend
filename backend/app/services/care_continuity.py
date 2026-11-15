@@ -819,6 +819,8 @@ def next_best_questions(
             "current instruction",
             "current medication instruction",
             "medication instruction",
+            "medication status",
+            "current medication status",
             "current prescription",
             "current prescription instruction",
             "current dose",
@@ -841,7 +843,7 @@ def next_best_questions(
             # dependency. Keep the prescription unresolved and direct confirmation
             # to a qualified professional; never generate a start/stop/dose action.
             candidates.append({
-                "question": "Can the prescribing clinician or pharmacist confirm the current instruction for this medication?",
+                "question": "Can the prescribing clinician or pharmacist confirm the current medication status and instruction for this medication?",
                 "subject_type": item.subject_type,
                 "subject_id": item.subject_id,
                 "source_field": item.field,
