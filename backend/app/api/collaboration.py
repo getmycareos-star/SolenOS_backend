@@ -5069,7 +5069,12 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "short and grounded in the retrieved situation. Do not produce a checklist, broad care lecture, "
             "multi-step plan, or unnecessary question. If a material safety concern exists, state it clearly; "
             "otherwise identify at most the single most consequential next concern and make clear that other "
-            "matters do not all need to be handled at once. Do not diagnose caregiver burnout."
+            "matters do not all need to be handled at once. Do not diagnose caregiver burnout. "
+            "When the record does not establish a specific priority, do not invent one: acknowledge only the "
+            "caregiver's stated exhaustion and offer one small, optional next step. Do not speculate about the "
+            "care recipient's condition, anyone's feelings or intentions, or what will happen later. Do not claim "
+            "that an appointment, reminder, update, or other action is scheduled, completed, or changed. "
+            "Prefer present-tense wording and no more than two short sentences."
         )
     if distress:
         guidance.append(
@@ -6366,8 +6371,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 retry_instruction = (
                     "Revise your previous answer to obey the caregiver interaction constraints. "
                     "Keep the answer grounded only in the authorized records. Do not ask the caregiver "
-                    "to repeat information already provided. For an overwhelmed caregiver, use no more "
-                    "than three short sentences, no list, and at most one question. For a vague concern, "
+                    "to repeat information already provided. For an overwhelmed caregiver, acknowledge only "
+                    "their stated words; if no specific priority is supported by the record, do not invent one. "
+                    "Do not speculate about the care recipient's condition, anyone's feelings or intentions, "
+                    "or future events, and do not claim an action or status changed. Use at most two short "
+                    "sentences, no list, and at most one question. For a vague concern, "
                     "ask no more than one focused question, phrased openly when appropriate. Do not claim a record was changed or an action "
                     "was completed unless the backend confirmed it. Return only the revised caregiver-facing answer."
                     if caregiver_guidance else
