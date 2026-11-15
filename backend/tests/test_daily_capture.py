@@ -2210,6 +2210,12 @@ def test_delta_failure_does_not_fail_persisted_daily_care_capture(monkeypatch):
             ).all()
             assert job.workflow == "daily_capture_delta_reconciliation"
             assert job.status == "completed"
+            result = json.loads(job.result_text or "{}")
+            assert result["projection_status"] == "verified"
+            assert result["observation_count"] >= 1
+            assert result["delta_engine_output_persisted"] is True
+            assert result["longitudinal_processing_status"] == "completed"
+            assert result["delta_run_id"] == "delta-retry-run-001"
             assert analysis.id == analysis_id
             assert analysis.execution_status["delta_reconciliation"] == "completed"
             assert analysis.execution_status["delta_run_id"] == "delta-retry-run-001"
