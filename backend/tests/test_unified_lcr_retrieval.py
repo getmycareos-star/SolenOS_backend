@@ -722,32 +722,33 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
     now = datetime(2026, 11, 15, 12, tzinfo=UTC)
     window = _temporal_window("What happened in 2025?", now=now, timezone_name="UTC")
     try:
-        with connection.begin():
-            connection.execute(Person.__table__.insert(), {"id": "year-person", "name": "Care recipient"})
-            connection.execute(Caregiver.__table__.insert(), {
-                "id": "year-caregiver", "name": "Caregiver", "relationship": "family",
-                "person_id": "year-person",
-            })
-            connection.execute(CareEvent.__table__.insert(), [
-                {
-                    "id": "event-in-2025", "person_id": "year-person",
-                    "event_type": "daily_observation", "status": "recorded",
-                    "occurred_at": datetime(2025, 6, 10, 9, tzinfo=UTC),
-                    "title": "Night waking", "description": "Caregiver recorded repeated waking.",
-                    "evidence_ids": [], "created_by_caregiver_id": "year-caregiver",
-                },
-                {
-                    "id": "event-in-2024", "person_id": "year-person",
-                    "event_type": "daily_observation", "status": "recorded",
-                    "occurred_at": datetime(2024, 12, 31, 9, tzinfo=UTC),
-                    "title": "Night waking", "description": "Caregiver recorded repeated waking.",
-                    "evidence_ids": [], "created_by_caregiver_id": "year-caregiver",
-                },
+        with Session(bind=connection) as db:
+            db.add(Person(id="year-person", name="Care recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id="year-caregiver", name="Caregiver", relationship="family",
+                person_id="year-person",
+            ))
+            db.flush()
+            db.add_all([
+                CareEvent(
+                    id="event-in-2025", person_id="year-person",
+                    event_type="daily_observation", status="recorded",
+                    occurred_at=datetime(2025, 6, 10, 9, tzinfo=UTC),
+                    title="Night waking", description="Caregiver recorded repeated waking.",
+                    evidence_ids=[], created_by_caregiver_id="year-caregiver",
+                ),
+                CareEvent(
+                    id="event-in-2024", person_id="year-person",
+                    event_type="daily_observation", status="recorded",
+                    occurred_at=datetime(2024, 12, 31, 9, tzinfo=UTC),
+                    title="Night waking", description="Caregiver recorded repeated waking.",
+                    evidence_ids=[], created_by_caregiver_id="year-caregiver",
+                ),
             ])
             session = ConversationSession(
                 id="year-session", person_id="year-person", caregiver_id="year-caregiver", status="active"
             )
-            db = Session(bind=connection)
             db.add(session)
             db.flush()
             db.add_all([
@@ -762,7 +763,7 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
                     created_at=datetime(2024, 12, 31, 10, tzinfo=UTC),
                 ),
             ])
-            db.flush()
+            db.commit()
             care_context = build_lcr_context(
                 db, "year-person", caregiver_id="year-caregiver",
                 query="What happened in 2025?", temporal_window=window,
@@ -771,7 +772,6 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
                 db, person_id="year-person", caregiver_id="year-caregiver",
                 query="What happened in 2025?", limit=8, temporal_window=window,
             )
-            db.close()
         assert {item["id"] for item in care_context["sources"]["events"]["items"]} == {"event-in-2025"}
         assert {item["id"] for item in conversation_context["items"]} == {"message-in-2025"}
     finally:
