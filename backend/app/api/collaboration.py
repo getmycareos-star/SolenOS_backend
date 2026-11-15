@@ -6739,6 +6739,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         caregiver_question_direct_answer = _caregiver_question_extractive_answer(
             user_text, included_model_context_lines
         )
+        care_history_direct_answer_used = False
+        # Explicit requests for what the caregiver recorded are source lookups,
+        # not requests for model interpretation. Use the dedicated person-scoped
+        # history query so relevance ranking cannot drop one requested topic.
+        if (
+            not caregiver_question_direct_answer
+            and care_history_recall_context
+            and re.search(
+                r"\\bwhat\\s+(?:has|did)\\s+(?:(?:the\\s+)?caregiver|i|we|you)\\s+"
+                r"(?:recorded|record|logged|saved|noted)\\b",
+                user_text or "",
+                re.IGNORECASE,
+            )
+        ):
+            caregiver_question_direct_answer = _care_history_extractive_answer(
+                user_text, care_history_recall_context.get("event_lines") or []
+            )
+            care_history_direct_answer_used = bool(caregiver_question_direct_answer)
         # A literal "what did the caregiver record" request is a source lookup,
         # not a request for generated interpretation. Answer it from the exact
         # authorized caregiver-authored event text before invoking a slow model.
@@ -7242,6 +7260,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             verdict = "passed"
             safety_note = "Quoted from the uploaded document. The extracted text has not been independently verified."
             ai_generated = False
+        elif care_history_direct_answer_used:
+            verdict = "passed"
+            safety_note = "Quoted from saved caregiver entries. This is not a clinical interpretation."
+            ai_generated = False
         elif caregiver_question_direct_answer_used:
             verdict = "passed"
             safety_note = "This is a saved caregiver question for a healthcare professional, not an answer from that professional."
@@ -7586,7 +7608,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "response_mode": (
-            "source_quoted_caregiver_question"
+            "source_quoted_care_history"
+            if care_history_direct_answer_used
+            else "source_quoted_caregiver_question"
             if caregiver_question_direct_answer_used
             else "deterministic_low_capacity_support_fallback"
             if low_capacity_support_fallback_used else "model_or_grounded_fallback"
