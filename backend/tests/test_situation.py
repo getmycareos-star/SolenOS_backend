@@ -2071,6 +2071,23 @@ def test_caregiver_situation_state_changes_require_linked_sources_and_persist_hi
                 evidence_ids=[evidence.id],
                 created_by_caregiver_id=caregiver_id,
             )
+            assertion = CareAssertion(
+                id="state-transition-assertion",
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="mobility",
+                assertion_kind="current_state",
+                asserted_value="Needs more help when walking",
+                source_event_id="state-transition-event",
+                source_label="Family caregiver",
+                source_text="Caregiver reports more help is needed with walking.",
+                evidence_ids=[evidence.id],
+                assertion_status="reported",
+                epistemic_state="reported",
+                observed_at=now,
+                created_by_caregiver_id=caregiver_id,
+            )
             situation = Situation(
                 id="state-transition-situation",
                 person_id=person_id,
@@ -2078,7 +2095,7 @@ def test_caregiver_situation_state_changes_require_linked_sources_and_persist_hi
                 state=SituationState.ACTIVE,
                 title="Walking support",
                 description="A saved mobility situation.",
-                signal_ids=[event.id],
+                signal_ids=[assertion.id],
                 signal_types=["mobility"],
                 temporal_start=now,
                 temporal_end=now,
@@ -2087,7 +2104,7 @@ def test_caregiver_situation_state_changes_require_linked_sources_and_persist_hi
                 context={},
                 is_active=True,
             )
-            db.add_all([other_person, other_caregiver, evidence, other_evidence, event, situation])
+            db.add_all([other_person, other_caregiver, evidence, other_evidence, event, assertion, situation])
             db.commit()
             situation_id = situation.id
 
@@ -2125,6 +2142,13 @@ def test_caregiver_situation_state_changes_require_linked_sources_and_persist_hi
             headers=headers,
         )
         assert detail.status_code == 200, detail.text
+        detail_sources = detail.json()["source_records"]
+        detail_source_ids = {item["id"] for item in detail_sources}
+        assert {
+            "state-transition-assertion",
+            "state-transition-event",
+            "state-transition-evidence",
+        }.issubset(detail_source_ids)
         history = detail.json()["state_history"]
         assert [entry["new_state"] for entry in history] == ["worsening", "resolved"]
         assert all(entry["source"] == "caregiver_confirmed" for entry in history)
