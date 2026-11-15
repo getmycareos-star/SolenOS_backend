@@ -500,6 +500,7 @@ def _daily_delta_retry_store(tmp_path, monkeypatch):
     from app.core.database import Base
     from app.models.care import Caregiver, CareEvent, Evidence, Person
     from app.models.capture_analysis import CaptureAnalysis
+    from app.models.care_continuity import CareStateRevision
     from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 
     engine = create_engine(
@@ -515,6 +516,7 @@ def _daily_delta_retry_store(tmp_path, monkeypatch):
             Evidence.__table__,
             CareEvent.__table__,
             CaptureAnalysis.__table__,
+            CareStateRevision.__table__,
             QwenBackgroundJob.__table__,
             QwenJobEvent.__table__,
         ],
