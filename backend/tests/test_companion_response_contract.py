@@ -80,6 +80,7 @@ def test_non_reconstruction_questions_do_not_force_full_history_paging(query):
 
 
 def test_explicit_temporal_window_fetches_all_matching_history_pages():
+    assert collaboration.MAX_TEMPORAL_LCR_HISTORY_PAGES == 20
     assert collaboration._should_fetch_full_lcr_context_pages(
         {"temporal_window": {"basis": "explicit_calendar_year"}}, False
     ) is True
