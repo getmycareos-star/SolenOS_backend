@@ -328,6 +328,50 @@ def test_unresolved_subject_conflict_is_detected_without_event_evidence_ids():
         teardown_db()
 
 
+def test_same_display_name_does_not_collapse_distinct_caregiver_corroboration():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.services.change_detection import detect_event_changes
+
+        app.dependency_overrides[get_db] = override_get_db
+        db, person, caregiver = _seed_person()
+        second_caregiver = Caregiver(
+            id="cg-same-name",
+            name=caregiver.name,
+            email="same-name-second-caregiver@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add(second_caregiver)
+        db.commit()
+        now = datetime.now(timezone.utc)
+        _add_event(
+            db, person, caregiver, "confusion", "First caregiver report",
+            days_ago=1, evidence_text="Dad seemed unusually confused.",
+        )
+        _add_event(
+            db, person, caregiver, "confusion", "Second caregiver report",
+            days_ago=2, evidence_text="Dad was unusually confused.",
+            caregiver_obj=second_caregiver,
+        )
+
+        changes = detect_event_changes(db, person.id, "confusion", None, now)
+        assert len(changes) == 1
+        assessment = db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.id == changes[0].significance_assessment_id
+        ).one()
+        corroboration = next(
+            item for item in assessment.dimensions
+            if item["name"] == "corroboration"
+        )
+        assert corroboration["score"] == 0.5
+        assert assessment.reporters == [caregiver.name, second_caregiver.name]
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_professional_claim_in_source_text_does_not_verify_authority():
     setup_db()
     try:
