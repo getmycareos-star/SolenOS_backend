@@ -4013,6 +4013,24 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
                 }],
             ),
             InformationGap(
+                id="gap-extracted-overnight-waking",
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="overnight_waking",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.NOT_DOCUMENTED,
+                priority=Priority.HIGH,
+                lifecycle_status=GapLifecycleStatus.OPEN,
+                description="The duration of the overnight waking pattern needs clarification.",
+                evidence_ids=[evidence.id],
+                context=[{
+                    "caregiver_attention_required": True,
+                    "necessity_rationale": "The next overnight care decision depends on understanding how long the waking pattern has been occurring.",
+                    "decision_dependency": "The caregiver needs the duration of the waking pattern to plan appropriate overnight support.",
+                }],
+            ),
+            InformationGap(
                 id="gap-extracted-medication",
                 person_id=person.id,
                 subject_type="person",
@@ -4779,7 +4797,7 @@ def test_source_questions_deduplicate_rephrasing_but_preserve_distinct_time_peri
             type="note",
             evidence_kind="caregiver_report",
             epistemic_status="caregiver_reported",
-            source_text="She woke several times overnight.",
+            source_text="She woke several times overnight since Friday.",
             uploaded_by_caregiver_id=caregiver.id,
             reported_by_caregiver_id=caregiver.id,
         )
@@ -4790,7 +4808,7 @@ def test_source_questions_deduplicate_rephrasing_but_preserve_distinct_time_peri
             status="recorded",
             occurred_at=datetime.now(timezone.utc),
             title="First daily care report",
-            description="She woke several times overnight.",
+            description="She woke several times overnight since Friday.",
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
