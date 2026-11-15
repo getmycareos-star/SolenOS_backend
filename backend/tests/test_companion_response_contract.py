@@ -92,6 +92,127 @@ def test_explicit_temporal_window_fetches_all_matching_history_pages():
     ) is True
 
 
+def test_temporal_history_page_collector_merges_pages_and_marks_complete(monkeypatch):
+    initial = {
+        "sources": {
+            "events": {
+                "status": "available",
+                "items": [{"id": "event-1"}],
+                "candidate_count": 3,
+                "returned_count": 1,
+                "candidate_scan_complete": True,
+                "has_more": True,
+                "next_offset": 1,
+            },
+            "companion_conversation": {
+                "status": "available",
+                "items": [{"id": "message-1"}],
+                "candidate_count": 1,
+                "returned_count": 1,
+            },
+        },
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "retrieval_contract": {},
+    }
+    requested_offsets = []
+
+    def next_page(*args, **kwargs):
+        requested_offsets.append(kwargs["source_offsets"]["events"])
+        offset = kwargs["source_offsets"]["events"]
+        if offset == 1:
+            return {
+                "sources": {
+                    "events": {
+                        "status": "available",
+                        "items": [{"id": "event-2"}],
+                        "candidate_count": 3,
+                        "candidate_scan_complete": True,
+                        "has_more": True,
+                        "next_offset": 2,
+                    }
+                },
+                "missing_required_sources": [],
+                "missing_optional_sources": [],
+                "retrieval_contract": {},
+            }
+        return {
+            "sources": {
+                "events": {
+                    "status": "available",
+                    "items": [{"id": "event-3"}],
+                    "candidate_count": 3,
+                    "candidate_scan_complete": True,
+                    "has_more": False,
+                    "next_offset": None,
+                }
+            },
+            "missing_required_sources": [],
+            "missing_optional_sources": [],
+            "retrieval_contract": {},
+        }
+
+    monkeypatch.setattr(collaboration, "build_unified_lcr_context", next_page)
+    merged = collaboration._collect_full_lcr_context_pages(
+        object(), "person-1", "caregiver-1", "What happened in 2025?",
+        initial, limit_per_source=1, max_pages=3,
+    )
+    assert requested_offsets == [1, 2]
+    assert [item["id"] for item in merged["sources"]["events"]["items"]] == [
+        "event-1", "event-2", "event-3",
+    ]
+    assert merged["retrieval_projection_complete"] is True
+    assert merged["retrieval_contract"]["page_limit_reached"] is False
+    assert merged["sources"]["companion_conversation"]["items"] == [{"id": "message-1"}]
+
+
+def test_temporal_history_page_collector_fails_closed_at_page_ceiling(monkeypatch):
+    initial = {
+        "sources": {
+            "events": {
+                "status": "available",
+                "items": [{"id": "event-0"}],
+                "candidate_count": 30,
+                "candidate_scan_complete": True,
+                "has_more": True,
+                "next_offset": 1,
+            },
+        },
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "retrieval_contract": {},
+    }
+
+    def next_page(*args, **kwargs):
+        offset = kwargs["source_offsets"]["events"]
+        return {
+            "sources": {
+                "events": {
+                    "status": "available",
+                    "items": [{"id": f"event-{offset}"}],
+                    "candidate_count": 30,
+                    "candidate_scan_complete": True,
+                    "has_more": True,
+                    "next_offset": offset + 1,
+                }
+            },
+            "missing_required_sources": [],
+            "missing_optional_sources": [],
+            "retrieval_contract": {},
+        }
+
+    monkeypatch.setattr(collaboration, "build_unified_lcr_context", next_page)
+    merged = collaboration._collect_full_lcr_context_pages(
+        object(), "person-1", "caregiver-1", "What happened in 2025?",
+        initial, limit_per_source=1,
+        max_pages=collaboration.MAX_TEMPORAL_LCR_HISTORY_PAGES,
+    )
+    assert merged["retrieval_contract"]["pages_fetched"] == 20
+    assert merged["retrieval_contract"]["page_limit_reached"] is True
+    assert merged["retrieval_projection_complete"] is False
+    assert merged["source_offsets"] == {"events": 20}
+
+
 def test_medication_dose_recall_never_overrides_higher_priority_safety_guards():
     request = "What dose did the doctor prescribe?"
     assert collaboration._should_use_medication_dose_recall_fallback(request) is True
