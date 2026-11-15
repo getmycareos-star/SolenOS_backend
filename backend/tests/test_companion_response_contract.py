@@ -2795,6 +2795,7 @@ def test_medication_dose_recall_quotes_saved_uncertainty_instead_of_model_comple
         assert "can't remember the new dose" in data["reply"].casefold()
         assert "10 mg" not in data["reply"].casefold()
         assert "does not confirm the prescribed dose" in data["safety_note"].casefold()
+        assert "caregiver report" in data["safety_note"].casefold()
         assert event_id in data["source_event_ids"]
         assert evidence_id in data["source_evidence_ids"]
         assert data["written_to_lcr"] is False

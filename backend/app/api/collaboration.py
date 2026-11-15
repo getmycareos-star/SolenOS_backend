@@ -4058,8 +4058,12 @@ async def get_qwen_background_job(
         QwenModelOutput.person_id == person_id,
         QwenModelOutput.caregiver_id == caregiver_id,
     ).first() if job.status == "completed" else None
+    daily_capture_workflow = job.workflow in {
+        "daily_capture_extraction",
+        "daily_capture_delta_reconciliation",
+    }
     daily_capture_result = None
-    if job.workflow == "daily_capture_extraction" and job.result_text:
+    if daily_capture_workflow and job.result_text:
         try:
             parsed_result = json.loads(job.result_text)
             daily_capture_result = parsed_result if isinstance(parsed_result, dict) else None
@@ -4073,10 +4077,10 @@ async def get_qwen_background_job(
         "output_id": output.id if output else None,
         "output_review_status": output.review_status if output else None,
         "written_to_lcr": bool(output.written_to_lcr) if output else False,
-        "error": "We couldn’t complete that request. Your original Daily Care report remains saved." if job.status == "failed" and job.workflow == "daily_capture_extraction" else "We couldn’t complete that request. Please try again." if job.status == "failed" else None,
+        "error": "We couldn’t complete that request. Your original Daily Care report remains saved." if job.status == "failed" and daily_capture_workflow else "We couldn’t complete that request. Please try again." if job.status == "failed" else None,
         "daily_capture": daily_capture_result,
-        "source_event_ids": json.loads(job.source_event_ids_json or "[]") if job.status == "completed" or job.workflow == "daily_capture_extraction" else [],
-        "source_evidence_ids": json.loads(job.source_evidence_ids_json or "[]") if job.status == "completed" or job.workflow == "daily_capture_extraction" else [],
+        "source_event_ids": json.loads(job.source_event_ids_json or "[]") if job.status == "completed" or daily_capture_workflow else [],
+        "source_evidence_ids": json.loads(job.source_evidence_ids_json or "[]") if job.status == "completed" or daily_capture_workflow else [],
         "source_document_analysis_ids": (output.output_metadata or {}).get("source_document_analysis_ids", []) if output else [],
         "source_appointment_ids": (output.output_metadata or {}).get("source_appointment_ids", []) if output else [],
         "source_handoff_ids": (output.output_metadata or {}).get("source_handoff_ids", []) if output else [],
@@ -4085,7 +4089,7 @@ async def get_qwen_background_job(
         "claim_provenance": (output.output_metadata or {}).get("claim_provenance", {}) if output else {},
         "review_required": (
             bool(daily_capture_result.get("review_required"))
-            if job.workflow == "daily_capture_extraction" and daily_capture_result is not None
+            if daily_capture_workflow and daily_capture_result is not None
             else job.status == "completed"
         ),
         "persistence": "read_only_assistance",

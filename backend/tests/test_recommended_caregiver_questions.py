@@ -119,75 +119,6 @@ def add_question(db, person_id, caregiver_id, question_id, priority, *, necessar
     ))
 
 
-def test_source_clarification_does_not_create_caregiver_work_without_valid_necessity_evidence():
-    """Unassessed or cross-person gaps must not turn extraction wording into caregiver tasks."""
-    from app.services.uncertainty import persist_source_clarification_questions
-
-    setup()
-    try:
-        db = SessionLocal()
-        person = Person(id="clarification-owner", name="Care Record Owner")
-        other_person = Person(id="clarification-other", name="Other Care Record")
-        caregiver = Caregiver(
-            id="clarification-caregiver", name="Caregiver", email=None,
-            relationship="Family", person_id=person.id,
-        )
-        other_caregiver = Caregiver(
-            id="clarification-other-caregiver", name="Other Caregiver", email=None,
-            relationship="Family", person_id=other_person.id,
-        )
-        own_source = Evidence(
-            id="clarification-own-source", person_id=person.id, type="document",
-            source_text="The discharge document mentions medication but gives no confirmed dose.",
-            uploaded_by_caregiver_id=caregiver.id, source_type="document",
-        )
-        foreign_evidence = Evidence(
-            id="clarification-foreign-evidence", person_id=other_person.id, type="caregiver_report",
-            source_text="Current medication dose is 10 mg.",
-            uploaded_by_caregiver_id=other_caregiver.id, source_type="caregiver_report",
-        )
-        db.add_all([person, other_person, caregiver, other_caregiver, own_source, foreign_evidence])
-        db.flush()
-        db.add_all([
-            InformationGap(
-                id="clarification-unassessed-gap", person_id=person.id,
-                subject_type="medication", subject_id="current-dose", field="current medication dose",
-                description="Dose has not been assessed for caregiver necessity.",
-                evidence_ids=[own_source.id], lifecycle_status=GapLifecycleStatus.OPEN,
-                priority=Priority.HIGH, context=[],
-            ),
-            InformationGap(
-                id="clarification-cross-person-gap", person_id=person.id,
-                subject_type="medication", subject_id="current-dose", field="current medication dose",
-                description="The linked evidence belongs to another care record.",
-                evidence_ids=[foreign_evidence.id], lifecycle_status=GapLifecycleStatus.OPEN,
-                priority=Priority.HIGH, context=[{
-                    "caregiver_attention_required": True,
-                    "necessity_rationale": "A handoff depends on this detail.",
-                    "decision_dependency": "The receiving caregiver needs this detail.",
-                }],
-            ),
-        ])
-        db.flush()
-
-        persisted = persist_source_clarification_questions(
-            db,
-            person_id=person.id,
-            caregiver_id=caregiver.id,
-            source_kind="document_extraction",
-            source_record_type="evidence",
-            source_record_id=own_source.id,
-            evidence_ids=[own_source.id],
-            questions=["What is the current medication dose?"],
-        )
-
-        assert persisted == []
-        assert db.query(OpenQuestion).filter(OpenQuestion.person_id == person.id).count() == 0
-        db.rollback()
-        db.close()
-    finally:
-        teardown()
-
 
 def test_caregiver_report_question_requires_its_exact_persisted_evidence_source():
     setup()
@@ -1057,6 +988,137 @@ def test_one_hundred_case_question_gate_benchmark():
         assert all(item["id"] in expected_eligible for item in result["questions"])
     finally:
         teardown()
+
+def test_delta_topic_medication_conflict_stays_internal_without_instruction_field():
+    setup()
+    try:
+        from app.services.care_continuity import next_best_questions
+
+        db = SessionLocal()
+        person = Person(id="delta-med-topic-person", name="Delta Medication Topic")
+        caregiver = Caregiver(
+            id="delta-med-topic-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        evidence = Evidence(
+            id="delta-med-topic-evidence", person_id=person.id,
+            type="caregiver_report",
+            source_text="Historical medication evidence is incomplete.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        )
+        contradiction = Contradiction(
+            id="delta-med-topic-contradiction",
+            person_id=person.id,
+            subject_type="delta_engine_report",
+            subject_id="medication",
+            field="medication",
+            description="Historical medication evidence remains uncertain.",
+            evidence_ids=[evidence.id],
+            source_assertion_ids=[],
+            resolution_status="unresolved",
+        )
+        db.add_all([person, caregiver, evidence, contradiction])
+        db.flush()
+
+        candidates = next_best_questions(db, person.id, persist=True, commit=False)
+        candidate = next(
+            item for item in candidates
+            if item.get("source_id") == contradiction.id
+        )
+        assert candidate["necessity"] == "not_assessed"
+        assert db.query(OpenQuestion).filter(
+            OpenQuestion.person_id == person.id,
+            OpenQuestion.status == "open",
+        ).count() == 0
+        db.close()
+    finally:
+        teardown()
+
+
+def test_source_clarification_does_not_create_caregiver_work_without_valid_necessity_evidence():
+    """Unassessed or cross-person gaps must not turn extraction wording into caregiver tasks."""
+    from app.services.uncertainty import persist_source_clarification_questions
+
+    setup()
+    try:
+        db = SessionLocal()
+        person = Person(id="clarification-owner", name="Care Record Owner")
+        other_person = Person(id="clarification-other", name="Other Care Record")
+        caregiver = Caregiver(
+            id="clarification-caregiver", name="Caregiver", email=None,
+            relationship="Family", person_id=person.id,
+        )
+        other_caregiver = Caregiver(
+            id="clarification-other-caregiver", name="Other Caregiver", email=None,
+            relationship="Family", person_id=other_person.id,
+        )
+        own_source = Evidence(
+            id="clarification-own-source", person_id=person.id, type="document",
+            source_text="The discharge document mentions medication but gives no confirmed dose.",
+            uploaded_by_caregiver_id=caregiver.id, source_type="document",
+        )
+        foreign_evidence = Evidence(
+            id="clarification-foreign-evidence", person_id=other_person.id, type="caregiver_report",
+            source_text="Current medication dose is 10 mg.",
+            uploaded_by_caregiver_id=other_caregiver.id, source_type="caregiver_report",
+        )
+        db.add_all([person, other_person, caregiver, other_caregiver, own_source, foreign_evidence])
+        db.flush()
+        db.add_all([
+            InformationGap(
+                id="clarification-unassessed-gap", person_id=person.id,
+                subject_type="medication", subject_id="current-dose", field="current medication dose",
+                description="Dose has not been assessed for caregiver necessity.",
+                evidence_ids=[own_source.id], lifecycle_status=GapLifecycleStatus.OPEN,
+                priority=Priority.HIGH, context=[],
+            ),
+            InformationGap(
+                id="clarification-cross-person-gap", person_id=person.id,
+                subject_type="medication", subject_id="current-dose", field="current medication dose",
+                description="The linked evidence belongs to another care record.",
+                evidence_ids=[foreign_evidence.id], lifecycle_status=GapLifecycleStatus.OPEN,
+                priority=Priority.HIGH, context=[{
+                    "caregiver_attention_required": True,
+                    "necessity_rationale": "A handoff depends on this detail.",
+                    "decision_dependency": "The receiving caregiver needs this detail.",
+                }],
+            ),
+        ])
+        db.flush()
+
+        persisted = persist_source_clarification_questions(
+            db,
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            source_kind="document_extraction",
+            source_record_type="evidence",
+            source_record_id=own_source.id,
+            evidence_ids=[own_source.id],
+            questions=["What is the current medication dose?"],
+        )
+
+        assert len(persisted) == 1
+        question = persisted[0]
+        assert question.necessity == "not_assessed"
+        assert question.priority == Priority.INFORMATIONAL
+        assert question.intended_answerer_role == "not_known"
+        assert question.subject_type == "person"
+        assert question.subject_id == person.id
+        assert question.evidence_ids == [own_source.id]
+        assert foreign_evidence.id not in (question.evidence_ids or [])
+        contexts = question.context or []
+        assert len(contexts) == 1
+        assert contexts[0]["source_record_refs"] == [
+            {"record_type": "evidence", "record_id": own_source.id}
+        ]
+        assert "necessity_assessment" not in contexts[0]
+        assert db.query(OpenQuestion).filter(OpenQuestion.person_id == person.id).count() == 1
+        db.rollback()
+        db.close()
+    finally:
+        teardown()
+
 
 def test_broad_delta_medication_topic_does_not_create_caregiver_question():
     setup()

@@ -5,7 +5,12 @@ import pytest
 from fastapi import HTTPException
 
 from app.services import delta_engine
-from app.services.delta_engine import DELTA_JSON_CONTRACT, _match_source_references, _parse_model_json
+from app.services.delta_engine import (
+    DELTA_JSON_CONTRACT,
+    _care_state_revision_snapshot,
+    _match_source_references,
+    _parse_model_json,
+)
 
 
 def test_new_event_excerpt_is_linked_only_to_the_persisted_event_id():
@@ -224,3 +229,22 @@ def test_delta_json_contract_bounds_each_finding_list_for_compact_inference():
     assert exc.value.status_code == 502
     assert "item limit" in str(exc.value.detail)
     assert DELTA_JSON_CONTRACT["properties"]["medications"]["maxItems"] == 5
+
+
+def test_care_state_revision_snapshot_detects_new_rows_with_identical_timestamps():
+    from datetime import datetime, timezone
+    from unittest.mock import Mock
+
+    db = Mock()
+    same_timestamp = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+    db.query.return_value.filter.return_value.scalar.side_effect = [
+        same_timestamp, 4,
+        same_timestamp, 5,
+    ]
+
+    before = _care_state_revision_snapshot(db, "person-revision-snapshot")
+    after = _care_state_revision_snapshot(db, "person-revision-snapshot")
+
+    assert before == "4:2026-11-15T12:00:00+00:00"
+    assert after == "5:2026-11-15T12:00:00+00:00"
+    assert before != after

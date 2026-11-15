@@ -238,8 +238,9 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert len(understood["observations"]) == 2
 
         # A generic extraction suggestion is not automatically caregiver work.
-        # The source-question lifecycle persists a question only when one
-        # unambiguous, evidence-backed LCR gap establishes decision necessity.
+        # Only source-grounded wording is retained as a review-only question;
+        # no caregiver task is created without an unambiguous, evidence-backed
+        # LCR gap that establishes decision necessity.
         with Session() as db:
             assert db.query(OpenQuestion).filter_by(
                 person_id=person_id,

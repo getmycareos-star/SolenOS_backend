@@ -3981,7 +3981,17 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
-        db.add_all([person, caregiver, reviewing_caregiver, evidence, event])
+        document_evidence = Evidence(
+            id="evidence-document-question",
+            person_id=person.id,
+            type="document",
+            evidence_kind="document",
+            epistemic_status="documented_record",
+            source_text="The discharge summary records a medication change before discharge.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, reviewing_caregiver, evidence, event, document_evidence])
         db.commit()
 
         questions = [
@@ -4004,6 +4014,8 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
         assert len(first) == 2
         assert all(row.person_id == person.id for row in first)
         assert all(row.status == "open" for row in first)
+        assert all(row.necessity == "not_assessed" for row in first)
+        assert all(row.intended_answerer_role == "not_known" for row in first)
         assert all(row.evidence_ids == [evidence.id] for row in first)
         assert all(row.context[0]["grounding_status"] == "source_record_linked; question wording not independently verified" for row in first)
         assert all(
@@ -4053,15 +4065,16 @@ def test_source_extraction_questions_are_saved_with_exact_person_scoped_source_l
             caregiver_id=reviewing_caregiver.id,
             source_kind="document_extraction",
             source_record_type="evidence",
-            source_record_id=evidence.id,
-            evidence_ids=[evidence.id],
+            source_record_id=document_evidence.id,
+            evidence_ids=[document_evidence.id],
             questions=["Was her medication changed before discharge?"],
         )
         db.commit()
         assert len(document_questions) == 1
         assert document_questions[0].created_by_caregiver_id == reviewing_caregiver.id
+        assert document_questions[0].evidence_ids == [document_evidence.id]
         assert document_questions[0].context[0]["source_record_refs"] == [
-            {"record_type": "evidence", "record_id": evidence.id}
+            {"record_type": "evidence", "record_id": document_evidence.id}
         ]
         assert db.query(OpenQuestion).filter_by(person_id=person.id, status="open").count() == 3
         all_question_revisions = db.query(CareStateRevision).filter(
@@ -5210,3 +5223,13 @@ def test_scenario_03_food_intake_date_correction_supersedes_without_erasing_hist
             assert audit.record_metadata["supersedes_observation_id"] == original["id"]
     finally:
         teardown_db()
+
+
+def test_source_clarification_text_normalizes_whitespace_without_inventing_text():
+    from app.services.uncertainty import _source_clarification_text
+
+    assert _source_clarification_text(None) == ""
+    assert _source_clarification_text(123) == ""
+    assert _source_clarification_text("  Patient\\n\\twalked   20 metres.  ") == (
+        "Patient walked 20 metres."
+    )

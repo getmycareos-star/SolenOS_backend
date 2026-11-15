@@ -5,6 +5,7 @@ exercise temporal boundaries, incomplete observation coverage, repeated source l
 multiple care domains, idempotent pattern reconciliation, and scoped API access.
 A pass is not clinical validation or evidence of real-patient performance.
 """
+import json
 from datetime import datetime, timedelta, timezone
 import hashlib
 import os
@@ -912,6 +913,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             evidence_ids=[matching.id, second_matching.id, unrelated.id],
             persist=True,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
 
         assert qwen_call_options
@@ -972,6 +974,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             evidence_ids=[mention_evidence.id],
             persist=True,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
         assert result["medications"][0]["medication_mention_only"] is True
         assert db.query(CareAssertion).filter(
@@ -1157,6 +1160,30 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
 
         monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen_chat)
 
+        # Delta-created assertions must be fed into the same persisted change
+        # reconciler that projects the authoritative Living Care Record.
+        from app.services import change_intelligence_reconciliation
+        original_reconcile = change_intelligence_reconciliation.reconcile_person_change_intelligence
+        reconciliation_calls = []
+
+        def track_canonical_reconciliation(
+            session, scoped_person_id, reference_time=None, *, protected_assertion_ids=None
+        ):
+            protected_ids = list(protected_assertion_ids or [])
+            reconciliation_calls.append((str(scoped_person_id), protected_ids))
+            return original_reconcile(
+                session,
+                scoped_person_id,
+                reference_time,
+                protected_assertion_ids=protected_ids,
+            )
+
+        monkeypatch.setattr(
+            change_intelligence_reconciliation,
+            "reconcile_person_change_intelligence",
+            track_canonical_reconciliation,
+        )
+
         original_event = None
         for event_spec in ordered_events:
             event_id = event_spec["id"]
@@ -1239,7 +1266,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 db.flush()
 
             model_result_by_call["value"] = fixture_result(event_spec)
-            delta_engine.reconcile_event(
+            delta_result = delta_engine.reconcile_event(
                 db,
                 person_id=person.id,
                 event_date=occurred_at,
@@ -1249,7 +1276,24 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 evidence_ids=[evidence_id],
                 persist=True,
                 created_by_caregiver_id=caregiver.id,
+                model_enrichment=True,
             )
+            canonical_receipt = delta_result["provenance"]["canonical_change_reconciliation"]
+            if canonical_receipt["status"] == "completed":
+                assert canonical_receipt["protected_assertion_count"] > 0
+                protected_for_event = next(
+                    protected_ids
+                    for scoped_person_id, protected_ids in reversed(reconciliation_calls)
+                    if scoped_person_id == str(person.id) and protected_ids
+                )
+                persisted_protected_ids = {
+                    str(row[0]) for row in db.query(CareAssertion.id).filter(
+                        CareAssertion.person_id == person.id,
+                        CareAssertion.source_event_id == care_event.id,
+                    ).all()
+                }
+                assert protected_for_event
+                assert set(protected_for_event).issubset(persisted_protected_ids)
 
         persisted_event_ids = {
             row[0] for row in db.query(CareEvent.id).filter(
@@ -1460,12 +1504,18 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             OpenQuestion.person_id == person.id,
             OpenQuestion.status == "open",
         ).all()
-        # The benchmark's generated clinical-gap questions have no separate,
-        # source-backed necessity assessment. Preserve their InformationGap
-        # records, but do not turn model wording into caregiver tasks.
-        assert actual_questions == [], (
-            f"{scenario['scenario_id']}: unassessed model-generated questions "
-            "must remain internal and must not become caregiver work"
+        # A scenario may also contain a genuine, source-backed decision
+        # dependency (for example, conflicting medication instructions). Those
+        # questions must remain actionable. The invariant is that no unassessed
+        # model-generated gap or question becomes caregiver work.
+        from app.services.care_continuity import has_valid_caregiver_necessity
+        invalid_questions = [
+            question for question in actual_questions
+            if not has_valid_caregiver_necessity(question, db, person.id)
+        ]
+        assert invalid_questions == [], (
+            f"{scenario['scenario_id']}: open caregiver questions must each have "
+            "an explicit necessity assessment, decision dependency and same-record evidence"
         )
 
 
@@ -1827,6 +1877,7 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
             evidence_ids=[],
             persist=False,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
 
         coverage = captured["payload"]["history_coverage"]
@@ -2002,3 +2053,150 @@ def test_situation_assessment_downgrades_persisted_delta_change_without_complete
             if item["record_id"] == "change-attention-incomplete"
         )
         assert clarification["category"] == "needs_clarification"
+
+
+def test_delta_does_not_persist_if_source_changes_during_model_inference(monkeypatch):
+    """A correction during inference invalidates the pending comparison before save."""
+    import json
+    from fastapi import HTTPException
+    from app.models.care import Evidence
+    from app.models.care_continuity import CareDeltaRun
+    from app.services import delta_engine
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "delta-source-mutated-during-inference")
+        evidence = Evidence(
+            id="delta-source-mutation-evidence",
+            person_id=person.id,
+            type="note",
+            source_text="Caregiver reported interrupted sleep.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        event = CareEvent(
+            id="delta-source-mutation-event",
+            person_id=person.id,
+            event_type="daily_care_capture",
+            status="recorded",
+            occurred_at=NOW,
+            title="Daily care update",
+            description="Caregiver reported interrupted sleep.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+            time_provenance="caregiver_observed",
+        )
+        db.add_all([evidence, event])
+        db.commit()
+
+        def mutate_source_then_answer(*args, **kwargs):
+            event.description = "Corrected caregiver report: sleep was uninterrupted."
+            db.flush()
+            return json.dumps({
+                "event_summary": "Sleep report corrected",
+                "medications": [],
+                "conditions": [],
+                "symptoms": [],
+                "tests": [],
+                "follow_ups": [],
+                "contradictions": [],
+                "clinical_gaps": [],
+                "caregiver_summary": "The report was corrected.",
+                "clinician_summary": "The source report changed during comparison.",
+            })
+
+        monkeypatch.setattr(
+            delta_engine,
+            "_local_ollama_url",
+            lambda: ("http://127.0.0.1:11434", "delta-source-revalidation-test", 1.0),
+        )
+        monkeypatch.setattr(delta_engine, "qwen_chat", mutate_source_then_answer)
+
+        with pytest.raises(HTTPException) as exc:
+            delta_engine.reconcile_event(
+                db,
+                person_id=person.id,
+                event_date=NOW,
+                source="SolenOS Daily Capture",
+                content="Caregiver reported interrupted sleep.",
+                source_event_id=event.id,
+                evidence_ids=[evidence.id],
+                persist=True,
+                created_by_caregiver_id=caregiver.id,
+                model_enrichment=True,
+            )
+
+        assert exc.value.status_code == 409
+        db.refresh(event)
+        assert event.description == "Caregiver reported interrupted sleep."
+        assert db.query(CareDeltaRun).filter_by(
+            person_id=person.id,
+            source_event_id=event.id,
+        ).count() == 0
+        assert db.query(CareAssertion).filter_by(person_id=person.id).count() == 0
+
+
+def test_care_delta_api_persists_deterministically_without_local_model(monkeypatch):
+    """The default caregiver-facing Delta route must not wait on local model inference."""
+    from app.models.care_continuity import CareDeltaRun
+    from app.services import delta_engine
+
+    def unexpected_model_call(*args, **kwargs):
+        pytest.fail("default care-delta reconciliation must not call local model inference")
+
+    monkeypatch.setattr(delta_engine, "qwen_chat", unexpected_model_call)
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "delta-api-deterministic")
+        token = issue_session(db, person, caregiver)
+        event = add_event(
+            db,
+            person,
+            caregiver,
+            "daily_observation",
+            1,
+            "Caregiver observed repeated overnight waking",
+        )
+        db.commit()
+        event_id = event.id
+        event_date = event.occurred_at.isoformat()
+        person_id = person.id
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/care-delta/reconcile",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "person_id": person_id,
+            "event_date": event_date,
+            "source": "postgres_deterministic_delta_acceptance",
+            "content": "Caregiver observed repeated overnight waking",
+            "source_event_id": event_id,
+            "evidence_ids": [],
+            "persist": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["event_summary"] == "Caregiver observed repeated overnight waking"
+    assert payload["provenance"]["model_provider"] == "deterministic_change_intelligence"
+    assert payload["provenance"]["model"] == "none"
+    assert payload["provenance"]["delta_run_id"]
+
+    invalid = client.post(
+        "/api/v1/care-delta/reconcile",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "person_id": person_id,
+            "source": "postgres_deterministic_delta_acceptance",
+            "content": "",
+            "persist": True,
+        },
+    )
+    assert invalid.status_code == 422, invalid.text
+
+    with TestingSessionLocal() as db:
+        saved = db.query(CareDeltaRun).filter(
+            CareDeltaRun.person_id == person_id,
+            CareDeltaRun.source_event_id == event_id,
+            CareDeltaRun.source == "postgres_deterministic_delta_acceptance",
+        ).one()
+        assert saved.model_name == "deterministic-change-intelligence"
+        assert json.loads(saved.delta_json)["provenance"]["delta_run_id"] == str(saved.id)
