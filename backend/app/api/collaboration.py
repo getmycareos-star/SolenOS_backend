@@ -2419,6 +2419,9 @@ def _is_broad_temporal_history_request(text: str | None) -> bool:
     return bool(asks_for_history and has_explicit_period)
 
 
+MAX_TEMPORAL_LCR_HISTORY_PAGES = 20
+
+
 def _collect_full_lcr_context_pages(
     db: Session,
     person_id: str,
@@ -5936,7 +5939,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 shared_lcr_context = _collect_full_lcr_context_pages(
                     db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
                     limit_per_source=200 if care_journey_request else 50,
-                    max_pages=1 if care_journey_request else 4,
+                    max_pages=1 if care_journey_request else MAX_TEMPORAL_LCR_HISTORY_PAGES,
                 )
             shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
