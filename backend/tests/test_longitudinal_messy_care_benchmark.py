@@ -912,6 +912,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             evidence_ids=[matching.id, second_matching.id, unrelated.id],
             persist=True,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
 
         assert qwen_call_options
@@ -972,6 +973,7 @@ def test_delta_assertion_links_only_finding_specific_evidence(monkeypatch):
             evidence_ids=[mention_evidence.id],
             persist=True,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
         assert result["medications"][0]["medication_mention_only"] is True
         assert db.query(CareAssertion).filter(
@@ -1249,6 +1251,7 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
                 evidence_ids=[evidence_id],
                 persist=True,
                 created_by_caregiver_id=caregiver.id,
+                model_enrichment=True,
             )
 
         persisted_event_ids = {
@@ -1822,6 +1825,7 @@ def test_delta_engine_discloses_prior_history_omitted_by_context_bounds(monkeypa
             evidence_ids=[],
             persist=False,
             created_by_caregiver_id=caregiver.id,
+            model_enrichment=True,
         )
 
         coverage = captured["payload"]["history_coverage"]
@@ -2065,6 +2069,7 @@ def test_delta_does_not_persist_if_source_changes_during_model_inference(monkeyp
                 evidence_ids=[evidence.id],
                 persist=True,
                 created_by_caregiver_id=caregiver.id,
+                model_enrichment=True,
             )
 
         assert exc.value.status_code == 409
