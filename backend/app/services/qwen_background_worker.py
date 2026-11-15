@@ -1433,6 +1433,12 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                                 "longitudinal_processing": "failed" if terminal_failure else "retrying",
                                 "longitudinal_processing_error": current.error_code,
                             }
+                            _merge_daily_capture_job_result(current, {
+                                "delta_reconciliation_status": "failed",
+                                "delta_reconciliation_error_code": current.error_code,
+                                "longitudinal_processing_status": "failed" if terminal_failure else "retrying",
+                                "longitudinal_processing_error": current.error_code,
+                            })
                     db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count, "error_type": type(exc).__name__}))
                     db.commit()
             except Exception:
