@@ -175,12 +175,22 @@ def _version_care_state(session, flush_context, instances):
     if any(isinstance(obj, (CareStateRevision, EvidenceReviewRecord)) for obj in list(session.dirty) + list(session.deleted)):
         raise ValueError("Care-state revisions and evidence review records are append-only and cannot be updated or deleted")
     candidates = list(session.new) + list(session.dirty) + list(session.deleted)
+    # SQLAlchemy column defaults may not assign primary keys until INSERT. Assign
+    # missing IDs before sorting; otherwise multiple new records tie on an empty
+    # ID and retain caller-dependent collection order, reintroducing advisory-lock
+    # deadlocks when concurrent transactions touch the same records in reverse order.
+    for candidate in candidates:
+        candidate_table = getattr(getattr(candidate, "__table__", None), "name", None)
+        if candidate_table in TRACKED_TABLES and not getattr(candidate, "id", None):
+            candidate.id = str(uuid.uuid4())
     # Acquire per-target advisory locks in a deterministic order so a transaction
     # touching multiple care records cannot deadlock another transaction that
     # touches the same records in the opposite ORM collection order.
     candidates.sort(key=lambda obj: (
         str(getattr(getattr(obj, "__table__", None), "name", "") or ""),
-        str(getattr(obj, "person_id", "") or ""),
+        str(getattr(obj, "person_id", None) or (
+            getattr(obj, "id", "") if getattr(getattr(obj, "__table__", None), "name", None) == "persons" else ""
+        )),
         str(getattr(obj, "id", "") or ""),
     ))
     seen = set()
