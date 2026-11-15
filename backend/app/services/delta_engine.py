@@ -440,7 +440,6 @@ def _delta_excerpt(value: Any, limit: int = 280) -> str | None:
 
 
 def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str]) -> list[dict[str, Any]]:
-    from app.models.change import Change
     from app.models.care_continuity import CareAssertion, EvidenceObservation
 
     ids = list(dict.fromkeys(str(value) for value in (record_ids or []) if value))
@@ -569,6 +568,15 @@ def _reconcile_from_change_intelligence(
             CareAssertion.person_id == person_id,
             CareAssertion.source_event_id == source_event_id,
         ).all()
+    elif evidence_ids:
+        assertion_candidates = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+        ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
+        incoming_evidence_ids = {str(value) for value in evidence_ids}
+        source_assertions = [
+            item for item in assertion_candidates
+            if incoming_evidence_ids.intersection(str(value) for value in (item.evidence_ids or []))
+        ]
     reconciliation_receipt = None
     if persist:
         reconciliation_receipt = reconcile_person_change_intelligence(
@@ -582,7 +590,7 @@ def _reconcile_from_change_intelligence(
     linked_ids = {str(value) for value in evidence_ids if value}
     if source_event_id:
         linked_ids.add(str(source_event_id))
-        linked_ids.update(str(item.id) for item in source_assertions)
+    linked_ids.update(str(item.id) for item in source_assertions)
     if evidence_ids:
         source_observations = db.query(EvidenceObservation).filter(
             EvidenceObservation.person_id == person_id,
@@ -594,12 +602,6 @@ def _reconcile_from_change_intelligence(
             CareEvent.person_id == person_id,
         ).order_by(CareEvent.occurred_at.desc()).limit(500).all()
         for item in recent_events:
-            if linked_ids.intersection(str(value) for value in (item.evidence_ids or [])):
-                linked_ids.add(str(item.id))
-        source_assertions = db.query(CareAssertion).filter(
-            CareAssertion.person_id == person_id,
-        ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
-        for item in source_assertions:
             if linked_ids.intersection(str(value) for value in (item.evidence_ids or [])):
                 linked_ids.add(str(item.id))
 
