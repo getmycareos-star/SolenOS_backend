@@ -459,6 +459,35 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "available" if candidate_count else "not_applicable"
     )
     review_status = "not_required" if quick_check_in_capture or natural_language_update or not candidate_count else "required"
+
+    # Commit the extraction/assessment receipt before derived reconciliation.
+    # If reconciliation or LCR projection later fails, the caregiver's original
+    # report, extracted source-grounded observations, and successful extraction
+    # must remain distinguishable from the failed downstream stage.
+    analysis = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.id == analysis_id,
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
+        CaptureAnalysis.source_event_id == event_id,
+        CaptureAnalysis.source_evidence_id == evidence_id,
+    ).with_for_update().first()
+    if analysis is None:
+        raise RuntimeError("daily_capture_analysis_disappeared_before_reconciliation")
+    analysis.candidates = candidates
+    analysis.extraction_status = extraction_status
+    analysis.execution_status = {
+        "source_preservation": "verified",
+        "evidence": "verified",
+        "extraction": extraction_status,
+        "assessment": assessment_status,
+        "review": review_status,
+        "reconciliation": "pending",
+        "longitudinal_retrieval": "not_verified",
+        "projection": "not_verified",
+    }
+    db.add(analysis)
+    db.commit()
+
     reconciliation = execute_care_continuity_reconciliation(
         db,
         person_id,
@@ -934,12 +963,32 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                         ).order_by(CaptureAnalysis.created_at.desc()).first()
                         if analysis is not None:
                             terminal_failure = current.status == "failed"
-                            analysis.extraction_status = "failed" if terminal_failure else "queued"
+                            prior_status = dict(analysis.execution_status or {})
+                            prior_extraction = prior_status.get("extraction", "processing")
+                            prior_assessment = prior_status.get("assessment", "pending")
+                            extraction_complete = prior_extraction in {"available", "not_applicable"}
+                            assessment_complete = prior_assessment in {"available", "not_applicable"}
+                            # A failure after extraction must not rewrite a
+                            # successfully saved extraction as an extraction
+                            # failure. Keep the stage receipt and mark only
+                            # unfinished downstream work as incomplete.
+                            analysis.extraction_status = (
+                                analysis.extraction_status
+                                if extraction_complete
+                                else "failed" if terminal_failure else "queued"
+                            )
                             analysis.execution_status = {
-                                **(analysis.execution_status or {}),
-                                "extraction": "failed" if terminal_failure else "queued",
-                                "assessment": "failed" if terminal_failure else "pending",
-                                "reconciliation": "not_completed" if terminal_failure else "pending",
+                                **prior_status,
+                                "extraction": prior_extraction if extraction_complete else (
+                                    "failed" if terminal_failure else "queued"
+                                ),
+                                "assessment": prior_assessment if assessment_complete else (
+                                    "failed" if terminal_failure else "pending"
+                                ),
+                                "reconciliation": (
+                                    "not_completed" if terminal_failure else "pending"
+                                ),
+                                "longitudinal_retrieval": "not_verified",
                                 "projection": "not_verified",
                             }
                     db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count, "error_type": type(exc).__name__}))
