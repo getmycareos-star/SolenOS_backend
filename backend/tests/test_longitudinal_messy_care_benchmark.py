@@ -11,7 +11,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, create_engine
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -36,6 +36,25 @@ if _benchmark_database_url.startswith("sqlite"):
     if _benchmark_database_url == "sqlite:///:memory:":
         _engine_options["poolclass"] = StaticPool
 engine = create_engine(_benchmark_database_url, **_engine_options)
+if "care_facts" not in Base.metadata.tables:
+    Table(
+        "care_facts", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("subject_type", String(80), nullable=False),
+        Column("subject_id", String(36)),
+        Column("fact_type", String(100), nullable=False),
+        Column("fact_value", Text, nullable=False),
+        Column("epistemic_status", String(32), nullable=False, server_default="reported"),
+        Column("effective_at", DateTime(timezone=True)),
+        Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("superseded_by_fact_id", String(36), ForeignKey("care_facts.id")),
+        Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("review_notes", Text),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("updated_at", DateTime(timezone=True)),
+    )
+
 if "care_assertion_revisions" not in Base.metadata.tables:
     Table(
         "care_assertion_revisions", Base.metadata,
