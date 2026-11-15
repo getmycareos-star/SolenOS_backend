@@ -1736,7 +1736,8 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
     idempotency_key = correction.idempotency_key or f"legacy-{request_sha256}"
     existing = db.query(CorrectionModel).filter(
         CorrectionModel.person_id == correction.person_id,
-        CorrectionModel.idempotency_key == idempotency_key,
+        (CorrectionModel.idempotency_key == idempotency_key)
+        | (CorrectionModel.request_sha256 == request_sha256),
     ).first()
     if existing is not None:
         if existing.request_sha256 != request_sha256:
@@ -1766,7 +1767,8 @@ def create_correction(correction: CorrectionCreate, request: Request, db: Sessio
         db.rollback()
         existing = db.query(CorrectionModel).filter(
             CorrectionModel.person_id == correction.person_id,
-            CorrectionModel.idempotency_key == idempotency_key,
+            (CorrectionModel.idempotency_key == idempotency_key)
+            | (CorrectionModel.request_sha256 == request_sha256),
         ).first()
         if existing is None:
             raise HTTPException(status_code=503, detail="The correction could not be saved. Retry safely.")
