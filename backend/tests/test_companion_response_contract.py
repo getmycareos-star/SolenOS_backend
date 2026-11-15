@@ -696,6 +696,63 @@ def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch)
         teardown()
 
 
+def test_companion_answers_literal_caregiver_record_lookup_without_waiting_for_qwen(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def qwen_must_not_run(*args, **kwargs):
+        raise AssertionError("A direct saved-record lookup must not wait for model inference.")
+
+    monkeypatch.setattr(collaboration, "_ollama_url", qwen_must_not_run)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        db.add_all([
+            CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime(2026, 11, 14, 8, 0, tzinfo=timezone.utc),
+                title="Sleep observation",
+                description="Mum slept poorly last night and seemed more unsettled this morning.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ),
+            CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc),
+                title="Meal observation",
+                description="Mum barely touched her lunch today. She drank some water, though.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "What did caregiver record about sleep and appetite?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is False
+        assert data["written_to_lcr"] is False
+        assert "slept poorly last night" in data["reply"].casefold()
+        assert "barely touched her lunch" in data["reply"].casefold()
+        assert data["persistence"] == "conversation_only"
+        assert len(data["source_event_ids"]) == 2
+    finally:
+        teardown()
+
+
 def test_companion_uses_source_grounded_history_when_qwen_returns_http_unavailable(monkeypatch):
     client = setup_client(monkeypatch)
 
