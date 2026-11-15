@@ -489,3 +489,139 @@ def test_document_intake_finishes_later_windows_before_failing_an_exhausted_page
     ).count() == 1
     db.close()
 
+
+
+def _daily_delta_retry_store(tmp_path, monkeypatch):
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    from app.models.care import Caregiver, CareEvent, Evidence, Person
+    from app.models.capture_analysis import CaptureAnalysis
+    from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    # Register the specific models before creating the isolated schema.
+    Base.metadata.create_all(bind=engine)
+    sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+    monkeypatch.setattr(worker, "SessionLocal", sessions)
+
+    db = sessions()
+    person = Person(id="daily-delta-person", name="Daily Delta Test")
+    caregiver = Caregiver(
+        id="daily-delta-caregiver", name="Test Caregiver",
+        relationship="family", person_id=person.id,
+    )
+    evidence = Evidence(
+        id="daily-delta-evidence", person_id=person.id, type="note",
+        source_text="Caregiver reports poor sleep overnight.",
+        uploaded_by_caregiver_id=caregiver.id,
+        evidence_status="active",
+    )
+    event = CareEvent(
+        id="daily-delta-event", person_id=person.id, event_type="daily_observation",
+        status="recorded", occurred_at=datetime.now(timezone.utc),
+        title="Daily care observation", description="Caregiver reports poor sleep overnight.",
+        evidence_ids=[evidence.id], created_by_caregiver_id=caregiver.id,
+    )
+    analysis = CaptureAnalysis(
+        id="daily-delta-analysis", person_id=person.id, caregiver_id=caregiver.id,
+        source_event_id=event.id, source_evidence_id=evidence.id,
+        source_text=event.description, extraction_status="available",
+        candidates={"observations": []}, review_history=[],
+        execution_status={"longitudinal_processing": "retrying"},
+    )
+    job = QwenBackgroundJob(
+        id="daily-delta-job", person_id=person.id, caregiver_id=caregiver.id,
+        task_text="Reconcile saved Daily Care evidence.", context_text="",
+        workflow="daily_capture_delta_reconciliation", status="queued",
+        attempt_count=1, available_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        source_event_ids_json=json.dumps([event.id]),
+        source_evidence_ids_json=json.dumps([evidence.id]),
+    )
+    db.add_all([person, caregiver, evidence, event, analysis, job])
+    db.commit()
+    db.close()
+    return sessions
+
+
+def test_daily_capture_delta_retry_reuses_saved_sources_and_completes_without_reextraction(tmp_path, monkeypatch):
+    from app.models.care import CareEvent, Evidence
+    from app.models.capture_analysis import CaptureAnalysis
+
+    sessions = _daily_delta_retry_store(tmp_path, monkeypatch)
+    calls = []
+
+    def reconcile(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {"status": "failed", "error_code": "temporary_delta_failure"}
+        return {"status": "completed", "run_id": "delta-run-reused-source", "reused": True}
+
+    monkeypatch.setattr(worker, "_reconcile_daily_capture_delta", reconcile)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    queued = db.query(QwenBackgroundJob).filter_by(id="daily-delta-job").one()
+    assert queued.status == "queued"
+    assert queued.attempt_count == 2
+    assert queued.workflow == "daily_capture_delta_reconciliation"
+    assert json.loads(queued.source_event_ids_json) == ["daily-delta-event"]
+    assert json.loads(queued.source_evidence_ids_json) == ["daily-delta-evidence"]
+    analysis = db.query(CaptureAnalysis).filter_by(id="daily-delta-analysis").one()
+    assert analysis.execution_status["longitudinal_processing"] == "retrying"
+    queued.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db.commit()
+    db.close()
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    completed = db.query(QwenBackgroundJob).filter_by(id="daily-delta-job").one()
+    assert completed.status == "completed"
+    assert completed.attempt_count == 3
+    result = json.loads(completed.result_text)
+    assert result["delta_reconciliation_status"] == "completed"
+    assert result["delta_run_id"] == "delta-run-reused-source"
+    assert result["longitudinal_processing_status"] == "completed"
+    analysis = db.query(CaptureAnalysis).filter_by(id="daily-delta-analysis").one()
+    assert analysis.execution_status["longitudinal_processing"] == "completed"
+    assert db.query(CareEvent).filter_by(id="daily-delta-event").count() == 1
+    assert db.query(Evidence).filter_by(id="daily-delta-evidence").count() == 1
+    assert len(calls) == 2
+    assert all(call == {
+        "person_id": "daily-delta-person",
+        "caregiver_id": "daily-delta-caregiver",
+        "source_event_id": "daily-delta-event",
+        "source_evidence_id": "daily-delta-evidence",
+    } for call in calls)
+    db.close()
+
+
+def test_daily_capture_delta_retry_stops_when_original_source_is_invalidated(tmp_path, monkeypatch):
+    from app.models.care import CareEvent
+
+    sessions = _daily_delta_retry_store(tmp_path, monkeypatch)
+    db = sessions()
+    event = db.query(CareEvent).filter_by(id="daily-delta-event").one()
+    event.status = "invalidated"
+    db.commit()
+    db.close()
+
+    def must_not_reconcile(**kwargs):
+        raise AssertionError("invalidated Daily Care sources must never be reconciled")
+
+    monkeypatch.setattr(worker, "_reconcile_daily_capture_delta", must_not_reconcile)
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+
+    db = sessions()
+    cancelled = db.query(QwenBackgroundJob).filter_by(id="daily-delta-job").one()
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_code == "daily_capture_source_unavailable"
+    analysis = db.query(CaptureAnalysis).filter_by(id="daily-delta-analysis").one()
+    assert analysis.execution_status["longitudinal_processing"] == "cancelled"
+    assert db.query(QwenJobEvent).filter_by(
+        job_id="daily-delta-job", event_type="daily_capture_delta_retry_cancelled"
+    ).count() == 1
+    db.close()
