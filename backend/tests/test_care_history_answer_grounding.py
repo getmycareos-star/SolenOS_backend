@@ -70,6 +70,18 @@ def test_medication_dose_recall_quotes_the_uncertain_caregiver_report_without_in
     assert _care_history_reply_covers_requested_topics(question, answer, context)
 
 
+def test_missing_medication_note_does_not_claim_a_caregiver_report_was_quoted():
+    answer = _care_history_extractive_answer(
+        "What new dose did the doctor prescribe for Mum yesterday?",
+        [],
+    )
+
+    assert answer is not None
+    assert "couldn't confirm medication" in answer
+    assert "caregiver report" not in answer
+    assert "current prescription" not in answer
+
+
 def test_history_fallback_refuses_to_summarize_when_a_requested_topic_is_missing():
     context = [
         _event_line("sleep-event", "Mum slept poorly last night."),
