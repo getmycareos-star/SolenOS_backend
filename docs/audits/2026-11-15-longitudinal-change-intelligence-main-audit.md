@@ -94,3 +94,19 @@ The repository status endpoint did not provide a successful frontend test/build 
 - **Caregiver-facing Delta safety:** the history panel promotes supported changes only when freshness is explicitly current. Stale, missing, and unchecked freshness remain review-only; a missing freshness result is no longer treated as current.
 
 These are source changes and regression tests, not test results. The PostgreSQL-specific concurrency behavior and the full authenticated route tests still need execution against the configured test database. Production must run the exact current backend commit before these changes can affect caregivers.
+
+
+## Additional implementation pass — single Daily Care reconciliation and stage receipts
+
+- Removed the hidden CareDeltaPanel auto-submit from the active StructuredDailyCapture workflow. A saved Daily Care event no longer triggers a second browser-side POST /care-delta/reconcile; the server-owned background worker remains responsible for source-grounded extraction and the shared persisted change-intelligence reconciliation.
+- Added a durable extraction/assessment checkpoint before downstream reconciliation in the Daily Care worker. If reconciliation or LCR projection fails after extraction, the saved extraction and assessment remain marked as completed; only the unfinished reconciliation/projection stages are marked incomplete.
+- Added a regression test that injects a reconciliation failure after successful extraction and verifies that the source-grounded observation and extraction receipt survive, while the job remains failed and reconciliation is explicitly not_completed.
+- Added a frontend contract check that prevents the Daily Care screen from reintroducing the hidden browser-side Delta call.
+
+Implementation commits:
+- Backend worker: 21b9ec82afeda866d523e41e8c11d6c71de51701
+- Backend regression test: d52857a5414c34a4166901ea1e22b2331cc8630a
+- Frontend removal of duplicate reconciliation: 41686141a7b3ba07dab104ec71376b18e4e61efd
+- Frontend contract guard: 177ff458f9aa1d2e5f61c80e29a7cf04f293a641
+
+Validation state at the time of this entry: GitHub Actions runs were queued or in progress for these exact main commits. No passing test, PostgreSQL run, deployment, or production behavior is claimed here.
