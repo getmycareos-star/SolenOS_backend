@@ -3429,12 +3429,32 @@ def _contains_unsupported_operational_claim(
     )
     future_match = re.search(future_claim, text)
     if future_match:
-        mentioned_time = re.search(future_time, future_match.group(0))
-        source_has_same_time = bool(
-            mentioned_time
-            and re.search(rf"\b{re.escape(mentioned_time.group(0))}\b", source)
-        )
-        if not source_has_same_time:
+        # A matching time phrase alone is not evidence for the same future
+        # claim: "Mum was calmer this evening" cannot support "Mum will be
+        # calmer this evening". Require the complete future claim in the source,
+        # and do not treat a quoted possibility or uncertainty as confirmation.
+        source_claim = future_match.group(0)
+        source_claim_start = source.find(source_claim)
+        source_supports_claim = source_claim_start >= 0
+        if source_supports_claim:
+            left = max(
+                source.rfind(mark, 0, source_claim_start)
+                for mark in (".", ";", "!", "?", "\\n")
+            ) + 1
+            right_candidates = [
+                source.find(mark, source_claim_start + len(source_claim))
+                for mark in (".", ";", "!", "?", "\\n")
+            ]
+            right_candidates = [position for position in right_candidates if position >= 0]
+            source_clause = source[left:min(right_candidates) if right_candidates else len(source)]
+            source_uncertainty = (
+                r"\\b(?:may|might|could|possibly|perhaps|uncertain|not sure|"
+                r"don.t know|do not know|whether|cannot confirm|can.t confirm|"
+                r"unable to confirm)\\b"
+            )
+            if re.search(source_uncertainty, source_clause):
+                source_supports_claim = False
+        if not source_supports_claim:
             return True
     # Preserve who supplied information; a caregiver observing a person is not
     # equivalent to the person reporting their own symptoms.
