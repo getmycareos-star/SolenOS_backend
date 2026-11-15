@@ -315,7 +315,7 @@ def test_companion_exact_message_capture_requires_explicit_acceptance(monkeypatc
         accepted = review(client, first, proposal["id"], {"decision": "accept"})
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
-        assert accepted.json()["reconciliation"]["stages"]["reconciliation"] == "committed"
+        assert accepted.json()["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
 
         after = client.get("/api/v1/care-continuity/current-care", headers=headers)
         assert after.status_code == 200, after.text
