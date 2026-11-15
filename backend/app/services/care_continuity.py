@@ -820,6 +820,8 @@ def next_best_questions(
             "prescribed frequency",
             "current route",
             "prescribed route",
+            "medication status",
+            "current medication status",
         }
         is_medication_conflict = (
             contradiction_subject_type in {"medication", "medications"}
