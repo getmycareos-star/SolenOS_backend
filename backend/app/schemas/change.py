@@ -185,6 +185,21 @@ class SituationResponse(BaseModel):
     temporal_start: datetime
     temporal_end: datetime
 
+class SituationStateTransitionRequest(BaseModel):
+    state: SituationState
+    reason: str = Field(min_length=1, max_length=1200)
+    evidence_ids: List[str] = Field(min_length=1, max_length=50)
+
+
+class SituationStateTransitionResponse(BaseModel):
+    situation: Situation
+    previous_state: SituationState
+    new_state: SituationState
+    actor_caregiver_id: str
+    reason: str
+    evidence_ids: List[str]
+    recorded_at: datetime
+
 class ChangeEvidenceResponse(BaseModel):
     id: str
     event_type: str
