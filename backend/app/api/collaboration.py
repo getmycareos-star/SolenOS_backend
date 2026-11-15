@@ -4890,6 +4890,11 @@ _CARE_HISTORY_TOPIC_GROUPS = {
     "hydration": {"water", "drink", "drank", "drinking", "hydration", "fluid", "fluids"},
     "medication": {"medication", "medicine", "dose", "tablet", "pill", "prescribed"},
 }
+_MEDICATION_DOSE_RECALL_RE = re.compile(
+    r"\bwhat\s+(?:new\s+)?dose\s+(?:did|was)\s+(?:the\s+)?(?:doctor|clinician|prescriber)\s+"
+    r"(?:prescribe|recommend|change|set)\b",
+    re.IGNORECASE,
+)
 _CARE_HISTORY_INTENT_PATTERN = re.compile(
     r"\bwhat\s+(?:has|have|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
     r"(?:recorded|logged|saved|noted)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
@@ -6500,6 +6505,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text,
             included_model_context_lines,
         )
+        medication_dose_recall_fallback_used = bool(_MEDICATION_DOSE_RECALL_RE.search(user_text))
+        if medication_dose_recall_fallback_used:
+            # Medication recall is answered from the caregiver-authored report,
+            # never from model completion. A report that says the dose is
+            # unknown must stay unknown rather than invite a guessed dose.
+            reply = care_history_extractive_answer or (
+                "I can't confirm the prescribed dose from the records retrieved. "
+                "Please check the prescription or ask the prescriber or pharmacist."
+            )
+            care_history_extractive_fallback_used = bool(care_history_extractive_answer)
         if (
             care_history_extractive_answer
             and not (emergency or unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
@@ -6537,7 +6552,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _caregiver_response_needs_revision(user_text, reply)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
-        if caregiver_question_direct_answer_used:
+        if caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
             invalid_reply = False
         if invalid_reply and caregiver_guidance:
             # Explicit caregiver-capacity and continuity constraints are part of
@@ -6764,6 +6779,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         elif caregiver_question_direct_answer_used:
             verdict = "passed"
             safety_note = "This is a saved caregiver question for a healthcare professional, not an answer from that professional."
+            ai_generated = False
+        elif medication_dose_recall_fallback_used:
+            verdict = "blocked"
+            safety_note = "This answer quotes a caregiver report and does not confirm the prescribed dose or current medication instructions."
             ai_generated = False
         elif care_history_extractive_fallback_used:
             verdict = "passed"
