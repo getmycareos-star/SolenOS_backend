@@ -739,6 +739,26 @@ def _question_period_scope(value: str | None) -> tuple[str, ...]:
     return tuple(sorted(match for pattern in patterns for match in re.findall(pattern, text)))
 
 
+def _question_intent_dimension(value: str | None) -> str | None:
+    """Separate distinct clarification intents that happen to share one care field."""
+    text = " ".join(str(value or "").casefold().split())
+    if re.search(
+        r"\\b(?:how\\s+long|for\\s+how\\s+long|since\\s+when|duration|how\\s+many\\s+"
+        r"(?:days?|weeks?|months?|nights?|hours?))\\b",
+        text,
+    ):
+        return "duration"
+    if re.search(
+        r"\\b(?:how\\s+many\\s+times|how\\s+often|how\\s+frequently|frequency|"
+        r"how\\s+many\\s+(?:episodes?|falls?|waking\\s+events?))\\b",
+        text,
+    ):
+        return "frequency"
+    if re.search(r"\\b(?:what\\s+is\\s+the\\s+dose|how\\s+much\\s+medication|dosage)\\b", text):
+        return "dose"
+    return None
+
+
 def _question_matches_source_field(
     question: OpenQuestion,
     candidate_contexts: list[dict],
@@ -760,6 +780,10 @@ def _question_matches_source_field(
     # dates or periods. An unqualified question and "since Friday" are distinct.
     if candidate_question is not None:
         if _question_period_scope(question.question) != _question_period_scope(candidate_question):
+            return False
+        prior_intent = _question_intent_dimension(question.question)
+        candidate_intent = _question_intent_dimension(candidate_question)
+        if prior_intent and candidate_intent and prior_intent != candidate_intent:
             return False
     return True
 
