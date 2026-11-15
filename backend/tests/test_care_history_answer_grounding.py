@@ -66,7 +66,7 @@ def test_medication_dose_recall_quotes_the_uncertain_caregiver_report_without_in
     assert "I can't remember the new dose" in answer
     assert "caregiver report" in answer
     assert "not confirmation of the current prescription" in answer
-    assert not __import__("re").search(r"\\b\\d+(?:\\.\\d+)?\\s*(?:mg|mcg|ml)\\b", answer, __import__("re").I)
+    assert not __import__("re").search(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|ml)\b", answer, __import__("re").I)
     assert _care_history_reply_covers_requested_topics(question, answer, context)
 
 
