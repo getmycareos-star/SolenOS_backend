@@ -5282,6 +5282,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # Always initialize optional prompt sections before any conditional retrieval path.
     conversation_context_lines: list[str] = []
     caregiver_question_queue_lines: list[str] = []
+    caregiver_question_direct_answer: str | None = None
+    caregiver_question_direct_answer_used = False
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
 
