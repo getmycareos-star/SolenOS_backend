@@ -56,7 +56,7 @@ def _temporal_window(
     # Calendar-year language must become an explicit temporal filter. Without
     # this branch, "last year" loses both tokens as stopwords and silently
     # falls back to the bounded recent-history projection.
-    if re.search(r"\\b(?:last|previous)\\s+year\\b", text):
+    if re.search(r"\b(?:last|previous)\s+year\b", text):
         previous_year = today.year - 1
         return {
             **{
@@ -66,7 +66,7 @@ def _temporal_window(
                 "basis": "explicit_previous_calendar_year",
             }
         }
-    if re.search(r"\\bthis year\\b", text):
+    if re.search(r"\bthis year\b", text):
         return {
             "start": datetime.combine(date(today.year, 1, 1), datetime.min.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
             "end": datetime.combine(today, datetime.max.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
