@@ -685,12 +685,12 @@ def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
                     id=f"delta-page-{index}",
                     person_id=person_id,
                     source="Caregiver report",
-                    event_date=datetime(2026, 10, 24, 9, index, tzinfo=timezone.utc),
+                    event_date=datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc),
                     evidence_ids=[],
                     delta_json=json.dumps({"computed_changes": []}),
                     model_name="benchmark-fixture",
                     created_by_caregiver_id=caregiver_id,
-                    created_at=datetime(2026, 10, 24, 9, index, tzinfo=timezone.utc),
+                    created_at=datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc),
                 ))
             db.commit()
 
