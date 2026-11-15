@@ -16,6 +16,7 @@ from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnes
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
+from app.services.unified_lcr_retrieval import _conversation_context
 
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
@@ -270,6 +271,52 @@ def test_companion_reuses_prior_assistant_turns_as_non_evidence_context(monkeypa
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+
+def test_conversation_search_finds_old_relevant_turn_after_more_than_40_matches():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    try:
+        token, person_id, caregiver_id = create_session(TestClient(app))
+        session = ConversationSession(
+            id="conversation-search-session", person_id=person_id,
+            caregiver_id=caregiver_id, status="archived",
+        )
+        db.add(session)
+        db.flush()
+        now = datetime.now(timezone.utc)
+        db.add(ConversationMessage(
+            id="old-relevant-medication-sleep", session_id=session.id,
+            role="user",
+            content="We discussed sleep and the new medication after the clinic visit.",
+            evidence_ids_json="[]",
+            created_at=now - timedelta(days=120),
+        ))
+        for index in range(125):
+            db.add(ConversationMessage(
+                id=f"recent-sleep-{index:03d}", session_id=session.id,
+                role="user",
+                content=f"Caregiver mentioned sleep was unchanged on routine day {index}.",
+                evidence_ids_json="[]",
+                created_at=now - timedelta(minutes=index + 1),
+            ))
+        db.commit()
+
+        result = _conversation_context(
+            db, person_id=person_id, caregiver_id=caregiver_id,
+            query="What did we discuss about sleep and medication?",
+            limit=8,
+        )
+        assert result["candidate_count"] == 126
+        assert result["candidate_scan_complete"] is True
+        assert result["has_more"] is True
+        assert "old-relevant-medication-sleep" in {
+            item["id"] for item in result["items"]
+        }
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
 
 
 def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeypatch):
