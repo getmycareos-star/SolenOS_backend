@@ -236,6 +236,32 @@ def test_medication_dose_recall_never_overrides_higher_priority_safety_guards():
     ) is False
 
 
+def test_companion_inference_timeout_is_bounded_and_passed_to_qwen(monkeypatch):
+    monkeypatch.delenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", raising=False)
+    assert collaboration._companion_inference_timeout_seconds() == 30.0
+    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "180")
+    assert collaboration._companion_inference_timeout_seconds() == 60.0
+    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "1")
+    assert collaboration._companion_inference_timeout_seconds() == 5.0
+
+    captured = {}
+    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "17")
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda messages, timeout=None, options=None: (
+            captured.update({"timeout": timeout, "options": options}) or "bounded reply"
+        ),
+    )
+    reply = collaboration._ollama_chat(
+        "http://ollama.internal",
+        "qwen-test",
+        [{"role": "user", "content": "What changed?"}],
+    )
+    assert reply == "bounded reply"
+    assert captured["timeout"] == 17.0
+
+
 def test_medication_dose_recall_directly_retrieves_person_scoped_report_and_evidence(monkeypatch):
     client = setup_client(monkeypatch)
     db = None
