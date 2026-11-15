@@ -7,7 +7,7 @@ from sqlalchemy import inspect
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
-from app.models.care_continuity import CareDeltaRun, EvidenceObservation
+from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation
 from app.models.care import CareEvent, Evidence
 from app.schemas.care_delta import CareDeltaReconcileRequest
 from app.services.delta_engine import reconcile_event
@@ -66,8 +66,25 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
         source_ids = [str(value) for value in (row.evidence_ids or []) if value]
         changed_observation_count = 0
         changed_source_count = 0
+        changed_context_count = 0
         freshness_reasons = []
-        observation_history_checked = inspect(db.get_bind()).has_table("evidence_observations")
+        schema_inspector = inspect(db.get_bind())
+        observation_history_checked = schema_inspector.has_table("evidence_observations")
+        care_state_history_checked = schema_inspector.has_table("care_state_revisions")
+        if row.created_at and care_state_history_checked:
+            # A Delta run depends on more than its incoming event. New or revised
+            # assertions, prior events/evidence, open gaps, questions, and
+            # contradictions can all change the comparison basis after it ran.
+            changed_context_count = db.query(CareStateRevision.id).filter(
+                CareStateRevision.person_id == scoped_person_id,
+                CareStateRevision.target_type.in_([
+                    "care_assertions", "care_events", "evidence",
+                    "information_gaps", "open_questions", "contradictions",
+                ]),
+                CareStateRevision.changed_at > row.created_at,
+            ).count()
+            if changed_context_count:
+                freshness_reasons.append("care_record_context_changed_after_review")
         if row.source_event_id:
             source_event = db.query(CareEvent).filter(
                 CareEvent.person_id == scoped_person_id,
@@ -121,9 +138,10 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
                     changed_source_count += changed_observation_count
                     freshness_reasons.append("source_observation_added_or_corrected_after_review")
         source_freshness = {
-            "status": "stale" if changed_source_count else "current" if (source_ids or row.source_event_id) and observation_history_checked else "not_checked",
+            "status": "stale" if changed_source_count or changed_context_count else "current" if (source_ids or row.source_event_id) and observation_history_checked and care_state_history_checked else "not_checked",
             "changed_source_count": changed_source_count,
             "changed_observation_count": changed_observation_count,
+            "changed_context_count": changed_context_count,
             "reasons": sorted(set(freshness_reasons)),
         }
         output.append({
