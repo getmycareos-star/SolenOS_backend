@@ -416,17 +416,18 @@ def _source_content_matches_event(content: str, event: CareEvent) -> bool:
 
 def source_event_snapshot_hash(event: CareEvent) -> str:
     """Fingerprint the exact saved event state used by a Delta assessment."""
+    occurred_at = getattr(event, "occurred_at", None)
     snapshot = {
-        "id": str(event.id),
-        "person_id": str(event.person_id),
-        "created_by_caregiver_id": str(event.created_by_caregiver_id or ""),
+        "id": str(getattr(event, "id", "") or ""),
+        "person_id": str(getattr(event, "person_id", "") or ""),
+        "created_by_caregiver_id": str(getattr(event, "created_by_caregiver_id", "") or ""),
         "status": str(getattr(event, "status", "") or ""),
-        "event_type": str(event.event_type or ""),
+        "event_type": str(getattr(event, "event_type", "") or ""),
         "time_provenance": str(getattr(event, "time_provenance", "") or ""),
-        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-        "title": str(event.title or ""),
-        "description": str(event.description or ""),
-        "evidence_ids": sorted(str(value) for value in (event.evidence_ids or [])),
+        "occurred_at": occurred_at.isoformat() if hasattr(occurred_at, "isoformat") else None,
+        "title": str(getattr(event, "title", "") or ""),
+        "description": str(getattr(event, "description", "") or ""),
+        "evidence_ids": sorted(str(value) for value in (getattr(event, "evidence_ids", None) or [])),
     }
     encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
