@@ -4977,7 +4977,9 @@ _CARE_HISTORY_INTENT_PATTERN = re.compile(
     r"\bqu[eé]\s+(?:dice|dijo)\s+(?:el\s+)?(?:registro|historial|expediente)\b|"
     r"\bqu['’]est-ce\s+qu['’]on\s+a\s+(?:not[eé]|enregistr[eé]|sauvegard[eé])\b|"
     r"\bqu['’]est-ce\s+que\s+(?:j['’]ai|nous\s+avons|vous\s+avez)\s+(?:not[eé]|enregistr[eé]|sauvegard[eé])\b|"
-    r"\bque\s+dit\s+(?:le\s+)?(?:dossier|historique|registre)\b",
+    r"\bque\s+dit\s+(?:le\s+)?(?:dossier|historique|registre)\b|"
+    r"\bqu[eé]lle\s+dose\s+(?:a\s+)?(?:prescrit|recommand[eé]|chang[eé])\b|"
+    r"\bqu[eé]\s+dosis\s+(?:indic[oó]|prescribi[oó]|recomend[oó]|cambi[oó])\b",
     re.IGNORECASE,
 )
 _CARE_HISTORY_STOPWORDS = {
@@ -5360,6 +5362,8 @@ def _localized_care_history_extractive_answer(
     language: Literal["es", "fr"],
 ) -> str:
     """Return source quotes with a short localized wrapper; never translate the source itself."""
+    if not _CARE_HISTORY_INTENT_PATTERN.search(user_text or ""):
+        return ""
     topic_names = {
         "es": {
             "sleep": "el sueño", "lunch": "el almuerzo", "dinner": "la cena",
