@@ -17,6 +17,7 @@ from app.models.care_continuity import CareAssertion, CareDeltaRun, EvidenceObse
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
 from app.models.uncertainty import OpenQuestion
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.services.learning import LearningEngine
