@@ -248,7 +248,8 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "table": "corrections",
         "required": False,
         "fields": ["id", "target_type", "target_id", "original_text", "corrected_text", "reason",
-                   "caregiver_id", "created_at"],
+                   "caregiver_id", "created_at", "processing_status", "processing_attempts",
+                   "processing_error", "processed_at"],
         "order": ["created_at"],
     },
     "appointments": {
