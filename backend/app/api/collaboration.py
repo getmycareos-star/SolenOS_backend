@@ -6614,6 +6614,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_lcr_context_ids = []
         source_freshness_assessment_ids = []
         source_lcr_record_refs = []
+        selected_ids_by_type["handoffs"] = []
         evidence_ids = []
         validated_aggregates = []
         if isinstance(lcr_context_coverage, dict):
@@ -7000,6 +7001,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "claim_provenance": claim_provenance,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
+        "response_mode": (
+            "deterministic_low_capacity_support_fallback"
+            if low_capacity_support_fallback_used else "model_or_grounded_fallback"
+        ),
         "written_to_lcr": False,
         "persistence": "conversation_only",
         "idempotent_replay": False,
