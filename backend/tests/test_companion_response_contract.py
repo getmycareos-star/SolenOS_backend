@@ -1963,6 +1963,19 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
         assert body["source_evidence_ids"] == []
         assert body["source_record_refs"] == []
         assert "did not pass" in body["safety_note"]
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+            assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
+            persisted = db.query(ConversationMessage).filter_by(
+                session_id=body["session_id"]
+            ).order_by(ConversationMessage.created_at.asc()).all()
+            assert [row.role for row in persisted] == ["user", "assistant"]
+            assert persisted[-1].content == body["reply"]
+            assert persisted[-1].evidence_ids_json == "[]"
+            assert persisted[-1].source_record_refs_json == "[]"
+        finally:
+            db.close()
     finally:
         teardown()
 
