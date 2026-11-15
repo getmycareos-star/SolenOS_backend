@@ -1964,3 +1964,48 @@ def test_overload_guidance_recognizes_natural_longer_distress_phrasing():
     ):
         guidance = collaboration._caregiver_interaction_guidance(message)
         assert "LOW-CAPACITY RESPONSE" in guidance, message
+
+def test_companion_uses_source_grounded_history_when_qwen_is_unavailable(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def unavailable(*args, **kwargs):
+        raise collaboration.HTTPException(status_code=503, detail="model unavailable")
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_run_companion_inference_with_metrics", unavailable)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc),
+            title="Sleep observation",
+            description="Caregiver reported that Mum slept poorly last night.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What has the caregiver recorded about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is False
+        assert data["written_to_lcr"] is False
+        assert data["guard_verdict"] == "passed"
+        assert "saved notes mention sleep" in data["reply"].casefold()
+        assert "slept poorly last night" in data["reply"].casefold()
+        assert "saved caregiver entries" in (data.get("safety_note") or "").casefold()
+        assert event_id in data["source_event_ids"]
+        assert data["persistence"] == "conversation_only"
+    finally:
+        teardown()
