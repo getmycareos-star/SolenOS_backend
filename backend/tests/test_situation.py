@@ -1731,6 +1731,22 @@ def test_situation_freshness_includes_new_persisted_care_events():
         assert current_after_reassessment.status_code == 200, current_after_reassessment.text
         assert current_after_reassessment.json()["assessment_id"] == reassessed.json()["assessment_id"]
         assert current_after_reassessment.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+
+        with TestingSessionLocal() as db:
+            event = db.query(CareEvent).filter_by(
+                id="freshness-new-daily-care-event",
+                person_id=person_id,
+            ).one()
+            event.description = "Caregiver corrected the standing-support detail."
+            db.commit()
+
+        after_event_correction = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert after_event_correction.status_code == 200, after_event_correction.text
+        assert after_event_correction.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+        assert after_event_correction.json()["source_freshness"]["reassessment_recommended"] is True
     finally:
         teardown_db()
 
