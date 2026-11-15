@@ -559,7 +559,7 @@ def test_daily_capture_does_not_report_longitudinal_processing_complete_when_del
         assert result["reconciliation_status"] == "completed"
         assert result["delta_reconciliation_status"] == "failed"
         assert result["delta_engine_output_persisted"] is False
-        assert result["longitudinal_processing_status"] == "incomplete"
+        assert result["longitudinal_processing_status"] == "retrying"
         assert result["longitudinal_processing_error"] == "delta_store_unavailable"
     finally:
         db.close()
