@@ -2208,6 +2208,7 @@ def _companion_replay_response(
     return {
         "session_id": saved_session.id,
         "person_id": person_id,
+        "source_message_id": metadata.get("source_message_id"),
         "care_update_candidates": care_update_candidates,
         "reply": assistant.content,
         "guard_verdict": assistant.guard_verdict,
@@ -7654,6 +7655,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     return {
         "session_id": session.id,
         "person_id": person_id,
+        "source_message_id": response_metadata.get("source_message_id"),
         "reply": reply,
         "guard_verdict": verdict,
         "safety_note": safety_note,
