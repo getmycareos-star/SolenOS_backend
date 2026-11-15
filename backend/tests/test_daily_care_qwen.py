@@ -596,3 +596,39 @@ def test_daily_care_answer_reports_records_omitted_from_bounded_model_context(mo
     assert scope["records_omitted_from_model"] >= 5
     assert scope["selection_truncated"] is True
     assert scope["prompt_context_truncated"] is True
+
+
+def test_companion_extracts_notes_from_structured_daily_capture_json_for_history_fallback():
+    question = "What has the caregiver recorded about sleep, lunch and dinner?"
+    reports = [
+        "Mum slept poorly last night and seemed more unsettled this morning.",
+        "Mum barely touched her lunch today. She drank some water, though.",
+        "Mum was calmer this evening. She ate a little more at dinner and is now resting.",
+    ]
+    lines = [
+        "Shared LCR context (source-attributed): " + json.dumps({
+            "source_type": "events",
+            "source_id": f"event-{index}",
+            "record": {
+                "status": "recorded",
+                "created_by_caregiver_id": "caregiver-1",
+                "description": json.dumps({
+                    "capture_kind": "natural_language_update",
+                    "notes": report,
+                    "capture_idempotency_key": f"capture-key-{index}",
+                }),
+            },
+        })
+        for index, report in enumerate(reports)
+    ]
+
+    answer = collaboration._care_history_extractive_answer(question, lines)
+    assert answer is not None
+    assert all(report in answer for report in reports)
+    assert "capture_kind" not in answer
+    assert "capture_idempotency_key" not in answer
+    assert len(re.findall(r"[a-z0-9']+", answer.casefold())) <= 55
+    assert collaboration._care_history_reply_covers_requested_topics(question, answer, lines)
+    assert not collaboration._contains_unsupported_operational_claim(
+        answer, question + "\\n" + "\\n".join(lines), lines
+    )
