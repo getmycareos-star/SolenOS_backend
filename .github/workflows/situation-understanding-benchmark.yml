@@ -34,6 +34,12 @@ on:
 permissions:
   contents: read
 
+# A new care-critical commit supersedes any older in-progress benchmark for
+# the same branch. The final main commit must receive the complete gate.
+concurrency:
+  group: messy-care-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   messy-care-contract:
     name: Messy-care adversarial contract benchmark
