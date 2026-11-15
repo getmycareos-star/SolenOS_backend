@@ -1139,11 +1139,17 @@ def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch, m
             lambda context: "Some required care history sources are unavailable.",
         )
         captured = {}
+        calls = []
+        outputs = iter([
+            "Welcome to SolenOS. This is your first time here, and your care story starts today.",
+            "Welcome to SolenOS. We can start with the care story you want to keep track of today.",
+        ])
         monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
 
         def fake_qwen(base, model, messages, options=None):
+            calls.append(messages)
             captured["prompt"] = messages[0]["content"]
-            return "Welcome to SolenOS. We can start with the care story you want to keep track of today."
+            return next(outputs)
 
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
         response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": "Hi"})
@@ -1151,6 +1157,9 @@ def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch, m
         assert "Caregiver orientation stage (derived from returned care-domain rows): unknown." in captured["prompt"]
         assert "CARE HISTORY STATUS UNKNOWN" in captured["prompt"]
         assert "NEW CARE RECORD" not in captured["prompt"]
+        assert len(calls) == 2
+        assert "Do not claim the caregiver is new or returning" in calls[1][-1]["content"]
+        assert "first time here" not in response.json()["reply"].casefold()
         assert response.json()["ai_generated"] is True
     finally:
         teardown_db()
