@@ -73,6 +73,10 @@ def client():
 
 def test_current_care_projection_is_read_only_and_person_scoped(client):
     test_client, owner, other = client
+    # Deliberately remove one required source to verify the projection fails
+    # closed and reports incomplete coverage rather than claiming completeness.
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE care_decisions")
     with engine.begin() as connection:
         connection.execute(text("""
             INSERT INTO care_facts (id, person_id, subject_type, subject_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
@@ -93,7 +97,7 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
     # SQLite fixture intentionally omits the full migration schema; the API must
     # report incomplete coverage rather than pretending this is the full LCR.
     assert body["schema_status"] != "complete"
-    assert body["missing_required_sources"]
+    assert "decisions" in body["missing_required_sources"]
 
 
 def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monkeypatch):
