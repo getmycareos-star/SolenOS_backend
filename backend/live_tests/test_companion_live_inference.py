@@ -446,6 +446,11 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
                 "format_lcr_context_for_prompt",
                 lambda context: "Some required care history sources are unavailable.",
             )
+            unknown_response = client.post(
+                "/api/lcr/orientation",
+                headers={"Authorization": f"Bearer {new_caregiver['access_token']}"},
+                json={"raw_input": "Hello"},
+            )
             assert_orientation(unknown_response, "unknown")
             repeated_unknown = client.post(
                 "/api/lcr/orientation",
