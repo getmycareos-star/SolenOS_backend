@@ -420,7 +420,7 @@ def source_event_snapshot_hash(event: CareEvent) -> str:
         "id": str(event.id),
         "person_id": str(event.person_id),
         "created_by_caregiver_id": str(event.created_by_caregiver_id or ""),
-        "status": str(event.status or ""),
+        "status": str(getattr(event, "status", "") or ""),
         "event_type": str(event.event_type or ""),
         "time_provenance": str(getattr(event, "time_provenance", "") or ""),
         "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
@@ -634,7 +634,7 @@ def _reconcile_from_change_intelligence(
             ).with_for_update().first()
             if (
                 current_event is None
-                or current_event.status in {"invalidated", "deleted"}
+                or getattr(current_event, "status", None) in {"invalidated", "deleted"}
                 or source_event_snapshot_hash(current_event) != source_event_snapshot_sha256
             ):
                 db.rollback()
@@ -911,7 +911,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         ).first()
         if source_event_row is None:
             raise HTTPException(status_code=422, detail="source_event_id must belong to this care record.")
-        if source_event_row.status in {"invalidated", "deleted"}:
+        if getattr(source_event_row, "status", None) in {"invalidated", "deleted"}:
             raise HTTPException(status_code=409, detail="The saved care update is no longer active.")
         if not _source_content_matches_event(content, source_event_row):
             raise HTTPException(
