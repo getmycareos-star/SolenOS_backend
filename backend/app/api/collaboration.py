@@ -5003,6 +5003,8 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
     else:
         return "I couldn't confirm a matching saved care note in the records I retrieved."
 
+    if topics and "medication" in {label for label, _ in topics}:
+        answer += " This is a caregiver report, not confirmation of the current prescription."
     word_count = len(re.findall(r"[a-z0-9']+", answer.casefold()))
     if word_count > 55:
         if topics and missing_topics:
@@ -5022,8 +5024,6 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
                 + ", but I can't summarize them reliably from the records retrieved."
             )
         return "I found saved care notes, but I can't summarize them reliably from the records retrieved."
-    if topics and "medication" in {label for label, _ in topics}:
-        answer += " This is a caregiver report, not confirmation of the current prescription."
     return answer
 
 
