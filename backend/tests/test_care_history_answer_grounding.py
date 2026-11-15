@@ -51,6 +51,25 @@ def test_history_fallback_covers_each_requested_topic_from_saved_event_reports()
     )
 
 
+def test_medication_dose_recall_quotes_the_uncertain_caregiver_report_without_inference():
+    context = [
+        _event_line(
+            "medication-event",
+            "I think the doctor changed Mum's medication yesterday, but I can't remember the new dose.",
+        ),
+    ]
+
+    question = "What new dose did the doctor prescribe for Mum yesterday?"
+    answer = _care_history_extractive_answer(question, context)
+
+    assert answer is not None
+    assert "I can't remember the new dose" in answer
+    assert "caregiver report" in answer
+    assert "not confirmation of the current prescription" in answer
+    assert not __import__("re").search(r"\\b\\d+(?:\\.\\d+)?\\s*(?:mg|mcg|ml)\\b", answer, __import__("re").I)
+    assert _care_history_reply_covers_requested_topics(question, answer, context)
+
+
 def test_history_fallback_refuses_to_summarize_when_a_requested_topic_is_missing():
     context = [
         _event_line("sleep-event", "Mum slept poorly last night."),
