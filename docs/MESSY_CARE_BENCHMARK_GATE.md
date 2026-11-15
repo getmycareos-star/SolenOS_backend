@@ -8,7 +8,7 @@ A capability is **not complete** because a route exists, a unit test passes, a m
 
 ## Current gate
 
-The GitHub Actions workflow `.github/workflows/situation-understanding-benchmark.yml` runs on pushes to `main` and manual dispatch. Implementation and benchmark changes are committed directly to `main`; this workstream does not use pull requests. It executes:
+The GitHub Actions workflow `.github/workflows/situation-understanding-benchmark.yml` is manually dispatched. It is an on-demand release/performance gate, not an automatic per-push check. Implementation and benchmark changes for this workstream are committed directly to `main`; this workstream does not use pull requests. It executes:
 
 - 10,000 deterministic adversarial uncertainty-classification cases (20 failure families × 500 variants), with per-case safety assertions and a corpus SHA-256.
 - 10,000 PostgreSQL-backed longitudinal event cases across 1,000 isolated synthetic histories (20 scenario families × 50 histories), with reporter attribution, five care domains, event/recorded-time separation, source anchors, person isolation, and fresh-session reconstruction asserted for every persisted record.
