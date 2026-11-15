@@ -886,7 +886,7 @@ def test_live_qwen_overwhelm_response_after_mixed_care_history():
         assert result.get("written_to_lcr") is False, result
         if result.get("ai_generated") is False:
             assert result.get("response_mode") == "deterministic_low_capacity_support_fallback", result
-            assert "grounding checks" in (result.get("safety_note") or "").casefold(), result
+            assert "couldn't confirm a reliable answer" in (result.get("safety_note") or "").casefold(), result
             assert result.get("source_event_ids") == [], result
             assert result.get("source_evidence_ids") == [], result
         assert 0 < len(reply.split()) <= 80, reply
