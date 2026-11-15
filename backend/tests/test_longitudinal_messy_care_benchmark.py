@@ -11,7 +11,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -22,6 +22,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.change import Change, Pattern, Baseline
 from app.models.observation_coverage import ObservationCoverage
+from app.models.care_continuity import CareAssertion
 from app.services.baseline import get_longitudinal_event_counts
 from app.services.change_detection import detect_event_changes
 from app.services.pattern_detection import detect_patterns
@@ -35,6 +36,22 @@ if _benchmark_database_url.startswith("sqlite"):
     if _benchmark_database_url == "sqlite:///:memory:":
         _engine_options["poolclass"] = StaticPool
 engine = create_engine(_benchmark_database_url, **_engine_options)
+if "care_assertion_revisions" not in Base.metadata.tables:
+    Table(
+        "care_assertion_revisions", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("assertion_id", String(36), ForeignKey("care_assertions.id"), nullable=False),
+        Column("revision_number", Integer, nullable=False),
+        Column("previous_payload", JSON),
+        Column("current_payload", JSON),
+        Column("revision_reason", Text),
+        Column("provenance_id", String(36)),
+        Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("changed_at", DateTime(timezone=True)),
+        UniqueConstraint("assertion_id", "revision_number"),
+    )
+
 TestingSessionLocal = sessionmaker(
     autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
 )
