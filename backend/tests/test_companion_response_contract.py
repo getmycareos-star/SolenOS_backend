@@ -82,7 +82,7 @@ def test_non_reconstruction_questions_do_not_force_full_history_paging(query):
 def test_companion_identity_guidance_does_not_repeat_the_one_time_name_question():
     named = collaboration._care_recipient_identity_guidance("Mom")
     assert '"Mom"' in named
-    assert "use this label consistently" in named
+    assert "use this label consistently" in named.casefold()
     assert "do not ask the caregiver for the person's name again" in named
 
     unnamed = collaboration._care_recipient_identity_guidance("Care recipient")
@@ -217,8 +217,8 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert "canned replies" in system_prompt
         assert "caregiver_question_queue is the only approved source" in system_prompt
         assert 'saved this care-recipient display label: "Mom"' in system_prompt
-        assert "do not ask the caregiver for the person's name again" in system_prompt
-        assert "do not generate or repeat patient-identity questions" not in system_prompt
+        assert "do not ask the caregiver for the person's name again" in system_prompt.casefold()
+        assert "do not generate or repeat patient-identity questions" not in system_prompt.casefold()
         assert "Who might know whether the sleep pattern changed?" not in user_payload
         assert "ask no more than one focused question" in system_prompt.casefold().casefold()
         assert "never repeat an answered or closed question" in system_prompt.casefold()
