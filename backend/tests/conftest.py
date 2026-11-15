@@ -6,7 +6,7 @@ so they continue to test service/schema behavior rather than fail at the auth bo
 """
 import pytest
 from sqlalchemy import (
-    Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint,
+    Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, func,
 )
 
 from app.core.database import Base
@@ -31,6 +31,57 @@ if "care_assertion_revisions" not in Base.metadata.tables:
         Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
         Column("changed_at", DateTime(timezone=True)),
         UniqueConstraint("assertion_id", "revision_number"),
+    )
+
+
+# SQLite create_all() fixtures need the same core LCR tables as the production
+# migration chain. These definitions are test-only schema mirrors.
+if "care_facts" not in Base.metadata.tables:
+    Table(
+        "care_facts", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("subject_type", String(80), nullable=False),
+        Column("subject_id", String(36)),
+        Column("fact_type", String(100), nullable=False),
+        Column("fact_value", Text, nullable=False),
+        Column("epistemic_status", String(32), nullable=False, server_default="reported"),
+        Column("effective_at", DateTime(timezone=True)),
+        Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("superseded_by_fact_id", String(36), ForeignKey("care_facts.id")),
+        Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("review_notes", Text),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+        Column("updated_at", DateTime(timezone=True)),
+    )
+
+if "care_record_change_sets" not in Base.metadata.tables:
+    Table(
+        "care_record_change_sets", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("care_record_id", String(36)),
+        Column("operation", String(60), nullable=False),
+        Column("status", String(32), nullable=False, server_default="committed"),
+        Column("reason", Text),
+        Column("author_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        Column("provenance_id", String(36)),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    )
+
+if "care_record_change_items" not in Base.metadata.tables:
+    Table(
+        "care_record_change_items", Base.metadata,
+        Column("id", String(36), primary_key=True),
+        Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+        Column("change_set_id", String(36), ForeignKey("care_record_change_sets.id"), nullable=False),
+        Column("target_type", String(100), nullable=False),
+        Column("target_id", String(36), nullable=False),
+        Column("operation", String(32), nullable=False),
+        Column("before_value", JSON),
+        Column("after_value", JSON),
+        Column("provenance_id", String(36)),
+        Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     )
 
 
