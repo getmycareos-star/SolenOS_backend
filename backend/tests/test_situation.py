@@ -1666,6 +1666,58 @@ def test_situation_freshness_includes_persisted_delta_engine_changes():
     finally:
         teardown_db()
 
+
+@pytest.mark.session_security
+def test_situation_freshness_includes_new_persisted_care_events():
+    """A newly saved Daily Care event must invalidate the prior situation snapshot."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Care Event Freshness Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+
+        initial = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert initial.status_code == 200, initial.text
+        assert initial.json()["status"] == "created"
+
+        current_before = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_before.status_code == 200, current_before.text
+        assert current_before.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+
+        with TestingSessionLocal() as db:
+            db.add(CareEvent(
+                id="freshness-new-daily-care-event",
+                person_id=person_id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=datetime(2026, 11, 14, 9, 0, tzinfo=timezone.utc),
+                title="Needed help standing",
+                description="Caregiver recorded that standing support was needed.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_observed",
+            ))
+            db.commit()
+
+        current_after = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_after.status_code == 200, current_after.text
+        assert current_after.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+        assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
+    finally:
+        teardown_db()
+
 @pytest.mark.session_security
 def test_saved_situation_assessment_survives_freshness_rebuild_failure(monkeypatch):
     """A failed freshness check must not hide the last persisted care picture."""
