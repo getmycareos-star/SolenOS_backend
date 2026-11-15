@@ -18,6 +18,7 @@ from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight,
 from app.models.care_continuity import CareRecordRelationship
 from app.models.memory import ReasoningMemory
 from app.models.uncertainty import OpenQuestion
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
 from app.services.learning import LearningEngine
 
@@ -1143,6 +1144,24 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
             description="She stopped taking her afternoon medication.",
             created_by_caregiver_id="caregiver-daily-test",
         ))
+        db.add(OpenLoopRecord(
+            id="loop-correction-retry",
+            person_id="person-daily-test",
+            caregiver_id="caregiver-daily-test",
+            loop_type="follow_up",
+            title="Confirm medication information",
+            description="Check whether the afternoon medication was stopped.",
+            status="open",
+            outcome_status="outcome_unknown",
+            source_type="care_event",
+            source_id="event-correction-retry",
+            source_fingerprint=hashlib.sha256(b"event-correction-retry").hexdigest(),
+            evidence=[],
+            uncertainty="unknown",
+            missing_information=[],
+            options=[],
+            version=1,
+        ))
         db.commit()
         db.close()
 
@@ -1262,6 +1281,15 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
             assert db.query(Correction).filter_by(person_id="person-daily-test").count() == 1
             original = db.query(CareEvent).filter_by(id="event-correction-retry").one()
             assert original.description == "She stopped taking her afternoon medication."
+            loop = db.query(OpenLoopRecord).filter_by(id="loop-correction-retry").one()
+            assert loop.status == "open"
+            assert loop.review_at is not None
+            assert loop.version == 2
+            event = db.query(OpenLoopEvent).filter_by(
+                loop_id=loop.id,
+                event_type="source_corrected_requires_review",
+            ).one()
+            assert event.evidence[0]["correction_id"] == correction_id
         finally:
             db.close()
     finally:
