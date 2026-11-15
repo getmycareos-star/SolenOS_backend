@@ -1946,10 +1946,23 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
             headers={"Authorization": f"Bearer {token}"},
             json={"person_id": person_id, "text": "I'm exhausted. I don't know what to do anymore."},
         )
-        assert response.status_code == 503, response.text
+        assert response.status_code == 200, response.text
+        body = response.json()
         assert len(calls) == 3
         assert all("current greeting" not in call[0][-1]["content"].casefold() for call in calls[1:])
         assert all("Use at most two short sentences" in call[0][-1]["content"] for call in calls[1:])
+        assert body["reply"] == (
+            "I hear that you're exhausted. "
+            "We can take this one concern at a time, using what you've already shared."
+        )
+        assert body["ai_generated"] is False
+        assert body["response_mode"] == "deterministic_low_capacity_support_fallback"
+        assert body["written_to_lcr"] is False
+        assert body["persistence"] == "conversation_only"
+        assert body["source_event_ids"] == []
+        assert body["source_evidence_ids"] == []
+        assert body["source_record_refs"] == []
+        assert "did not pass" in body["safety_note"]
     finally:
         teardown()
 
