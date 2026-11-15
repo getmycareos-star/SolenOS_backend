@@ -1897,3 +1897,94 @@ def test_delta_history_becomes_stale_when_baseline_change_or_situation_is_revise
             assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
     finally:
         teardown()
+
+
+def test_delta_freshness_tracks_real_orm_updates_to_baselines_changes_and_situations(monkeypatch):
+    """The ORM revision listener, not hand-inserted audit fixtures, invalidates Delta."""
+    from app.core.change_enums import (
+        BaselineConfidence, BaselineType, ChangeDirection, ChangeType,
+        SituationState, SituationType,
+    )
+    from app.models.change import Baseline, Change, Situation
+
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    reviewed_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    ids = {
+        "baseline": "orm-baseline-delta-freshness",
+        "change": "orm-change-delta-freshness",
+        "situation": "orm-situation-delta-freshness",
+        "run": "orm-delta-freshness-run",
+    }
+    try:
+        with TestingSessionLocal() as db:
+            baseline = Baseline(
+                id=ids["baseline"], person_id=person_id,
+                subject_type="person", subject_id=person_id,
+                baseline_type=BaselineType.PERSONAL_HISTORICAL,
+                window_start=reviewed_at - timedelta(days=30),
+                window_end=reviewed_at - timedelta(days=1),
+                event_count=3, confidence=BaselineConfidence.MODERATE,
+                is_stable=True, evidence_ids=[],
+            )
+            change = Change(
+                id=ids["change"], person_id=person_id,
+                subject_type="mobility", subject_id="mobility",
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                evidence_ids=[], is_active=True,
+            )
+            situation = Situation(
+                id=ids["situation"], person_id=person_id,
+                situation_type=SituationType.UNKNOWN,
+                state=SituationState.ACTIVE,
+                title="Recorded situation fixture",
+                signal_ids=[], signal_types=[],
+                temporal_start=reviewed_at - timedelta(days=2),
+                temporal_end=reviewed_at - timedelta(days=1),
+            )
+            db.add_all([baseline, change, situation])
+            db.commit()
+
+            db.add(CareDeltaRun(
+                id=ids["run"], person_id=person_id,
+                source="Caregiver report", event_date=reviewed_at,
+                evidence_ids=[], delta_json=json.dumps({"computed_changes": []}),
+                model_name="orm-freshness-regression",
+                created_by_caregiver_id=caregiver_id,
+                created_at=reviewed_at,
+            ))
+            db.commit()
+
+            baseline.state_value = "updated baseline"
+            baseline.coverage_status = "covered"
+            change.confirmation_status = "resolved"
+            change.is_active = False
+            situation.state = SituationState.RESOLVED
+            db.commit()
+
+            revisions = db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+                CareStateRevision.target_type.in_(("baselines", "changes", "situations")),
+                CareStateRevision.target_id.in_((ids["baseline"], ids["change"], ids["situation"])),
+            ).all()
+            assert len(revisions) == 6
+            assert {
+                (row.target_type, row.change_kind)
+                for row in revisions
+            } == {
+                ("baselines", "created"), ("baselines", "updated"),
+                ("changes", "created"), ("changes", "updated"),
+                ("situations", "created"), ("situations", "updated"),
+            }
+
+        response = client.get(
+            f"/api/v1/care-delta/runs/{person_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        run = next(item for item in response.json() if item["id"] == ids["run"])
+        assert run["source_freshness"]["status"] == "stale", run
+        assert run["source_freshness"]["changed_context_count"] == 3, run
+        assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
+    finally:
+        teardown()
