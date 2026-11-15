@@ -3427,8 +3427,15 @@ def _contains_unsupported_operational_claim(
         rf"\b(?:appointment|visit|call|review|test|scan|dose|medication|reminder)\b"
         rf"[^.!?]{0,60}\b(?:will|is scheduled|has been scheduled|is planned)\b"
     )
-    if re.search(future_claim, text) and not re.search(future_time, source):
-        return True
+    future_match = re.search(future_claim, text)
+    if future_match:
+        mentioned_time = re.search(future_time, future_match.group(0))
+        source_has_same_time = bool(
+            mentioned_time
+            and re.search(rf"\\b{re.escape(mentioned_time.group(0))}\\b", source)
+        )
+        if not source_has_same_time:
+            return True
     # Preserve who supplied information; a caregiver observing a person is not
     # equivalent to the person reporting their own symptoms.
     if re.search(r"\bcaregiver\s+(?:reports?|reported|says?|said|observed|noticed)\b", source) and re.search(
