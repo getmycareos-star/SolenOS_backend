@@ -558,6 +558,20 @@ def test_postgres_open_question_answer_versions_and_historical_unresolved_retrie
                     "answer": "The second source qualifies the first report; support remains unconfirmed.",
                     "answer_provenance": "Revised after reviewing the later source.",
                     "evidence_ids": [evidence_ids[1]],
+                    "context": [{
+                        "source_kind": "caregiver_report",
+                        "source_id": evidence_ids[1],
+                        "source_record_refs": [{
+                            "record_type": "evidence",
+                            "record_id": evidence_ids[1],
+                        }],
+                        "necessity_assessment": {
+                            "necessity": "necessary",
+                            "necessity_rationale": "The appointment preparation depends on knowing whether walking support was required.",
+                            "decision_dependency": "The caregiver cannot prepare an accurate mobility handoff until the later source is reconciled with the earlier report.",
+                            "evidence_ids": [evidence_ids[1]],
+                        },
+                    }],
                 },
             )
             assert revised_answer.status_code == 200, revised_answer.text
