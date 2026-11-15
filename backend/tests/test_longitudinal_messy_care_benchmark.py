@@ -1236,6 +1236,14 @@ def test_curated_100_scenarios_execute_through_delta_persistence(scenario, monke
             assert receipt["provenance"]["evidence_ids"] == run.evidence_ids
             assert "computed_changes" in receipt
             assert "claim_provenance" in receipt
+            for change in receipt.get("computed_changes", []):
+                if change.get("certainty") == "supported" and change.get("evidence_supported") is True:
+                    assert change.get("source_record_refs"), (
+                        "a caregiver-facing supported change must retain its exact source references"
+                    )
+                    assert change.get("source_reference_status") == "matched", (
+                        "a supported comparison must expose successful source-reference validation"
+                    )
             for claim in receipt["claim_provenance"]["claims"]:
                 if claim["support_status"] in {"matched_source_and_state", "matched_competing_sources"}:
                     assert claim["source_references"], "a supported Delta finding must name its actual source records"
