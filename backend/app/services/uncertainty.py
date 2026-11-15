@@ -471,6 +471,42 @@ def persist_source_clarification_questions(
                 and row.subject_id == subject_id
                 and _question_matches_source_field(row, contexts_to_add)
             ), None)
+        # A replay of the same persisted source with the same evidence and
+        # assessment must not touch the question or invoke lifecycle reassessment.
+        if existing is not None:
+            existing_contexts = [item for item in (existing.context or []) if isinstance(item, dict)]
+            existing_source_context = next((
+                item for item in existing_contexts
+                if item.get("source_kind") == source_kind
+                and str(item.get("source_id") or "") == str(source_record_id)
+            ), None)
+            existing_source_refs = {
+                json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+                for item in (existing_source_context or {}).get("source_record_refs", [])
+                if isinstance(item, dict)
+            }
+            requested_source_refs = {
+                json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+                for item in source_refs
+            }
+            existing_evidence_ids = set(str(value) for value in (existing.evidence_ids or []))
+            replay_is_unchanged = (
+                existing.question == question_text
+                and requested_source_refs.issubset(existing_source_refs)
+                and set(assessed_evidence_ids).issubset(existing_evidence_ids)
+                and (
+                    not matched_gap
+                    or (
+                        existing.necessity == "necessary"
+                        and existing.necessity_rationale == necessity_rationale
+                        and existing.priority == priority
+                        and existing.intended_answerer_role == "reporting_caregiver"
+                    )
+                )
+            )
+            if replay_is_unchanged:
+                persisted.append(existing)
+                continue
         candidate_grounding = {
             "source_ids": [matched_gap[0].id] if matched_gap else [source_record_id],
             "evidence_ids": matched_gap[3] if matched_gap else linked_ids,
