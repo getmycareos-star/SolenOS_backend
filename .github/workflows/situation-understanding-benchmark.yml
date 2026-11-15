@@ -14,6 +14,7 @@ on:
       - "backend/tests/test_evidence_review_persistence.py"
       - "backend/tests/test_unified_lcr_retrieval.py"
       - "backend/app/api/change.py"
+      - "backend/app/core/change_enums.py"
       - "backend/app/api/care_continuity.py"
       - "backend/app/api/collaboration.py"
       - "backend/app/api/v1.py"
