@@ -800,9 +800,17 @@ def next_best_questions(
         Contradiction.resolution_status.in_(("unresolved", "reopened", "partially_resolved", "qualified")),
     ).all()
     for item in contradictions:
+        normalized_conflict_field = " ".join(
+            str(item.field or "").strip().casefold().replace("-", "_").split()
+        ).replace(" ", "_")
         is_medication_conflict = (
             str(item.subject_type or "").strip().casefold() in {"medication", "medications"}
-            or "medication" in str(item.field or "").casefold()
+            or normalized_conflict_field in {
+                "medication_instruction",
+                "current_medication_instruction",
+                "prescription_instruction",
+                "current_prescription_instruction",
+            }
         )
         if is_medication_conflict:
             # A competing current medication instruction is a concrete decision
