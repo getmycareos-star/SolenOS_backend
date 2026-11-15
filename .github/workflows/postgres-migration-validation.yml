@@ -105,6 +105,56 @@ jobs:
           print(f"SITUATION_STATE_ENUM_VALUES={sorted(values)}")
           PY
 
+      - name: Verify missing caregiver responsibility transfer table is repaired
+        working-directory: backend
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(text(
+                  "DROP TABLE IF EXISTS caregiver_responsibility_transfers CASCADE"
+              ))
+          PY
+          # Simulate a production database whose earlier caregiver-access
+          # revision is stamped although this one table is missing.
+          python -m alembic stamp 20261115_01_situation_states
+          python -m alembic upgrade head
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          table = "caregiver_responsibility_transfers"
+          if not inspector.has_table(table):
+              raise SystemExit("Caregiver responsibility transfer table was not repaired")
+          columns = {column["name"] for column in inspector.get_columns(table)}
+          required = {
+              "id", "person_id", "source_responsibility_id",
+              "from_caregiver_profile_id", "to_caregiver_profile_id",
+              "created_by_caregiver_id", "related_record_type", "related_record_id",
+              "reason", "status", "created_at", "accepted_at",
+              "accepted_by_caregiver_id",
+          }
+          missing = required - columns
+          if missing:
+              raise SystemExit(f"Missing repaired caregiver transfer columns: {sorted(missing)}")
+          indexes = {item["name"] for item in inspector.get_indexes(table)}
+          required_indexes = {
+              "ix_caregiver_responsibility_transfers_person_id",
+              "ix_caregiver_responsibility_transfers_source_responsibility_id",
+              "ix_caregiver_responsibility_transfers_status",
+          }
+          missing_indexes = required_indexes - indexes
+          if missing_indexes:
+              raise SystemExit(f"Missing repaired caregiver transfer indexes: {sorted(missing_indexes)}")
+          print("CAREGIVER_RESPONSIBILITY_TRANSFER_REPAIR=PASS")
+          PY
+
       - name: Verify appointment idempotency migration downgrade and re-upgrade
         working-directory: backend
         run: |
