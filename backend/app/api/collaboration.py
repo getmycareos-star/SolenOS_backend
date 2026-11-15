@@ -6244,66 +6244,66 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
             if (
-            _CARE_HISTORY_INTENT_PATTERN.search(user_text or "")
-            and _care_history_requested_topics(user_text)
-        ):
-            care_history_recall_context = _care_history_recall_context_lines(
-                db, person_id, user_text,
-            )
-            direct_event_ids = set(_context_record_ids(
-                care_history_recall_context["event_lines"], "event_id",
-            ))
-            direct_evidence_ids = set(_context_record_ids(
-                care_history_recall_context["evidence_lines"], "evidence_id",
-            ))
-
-            def without_history_records(
-                lines: list[str], id_key: str, identifiers: set[str],
-            ) -> list[str]:
-                if not identifiers:
-                    return lines
-                retained: list[str] = []
-                for line in lines:
-                    try:
-                        payload = json.loads(line[line.index("{"):])
-                        record_id = str(payload.get(id_key) or "")
-                    except (ValueError, TypeError, json.JSONDecodeError):
-                        retained.append(line)
-                        continue
-                    if record_id not in identifiers:
-                        retained.append(line)
-                return retained
-
-            # Replace ranked variants with the exact caregiver-authored reports.
-            event_context = without_history_records(event_context, "event_id", direct_event_ids)
-            evidence_context = without_history_records(evidence_context, "evidence_id", direct_evidence_ids)
-            shared_lcr_lines = without_history_records(shared_lcr_lines, "event_id", direct_event_ids)
-            shared_lcr_lines = without_history_records(shared_lcr_lines, "evidence_id", direct_evidence_ids)
-            event_context = list(dict.fromkeys([
-                *event_context, *care_history_recall_context["event_lines"],
-            ]))
-            evidence_context = list(dict.fromkeys([
-                *evidence_context, *care_history_recall_context["evidence_lines"],
-            ]))
-            shared_lcr_lines = list(dict.fromkeys([
-                *shared_lcr_lines,
-                *care_history_recall_context["event_lines"],
-                *care_history_recall_context["evidence_lines"],
-            ]))
-            lcr_context_coverage["direct_care_history_recall"] = {
-                "status": (
-                    "partial" if care_history_recall_context["has_more"]
-                    else "available" if care_history_recall_context["event_lines"]
-                    else "no_matching_record"
-                ),
-                "event_count": len(care_history_recall_context["event_lines"]),
-                "evidence_count": len(care_history_recall_context["evidence_lines"]),
-                "history_complete": not care_history_recall_context["has_more"],
-            }
-            if care_history_recall_context["has_more"]:
-                lcr_context_coverage["retrieval_projection_complete"] = False
-                lcr_context_coverage["page_limit_reached"] = True
-
+                _CARE_HISTORY_INTENT_PATTERN.search(user_text or "")
+                and _care_history_requested_topics(user_text)
+            ):
+                care_history_recall_context = _care_history_recall_context_lines(
+                    db, person_id, user_text,
+                )
+                direct_event_ids = set(_context_record_ids(
+                    care_history_recall_context["event_lines"], "event_id",
+                ))
+                direct_evidence_ids = set(_context_record_ids(
+                    care_history_recall_context["evidence_lines"], "evidence_id",
+                ))
+    
+                def without_history_records(
+                    lines: list[str], id_key: str, identifiers: set[str],
+                ) -> list[str]:
+                    if not identifiers:
+                        return lines
+                    retained: list[str] = []
+                    for line in lines:
+                        try:
+                            payload = json.loads(line[line.index("{"):])
+                            record_id = str(payload.get(id_key) or "")
+                        except (ValueError, TypeError, json.JSONDecodeError):
+                            retained.append(line)
+                            continue
+                        if record_id not in identifiers:
+                            retained.append(line)
+                    return retained
+    
+                # Replace ranked variants with the exact caregiver-authored reports.
+                event_context = without_history_records(event_context, "event_id", direct_event_ids)
+                evidence_context = without_history_records(evidence_context, "evidence_id", direct_evidence_ids)
+                shared_lcr_lines = without_history_records(shared_lcr_lines, "event_id", direct_event_ids)
+                shared_lcr_lines = without_history_records(shared_lcr_lines, "evidence_id", direct_evidence_ids)
+                event_context = list(dict.fromkeys([
+                    *event_context, *care_history_recall_context["event_lines"],
+                ]))
+                evidence_context = list(dict.fromkeys([
+                    *evidence_context, *care_history_recall_context["evidence_lines"],
+                ]))
+                shared_lcr_lines = list(dict.fromkeys([
+                    *shared_lcr_lines,
+                    *care_history_recall_context["event_lines"],
+                    *care_history_recall_context["evidence_lines"],
+                ]))
+                lcr_context_coverage["direct_care_history_recall"] = {
+                    "status": (
+                        "partial" if care_history_recall_context["has_more"]
+                        else "available" if care_history_recall_context["event_lines"]
+                        else "no_matching_record"
+                    ),
+                    "event_count": len(care_history_recall_context["event_lines"]),
+                    "evidence_count": len(care_history_recall_context["evidence_lines"]),
+                    "history_complete": not care_history_recall_context["has_more"],
+                }
+                if care_history_recall_context["has_more"]:
+                    lcr_context_coverage["retrieval_projection_complete"] = False
+                    lcr_context_coverage["page_limit_reached"] = True
+    
         source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
