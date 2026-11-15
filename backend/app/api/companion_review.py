@@ -27,6 +27,10 @@ class CompanionCareUpdateReview(BaseModel):
     correction_context: str | None = Field(default=None, max_length=4000)
 
 
+class CompanionCareUpdateCapture(BaseModel):
+    source_message_id: str = Field(min_length=1, max_length=128)
+
+
 def _parse_explicit_event_time(value: str | None):
     """Parse only unambiguous timezone-aware ISO timestamps; retain other wording separately."""
     if not isinstance(value, str) or not value.strip():
@@ -225,6 +229,79 @@ def review_qwen_assistance_proposal(
         "reconciliation": execution,
         "idempotent_replay": False,
     }
+
+
+@router.post("/capture")
+def create_companion_care_update_capture(
+    payload: CompanionCareUpdateCapture,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Prepare exact caregiver-authored wording for explicit Care Record review."""
+    person_id, caregiver_id = _scope(request, db)
+    source_message = db.query(ConversationMessage).join(
+        ConversationSession,
+        ConversationSession.id == ConversationMessage.session_id,
+    ).filter(
+        ConversationMessage.id == payload.source_message_id,
+        ConversationMessage.role == "user",
+        ConversationSession.person_id == person_id,
+        ConversationSession.caregiver_id == caregiver_id,
+        ConversationSession.status == "active",
+    ).first()
+    if source_message is None:
+        raise HTTPException(status_code=404, detail="Your original message could not be found")
+    source_text = (source_message.content or "").strip()
+    if len(source_text) < 8 or len(source_text) > 4000:
+        raise HTTPException(status_code=422, detail="Only messages between 8 and 4,000 characters can be added for review")
+
+    existing = db.query(AIOutputLCRProposal).filter(
+        AIOutputLCRProposal.person_id == person_id,
+        AIOutputLCRProposal.caregiver_id == caregiver_id,
+        AIOutputLCRProposal.proposal_type == "companion_care_observation",
+        AIOutputLCRProposal.source_message_id == source_message.id,
+        AIOutputLCRProposal.candidate_index == 0,
+        AIOutputLCRProposal.proposal_version == 1,
+    ).first()
+    if existing is not None:
+        return {"proposal": _proposal_json(existing), "idempotent_replay": True}
+
+    proposal = AIOutputLCRProposal(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        proposal_type="companion_care_observation",
+        proposed_change_json={
+            "subject_type": "person",
+            "subject_id": person_id,
+            "field": "care_observation",
+            "assertion_kind": "time_bound_observation",
+            "asserted_value": source_text,
+            "source_quote": source_text,
+            "event_time_text": None,
+            "source_message_id": source_message.id,
+            "source_conversation_id": source_message.session_id,
+            "information_status": "caregiver_reported_pending_review",
+            "model_generated_paraphrase_used": False,
+        },
+        source_event_ids_json=[],
+        source_evidence_ids_json=[],
+        rationale="Caregiver asked to review this exact original message for addition to the Care Record. No AI extraction or paraphrase was used.",
+        uncertainty_json={"source_grounding": "exact_original_message", "event_time": "not_supplied"},
+        source_conversation_id=source_message.session_id,
+        source_message_id=source_message.id,
+        candidate_index=0,
+        proposal_version=1,
+        status="pending_authorization",
+    )
+    try:
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="This message could not be prepared for review. Please try again.") from exc
+    return {"proposal": _proposal_json(proposal), "idempotent_replay": False}
 
 
 @router.get("")
