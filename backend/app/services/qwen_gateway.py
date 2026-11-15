@@ -82,12 +82,13 @@ def qwen_chat(
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         _log_inference_result(os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"))
         raise
-    # Keep inference memory bounded for Railway deployments. The 4B model's
-    # default context window can allocate a large KV cache and destabilize the
-    # same container that hosts FastAPI. Every workflow uses the shared gateway,
-    # so the limit applies consistently without changing model authority.
+    # Keep the model context bounded, but large enough for the authorized
+    # source-grounded care context. A 1,024-token window silently truncates
+    # multi-record prompts (often to their instructions), causing grounded
+    # Companion answers to fail even when retrieval succeeded. Deployments
+    # with tighter memory limits can explicitly lower OLLAMA_NUM_CTX.
     try:
-        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "1024")), 8192))
+        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "8192")), 8192))
     except (TypeError, ValueError):
         num_ctx = 1024
     try:
