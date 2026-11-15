@@ -477,7 +477,7 @@ def persist_source_clarification_questions(
                 existing_source_context is not None
                 and existing.question == question_text
                 and set(assessed_evidence_ids).issubset(existing_evidence_ids)
-                and (not matched_gap or existing.necessity == "necessary")
+                and (not matched_gap or (existing.necessity == "necessary" and existing.necessity_rationale == necessity_rationale))
             ):
                 persisted.append(existing)
                 continue
