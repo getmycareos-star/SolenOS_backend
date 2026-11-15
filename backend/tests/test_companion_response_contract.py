@@ -1106,6 +1106,98 @@ def test_companion_retrieves_original_care_reports_for_spanish_and_french_topics
         teardown()
 
 
+@pytest.mark.parametrize(
+    ("language", "question", "report", "expected_prefix"),
+    [
+        (
+            "es",
+            "¿Qué hemos registrado sobre el sueño?",
+            "Mum woke several times during the night.",
+            "Las notas guardadas mencionan el sueño.",
+        ),
+        (
+            "fr",
+            "Qu'est-ce qu'on a noté sur le sommeil ?",
+            "Mum woke several times during the night.",
+            "Les notes enregistrées mentionnent le sommeil.",
+        ),
+    ],
+)
+def test_companion_outage_history_fallback_uses_selected_language_and_original_quote(
+    monkeypatch, language, question, report, expected_prefix,
+):
+    from fastapi import HTTPException
+
+    client = setup_client(monkeypatch)
+
+    def unavailable_qwen(*args, **kwargs):
+        raise HTTPException(status_code=503, detail="model unavailable")
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", unavailable_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            id=f"multilingual-fallback-{language}",
+            person_id=person_id,
+            event_type="caregiver_report",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Sleep report",
+            description=report,
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": question, "language": language},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["reply"].startswith(expected_prefix)
+        assert f"«{report}»" in body["reply"]
+        assert event_id in body["source_event_ids"]
+        assert body["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_non_english_companion_does_not_use_english_saved_question_shortcut(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "Puedo ayudarte a preparar preguntas para el médico."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "What questions should I ask the doctor?",
+                "language": "es",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "Puedo ayudarte a preparar preguntas para el médico."
+        assert captured["messages"]
+        assert "Respond to the caregiver in Spanish" in captured["messages"][0]["content"]
+    finally:
+        teardown()
+
+
 def test_companion_context_filter_excludes_unrelated_records_for_specific_question():
     sleep = 'LCR event evidence: {"event_id":"sleep-1","title":"Sleep history","description":"Restless sleep."}'
     household = 'LCR event evidence: {"event_id":"home-1","title":"Unrelated household note 1","description":"Household activity note."}'
