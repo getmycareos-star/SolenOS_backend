@@ -402,7 +402,7 @@ def _source_content_matches_event(content: str, event: CareEvent) -> bool:
     try:
         incoming_payload = json.loads(incoming)
         saved_payload = json.loads(saved_description)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return False
 
     if not isinstance(incoming_payload, dict) or not isinstance(saved_payload, dict) or not incoming_payload:
