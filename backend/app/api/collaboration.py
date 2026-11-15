@@ -6464,7 +6464,33 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "error_type": type(exc).__name__,
                 }, separators=(",", ":")),
             )
-            if not emergency and "LOW-CAPACITY RESPONSE" in caregiver_guidance:
+            unsupported_trend_fallback = bool(
+                trend_assessment and not trend_assessment.get("sufficient")
+            )
+            conflict_fallback = _contradictory_event_evidence_response(user_text, event_context)
+            missing_measurement_fallback = _missing_requested_measurement_response(
+                user_text,
+                [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
+            )
+            medication_safety_fallback = _medication_change_safety_response(user_text)
+            if _should_use_medication_dose_recall_fallback(
+                user_text,
+                emergency=emergency,
+                unsupported_trend=unsupported_trend_fallback,
+                conflict_response=conflict_fallback,
+                missing_measurement_reply=missing_measurement_fallback,
+                medication_change_reply=medication_safety_fallback,
+            ):
+                reply = _care_history_extractive_answer(
+                    user_text, included_model_context_lines
+                ) or (
+                    "I can't confirm the prescribed dose from the records retrieved. "
+                    "Please check the prescription or ask the prescriber or pharmacist."
+                )
+                care_history_fallback_from_outage = bool(
+                    reply.startswith("The saved notes mention medication:")
+                )
+            elif not emergency and "LOW-CAPACITY RESPONSE" in caregiver_guidance:
                 reply = (
                     "I hear that you're exhausted. "
                     "We can take this one concern at a time."
