@@ -2104,7 +2104,7 @@ def prepare_handoff_draft(
         ],
         "evidence_lineage": evidence_lineage,
         "limitations": gaps,
-        "retrieval_complete": not gaps,
+        "retrieval_complete": retrieval_complete,
         "partial_sources": partial_sources,
         "warning": "This is a draft from the listed saved records only. Unavailable or partially retrieved sources were not fully read. Verify every item and resolve uncertainty before sharing.",
     }
