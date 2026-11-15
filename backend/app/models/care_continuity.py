@@ -173,6 +173,14 @@ def _version_care_state(session, flush_context, instances):
     if any(isinstance(obj, (CareStateRevision, EvidenceReviewRecord)) for obj in list(session.dirty) + list(session.deleted)):
         raise ValueError("Care-state revisions and evidence review records are append-only and cannot be updated or deleted")
     candidates = list(session.new) + list(session.dirty) + list(session.deleted)
+    # Acquire per-target advisory locks in a deterministic order so a transaction
+    # touching multiple care records cannot deadlock another transaction that
+    # touches the same records in the opposite ORM collection order.
+    candidates.sort(key=lambda obj: (
+        str(getattr(getattr(obj, "__table__", None), "name", "") or ""),
+        str(getattr(obj, "person_id", "") or ""),
+        str(getattr(obj, "id", "") or ""),
+    ))
     seen = set()
     for obj in candidates:
         table = getattr(getattr(obj, "__table__", None), "name", None)
