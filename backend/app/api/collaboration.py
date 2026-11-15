@@ -6298,6 +6298,53 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         assertion_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 20)
         )
+        # A direct "what have I told you about X?" question must retain
+        # caregiver-reviewed assertions even when lexical ranking would discard
+        # the source label or field name. Match only explicit user-topic terms.
+        if _CARE_HISTORY_INTENT_PATTERN.search(user_text or "") and direct_terms:
+            care_history_assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                or_(
+                    CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
+                    and_(
+                        CareAssertion.assertion_status == "reported",
+                        CareAssertion.created_by_caregiver_id.isnot(None),
+                    ),
+                ),
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        CareAssertion.field, CareAssertion.asserted_value,
+                        CareAssertion.source_label, CareAssertion.source_text,
+                    )
+                    for term in direct_terms
+                ]),
+            ).order_by(CareAssertion.recorded_at.desc()).limit(20).all()
+            retained_assertion_ids = set(_context_record_ids(assertion_context, "assertion_id"))
+            for assertion in care_history_assertions:
+                assertion_id = str(assertion.id)
+                if assertion_id in retained_assertion_ids:
+                    continue
+                information_status, interpretation_limit = assertion_information_status(
+                    assertion.epistemic_state, assertion.assertion_status,
+                )
+                assertion_context.append(
+                    "Caregiver-attributed LCR assertion (status preserved): "
+                    + json.dumps({
+                        "assertion_id": assertion_id,
+                        "field": assertion.field,
+                        "value": assertion.asserted_value,
+                        "assertion_kind": assertion.assertion_kind,
+                        "source_label": assertion.source_label,
+                        "source_text": (assertion.source_text or "")[:500],
+                        "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                        "epistemic_state": assertion.epistemic_state or "reported",
+                        "status": assertion.assertion_status,
+                        "information_status": information_status,
+                        "interpretation_limit": interpretation_limit,
+                    }, ensure_ascii=False)
+                )
+                retained_assertion_ids.add(assertion_id)
         appointment_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, appointment_context, 15)
         )
