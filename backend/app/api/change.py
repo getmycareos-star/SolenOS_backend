@@ -619,6 +619,31 @@ def get_situation_detail(
         if assertion.source_event_id:
             source_ids.add(str(assertion.source_event_id))
 
+    # Assertions can point to a care event that was not in the situation's
+    # original signal_ids. Resolve those newly discovered links before building
+    # observations/documents so the detail response does not silently omit the
+    # event that supports the assertion.
+    known_event_ids = {str(event.id) for event in events}
+    linked_event_ids = {str(value) for value in source_ids} - known_event_ids
+    if linked_event_ids:
+        linked_events = db.query(CareEvent).filter(
+            CareEvent.person_id == person_id,
+            CareEvent.id.in_(linked_event_ids),
+        ).all()
+        for event in linked_events:
+            source_records.append(SituationSourceRecord(
+                id=event.id,
+                source_type="care_record",
+                title=str(event.title or event.event_type or "Care record")[:240],
+                excerpt=str(event.description or "")[:1000] or None,
+                occurred_at=event.occurred_at,
+                recorded_at=getattr(event, "recorded_at", None) or getattr(event, "created_at", None),
+                source_label="Care record",
+                status=str(event.status or ""),
+                evidence_ids=list(event.evidence_ids or []),
+            ))
+            source_ids.update(event.evidence_ids or [])
+
     observations = db.query(EvidenceObservation).filter(
         EvidenceObservation.person_id == person_id,
         EvidenceObservation.id.in_(source_ids or {"__none__"}),
