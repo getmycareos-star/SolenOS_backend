@@ -4911,6 +4911,52 @@ def _care_history_requested_topics(user_text: str) -> list[tuple[str, set[str]]]
     ]
 
 
+def _care_history_event_text(record: dict[str, Any]) -> str:
+    """Extract caregiver-authored prose from structured Daily Capture event JSON."""
+    raw_description = record.get("description")
+    if not isinstance(raw_description, str) or not raw_description.strip():
+        return ""
+    try:
+        payload = json.loads(raw_description)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return re.sub(r"\s+", " ", raw_description).strip()
+    if not isinstance(payload, dict):
+        return re.sub(r"\s+", " ", raw_description).strip()
+
+    sources = [payload]
+    original_capture = payload.get("original_capture")
+    if isinstance(original_capture, dict):
+        sources.insert(0, original_capture)
+    extracted: list[str] = []
+    for source in sources:
+        for field in ("notes", "summary", "description", "observations", "observation", "details", "care_notes"):
+            value = source.get(field)
+            if isinstance(value, str) and value.strip():
+                extracted.append(value.strip())
+            elif isinstance(value, (dict, list)) and value:
+                extracted.append(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str))
+        quick_check_in = source.get("quick_check_in")
+        if isinstance(quick_check_in, dict):
+            for field in ("note", "notes"):
+                value = quick_check_in.get(field)
+                if isinstance(value, str) and value.strip():
+                    extracted.append(value.strip())
+            selected_areas = quick_check_in.get("selected_areas")
+            if isinstance(selected_areas, list) and selected_areas:
+                extracted.append("Selected care areas: " + ", ".join(
+                    str(value).strip() for value in selected_areas if str(value).strip()
+                ))
+        for field in ("medications", "vitals", "scales"):
+            value = source.get(field)
+            if isinstance(value, list) and value:
+                extracted.append(
+                    f"{field}: " + json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+                )
+    if not extracted:
+        return re.sub(r"\s+", " ", raw_description).strip()
+    return re.sub(r"\s+", " ", " ".join(dict.fromkeys(extracted))).strip()
+
+
 def _care_history_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
     """Return only caregiver-authored event descriptions relevant to a history question."""
     if not _CARE_HISTORY_INTENT_PATTERN.search(user_text or ""):
@@ -4936,8 +4982,8 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             continue
         if str(record.get("status") or "").strip().casefold() != "recorded":
             continue
-        description = record.get("description")
-        if not isinstance(description, str) or not description.strip():
+        description = _care_history_event_text(record)
+        if not description:
             continue
         terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
         matched_topics = {
@@ -5103,8 +5149,8 @@ def _care_history_reply_covers_requested_topics(
         record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
         if not record.get("created_by_caregiver_id") or str(record.get("status") or "").strip().casefold() != "recorded":
             continue
-        description = record.get("description")
-        if not isinstance(description, str):
+        description = _care_history_event_text(record)
+        if not description:
             continue
         terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
         if not topics:
