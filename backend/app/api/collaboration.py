@@ -3409,8 +3409,25 @@ def _contains_unsupported_operational_claim(
         r"\b(?:unsure|worried|afraid|anxious|confused|upset)\b", source
     ):
         return True
-    future_time = r"\b(?:tonight|tomorrow|later today|this evening|next week|next month)\b"
-    if re.search(future_time, text) and not re.search(future_time, source):
+    # A caregiver-facing reassurance may mention tonight or tomorrow without
+    # asserting that a care event is scheduled or will occur. Reject only
+    # unsupported future-state claims about a person, appointment, medication,
+    # reminder, test, or care-team action; do not reject benign time references.
+    future_time = r"(?:tonight|tomorrow|later today|this evening|next week|next month)"
+    future_subject = (
+        r"(?:she|he|they|the person|the caregiver|mum|mom|dad|the appointment|"
+        r"the doctor|the care team|the reminder|the medication|the dose|the test|the result)"
+    )
+    future_claim = (
+        rf"\b{future_subject}\b[^.!?]{0,80}"
+        rf"\b(?:will|shall|is|was|are|were|is going to|are going to|"
+        rf"is scheduled|has been scheduled|was scheduled|is planned|has been planned)\b"
+        rf"[^.!?]{0,80}\b{future_time}\b"
+        rf"|\b{future_time}\b[^.!?]{0,80}"
+        rf"\b(?:appointment|visit|call|review|test|scan|dose|medication|reminder)\b"
+        rf"[^.!?]{0,60}\b(?:will|is scheduled|has been scheduled|is planned)\b"
+    )
+    if re.search(future_claim, text) and not re.search(future_time, source):
         return True
     # Preserve who supplied information; a caregiver observing a person is not
     # equivalent to the person reporting their own symptoms.
