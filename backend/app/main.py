@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
+from app.models.care import Correction as CorrectionModel
 from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
@@ -159,6 +160,48 @@ class RequestBodySizeLimitMiddleware:
         await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
 settings = get_settings()
+
+async def correction_recovery_loop():
+    """Retry durable correction receipts left pending by failed or crashed workers."""
+    from datetime import timedelta
+    from app.api.v1 import _process_persisted_correction
+
+    while True:
+        db = SessionLocal()
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+            stale_processing = db.query(CorrectionModel).filter(
+                CorrectionModel.processing_status == "processing",
+                CorrectionModel.processing_started_at.is_not(None),
+                CorrectionModel.processing_started_at < cutoff,
+            )
+            pending = db.query(CorrectionModel).filter(
+                CorrectionModel.processing_status == "pending"
+            )
+            candidate_ids = [row.id for row in pending.order_by(CorrectionModel.created_at.asc()).limit(20).all()]
+            candidate_ids.extend(
+                row.id for row in stale_processing.order_by(CorrectionModel.processing_started_at.asc()).limit(20).all()
+            )
+            db.close()
+            for correction_id in dict.fromkeys(candidate_ids):
+                worker_db = SessionLocal()
+                try:
+                    row = worker_db.query(CorrectionModel).filter(CorrectionModel.id == correction_id).first()
+                    if row is not None:
+                        _process_persisted_correction(worker_db, row.person_id, row.id)
+                except Exception:
+                    logger.exception("Durable correction recovery failed for %s", correction_id)
+                finally:
+                    worker_db.close()
+        except asyncio.CancelledError:
+            db.close()
+            raise
+        except Exception:
+            logger.exception("Correction recovery scan failed")
+            db.close()
+        await asyncio.sleep(15)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Own background worker tasks for the complete ASGI application lifespan."""
@@ -170,6 +213,8 @@ async def lifespan(app: FastAPI):
         tasks.append(app.state.open_loop_maintenance_task)
         app.state.reminder_delivery_task = asyncio.create_task(reminder_delivery_loop())
         tasks.append(app.state.reminder_delivery_task)
+        app.state.correction_recovery_task = asyncio.create_task(correction_recovery_loop())
+        tasks.append(app.state.correction_recovery_task)
         yield
     finally:
         for task in tasks:
