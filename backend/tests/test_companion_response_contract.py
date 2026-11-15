@@ -1746,7 +1746,8 @@ def test_companion_reports_missing_history_topic_instead_of_filling_it_in(monkey
         assert "I couldn't confirm dinner" in reply
         assert "dinner went well" not in reply
         assert response.json()["written_to_lcr"] is False
-        assert len(calls) == 1
+        assert len(calls) == 0, "an explicit saved-history lookup must use exact source retrieval instead of model inference"
+        assert response.json()["response_mode"] == "source_quoted_care_history"
     finally:
         teardown()
 
