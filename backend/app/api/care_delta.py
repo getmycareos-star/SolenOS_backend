@@ -50,13 +50,13 @@ def reconcile_care_event(payload: CareDeltaReconcileRequest, request: Request, d
 
 
 @router.get("/runs/{person_id}")
-def list_delta_runs(person_id: str, request: Request, limit: int = 25, db: Session = Depends(get_db)):
+def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: int = 0, db: Session = Depends(get_db)):
     scoped_person_id, _ = _scoped_identity(request, db)
     if str(person_id) != str(scoped_person_id):
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     rows = db.query(CareDeltaRun).filter(
         CareDeltaRun.person_id == scoped_person_id
-    ).order_by(CareDeltaRun.created_at.desc()).limit(max(1, min(limit, 100))).all()
+    ).order_by(CareDeltaRun.created_at.desc()).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
     output = []
     for row in rows:
         try:
