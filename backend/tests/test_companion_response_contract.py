@@ -2119,3 +2119,15 @@ def test_operational_guard_still_rejects_unsupported_future_care_claim():
     reply = "Mum will be calmer tomorrow."
     assert collaboration._contains_unsupported_operational_claim(reply, source, []) is True
 
+
+def test_operational_guard_allows_future_claim_explicitly_present_in_source():
+    source = "Mum will be calmer tomorrow."
+    reply = "Mum will be calmer tomorrow."
+    assert collaboration._contains_unsupported_operational_claim(reply, source, []) is False
+
+
+def test_operational_guard_rejects_future_claim_mentioned_as_uncertain_in_source():
+    source = "I don't know whether Mum will be calmer tomorrow."
+    reply = "Mum will be calmer tomorrow."
+    assert collaboration._contains_unsupported_operational_claim(reply, source, []) is True
+
