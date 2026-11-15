@@ -1440,6 +1440,54 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
 
 
 
+def test_overwhelmed_caregiver_gets_safe_reply_when_qwen_is_unavailable(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = 0
+
+    def unavailable_qwen(base, model, messages, options=None):
+        nonlocal calls
+        calls += 1
+        raise collaboration.HTTPException(status_code=503, detail="Qwen unavailable")
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", unavailable_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "I'm exhausted. I don't know what to do anymore."},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert calls == 1
+        assert body["reply"] == (
+            "I hear that you're exhausted. "
+            "We can take this one concern at a time."
+        )
+        assert body["ai_generated"] is False
+        assert body["response_mode"] == "deterministic_low_capacity_support_fallback"
+        assert body["written_to_lcr"] is False
+        assert body["source_event_ids"] == []
+        assert body["source_evidence_ids"] == []
+        assert body["source_record_refs"] == []
+        assert "couldn't confirm a reliable answer" in body["safety_note"]
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+            assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
+            persisted = db.query(ConversationMessage).filter_by(
+                session_id=body["session_id"]
+            ).order_by(ConversationMessage.created_at.asc()).all()
+            assert [row.role for row in persisted] == ["user", "assistant"]
+            assert persisted[-1].content == body["reply"]
+            assert persisted[-1].source_record_refs_json == "[]"
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
 def test_companion_never_asks_multiple_questions_in_one_reply():
     assert collaboration._caregiver_response_needs_revision(
         "What was recorded about sleep and lunch?",
