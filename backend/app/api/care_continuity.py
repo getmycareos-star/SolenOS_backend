@@ -2826,6 +2826,38 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     baseline_by_id = {}
     relevant_changes = []
     inspector = inspect(db.connection())
+    # The LCR context is intentionally bounded to recent rows per source. Its
+    # visible page alone cannot detect a correction or insertion outside that
+    # page. Use the append-only, person-scoped revision ledger as a compact
+    # freshness watermark for every tracked care-state table.
+    revision_tracking_state: dict[str, Any] = {"available": False}
+    if inspector.has_table("care_state_revisions"):
+        revision_columns = {
+            column["name"] for column in inspector.get_columns("care_state_revisions")
+        }
+        if {"id", "person_id", "changed_at"}.issubset(revision_columns):
+            revision_count, latest_changed_at, latest_revision_id = db.query(
+                func.count(CareStateRevision.id),
+                func.max(CareStateRevision.changed_at),
+                func.max(CareStateRevision.id),
+            ).filter(CareStateRevision.person_id == person_id).one()
+            revision_tracking_state = {
+                "available": True,
+                "revision_count": int(revision_count or 0),
+                "latest_changed_at": latest_changed_at,
+                "latest_revision_id": latest_revision_id,
+            }
+        else:
+            revision_tracking_state = {
+                "available": False,
+                "limitation": "care_state_revisions_schema_incomplete",
+            }
+    else:
+        revision_tracking_state = {
+            "available": False,
+            "limitation": "care_state_revisions_table_unavailable",
+        }
+
     change_table_available = inspector.has_table("changes")
     change_columns = {column["name"] for column in inspector.get_columns("changes")} if change_table_available else set()
     required_change_columns = {
@@ -3000,6 +3032,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "source_state_fingerprint": _situation_source_fingerprint(
             context,
             {
+                "care_state_revision_tracking": revision_tracking_state,
                 "change_source_available": change_table_available,
                 "change_history_bounded": persisted_change_history_bounded,
                 "active_changes": change_source_state,
