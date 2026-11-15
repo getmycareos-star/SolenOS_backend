@@ -1,6 +1,7 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
 import json
+import pytest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
