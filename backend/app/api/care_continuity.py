@@ -3016,15 +3016,24 @@ def get_situation_understanding(request: Request, db: Session = Depends(get_db))
     # Rebuild the same bounded assessment inputs used by reassessment. A
     # fingerprint of LCR context alone misses changes to Delta Engine decisions
     # and referenced baselines, even though those records affect care attention.
-    current_assessment = _build_situation_understanding_assessment(db, person_id)
-    current_fingerprint = current_assessment.get("source_state_fingerprint")
-    stored_fingerprint = assessment.get("source_state_fingerprint") if isinstance(assessment, dict) else None
-    if not stored_fingerprint:
-        freshness_status = "legacy_snapshot_unfingerprinted"
-    elif stored_fingerprint == current_fingerprint:
-        freshness_status = "current_for_bounded_source_view"
-    else:
-        freshness_status = "source_changed_since_assessment"
+    try:
+        current_assessment = _build_situation_understanding_assessment(db, person_id)
+        current_fingerprint = current_assessment.get("source_state_fingerprint")
+        stored_fingerprint = assessment.get("source_state_fingerprint") if isinstance(assessment, dict) else None
+        if not stored_fingerprint:
+            freshness_status = "legacy_snapshot_unfingerprinted"
+        elif stored_fingerprint == current_fingerprint:
+            freshness_status = "current_for_bounded_source_view"
+        else:
+            freshness_status = "source_changed_since_assessment"
+    except Exception:
+        # Freshness is a secondary check. A failure to rebuild the current
+        # bounded source view must not hide the last successfully saved care
+        # assessment from the caregiver. Mark it as potentially stale and let
+        # the explicit reassessment endpoint retry the full computation.
+        logger.exception("Situation assessment freshness check failed for session-scoped person %s", person_id)
+        db.rollback()
+        freshness_status = "freshness_check_unavailable"
     return {
         "person_id": person_id,
         "status": "available",
@@ -3037,7 +3046,12 @@ def get_situation_understanding(request: Request, db: Session = Depends(get_db))
             "source_of_truth": "current_person_scoped_lcr_context",
             "scope": "bounded_per_source_limit_50",
             "read_only": True,
-            "limitation": "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete.",
+            "limitation": (
+                "The saved assessment is returned even when the latest freshness check cannot be completed. "
+                "Treat it as potentially out of date and reassess before relying on it."
+                if freshness_status == "freshness_check_unavailable"
+                else "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete."
+            ),
         },
     }
 
