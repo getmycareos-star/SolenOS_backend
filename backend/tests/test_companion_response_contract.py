@@ -1227,6 +1227,45 @@ def test_historical_event_outside_recent_window_is_retrieved_with_synonym_matchi
         teardown()
 
 
+
+def test_companion_temporal_question_retrieves_events_without_literal_temporal_verb(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The record says Mum had a quieter night."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        now = datetime.now(timezone.utc)
+        event = CareEvent(
+            person_id=person_id, event_type="daily_note", status="recorded",
+            occurred_at=now - timedelta(days=2), title="Quieter night",
+            description="Caregiver reported that Mum had a quieter night yesterday.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened last week?"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["source_event_ids"]
+        assert "Mum had a quieter night" in captured["messages"][-1]["content"]
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_companion_reports_missing_history_topic_instead_of_filling_it_in(monkeypatch):
     client = setup_client(monkeypatch)
     calls = []
