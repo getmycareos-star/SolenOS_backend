@@ -12,6 +12,7 @@ on:
       - "backend/tests/test_situation.py"
       - "backend/tests/test_persisted_capture_review.py"
       - "backend/tests/test_evidence_review_persistence.py"
+      - "backend/tests/test_unified_lcr_retrieval.py"
       - "backend/tests/test_change_detection.py"
       - "backend/tests/test_significance.py"
       - "backend/tests/test_longitudinal_messy_care_benchmark.py"
