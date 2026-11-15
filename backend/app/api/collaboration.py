@@ -3439,16 +3439,16 @@ def _contains_unsupported_operational_claim(
         if source_supports_claim:
             left = max(
                 source.rfind(mark, 0, source_claim_start)
-                for mark in (".", ";", "!", "?", "\\n")
+                for mark in (".", ";", "!", "?", "\n")
             ) + 1
             right_candidates = [
                 source.find(mark, source_claim_start + len(source_claim))
-                for mark in (".", ";", "!", "?", "\\n")
+                for mark in (".", ";", "!", "?", "\n")
             ]
             right_candidates = [position for position in right_candidates if position >= 0]
             source_clause = source[left:min(right_candidates) if right_candidates else len(source)]
             source_uncertainty = (
-                r"\\b(?:may|might|could|possibly|perhaps|uncertain|not sure|"
+                r"\b(?:may|might|could|possibly|perhaps|uncertain|not sure|"
                 r"don.t know|do not know|whether|cannot confirm|can.t confirm|"
                 r"unable to confirm)\\b"
             )
@@ -3591,7 +3591,7 @@ def create_share_intake(payload: ShareIntakeCreate, db: Session = Depends(get_db
     total_bytes = 0
     for item in payload.files:
         mime_type = item.mimeType.lower().strip()
-        filename = os.path.basename(item.name).replace("\\r", "").replace("\\n", "").replace("\\x00", "")[:180]
+        filename = os.path.basename(item.name).replace("\\r", "").replace("\n", "").replace("\\x00", "")[:180]
         extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if mime_type not in allowed_mime_types:
             raise HTTPException(status_code=415, detail=f"Unsupported shared file type: {mime_type}")
