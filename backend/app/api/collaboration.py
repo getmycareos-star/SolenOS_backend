@@ -6205,10 +6205,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "shared_lcr_ref_count": len(source_lcr_record_refs),
             }, separators=(",", ":")),
         )
-        base, model = _ollama_url()
+        base = ""
+        model = "unavailable"
         inference_started = _time.perf_counter()
         care_history_fallback_from_outage = False
         try:
+            base, model = _ollama_url()
             reply = await asyncio.to_thread(
                 _run_companion_inference_with_metrics,
                 companion_request_id,
