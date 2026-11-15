@@ -487,7 +487,7 @@ def build_lcr_context(
     if temporal_window:
         # A calendar year is part of the date constraint, not a word that must
         # also appear in the care note's prose.
-        direct_terms = [term for term in direct_terms if not re.fullmatch(r"20\\d{2}", term)]
+        direct_terms = [term for term in direct_terms if not re.fullmatch(r"20\d{2}", term)]
     terms = _expanded_search_terms(direct_terms)
     bind = db.get_bind()
     available_tables, metadata = _load_source_schema(bind)
