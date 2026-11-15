@@ -40,7 +40,7 @@ def detect_event_changes(
                 Change.is_active.is_(True),
                 Change.change_type.in_((
                     ChangeType.INCREASE, ChangeType.DECREASE,
-                    ChangeType.EMERGENCE, ChangeType.RECURRENCE,
+                    ChangeType.EMERGENCE, ChangeType.RECURRENCE, ChangeType.CESSATION,
                 )),
                 Change.confirmation_status.in_(("detected", "awaiting_confirmation")),
             )
@@ -161,7 +161,54 @@ def detect_event_changes(
         )
         changes.append(change)
     elif (
-        baseline.event_count > 0
+        current_count == 0
+        and baseline.event_count >= 2
+        and baseline.is_stable is True
+        and baseline.history_completeness == "complete"
+        and not comparison.get("baseline_history_truncated", False)
+        and comparison.get("baseline_coverage_status") == "covered"
+        and comparison.get("current_coverage_status") == "covered"
+        and len(baseline.evidence_ids or []) == baseline.event_count
+    ):
+        # A previously recurring pattern with no events in a fully covered
+        # current window can support a cessation candidate. It is not a
+        # caregiver-confirmed resolution and must remain reviewable.
+        baseline_events = (
+            db.query(CareEvent)
+            .filter(
+                CareEvent.person_id == person_id,
+                CareEvent.id.in_(baseline.evidence_ids),
+            )
+            .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
+            .all()
+        )
+        if len(baseline_events) == baseline.event_count:
+            change = _create_change(
+                db=db,
+                person_id=person_id,
+                subject_type=event_type,
+                subject_id=subject_id or "",
+                change_type=ChangeType.CESSATION,
+                change_direction=ChangeDirection.DECREASING,
+                previous_state=(
+                    f"{baseline.event_count} events recorded across "
+                    f"{comparison['baseline_window_days']} calendar days"
+                ),
+                current_state=(
+                    "No matching events recorded during the fully covered current observation window"
+                ),
+                previous_count=baseline.event_count,
+                current_count=0,
+                baseline_id=baseline.id,
+                baseline=baseline,
+                comparison=comparison,
+                events=baseline_events,
+                now=now,
+            )
+            changes.append(change)
+    elif (
+        current_count > 0
+        and baseline.event_count > 0
         and comparison.get("frequency_delta") is not None
         and comparison["frequency_delta"] < 0
         and comparison.get("baseline_coverage_status") == "covered"
@@ -298,6 +345,17 @@ def detect_event_changes(
                 and baseline.event_count == 0
                 and not comparison.get("baseline_history_truncated", False)
             )
+        elif stale.change_type == ChangeType.CESSATION:
+            still_supported = bool(
+                current_count == 0
+                and baseline.event_count >= 2
+                and baseline.is_stable is True
+                and baseline.history_completeness == "complete"
+                and not comparison.get("baseline_history_truncated", False)
+                and comparison.get("baseline_coverage_status") == "covered"
+                and comparison.get("current_coverage_status") == "covered"
+                and set(stale.evidence_ids or []) == set(baseline.evidence_ids or [])
+            )
         elif stale.change_type == ChangeType.RECURRENCE:
             still_supported = bool(
                 stale.evidence_ids
@@ -335,7 +393,14 @@ def _create_change(
                  events: List[CareEvent],
                  now: datetime,
 ) -> Change:
-    if change_type == ChangeType.EMERGENCE:
+    if change_type == ChangeType.CESSATION:
+        explanation = (
+            f"No matching {subject_type} events were recorded during a fully covered current observation window. "
+            f"Previously recorded: {previous_state}. Current observation: {current_state}. "
+            "This is a cessation candidate for caregiver review, not proof that the underlying issue has resolved. "
+            "The linked source events establish the earlier recorded pattern; the coverage record supports the observation interval."
+        )
+    elif change_type == ChangeType.EMERGENCE:
         explanation = (
             f"{subject_type} was first observed in the available records; this is not a claim about onset. "
             f"{current_state}. {previous_state}. "
