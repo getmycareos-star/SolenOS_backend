@@ -227,7 +227,7 @@ def _conversation_context(
     # recent-first and bounded to avoid loading an entire chat archive.
     rows = (
         ordered_statement.execution_options(stream_results=True).yield_per(200)
-        if terms
+        if terms or temporal_window
         else ordered_statement.limit(bounded_limit + 1).all()
     )
     expanded_only = [term for term in terms if term not in direct_terms]
@@ -270,7 +270,7 @@ def _conversation_context(
         "items": items,
         "returned_count": len(items),
         "candidate_count": candidate_count,
-        "candidate_scan_complete": bool(terms),
+        "candidate_scan_complete": bool(terms or temporal_window),
         "has_more": candidate_count > len(items),
         "limit": bounded_limit,
         "interpretation_limit": (
