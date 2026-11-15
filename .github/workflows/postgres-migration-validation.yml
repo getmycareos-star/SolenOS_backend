@@ -192,6 +192,7 @@ jobs:
               "care_conflicts": {"person_id", "conflict_type", "claim_refs", "description", "status"},
               "care_action_outcomes": {"person_id", "action_id", "outcome_status"},
               "caregiver_profiles": {"person_id", "session_caregiver_id", "name", "email"},
+              "caregiver_responsibility_transfers": {"person_id", "source_responsibility_id", "from_caregiver_profile_id", "to_caregiver_profile_id", "status", "created_at", "accepted_at", "accepted_by_caregiver_id"},
               "care_notifications": {"person_id", "caregiver_id", "category", "source_event_id", "status", "updated_at", "resolved_at", "resolution_reason"},
               "caregiver_contexts": {"person_id", "reported_by_caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
               "caregiver_perspectives": {"person_id", "reported_by_caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
@@ -294,6 +295,7 @@ jobs:
               "appointment_workspace_records": "person_id",
               "appointment_workspace_revisions": "record_id",
               "caregiver_profiles": "session_caregiver_id",
+              "caregiver_responsibility_transfers": "source_responsibility_id",
               "evidence_claim_assessments": "claim_id",
           }
           for table, column in fks.items():
