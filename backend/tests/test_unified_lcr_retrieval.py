@@ -683,6 +683,28 @@ def test_last_year_uses_previous_calendar_year_in_caregiver_timezone():
     assert window["end"] == "2026-01-01T07:59:59.999999+00:00"
 
 
+def test_past_year_uses_rolling_twelve_month_window_in_caregiver_timezone():
+    window = _temporal_window(
+        "What changed in the past year?",
+        now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+        timezone_name="America/Los_Angeles",
+    )
+    assert window is not None
+    assert window["basis"] == "explicit_rolling_past_year"
+    assert window["timezone"] == "America/Los_Angeles"
+    assert window["start"] == "2025-11-15T08:00:00+00:00"
+    assert window["end"] == "2026-11-16T07:59:59.999999+00:00"
+
+
+def test_past_year_clamps_leap_day_when_prior_year_is_not_leap():
+    window = _temporal_window(
+        "Show me the past year",
+        now=datetime(2025, 2, 28, 12, tzinfo=UTC),
+    )
+    assert window is not None
+    assert window["start"] == "2024-02-28T00:00:00+00:00"
+
+
 def test_this_year_is_bounded_from_local_january_first_through_today():
     window = _temporal_window(
         "Show me what changed this year.",
