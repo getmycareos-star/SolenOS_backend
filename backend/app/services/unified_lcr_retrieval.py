@@ -56,6 +56,20 @@ def _temporal_window(
     # Calendar-year language must become an explicit temporal filter. Without
     # this branch, "last year" loses both tokens as stopwords and silently
     # falls back to the bounded recent-history projection.
+    # "Past year" is a rolling twelve-month window, not the previous
+    # calendar year. Treating it as a calendar year drops recent months and
+    # includes months older than the caregiver requested.
+    if re.search(r"\bpast\s+year\b", text):
+        start_year = today.year - 1
+        start_day = min(today.day, calendar.monthrange(start_year, today.month)[1])
+        rolling_start = date(start_year, today.month, start_day)
+        return {
+            "start": datetime.combine(rolling_start, datetime.min.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+            "end": datetime.combine(today, datetime.max.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+            "timezone": str(local_timezone),
+            "basis": "explicit_rolling_past_year",
+        }
+
     if re.search(r"\b(?:last|previous)\s+year\b", text):
         previous_year = today.year - 1
         return {
