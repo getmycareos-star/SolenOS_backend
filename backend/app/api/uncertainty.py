@@ -104,7 +104,6 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
             " ".join((row.question or "").casefold().split()),
             row.subject_type,
             row.subject_id,
-            row.claim_id,
         )
         for row in active if (row.question or "").strip()
     ]
@@ -159,7 +158,7 @@ def question_quality_metrics(engine: UncertaintyEngine = Depends(get_engine)):
             "non_actionable_active_questions": "Open or unresolved questions that fail the necessity, same-record evidence, or known-answerer gate; these must not appear as caregiver tasks.",
             "manual_review_backlog": "Source-linked open questions without a valid necessary assessment.",
             "questions_awaiting_answerer_assignment": "Evidence-validated necessary questions whose intended answerer is missing or unknown; these are not shown as caregiver tasks.",
-            "duplicate_question_excess": "Additional active records beyond one per normalized question text.",
+            "duplicate_question_excess": "Additional active records beyond one per normalized question text and care subject, regardless of claim reference.",
             "automatic_transitions": "System-suppressed or superseded questions; neither is counted as a caregiver answer.",
         },
     }

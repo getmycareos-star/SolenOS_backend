@@ -2638,7 +2638,19 @@ def test_duplicate_open_clarification_question_is_suppressed_but_answered_questi
             relationship="Family",
             person_id=person.id,
         )
-        db.add_all([person, caregiver])
+        duplicate_claim = CareAssertion(
+            id="question-dedupe-claim",
+            person_id=person.id,
+            subject_type="appointment",
+            subject_id="appointment-1",
+            field="attendance",
+            assertion_kind="reported_state",
+            asserted_value="Attendance not established",
+            source_label="Caregiver report",
+            source_text="The saved report does not establish attendance.",
+            evidence_ids=[],
+        )
+        db.add_all([person, caregiver, duplicate_claim])
         db.commit()
         db.close()
 
@@ -2671,6 +2683,15 @@ def test_duplicate_open_clarification_question_is_suppressed_but_answered_questi
         )
         assert duplicate_while_unresolved.status_code == 422, duplicate_while_unresolved.text
         assert "equivalent unanswered clarification question already exists" in duplicate_while_unresolved.text
+
+        # A second subsystem must not create the same caregiver-facing question
+        # by attaching it to another claim row for the same care subject.
+        duplicate_with_other_claim = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**payload, "claim_id": "question-dedupe-claim"},
+        )
+        assert duplicate_with_other_claim.status_code == 422, duplicate_with_other_claim.text
+        assert "equivalent unanswered clarification question already exists" in duplicate_with_other_claim.text
 
         reopened = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",

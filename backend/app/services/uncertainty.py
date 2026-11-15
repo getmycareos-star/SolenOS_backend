@@ -748,9 +748,10 @@ class UncertaintyEngine:
         if not question_text:
             raise ValueError("A clarification question must contain non-empty text.")
         payload["question"] = question_text
-        # Suppress an exact normalized duplicate that is still open or unresolved for
-        # the same person, subject, and claim. Answered/declined questions do not
-        # block a new review; an unanswered question must be reopened or updated.
+        # Suppress an exact normalized duplicate that is still open or unresolved
+        # for the same person and care subject, even when it was attached to a
+        # different claim record. Claim IDs are provenance links, not separate
+        # caregiver questions. Answered/declined questions may be asked again.
         question_key = re.sub(r"[\W_]+", " ", question_text.casefold()).strip()
         existing_open = (
             self.db.query(OpenQuestionModel)
@@ -758,7 +759,6 @@ class UncertaintyEngine:
                 OpenQuestionModel.person_id == scoped_person_id,
                 OpenQuestionModel.subject_type == payload["subject_type"],
                 OpenQuestionModel.subject_id == payload["subject_id"],
-                OpenQuestionModel.claim_id == claim_id,
                 OpenQuestionModel.status.in_(["open", "unresolved"]),
             )
             .order_by(OpenQuestionModel.asked_at.desc(), OpenQuestionModel.id.asc())
@@ -770,7 +770,7 @@ class UncertaintyEngine:
             for row in existing_open
         ):
             raise ValueError(
-                "An equivalent unanswered clarification question already exists for this claim and subject; review its status and answer history before asking again."
+                "An equivalent unanswered clarification question already exists for this care detail; review its status and answer history before asking again."
             )
         db_question = OpenQuestionModel(**payload)
         manual_revision_objects = self.db.info.setdefault("manual_care_state_revision_objects", set())
