@@ -4984,7 +4984,7 @@ def _medication_dose_recall_context_lines(
     db: Session,
     person_id: str,
     *,
-    limit: int = 50,
+    limit: int = 20,
 ) -> dict[str, Any]:
     """Fetch person-scoped caregiver medication reports directly from persisted LCR events.
 
@@ -4992,7 +4992,7 @@ def _medication_dose_recall_context_lines(
     lexical ranking in the general Companion context, which can omit the exact
     uncertain report while retaining an older medication assertion.
     """
-    bounded_limit = max(1, min(int(limit), 100))
+    bounded_limit = max(1, min(int(limit), 50))
     query = (
         db.query(CareEvent)
         .filter(
@@ -5018,6 +5018,9 @@ def _medication_dose_recall_context_lines(
     event_lines: list[str] = []
     linked_evidence_ids: list[str] = []
     for row in rows:
+        caregiver_report = _care_history_event_text({"description": row.description})
+        if not caregiver_report:
+            continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
         linked_evidence_ids.extend(evidence_ids)
         event_lines.append(
@@ -5029,7 +5032,7 @@ def _medication_dose_recall_context_lines(
                     "id": str(row.id),
                     "status": row.status,
                     "created_by_caregiver_id": str(row.created_by_caregiver_id or ""),
-                    "description": row.description,
+                    "description": caregiver_report,
                     "event_type": row.event_type,
                     "title": row.title,
                     "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
@@ -6203,7 +6206,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             medication_recall_context = _medication_dose_recall_context_lines(db, person_id)
             existing_event_ids = set(_context_record_ids(shared_lcr_lines, "event_id"))
             existing_evidence_ids = set(_context_record_ids(shared_lcr_lines, "evidence_id"))
-            direct_medication_lines: list[str] = []
+            direct_medication_event_lines: list[str] = []
+            direct_medication_evidence_lines: list[str] = []
             for line in medication_recall_context["event_lines"]:
                 try:
                     payload = json.loads(line[line.index("{"):])
@@ -6211,7 +6215,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
                 if event_id and event_id not in existing_event_ids:
-                    direct_medication_lines.append(line)
+                    direct_medication_event_lines.append(line)
                     existing_event_ids.add(event_id)
             for line in medication_recall_context["evidence_lines"]:
                 try:
@@ -6220,10 +6224,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 except (ValueError, TypeError, json.JSONDecodeError):
                     continue
                 if evidence_id and evidence_id not in existing_evidence_ids:
-                    direct_medication_lines.append(line)
+                    direct_medication_evidence_lines.append(line)
                     existing_evidence_ids.add(evidence_id)
-            if direct_medication_lines:
-                shared_lcr_lines = list(dict.fromkeys([*shared_lcr_lines, *direct_medication_lines]))
+            if direct_medication_event_lines:
+                event_context = list(dict.fromkeys([*event_context, *direct_medication_event_lines]))
+            if direct_medication_evidence_lines:
+                evidence_context = list(dict.fromkeys([*evidence_context, *direct_medication_evidence_lines]))
+            if direct_medication_event_lines or direct_medication_evidence_lines:
+                shared_lcr_lines = list(dict.fromkeys([
+                    *shared_lcr_lines,
+                    *direct_medication_event_lines,
+                    *direct_medication_evidence_lines,
+                ]))
             lcr_context_coverage["direct_medication_recall"] = {
                 "status": "available" if medication_recall_context["event_lines"] else "no_matching_record",
                 "event_count": len(medication_recall_context["event_lines"]),
