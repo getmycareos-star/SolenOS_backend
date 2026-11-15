@@ -200,6 +200,27 @@ class SituationStateTransitionResponse(BaseModel):
     evidence_ids: List[str]
     recorded_at: datetime
 
+class SituationSourceRecord(BaseModel):
+    id: str
+    source_type: str
+    title: str
+    excerpt: Optional[str] = None
+    occurred_at: Optional[datetime] = None
+    recorded_at: Optional[datetime] = None
+    source_label: Optional[str] = None
+    status: Optional[str] = None
+    evidence_ids: List[str] = Field(default_factory=list)
+    epistemic_status: Optional[str] = None
+    negated: Optional[bool] = None
+    hedge_marker: Optional[str] = None
+    ambiguity_note: Optional[str] = None
+
+
+class SituationDetailResponse(BaseModel):
+    situation: Situation
+    source_records: List[SituationSourceRecord] = Field(default_factory=list)
+    state_history: List[dict[str, Any]] = Field(default_factory=list)
+
 class ChangeEvidenceResponse(BaseModel):
     id: str
     event_type: str
