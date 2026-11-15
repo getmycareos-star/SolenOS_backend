@@ -4901,15 +4901,46 @@ def _document_reply_contains_source_detail(reply: str, extractive_answer: str) -
 
 
 _CARE_HISTORY_TOPIC_GROUPS = {
-    "sleep": {"sleep", "slept", "sleeping", "rest", "rested", "woke", "waking", "overnight", "night"},
-    "lunch": {"lunch", "midday"},
-    "dinner": {"dinner", "supper", "evening"},
-    "breakfast": {"breakfast"},
-    "appetite": {"appetite", "ate", "eating", "food", "meal", "snack"},
-    "mobility": {"mobility", "walk", "walked", "walking", "walker", "frame", "transfer", "transfers"},
-    "mood": {"mood", "calm", "calmer", "agitated", "unsettled", "upset"},
-    "hydration": {"water", "drink", "drank", "drinking", "hydration", "fluid", "fluids"},
-    "medication": {"medication", "medicine", "dose", "tablet", "pill", "prescribed"},
+    "sleep": {
+        "sleep", "slept", "sleeping", "rest", "rested", "woke", "waking", "overnight", "night",
+        "sueño", "dormir", "durmió", "durmiendo", "despertó", "despierta", "noche", "reposo",
+        "sommeil", "dormait", "dormi", "réveillé", "réveillée", "nuit", "repos",
+    },
+    "lunch": {"lunch", "midday", "almuerzo", "comida", "déjeuner"},
+    "dinner": {"dinner", "supper", "evening", "cena", "dîner", "souper"},
+    "breakfast": {"breakfast", "desayuno", "petit-déjeuner"},
+    "appetite": {
+        "appetite", "ate", "eating", "food", "meal", "snack", "apetito", "comer", "comió",
+        "comiendo", "alimento", "alimentos", "hambre", "appétit", "manger", "mangé", "repas",
+        "nourriture", "déjeuner",
+    },
+    "mobility": {
+        "mobility", "walk", "walked", "walking", "walker", "frame", "transfer", "transfers",
+        "movilidad", "caminar", "caminó", "caminando", "andador", "mobilité", "marcher",
+        "marché", "marche", "déambulation",
+    },
+    "mood": {
+        "mood", "calm", "calmer", "agitated", "unsettled", "upset", "ánimo", "humor",
+        "tranquilo", "inquieto", "agitado", "humeur", "calme", "agité", "agitation", "contrarié",
+    },
+    "hydration": {
+        "water", "drink", "drank", "drinking", "hydration", "fluid", "fluids", "agua",
+        "beber", "bebió", "bebiendo", "líquidos", "hidratación", "eau", "boire", "hydratation",
+        "liquide",
+    },
+    "medication": {
+        "medication", "medicine", "dose", "tablet", "pill", "prescribed", "medicamento",
+        "medicación", "medicina", "dosis", "pastilla", "comprimido", "médicament", "médicaments",
+        "comprimé", "pilule", "ordonnance",
+    },
+    "falls": {
+        "fall", "fell", "fallen", "slipped", "slip", "caída", "caídas", "cayó", "resbaló",
+        "chute", "tombé", "tombée", "glissé", "glissade",
+    },
+    "pain": {
+        "pain", "hurt", "hurting", "ache", "dolor", "duele", "dolía", "dolorido",
+        "douleur", "souffrir", "mal",
+    },
 }
 _MEDICATION_DOSE_RECALL_RE = re.compile(
     r"\bwhat\s+(?:new\s+)?dose\s+(?:did|was)\s+(?:the\s+)?(?:doctor|clinician|prescriber)\s+"
