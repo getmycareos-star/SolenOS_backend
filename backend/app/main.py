@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import text, or_
 import asyncio
 import hashlib
 import os
@@ -179,8 +179,10 @@ def process_pending_corrections_once(batch_size: int = 20) -> dict:
             row.id for row in scan.query(CorrectionModel)
             .filter(
                 CorrectionModel.processing_status == "processing",
-                CorrectionModel.processing_started_at.is_not(None),
-                CorrectionModel.processing_started_at < cutoff,
+                or_(
+                    CorrectionModel.processing_started_at.is_(None),
+                    CorrectionModel.processing_started_at < cutoff,
+                ),
             )
             .order_by(CorrectionModel.processing_started_at.asc())
             .limit(batch_size).all()
