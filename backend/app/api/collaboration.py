@@ -3432,7 +3432,7 @@ def _contains_unsupported_operational_claim(
         mentioned_time = re.search(future_time, future_match.group(0))
         source_has_same_time = bool(
             mentioned_time
-            and re.search(rf"\\b{re.escape(mentioned_time.group(0))}\\b", source)
+            and re.search(rf"\b{re.escape(mentioned_time.group(0))}\b", source)
         )
         if not source_has_same_time:
             return True
