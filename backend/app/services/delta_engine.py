@@ -433,6 +433,20 @@ def source_event_snapshot_hash(event: CareEvent) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _care_state_revision_snapshot(db: Session, person_id: str) -> str:
+    """Fingerprint the append-only revision set, including same-transaction rows."""
+    from sqlalchemy import func
+    from app.models.care_continuity import CareStateRevision
+
+    latest_revision_time = db.query(func.max(CareStateRevision.changed_at)).filter(
+        CareStateRevision.person_id == person_id
+    ).scalar()
+    revision_count = db.query(func.count(CareStateRevision.id)).filter(
+        CareStateRevision.person_id == person_id
+    ).scalar() or 0
+    return f"{revision_count}:{latest_revision_time.isoformat() if latest_revision_time else 'none'}"
+
+
 def _delta_iso(value: Any) -> str | None:
     return value.isoformat() if hasattr(value, "isoformat") else None
 
@@ -662,17 +676,9 @@ def _reconcile_from_change_intelligence(
         item for item in candidate_changes
         if linked_ids.intersection(str(value) for value in (item.evidence_ids or []))
     ]
-    latest_revision_time = db.query(func.max(CareStateRevision.changed_at)).filter(
-        CareStateRevision.person_id == person_id
-    ).scalar()
-    revision_count = db.query(func.count(CareStateRevision.id)).filter(
-        CareStateRevision.person_id == person_id
-    ).scalar() or 0
     # Include the append-only revision count as well as its timestamp. Multiple
     # revisions created in one transaction can share the same changed_at value.
-    care_state_revision_snapshot = (
-        f"{revision_count}:{latest_revision_time.isoformat() if latest_revision_time else 'none'}"
-    )
+    care_state_revision_snapshot = _care_state_revision_snapshot(db, person_id)
 
     def validate_source_snapshot() -> None:
         if source_event_id:
@@ -706,15 +712,7 @@ def _reconcile_from_change_intelligence(
                 status_code=409,
                 detail="The source evidence changed during reconciliation. Retry using the latest record.",
             )
-        current_revision_time = db.query(func.max(CareStateRevision.changed_at)).filter(
-            CareStateRevision.person_id == person_id
-        ).scalar()
-        current_revision_count = db.query(func.count(CareStateRevision.id)).filter(
-            CareStateRevision.person_id == person_id
-        ).scalar() or 0
-        current_revision_snapshot = (
-            f"{current_revision_count}:{current_revision_time.isoformat() if current_revision_time else 'none'}"
-        )
+        current_revision_snapshot = _care_state_revision_snapshot(db, person_id)
         if current_revision_snapshot != care_state_revision_snapshot:
             db.rollback()
             raise HTTPException(
