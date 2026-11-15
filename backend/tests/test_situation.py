@@ -1116,9 +1116,9 @@ def test_lcr_orientation_rejects_returning_language_for_new_caregiver(monkeypatc
 
 
 
+@pytest.mark.parametrize("missing_source", ["events", "decisions", "living_record"])
 @pytest.mark.session_security
-@pytest.mark.session_security
-def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch):
+def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch, missing_source):
     setup_db()
     try:
         from app.core.database import get_db
@@ -1130,7 +1130,7 @@ def test_lcr_orientation_does_not_label_incomplete_history_as_new(monkeypatch):
             "build_lcr_context",
             lambda *args, **kwargs: {
                 "sources": {"documents": {"returned_count": 1}},
-                "missing_required_sources": ["events"],
+                "missing_required_sources": [missing_source],
             },
         )
         monkeypatch.setattr(
