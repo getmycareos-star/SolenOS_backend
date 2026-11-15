@@ -449,19 +449,19 @@ def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_histo
             assert repeated_body.get("written_to_lcr") is False, repeated_body
             repeated_reply = repeated_body.get("reply", "")
             assert 8 <= len(repeated_reply.split()) <= 40, repeated_reply
-            assert len([part for part in re.split(r"(?<=[.!?])\\s+", repeated_reply.strip()) if part]) <= 2, repeated_reply
-            assert re.search(r"\\bsolenos\\b", repeated_reply, re.IGNORECASE), repeated_reply
-            assert re.search(r"\\b(?:care story|care record|care history)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+            assert len([part for part in re.split(r"(?<=[.!?])\s+", repeated_reply.strip()) if part]) <= 2, repeated_reply
+            assert re.search(r"\bsolenos\b", repeated_reply, re.IGNORECASE), repeated_reply
+            assert re.search(r"\b(?:care story|care record|care history)\b", repeated_reply, re.IGNORECASE), repeated_reply
             if expected_stage == "new":
-                assert re.search(r"\\b(?:start|starting|begin|beginning|today|welcome)\\b", repeated_reply, re.IGNORECASE), repeated_reply
-                assert not re.search(r"\\b(?:welcome back|already underway|your previous updates)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+                assert re.search(r"\b(?:start|starting|begin|beginning|today|welcome)\b", repeated_reply, re.IGNORECASE), repeated_reply
+                assert not re.search(r"\b(?:welcome back|already underway|your previous updates)\b", repeated_reply, re.IGNORECASE), repeated_reply
             elif expected_stage == "returning":
-                assert re.search(r"\\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\\b", repeated_reply, re.IGNORECASE), repeated_reply
-                assert not re.search(r"\\b(?:first time here|new caregiver|starting from scratch)\\b", repeated_reply, re.IGNORECASE), repeated_reply
+                assert re.search(r"\b(?:welcome back|already underway|continue|continuing|pick up|ongoing)\b", repeated_reply, re.IGNORECASE), repeated_reply
+                assert not re.search(r"\b(?:first time here|new caregiver|starting from scratch)\b", repeated_reply, re.IGNORECASE), repeated_reply
             else:
                 assert not re.search(
-                    r"\\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
-                    r"we talked about|first time here|new caregiver|starting from scratch)\\b",
+                    r"\b(?:welcome back|already underway|as we discussed|your previous updates|last time we|"
+                    r"we talked about|first time here|new caregiver|starting from scratch)\b",
                     repeated_reply,
                     re.IGNORECASE,
                 ), repeated_reply
