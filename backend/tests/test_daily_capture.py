@@ -1189,6 +1189,16 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
             if row["source_type"] == "correction" and row["source_id"] == correction_id
         )
         assert pending_item["processing_status"] == "pending"
+        pending_current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert pending_current.status_code == 200, pending_current.text
+        pending_items = pending_current.json()["items"]
+        assert any(row["id"] == "event-correction-retry" for row in pending_items)
+        assert any(
+            row.get("source_collection") == "corrections"
+            and row.get("target_id") == "event-correction-retry"
+            and row.get("processing_status") == "pending"
+            for row in pending_items
+        )
 
         db = TestingSessionLocal()
         try:
@@ -1223,6 +1233,17 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
             if row["source_type"] == "correction" and row["source_id"] == correction_id
         )
         assert completed_item["processing_status"] == "completed"
+        completed_current = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert completed_current.status_code == 200, completed_current.text
+        completed_items = completed_current.json()["items"]
+        assert not any(row["id"] == "event-correction-retry" for row in completed_items)
+        corrected_projection = next(
+            row for row in completed_items
+            if row.get("source_collection") == "corrections"
+            and row.get("target_id") == "event-correction-retry"
+        )
+        assert corrected_projection["description"] == payload["corrected_text"]
+        assert corrected_projection["epistemic_status"] == "caregiver_reported"
 
         # Replaying the same idempotency key returns the same correction, not a
         # second history item or a second reconciliation side effect.
