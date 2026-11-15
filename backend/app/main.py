@@ -1366,7 +1366,9 @@ async def generate_lcr_orientation(
                 return None
             if caregiver_stage == "unknown" and re.search(
                 r"(?i)\b(?:welcome back|already underway|as we discussed|"
-                r"your previous updates|last time we|we talked about)\b",
+                r"your previous updates|last time we|we talked about|first time here|"
+                r"new caregiver|starting from scratch|new to solenos|your first visit|"
+                r"first time using solenos)\b",
                 candidate,
             ):
                 return None
@@ -1403,6 +1405,7 @@ async def generate_lcr_orientation(
                         + ("Use 1 or 2 short sentences and no more than 40 words. Mention SolenOS and the care story or care record; do not ask a generic 'How can I help?' question. " if is_greeting else "Use no more than 3 short sentences and 55 words. ")
                         + ("Do not imply prior history for a new caregiver. " if is_greeting and caregiver_stage == "new" else "")
                         + ("Do not describe a returning caregiver as new. " if is_greeting and caregiver_stage == "returning" else "")
+                        + ("Do not claim the caregiver is new or returning because required care history is incomplete. " if is_greeting and caregiver_stage == "unknown" else "")
                         + "Use only the authorized care context. Return only the caregiver-facing answer."
                     ),
                 },
