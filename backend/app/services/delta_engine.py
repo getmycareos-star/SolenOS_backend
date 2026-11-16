@@ -278,6 +278,7 @@ def evaluate_longitudinal_interpretations(
     *,
     db: Session | None = None,
     person_id: str | None = None,
+    history_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Independently grade interpretations without changing source evidence.
 
@@ -293,6 +294,7 @@ def evaluate_longitudinal_interpretations(
         "insufficient_evidence": 0,
         "stale_evidence": 0,
         "unsupported": 0,
+        "no_change_detected": 0,
     }
     evaluated = []
     for item in computed_changes:
@@ -398,7 +400,11 @@ def evaluate_longitudinal_interpretations(
 
     total = len(evaluated)
     if not total:
-        overall = "insufficient_evidence"
+        if history_coverage and history_coverage.get("complete") is True:
+            overall = "no_change_detected"
+            counts["no_change_detected"] = 1
+        else:
+            overall = "insufficient_evidence"
     elif counts["conflicting"]:
         overall = "conflicting"
     elif counts["stale_evidence"] and counts["supported"] == 0:
@@ -2332,7 +2338,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 detail="The reconciliation could not be persisted; the transaction was rolled back.",
             ) from exc
 
-    result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(computed, db=db, person_id=person_id)
+    result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(computed, db=db, person_id=person_id, history_coverage=history_coverage)
     result["computed_changes"] = computed
     result["provenance"] = {
         "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
