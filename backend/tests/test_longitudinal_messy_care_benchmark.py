@@ -2209,7 +2209,10 @@ def test_care_delta_api_persists_deterministically_without_local_model(monkeypat
             CareDeltaRun.source == "postgres_deterministic_delta_acceptance",
         ).one()
         assert saved.model_name == "deterministic-change-intelligence"
-        assert json.loads(saved.delta_json)["provenance"]["delta_run_id"] == str(saved.id)
+        saved_payload = json.loads(saved.delta_json)
+        assert saved_payload["provenance"]["delta_run_id"] == str(saved.id)
+        assert saved_payload["interpretation_evaluation"]["version"] == "longitudinal-interpretation-evaluator-v1"
+        assert saved_payload["interpretation_evaluation"]["source_evidence_mutated"] is False
 
 def test_persisted_misleading_delta_is_rejected_when_source_belongs_to_another_person():
     """The evaluator catches a persisted comparison whose cited record is outside its person scope."""
