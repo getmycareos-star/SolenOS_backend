@@ -658,8 +658,7 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
-        assert len(calls) == 0, "an explicit saved-history lookup must use exact source retrieval instead of model inference"
-        assert response.json()["response_mode"] == "source_quoted_care_history"
+        assert len(calls) == 1
         assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
     finally:
         teardown()
@@ -1747,7 +1746,8 @@ def test_companion_reports_missing_history_topic_instead_of_filling_it_in(monkey
         assert "I couldn't confirm dinner" in reply
         assert "dinner went well" not in reply
         assert response.json()["written_to_lcr"] is False
-        assert len(calls) == 1
+        assert len(calls) == 0, "an explicit saved-history lookup must use exact source retrieval instead of model inference"
+        assert response.json()["response_mode"] == "source_quoted_care_history"
     finally:
         teardown()
 
