@@ -1068,7 +1068,7 @@ WRITABLE = {
                           "evidence_ids", "is_intended_outcome"},
     "reconciliations": {"target_type", "target_id", "reconciliation_status", "competing_claim_ids",
                         "evidence_ids", "decision_notes"},
-    "follow-up-links": {"source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids"},
+    "follow-up-links": {"source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "owner_caregiver_id"},
     "review-decisions": {"target_type", "target_id", "review_decision", "reason", "evidence_ids"},
     "provenance": {"target_type", "target_id", "source_type", "source_id", "evidence_id", "source_label", "source_span", "metadata"},
     "timeline": {"source_type", "source_id", "entry_type", "title", "summary", "occurred_at", "evidence_ids", "epistemic_status", "is_projection"},
@@ -4127,6 +4127,14 @@ def update_follow_up_link(
             raise HTTPException(status_code=404, detail="Follow-up not found")
         merged = dict(current)
         merged.update(changes)
+        if changes.get("owner_caregiver_id"):
+            caregivers = _table(db, "caregivers")
+            owner = db.execute(select(caregivers.c.id).where(
+                caregivers.c.id == changes["owner_caregiver_id"],
+                caregivers.c.person_id == person_id,
+            )).first()
+            if owner is None:
+                raise HTTPException(status_code=404, detail="Follow-up owner was not found in this care record")
         if str(merged.get("status") or "").strip().lower() == "completed":
             evidence_ids = merged.get("evidence_ids") or []
             if not isinstance(evidence_ids, list) or not evidence_ids:
@@ -4645,6 +4653,14 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 status_code=409,
                 detail="This evidence is already linked to the claim; duplicate links cannot count as corroboration.",
             )
+    if resource == "follow-up-links" and data.get("owner_caregiver_id"):
+        caregivers = _table(db, "caregivers")
+        owner = db.execute(select(caregivers.c.id).where(
+            caregivers.c.id == data["owner_caregiver_id"],
+            caregivers.c.person_id == person_id,
+        )).first()
+        if owner is None:
+            raise HTTPException(status_code=404, detail="Follow-up owner was not found in this care record")
     _validate_links(db, person_id, resource, data)
     table = _table(db, RESOURCES[resource])
     data["person_id"] = person_id
