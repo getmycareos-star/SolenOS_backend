@@ -2961,3 +2961,5 @@ def test_retrieval_receipt_distinguishes_retrieval_from_prompt_inclusion():
         prompt_context_budget_chars=16000,
     )
     assert not_retrieved["retrieval_completeness"] == "not_assessed"
+
+# Retrieval receipt tests are part of the Companion response contract.
