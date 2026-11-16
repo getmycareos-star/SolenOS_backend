@@ -76,20 +76,20 @@ jobs:
           matched=0
           deployed_commit=""
           for attempt in $(seq 1 48); do
-            if ! curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json; then
+            if ! curl --silent --show-error --fail --max-time 10 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json; then
               echo "Attempt $attempt: production readiness endpoint is not reachable yet."
-              sleep 20
+              sleep 10
               continue
             fi
             deployed_commit=$(python -c 'import json; print(json.load(open("/tmp/solenos-ready.json")).get("deployment_commit") or "")')
             if ! [[ "$deployed_commit" =~ ^[0-9a-f]{40}$ ]]; then
               echo "Attempt $attempt: /ready did not expose a valid Railway source commit: '$deployed_commit'"
-              sleep 20
+              sleep 10
               continue
             fi
             if ! git merge-base --is-ancestor "$deployed_commit" "$GITHUB_SHA"; then
               echo "Attempt $attempt: deployed source is not an ancestor of main yet: deployed=$deployed_commit main=$GITHUB_SHA"
-              sleep 20
+              sleep 10
               continue
             fi
             changed=$(git diff --name-only "$deployed_commit..$GITHUB_SHA")
@@ -103,7 +103,7 @@ jobs:
             if [ -n "$runtime_changes" ]; then
               echo "Attempt $attempt: waiting for Railway to deploy these runtime/migration changes:"
               printf '%s\n' "$runtime_changes"
-              sleep 20
+              sleep 10
               continue
             fi
             matched=1
