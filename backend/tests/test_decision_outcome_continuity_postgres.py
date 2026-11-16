@@ -201,7 +201,7 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             )
             assert revised.status_code == 200, revised.text
             assert revised.json()["decision_text"].endswith("three days each week.")
-            assert "Evening coverage was difficult" in revised.json()["context"]
+            assert revised.json()["context"]["reason"] == "Evening coverage was difficult"
 
             revisions = client.get("/api/v1/care-continuity/decision-revisions", headers=headers)
             assert revisions.status_code == 200, revisions.text
