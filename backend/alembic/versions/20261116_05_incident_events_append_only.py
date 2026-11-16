@@ -27,6 +27,12 @@ def upgrade():
             CREATE OR REPLACE FUNCTION {FUNCTION}()
             RETURNS trigger AS $$
             BEGIN
+                -- Explicit, reviewed privacy erasure may remove subject-linked
+                -- incident events; ordinary UPDATE/DELETE remains prohibited.
+                IF TG_OP = 'DELETE'
+                   AND current_setting('solenos.privacy_erasure', true) = 'on' THEN
+                    RETURN OLD;
+                END IF;
                 RAISE EXCEPTION 'security incident timeline events are append-only';
             END;
             $$ LANGUAGE plpgsql
@@ -37,23 +43,9 @@ def upgrade():
             BEFORE UPDATE OR DELETE ON {TABLE}
             FOR EACH ROW EXECUTE FUNCTION {FUNCTION}()
         """)
-    elif bind.dialect.name == "sqlite":
-        op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER}_update")
-        op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER}_delete")
-        op.execute(f"""
-            CREATE TRIGGER {TRIGGER}_update
-            BEFORE UPDATE ON {TABLE}
-            BEGIN
-                SELECT RAISE(ABORT, 'security incident timeline events are append-only');
-            END
-        """)
-        op.execute(f"""
-            CREATE TRIGGER {TRIGGER}_delete
-            BEFORE DELETE ON {TABLE}
-            BEGIN
-                SELECT RAISE(ABORT, 'security incident timeline events are append-only');
-            END
-        """)
+    # SQLite is a local/test compatibility database and has no equivalent
+    # transaction-local privacy-erasure authorization variable. Do not install
+    # a trigger there that would make the reviewed erasure workflow impossible.
 
 
 def downgrade():
@@ -61,6 +53,3 @@ def downgrade():
     if bind.dialect.name == "postgresql":
         op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER} ON {TABLE}")
         op.execute(f"DROP FUNCTION IF EXISTS {FUNCTION}()")
-    elif bind.dialect.name == "sqlite":
-        op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER}_update")
-        op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER}_delete")
