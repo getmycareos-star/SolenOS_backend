@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
+import importlib.util
+from pathlib import Path
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from sqlalchemy import create_engine, text
 
 
@@ -18,20 +22,19 @@ def test_incident_timeline_rejects_update_and_delete():
                     notes_redacted TEXT
                 )
             """))
-            connection.execute(text("""
-                CREATE TRIGGER trg_privacy_incident_events_append_only_update
-                BEFORE UPDATE ON privacy_incident_events
-                BEGIN
-                    SELECT RAISE(ABORT, 'security incident timeline events are append-only');
-                END
-            """))
-            connection.execute(text("""
-                CREATE TRIGGER trg_privacy_incident_events_append_only_delete
-                BEFORE DELETE ON privacy_incident_events
-                BEGIN
-                    SELECT RAISE(ABORT, 'security incident timeline events are append-only');
-                END
-            """))
+            migration_path = (
+                Path(__file__).parents[1]
+                / "alembic"
+                / "versions"
+                / "20261116_05_incident_events_append_only.py"
+            )
+            spec = importlib.util.spec_from_file_location(
+                "incident_events_append_only_migration", migration_path
+            )
+            migration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration)
+            migration.op = Operations(MigrationContext.configure(connection))
+            migration.upgrade()
             connection.execute(text("""
                 INSERT INTO privacy_incident_events
                     (id, incident_id, event_type, occurred_at, actor_id, notes_redacted)
