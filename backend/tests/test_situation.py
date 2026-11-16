@@ -106,7 +106,7 @@ def test_get_situation_rejects_missing_or_invalid_bearer_and_accepts_valid_sessi
         )
         assert accepted.status_code == 200, accepted.text
         payload = accepted.json()
-        assert payload["person_id"] == created["person"]["id"]
+        assert payload["care_recipient_id"] == created["person"]["id"]
     finally:
         teardown_db()
 
