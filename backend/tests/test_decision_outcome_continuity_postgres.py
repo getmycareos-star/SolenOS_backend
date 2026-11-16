@@ -96,6 +96,26 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             assert first_read.status_code == 200, first_read.text
             assert any(row["id"] == decision_id for row in first_read.json())
 
+            other_decision = client.post(
+                "/api/v1/care-continuity/decisions",
+                headers=other_headers,
+                json={
+                    "title": "Other person's synthetic decision " + suffix,
+                    "decision_text": "This decision belongs to a separate care record.",
+                },
+            )
+            assert other_decision.status_code == 201, other_decision.text
+            cross_person_outcome = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={
+                    "decision_id": other_decision.json()["id"],
+                    "outcome_status": "observed",
+                    "description": "Must not cross care-record boundaries.",
+                },
+            )
+            assert cross_person_outcome.status_code == 404, cross_person_outcome.text
+
             outcome = client.post(
                 "/api/v1/care-continuity/decision-outcomes",
                 headers=headers,
