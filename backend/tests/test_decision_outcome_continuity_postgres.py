@@ -59,12 +59,38 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                     "title": "Synthetic support decision " + suffix,
                     "decision_text": "Family agreed to trial evening home support.",
                     "decision_status": "recorded",
+                    "client_reference_id": "decision-" + suffix,
                     "context": "Caregiver reported that evenings had become difficult.",
                     "evidence_ids": [],
                 },
             )
             assert created.status_code == 201, created.text
             decision_id = created.json()["id"]
+            replayed_create = client.post(
+                "/api/v1/care-continuity/decisions",
+                headers=headers,
+                json={
+                    "title": "Synthetic support decision " + suffix,
+                    "decision_text": "Family agreed to trial evening home support.",
+                    "decision_status": "recorded",
+                    "client_reference_id": "decision-" + suffix,
+                    "context": "Caregiver reported that evenings had become difficult.",
+                    "evidence_ids": [],
+                },
+            )
+            assert replayed_create.status_code == 201, replayed_create.text
+            assert replayed_create.json()["id"] == decision_id
+
+            conflicting_replay = client.post(
+                "/api/v1/care-continuity/decisions",
+                headers=headers,
+                json={
+                    "title": "Synthetic support decision " + suffix,
+                    "decision_text": "Different decision content under the same reference.",
+                    "client_reference_id": "decision-" + suffix,
+                },
+            )
+            assert conflicting_replay.status_code == 409, conflicting_replay.text
 
             first_read = client.get("/api/v1/care-continuity/decisions", headers=headers)
             assert first_read.status_code == 200, first_read.text
