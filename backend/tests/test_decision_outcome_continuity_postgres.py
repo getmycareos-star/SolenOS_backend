@@ -85,6 +85,13 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             assert outcome.status_code == 201, outcome.text
             assert outcome.json()["decision_id"] == decision_id
 
+            ambiguous_outcome = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={"outcome_status": "observed", "description": "Unlinked synthetic observation."},
+            )
+            assert ambiguous_outcome.status_code == 422, ambiguous_outcome.text
+
             revised = client.patch(
                 f"/api/v1/care-continuity/decisions/{decision_id}",
                 headers=headers,
@@ -118,6 +125,13 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             assert follow_up.status_code == 201, follow_up.text
             assert follow_up.json()["owner_caregiver_id"] == caregiver_id
             follow_up_id = follow_up.json()["id"]
+
+            rejected_owner = client.patch(
+                f"/api/v1/care-continuity/follow-up-links/{follow_up_id}",
+                headers=headers,
+                json={"owner_caregiver_id": other.json()["caregiver"]["id"]},
+            )
+            assert rejected_owner.status_code == 404, rejected_owner.text
 
             rejected_completion = client.patch(
                 f"/api/v1/care-continuity/follow-up-links/{follow_up_id}",
