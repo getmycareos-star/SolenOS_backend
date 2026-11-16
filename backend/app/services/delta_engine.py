@@ -314,8 +314,10 @@ def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]
             status = "unsupported"
             justification = "The linked records do not satisfy the source-verification requirement."
         elif item.get("claim_supported") is True and item.get("certainty") in {"candidate", "supported"}:
-            baseline = str(item.get("baseline_coverage_status") or "").casefold()
-            current = str(item.get("current_coverage_status") or "").casefold()
+            baseline_value = item.get("baseline_coverage_status")
+            current_value = item.get("current_coverage_status")
+            baseline = str(getattr(baseline_value, "value", baseline_value) or "").casefold()
+            current = str(getattr(current_value, "value", current_value) or "").casefold()
             complete = {"covered", "complete", "full", "sufficient"}
             if (baseline and baseline not in complete) or (current and current not in complete):
                 status = "partially_supported"
