@@ -46,7 +46,20 @@ Required states and evidence:
 
 A request response must not say data has been deleted unless the corresponding deletion and verification have actually completed. Account deletion must not be described as care-record erasure. Browser-local clearing must not be described as server-side deletion.
 
-## 4. Engineering enforcement required
+## 4. Implemented bounded expiry control
+
+Encrypted privacy export artifacts now have a dedicated application lifespan worker:
+
+- Runs every five minutes and deletes at most 100 expired export rows per pass.
+- Uses row-level locking with `SKIP LOCKED` where supported to avoid competing workers processing the same rows.
+- Writes a metadata-only `privacy_export.expired` audit receipt with artifact identifier, byte count and SHA-256 digest; archive bytes are not copied into the audit event.
+- Is idempotent and retries on the next pass after transient failures.
+- Does not delete care records, source evidence, original documents, conversations, accounts, or audit history.
+- Has focused tests for expired-versus-live artifacts, bounded batches, idempotency and invalid batch sizes.
+
+This implements expiry of the short-lived privacy export archive only. It does **not** complete the retention schedule or prove deletion from database backups, provider logs, replicas or external processors.
+
+## 5. Engineering enforcement required
 
 Before marking the schedule enforced, implement and test:
 
@@ -62,7 +75,7 @@ Before marking the schedule enforced, implement and test:
 
 Do not add a scheduled destructive purge until policy periods, dependencies, legal holds and restore behavior have been reviewed and tested. A guessed retention period can cause irreversible loss of care history or unlawful over-retention.
 
-## 5. Required approval and evidence
+## 6. Required approval and evidence
 
 The Founder must obtain qualified privacy/legal review for applicable jurisdictions and document the approved periods. Engineering must then map each row to exact tables, object stores, logs, caches, providers and backup systems. Keep approvals and production evidence in a restricted operations system, not public source control.
 
