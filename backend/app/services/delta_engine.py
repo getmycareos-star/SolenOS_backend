@@ -6,7 +6,7 @@ import logging
 import uuid
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -304,36 +304,66 @@ def evaluate_longitudinal_interpretations(
         ]
         verified_references = []
         invalid_reference_ids = []
+        stale_source_ids = []
         for ref in references:
             record_id = str(ref["record_id"])
             record_type = str(ref.get("record_type") or "")
             exists = True
+            database_stale = False
             if db is not None:
                 exists = False
                 if person_id:
                     if record_type == "care_event":
-                        exists = db.query(CareEvent.id).filter(
+                        source = db.query(CareEvent).filter(
                             CareEvent.id == record_id, CareEvent.person_id == person_id
-                        ).first() is not None
+                        ).first()
+                        exists = source is not None
+                        database_stale = bool(
+                            source is not None and str(source.status or "").casefold()
+                            in {"stale", "historical", "historical_only", "archived", "superseded"}
+                        )
                     elif record_type == "evidence":
-                        exists = db.query(Evidence.id).filter(
+                        source = db.query(Evidence).filter(
                             Evidence.id == record_id, Evidence.person_id == person_id
-                        ).first() is not None
+                        ).first()
+                        exists = source is not None
+                        database_stale = bool(
+                            source is not None and str(source.evidence_status or "").casefold()
+                            in {"stale", "historical", "historical_only", "archived", "superseded", "needs_confirmation"}
+                        )
                     elif record_type == "care_assertion":
-                        exists = db.query(CareAssertion.id).filter(
+                        source = db.query(CareAssertion).filter(
                             CareAssertion.id == record_id, CareAssertion.person_id == person_id
-                        ).first() is not None
+                        ).first()
+                        exists = source is not None
+                        if source is not None and source.review_after_days is not None and source.observed_at is not None:
+                            observed_at = source.observed_at
+                            if observed_at.tzinfo is None:
+                                observed_at = observed_at.replace(tzinfo=timezone.utc)
+                            database_stale = datetime.now(timezone.utc) > observed_at + timedelta(
+                                days=max(0, int(source.review_after_days))
+                            )
                     elif record_type == "evidence_observation":
-                        exists = db.query(EvidenceObservation.id).filter(
+                        source = db.query(EvidenceObservation).filter(
                             EvidenceObservation.id == record_id, EvidenceObservation.person_id == person_id
-                        ).first() is not None
+                        ).first()
+                        exists = source is not None
+                        if source is not None:
+                            database_stale = source.supersedes_observation_id is not None or (
+                                db.query(EvidenceObservation.id).filter(
+                                    EvidenceObservation.person_id == person_id,
+                                    EvidenceObservation.supersedes_observation_id == record_id,
+                                ).first() is not None
+                            )
             if exists:
                 verified_references.append(ref)
+                if database_stale:
+                    stale_source_ids.append(record_id)
             else:
                 invalid_reference_ids.append(record_id)
 
         reference_ids = list(dict.fromkeys(str(ref["record_id"]) for ref in verified_references))
-        explicit_stale = item.get("historical_only") is True or any(
+        explicit_stale = item.get("historical_only") is True or bool(stale_source_ids) or any(
             str(ref.get("freshness_status") or ref.get("status") or "").casefold()
             in {"stale", "historical_only", "needs_confirmation"}
             for ref in verified_references
@@ -385,6 +415,7 @@ def evaluate_longitudinal_interpretations(
             reference_ids if status == "conflicting" else []
         )
         item["interpretation_invalid_source_ids"] = invalid_reference_ids
+        item["interpretation_stale_source_ids"] = stale_source_ids
         item["interpretation_uncertainty_justification"] = justification
         counts[status] += 1
         evaluated.append({
