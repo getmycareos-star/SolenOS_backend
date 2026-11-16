@@ -96,3 +96,19 @@ def test_complete_comparison_with_no_emitted_change_is_not_mislabeled_insufficie
     assert result["overall_status"] == "no_change_detected"
     assert result["caregiver_visible"] is False
     assert result["counts"]["no_change_detected"] == 1
+
+def test_invalid_source_reference_overrides_conflicting_interpretation():
+    item = _item(
+        change_type="conflicting",
+        classification="conflicting",
+        source_record_refs=[
+            {"record_type": "unknown_source_type", "record_id": "unverifiable-report"},
+            {"record_type": "care_event", "record_id": "event-2"},
+        ],
+    )
+    result = evaluate_longitudinal_interpretations([item], db=object(), person_id="person-1")
+    assert result["overall_status"] == "unsupported"
+    assert item["interpretation_status"] == "unsupported"
+    assert item["interpretation_caregiver_visible"] is False
+    assert item["interpretation_supporting_evidence_ids"] == []
+    assert item["interpretation_invalid_source_ids"] == ["unverifiable-report", "event-2"]
