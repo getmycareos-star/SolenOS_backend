@@ -272,6 +272,112 @@ def _normalise(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+
+def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Independently grade persisted change interpretations without changing source evidence.
+
+    This verifier checks the evidence/provenance and coverage contract after the
+    Delta Engine has produced its interpretation. It is deliberately deterministic:
+    it does not call a model, infer causes, rewrite observations, or create care facts.
+    """
+    counts = {
+        "supported": 0,
+        "partially_supported": 0,
+        "conflicting": 0,
+        "insufficient_evidence": 0,
+        "stale_evidence": 0,
+        "unsupported": 0,
+    }
+    evaluated = []
+    for item in computed_changes:
+        references = [
+            ref for ref in (item.get("source_record_refs") or [])
+            if isinstance(ref, dict) and str(ref.get("record_id") or "").strip()
+        ]
+        reference_ids = list(dict.fromkeys(str(ref["record_id"]) for ref in references))
+        explicit_stale = item.get("historical_only") is True or any(
+            str(ref.get("freshness_status") or ref.get("status") or "").casefold()
+            in {"stale", "historical_only", "needs_confirmation"}
+            for ref in references
+        )
+        change_kind = str(item.get("change_type") or item.get("classification") or "").casefold()
+        if change_kind == "conflicting" or item.get("classification") == "conflicting":
+            status = "conflicting"
+            justification = "Competing reports are preserved; the evaluator does not choose which report is correct."
+        elif explicit_stale:
+            status = "stale_evidence"
+            justification = "The linked source is explicitly marked historical or requiring confirmation."
+        elif not reference_ids:
+            status = "insufficient_evidence"
+            justification = "No verifiable source record is linked to this interpretation."
+        elif item.get("evidence_supported") is not True or item.get("source_reference_status") not in (None, "matched"):
+            status = "unsupported"
+            justification = "The linked records do not satisfy the source-verification requirement."
+        elif item.get("claim_supported") is True and item.get("certainty") in {"candidate", "supported"}:
+            baseline = str(item.get("baseline_coverage_status") or "").casefold()
+            current = str(item.get("current_coverage_status") or "").casefold()
+            complete = {"covered", "complete", "full", "sufficient"}
+            if (baseline and baseline not in complete) or (current and current not in complete):
+                status = "partially_supported"
+                justification = "Source records are linked, but the comparison window is not fully covered."
+            else:
+                status = "supported"
+                justification = "Source records are linked and the existing deterministic support checks passed; this is not a clinical conclusion."
+        else:
+            status = "partially_supported"
+            justification = "Some source support exists, but the interpretation has not passed every support check."
+        item["interpretation_status"] = status
+        item["interpretation_caregiver_visible"] = status in {
+            "supported", "partially_supported", "conflicting"
+        }
+        item["interpretation_supporting_evidence_ids"] = (
+            reference_ids if status not in {"insufficient_evidence", "unsupported"} else []
+        )
+        item["interpretation_contradictory_evidence_ids"] = (
+            reference_ids if status == "conflicting" else []
+        )
+        item["interpretation_uncertainty_justification"] = justification
+        counts[status] += 1
+        evaluated.append({
+            "change_id": str(item.get("authoritative_change_id") or ""),
+            "subject": str(item.get("name") or item.get("domain") or "care information"),
+            "status": status,
+            "supporting_evidence_ids": item["interpretation_supporting_evidence_ids"],
+            "contradictory_evidence_ids": item["interpretation_contradictory_evidence_ids"],
+            "uncertainty_justification": justification,
+            "caregiver_visible": item["interpretation_caregiver_visible"],
+        })
+
+    total = len(evaluated)
+    if not total:
+        overall = "insufficient_evidence"
+    elif counts["conflicting"]:
+        overall = "conflicting"
+    elif counts["stale_evidence"] and counts["supported"] == 0:
+        overall = "stale_evidence"
+    elif counts["unsupported"] or counts["insufficient_evidence"]:
+        overall = "partially_supported" if counts["supported"] or counts["partially_supported"] else "unsupported"
+    elif counts["partially_supported"]:
+        overall = "partially_supported"
+    else:
+        overall = "supported"
+    return {
+        "version": "longitudinal-interpretation-evaluator-v1",
+        "evaluator": "deterministic_post_delta_provenance_and_coverage_check",
+        "overall_status": overall,
+        "caregiver_visible": any(item["caregiver_visible"] for item in evaluated),
+        "source_evidence_mutated": False,
+        "creates_competing_care_record": False,
+        "counts": counts,
+        "evaluations": evaluated,
+        "limitations": [
+            "A supported result means provenance and existing comparison checks passed; it does not establish clinical truth.",
+            "Freshness is marked stale only when the source or comparison already carries an explicit historical or confirmation-required marker; no universal expiry period is assumed.",
+            "This evaluator verifies emitted interpretations. It does not prove that the Delta Engine detected every meaningful change.",
+        ],
+    }
+
+
 def _medication_change_is_explicit(item: dict[str, Any]) -> bool:
     """Require source wording that actually describes a medication change.
 
@@ -2178,6 +2284,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 detail="The reconciliation could not be persisted; the transaction was rolled back.",
             ) from exc
 
+    result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(computed)
     result["computed_changes"] = computed
     result["provenance"] = {
         "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
