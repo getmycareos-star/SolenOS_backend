@@ -4479,10 +4479,19 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             outcomes_table.c.client_reference_id == reference_id,
         )).mappings().first()
         if existing is not None:
+            existing_evidence_ids = existing.get("evidence_ids") or []
+            if isinstance(existing_evidence_ids, str):
+                try:
+                    existing_evidence_ids = json.loads(existing_evidence_ids)
+                except (TypeError, ValueError):
+                    existing_evidence_ids = []
+            requested_evidence_ids = data.get("evidence_ids") or []
             if (
                 str(existing.get("decision_id")) != str(data.get("decision_id"))
                 or str(existing.get("outcome_status")) != str(data.get("outcome_status"))
                 or (existing.get("description") or "") != (data.get("description") or "")
+                or bool(existing.get("is_intended_outcome")) != bool(data.get("is_intended_outcome"))
+                or sorted(map(str, existing_evidence_ids)) != sorted(map(str, requested_evidence_ids))
             ):
                 raise HTTPException(status_code=409, detail="This outcome capture reference was already used for different content")
             return _jsonable(dict(existing))
