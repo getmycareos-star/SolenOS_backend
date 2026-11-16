@@ -168,22 +168,36 @@ jobs:
           records = []
           failures = []
           for name, method, path, expected, body in probes:
-              request = urllib.request.Request(
-                  base + path,
-                  data=body,
-                  headers={"Content-Type": "application/json"} if body else {},
-                  method=method,
-              )
               started = time.monotonic()
               actual = None
               error_category = None
-              try:
-                  with urllib.request.urlopen(request, timeout=25) as response:
-                      actual = response.status
-              except urllib.error.HTTPError as exc:
-                  actual = exc.code
-              except Exception as exc:
-                  error_category = type(exc).__name__
+              attempts = 0
+              retryable_statuses = {500, 502, 503, 504}
+              for attempt in range(1, 4):
+                  attempts = attempt
+                  request = urllib.request.Request(
+                      base + path,
+                      data=body,
+                      headers={"Content-Type": "application/json"} if body else {},
+                      method=method,
+                  )
+                  actual = None
+                  error_category = None
+                  try:
+                      with urllib.request.urlopen(request, timeout=15) as response:
+                          actual = response.status
+                  except urllib.error.HTTPError as exc:
+                      actual = exc.code
+                  except Exception as exc:
+                      error_category = type(exc).__name__
+                  if actual == expected and error_category is None:
+                      break
+                  # Retry only transient transport/server failures. Stable 4xx
+                  # responses remain immediate contract failures.
+                  if error_category is None and actual not in retryable_statuses:
+                      break
+                  if attempt < 3:
+                      time.sleep(attempt * 2)
               duration_ms = round((time.monotonic() - started) * 1000, 3)
               record = {
                   "observed_at": datetime.now(timezone.utc).isoformat(),
@@ -192,6 +206,7 @@ jobs:
                   "route": path,
                   "expected_status": expected,
                   "actual_status": actual,
+                  "attempts": attempts,
                   "duration_ms": duration_ms,
                   "outcome": "pass" if actual == expected and error_category is None else "fail",
                   "error_category": error_category,
