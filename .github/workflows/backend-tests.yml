@@ -189,6 +189,14 @@ jobs:
               cur.execute("SELECT COUNT(*) FROM privacy_incident_events WHERE id=%s", (event_id,))
               if cur.fetchone()[0] != 1:
                   raise SystemExit("Incident event was not preserved after rejected mutations")
+
+              # The approved privacy-erasure transaction is the sole exception
+              # for deletion; ordinary SQL DELETE above must remain rejected.
+              cur.execute("SET LOCAL solenos.privacy_erasure = 'on'")
+              cur.execute("DELETE FROM privacy_incident_events WHERE id=%s", (event_id,))
+              cur.execute("SELECT COUNT(*) FROM privacy_incident_events WHERE id=%s", (event_id,))
+              if cur.fetchone()[0] != 0:
+                  raise SystemExit("Reviewed privacy erasure could not remove the incident event")
           conn.commit()
           conn.close()
           print("PASS: PostgreSQL rejects UPDATE and DELETE on security incident timeline events.")
