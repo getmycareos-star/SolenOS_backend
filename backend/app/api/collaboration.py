@@ -7849,7 +7849,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "response_mode": (
-            "source_quoted_caregiver_question"
+            "source_quoted_care_history"
+            if care_history_direct_answer_used or care_history_extractive_fallback_used
+            else "source_quoted_caregiver_question"
             if caregiver_question_direct_answer_used
             else "deterministic_low_capacity_support_fallback"
             if low_capacity_support_fallback_used else "model_or_grounded_fallback"
