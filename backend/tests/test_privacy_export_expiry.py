@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.privacy_delivery import AuditLogEvent
+from app.models.privacy_request import DataSubjectRequest
 from app.models.privacy_export import PrivacyExportArtifact
 from app.services import privacy_export_expiry
 
@@ -17,6 +18,7 @@ def _expiry_db(monkeypatch):
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine, tables=[
+        DataSubjectRequest.__table__,
         PrivacyExportArtifact.__table__,
         AuditLogEvent.__table__,
     ])
