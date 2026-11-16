@@ -2180,6 +2180,12 @@ def test_care_delta_api_persists_deterministically_without_local_model(monkeypat
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["event_summary"] == "Caregiver observed repeated overnight waking"
+    # This exercises the default no-model caregiver API path against PostgreSQL.
+    # The independent evaluator must be present on this path, not only on the
+    # optional model-enrichment reconciliation path.
+    assert isinstance(payload.get("interpretation_evaluation"), dict)
+    assert payload["interpretation_evaluation"]["version"] == "longitudinal-interpretation-evaluator-v1"
+    assert payload["interpretation_evaluation"]["source_evidence_mutated"] is False
     assert payload["provenance"]["model_provider"] == "deterministic_change_intelligence"
     assert payload["provenance"]["model"] == "none"
     assert payload["provenance"]["delta_run_id"]
