@@ -182,6 +182,28 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                 },
             )
             assert foreign_source_event.status_code == 404, foreign_source_event.text
+            malformed_source_events = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={
+                    "decision_id": decision_id,
+                    "outcome_status": "observed",
+                    "description": "A source-event reference must be an array.",
+                    "source_event_ids": source_event_id,
+                },
+            )
+            assert malformed_source_events.status_code == 422, malformed_source_events.text
+            missing_source_event = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={
+                    "decision_id": decision_id,
+                    "outcome_status": "observed",
+                    "description": "A source-event reference must resolve to a persisted event.",
+                    "source_event_ids": [str(uuid.uuid4())],
+                },
+            )
+            assert missing_source_event.status_code == 404, missing_source_event.text
             replayed_outcome = client.post(
                 "/api/v1/care-continuity/decision-outcomes",
                 headers=headers,
