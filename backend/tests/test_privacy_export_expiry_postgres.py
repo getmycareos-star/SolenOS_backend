@@ -13,7 +13,7 @@ from app.services.privacy_export_expiry import expire_privacy_exports_once
 @pytest.mark.skipif(engine.dialect.name != "postgresql", reason="PostgreSQL locking behavior only")
 def test_expired_export_cleanup_uses_postgresql_row_lock_and_persists_receipt():
     suffix = str(uuid.uuid4())
-    request_id = f"expiry-test-{suffix}"
+    request_id = str(uuid.uuid4())
     artifact_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     db = SessionLocal()
