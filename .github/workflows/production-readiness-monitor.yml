@@ -1,6 +1,16 @@
 name: Production readiness monitor
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/**"
+      - "backend/alembic/**"
+      - "Dockerfile"
+      - "railway.json"
+      - "start-with-qwen.sh"
+      - ".dockerignore"
+      - ".github/workflows/production-readiness-monitor.yml"
   pull_request:
     paths:
       - ".github/workflows/production-readiness-monitor.yml"
@@ -64,6 +74,8 @@ jobs:
           set -Eeuo pipefail
           curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json
           deployed_commit=$(python -c 'import json; print(json.load(open("/tmp/solenos-ready.json")).get("deployment_commit") or "")')
+          echo "Production reports source commit: $deployed_commit"
+          echo "GitHub main monitor target: $GITHUB_SHA"
           if ! [[ "$deployed_commit" =~ ^[0-9a-f]{40}$ ]]; then
             echo "Production /ready did not expose a valid Railway source commit: '$deployed_commit'" >&2
             exit 1
