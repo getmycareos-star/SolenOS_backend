@@ -5628,6 +5628,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     caregiver_question_queue_lines: list[str] = []
     caregiver_question_direct_answer: str | None = None
     caregiver_question_direct_answer_used = False
+    care_history_direct_answer: str | None = None
+    care_history_direct_answer_used = False
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
 
@@ -5997,6 +5999,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ))[:12]
         synonym_terms = sorted(_expanded_context_terms(retrieval_query) - set(ranking_terms))[:12]
         retrieval_terms = _ordered_context_search_terms(user_text, retrieval_query, limit=24)
+        requested_history_terms = [
+            term
+            for _, variants in _care_history_requested_topics(user_text)
+            for term in sorted(variants)
+            if len(term) >= 4
+        ]
+        retrieval_terms = list(dict.fromkeys([
+            *retrieval_terms, *requested_history_terms,
+        ]))[:36]
         existing_event_ids = {str(event.id) for event in recent_events}
         if retrieval_terms:
             matching_events = (
@@ -6255,7 +6266,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 + item["content"].strip()[:600]
                 for item in conversation_items
             ]
-            shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
+            if not shared_lcr_context.get("temporal_window"):
+                shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
             document_question_for_fallback = bool(re.search(
                 r"\b(?:uploaded document|document|file|attachment|letter|pdf|discharge summary|medical record)\b",
                 user_text,
@@ -6394,6 +6406,28 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if document_question
             else _filter_context_lines_to_query(retrieval_query, ranked_evidence_context)
         )
+        temporal_event_lines: list[str] = []
+        if isinstance(lcr_context_coverage, dict) and lcr_context_coverage.get("temporal_window"):
+            # The shared projection has already applied the requested date window.
+            # Preserve its dated care events even when the question has no lexical
+            # overlap with the event text (for example, "what happened last week?").
+            for shared_line in shared_lcr_lines:
+                brace = (shared_line or "").find("{")
+                if brace < 0:
+                    continue
+                try:
+                    shared_payload = json.loads(shared_line[brace:])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                record = shared_payload.get("record") if isinstance(shared_payload, dict) else None
+                if (
+                    isinstance(record, dict)
+                    and record.get("event_type")
+                    and record.get("occurred_at")
+                    and shared_payload.get("source_id")
+                ):
+                    temporal_event_lines.append(shared_line)
+
         if document_question:
             relevant_shared_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
             # A document question is an explicit request for source material.
@@ -6406,6 +6440,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ]))
         else:
             shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
+            if temporal_event_lines:
+                shared_lcr_lines = list(dict.fromkeys([
+                    *shared_lcr_lines, *temporal_event_lines,
+                ]))
         # Direct caregiver-history questions must send the exact caregiver-
         # attributed assertions retained above into the model context and the
         # deterministic source-quote fallback. Keeping them only in the
@@ -6541,7 +6579,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 lcr_context_coverage["page_limit_reached"] = True
 
         source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
-        source_event_ids = _context_record_ids(event_context, "event_id")
+        temporal_event_ids = []
+        for temporal_line in temporal_event_lines:
+            brace = (temporal_line or "").find("{")
+            if brace < 0:
+                continue
+            try:
+                temporal_payload = json.loads(temporal_line[brace:])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            temporal_source_id = temporal_payload.get("source_id") if isinstance(temporal_payload, dict) else None
+            if temporal_source_id:
+                temporal_event_ids.append(str(temporal_source_id))
+        source_event_ids = list(dict.fromkeys([
+            *_context_record_ids(event_context, "event_id"), *temporal_event_ids,
+        ]))
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
         source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
@@ -6832,6 +6884,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "shared_lcr_ref_count": len(source_lcr_record_refs),
             }, separators=(",", ":")),
         )
+        care_history_direct_answer = None
+        if (
+            _CARE_HISTORY_INTENT_PATTERN.search(user_text or "")
+            and _care_history_requested_topics(user_text)
+            and not emergency
+        ):
+            care_history_direct_answer = _care_history_extractive_answer(
+                user_text, included_model_context_lines
+            )
+        care_history_direct_answer_used = bool(care_history_direct_answer)
         caregiver_question_direct_answer = _caregiver_question_extractive_answer(
             user_text, included_model_context_lines
         )
@@ -6851,11 +6913,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         caregiver_question_direct_answer_used = bool(caregiver_question_direct_answer)
         base = ""
-        model = "deterministic-source-quote" if caregiver_question_direct_answer_used else "unavailable"
+        model = "deterministic-source-quote" if (care_history_direct_answer_used or caregiver_question_direct_answer_used) else "unavailable"
         inference_started = _time.perf_counter()
         care_history_fallback_from_outage = False
         try:
-            if caregiver_question_direct_answer_used:
+            if care_history_direct_answer_used:
+                reply = care_history_direct_answer
+                logger.info(
+                    "solenos_companion_stage %s",
+                    json.dumps({
+                        "event": "companion_inference_complete",
+                        "request_id": companion_request_id,
+                        "duration_ms": 0,
+                        "retrieval_duration_ms": retrieval_duration_ms,
+                        "model": model,
+                        "outcome": "deterministic_source_grounded_history_answer",
+                    }, separators=(",", ":")),
+                )
+            elif caregiver_question_direct_answer_used:
                 reply = caregiver_question_direct_answer
                 logger.info(
                     "solenos_companion_stage %s",
@@ -7020,8 +7095,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         medication_change_reply = _medication_change_safety_response(user_text)
         unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
         conflict_response = _contradictory_event_evidence_response(user_text, event_context)
-        care_history_extractive_fallback_used = care_history_fallback_from_outage
-        if caregiver_question_direct_answer_used:
+        care_history_extractive_fallback_used = care_history_fallback_from_outage or care_history_direct_answer_used
+        if care_history_direct_answer_used:
+            reply = care_history_direct_answer
+        elif caregiver_question_direct_answer_used:
             # This answer is a direct lookup of authorized saved source text,
             # not a generated clinical interpretation. Keep it explicitly
             # non-AI and read-only.
@@ -7114,7 +7191,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _caregiver_response_needs_revision(user_text, reply)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
-        if caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
+        if care_history_direct_answer_used or caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
             invalid_reply = False
         if invalid_reply and caregiver_guidance:
             # Explicit caregiver-capacity and continuity constraints are part of
@@ -7682,7 +7759,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "response_mode": (
-            "source_quoted_caregiver_question"
+            "source_quoted_care_history"
+            if care_history_direct_answer_used or care_history_extractive_fallback_used
+            else "source_quoted_caregiver_question"
             if caregiver_question_direct_answer_used
             else "deterministic_low_capacity_support_fallback"
             if low_capacity_support_fallback_used else "model_or_grounded_fallback"
