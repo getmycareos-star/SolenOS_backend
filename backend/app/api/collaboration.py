@@ -5239,8 +5239,10 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         return None
 
     topics = _care_history_requested_topics(user_text)
-    candidates: list[tuple[int, int, str, set[str]]] = []
+    query_terms = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold())) - _CARE_HISTORY_STOPWORDS
+    candidates: list[tuple[int, int, int, str, set[str]]] = []
     order = 0
+
     for line in context_lines:
         brace = (line or "").find("{")
         if brace < 0:
@@ -5284,26 +5286,31 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             continue
         candidates.append((
             len(matched_topics),
+            len(terms & query_terms),
             order,
             re.sub(r"\s+", " ", description).strip(),
             matched_topics,
         ))
         order += 1
 
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    selected: list[tuple[int, int, str, set[str]]] = []
+    # Prefer the caregiver entry that best matches the actual question, not
+    # merely the first medication-related note in the timeline. A newer or
+    # previously reviewed dose must not eclipse a report about a possible
+    # medication change yesterday.
+    candidates.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    selected: list[tuple[int, int, int, str, set[str]]] = []
     covered_topics: set[str] = set()
     for candidate in candidates:
-        if not topics or candidate[3] - covered_topics:
+        if not topics or candidate[4] - covered_topics:
             selected.append(candidate)
-            covered_topics.update(candidate[3])
+            covered_topics.update(candidate[4])
         if topics and len(covered_topics) == len(topics):
             break
         if not topics and len(selected) >= 3:
             break
 
-    selected.sort(key=lambda item: item[1])
-    descriptions = [item[2] for item in selected[:3]]
+    selected.sort(key=lambda item: item[2])
+    descriptions = [item[3] for item in selected[:3]]
     if topics:
         missing_topics = [
             label for label, _ in topics if label not in covered_topics
@@ -7052,11 +7059,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 missing_measurement_reply=missing_measurement_fallback,
                 medication_change_reply=medication_safety_fallback,
             ):
-                history_source_lines = list(dict.fromkeys([
-                    *included_model_context_lines,
-                    *event_context,
-                    *shared_lcr_lines,
-                ]))
+                # Dose-recall answers must be grounded only in the direct
+                # person-scoped caregiver medication-event lookup. General
+                # context may contain an older reviewed dose assertion that
+                # is not evidence of the new prescription asked about.
+                history_source_lines = list(dict.fromkeys(
+                    medication_recall_context["event_lines"]
+                ))
                 reply = _care_history_extractive_answer(
                     user_text, history_source_lines
                 ) or (
@@ -7125,15 +7134,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # let the model restate an old observation as a recent trend or imply
             # direction indirectly. Return the evidence-derived limit directly.
             reply = _trend_uncertainty_response(trend_assessment)
-        history_source_lines = list(dict.fromkeys([
-            *included_model_context_lines,
-            *event_context,
-            *shared_lcr_lines,
-        ]))
-        care_history_extractive_answer = _care_history_extractive_answer(
-            user_text,
-            history_source_lines,
-        )
         medication_dose_recall_fallback_used = _should_use_medication_dose_recall_fallback(
             user_text,
             emergency=emergency,
@@ -7141,6 +7141,22 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             conflict_response=conflict_response,
             missing_measurement_reply=missing_measurement_reply,
             medication_change_reply=medication_change_reply,
+        )
+        if medication_dose_recall_fallback_used:
+            # Do not let a general-context assertion about an older dose
+            # override the directly retrieved caregiver report about a change.
+            history_source_lines = list(dict.fromkeys(
+                medication_recall_context["event_lines"]
+            ))
+        else:
+            history_source_lines = list(dict.fromkeys([
+                *included_model_context_lines,
+                *event_context,
+                *shared_lcr_lines,
+            ]))
+        care_history_extractive_answer = _care_history_extractive_answer(
+            user_text,
+            history_source_lines,
         )
         if medication_dose_recall_fallback_used:
             # Medication recall is answered from the caregiver-authored report,
@@ -7155,6 +7171,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 and care_history_extractive_answer.startswith("The saved notes mention medication:")
             )
             care_history_extractive_fallback_used = medication_dose_recall_source_quote_used
+            # Public provenance must describe only the direct medication-event
+            # records used for this answer, not unrelated assertions or context.
+            source_event_ids = _context_record_ids(
+                medication_recall_context["event_lines"], "event_id",
+            )
+            source_evidence_ids = _context_record_ids(
+                medication_recall_context["evidence_lines"], "evidence_id",
+            )
+            source_assertion_ids = []
+            source_appointment_ids = []
+            source_document_analysis_ids = []
+            source_freshness_assessment_ids = []
+            source_lcr_context_ids = []
+            source_lcr_record_refs = []
+            selected_ids_by_type["handoffs"] = []
         if (
             care_history_extractive_answer
             and not (emergency or unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
