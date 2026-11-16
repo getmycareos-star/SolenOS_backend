@@ -339,8 +339,11 @@ def evaluate_longitudinal_interpretations(
             for ref in verified_references
         )
         change_kind = str(item.get("change_type") or item.get("classification") or "").casefold()
-        if change_kind == "conflicting" or item.get("classification") == "conflicting":
-            if len(reference_ids) >= 2 and not invalid_reference_ids:
+        if invalid_reference_ids:
+            status = "unsupported"
+            justification = "One or more linked source records could not be verified for this care record."
+        elif change_kind == "conflicting" or item.get("classification") == "conflicting":
+            if len(reference_ids) >= 2:
                 status = "conflicting"
                 justification = "Competing reports are preserved; the evaluator does not choose which report is correct."
             else:
@@ -349,9 +352,6 @@ def evaluate_longitudinal_interpretations(
         elif explicit_stale:
             status = "stale_evidence"
             justification = "The linked source is explicitly marked historical or requiring confirmation."
-        elif invalid_reference_ids:
-            status = "unsupported"
-            justification = "One or more linked source records could not be verified for this care record."
         elif not reference_ids:
             status = "insufficient_evidence"
             justification = "No verifiable source record is linked to this interpretation."
