@@ -384,6 +384,10 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         )
         assert follow_up.status_code == 200, follow_up.text
         assert follow_up.json()["session_id"] != body["session_id"]
+        assert source in follow_up.json()["reply"], (
+            "when Companion inference returns no source-grounded answer, the saved caregiver report must be quoted"
+        )
+        assert follow_up.json()["ai_generated"] is False
         follow_up_prompt = "\\n".join(
             str(item.get("content", "")) for item in captured_prompts[-1]
         )
@@ -400,6 +404,8 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
             },
         )
         assert natural_recall.status_code == 200, natural_recall.text
+        assert source in natural_recall.json()["reply"]
+        assert natural_recall.json()["ai_generated"] is False
         natural_recall_prompt = "\\n".join(
             str(item.get("content", "")) for item in captured_prompts[-1]
         )
