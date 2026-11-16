@@ -12,6 +12,7 @@ on:
       - "backend/alembic.ini"
       - "backend/docs/BACKUP_RESTORE_VERIFICATION.md"
       - ".github/workflows/backup-recovery.yml"
+      - ".github/workflows/postgres-migration-validation.yml"
   workflow_dispatch:
 
 permissions:
