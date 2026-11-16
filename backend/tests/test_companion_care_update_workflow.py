@@ -371,6 +371,7 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         assert current_care.status_code == 200, current_care.text
         assert any(item.get("id") == assertion_id for item in current_care.json().get("items", []))
 
+        prompt_count_before_readback = len(captured_prompts)
         follow_up = client.post(
             "/api/v1/conversation/message",
             headers=headers,
@@ -388,12 +389,10 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
             "when Companion inference returns no source-grounded answer, the saved caregiver report must be quoted"
         )
         assert follow_up.json()["ai_generated"] is False
-        follow_up_prompt = "\\n".join(
-            str(item.get("content", "")) for item in captured_prompts[-1]
-        )
-        assert "Caregiver-attributed LCR assertion" in follow_up_prompt
-        assert source in follow_up_prompt
+        assert follow_up.json()["response_mode"] == "source_quoted_care_history"
+        assert len(captured_prompts) == prompt_count_before_readback, "saved-history readback must not require model inference"
 
+        prompt_count_before_natural_recall = len(captured_prompts)
         natural_recall = client.post(
             "/api/v1/conversation/message",
             headers=headers,
@@ -406,11 +405,8 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         assert natural_recall.status_code == 200, natural_recall.text
         assert source in natural_recall.json()["reply"]
         assert natural_recall.json()["ai_generated"] is False
-        natural_recall_prompt = "\\n".join(
-            str(item.get("content", "")) for item in captured_prompts[-1]
-        )
-        assert "Caregiver-attributed LCR assertion" in natural_recall_prompt
-        assert source in natural_recall_prompt
+        assert natural_recall.json()["response_mode"] == "source_quoted_care_history"
+        assert len(captured_prompts) == prompt_count_before_natural_recall, "natural saved-history readback must not require model inference"
 
         db = TestingSessionLocal()
         try:
