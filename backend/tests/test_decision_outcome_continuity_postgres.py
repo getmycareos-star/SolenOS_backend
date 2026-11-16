@@ -91,6 +91,19 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                 },
             )
             assert conflicting_replay.status_code == 409, conflicting_replay.text
+            changed_reason_replay = client.post(
+                "/api/v1/care-continuity/decisions",
+                headers=headers,
+                json={
+                    "title": "Synthetic support decision " + suffix,
+                    "decision_text": "Family agreed to trial evening home support.",
+                    "decision_status": "recorded",
+                    "client_reference_id": "decision-" + suffix,
+                    "context": "A different reason must not be silently treated as the original capture.",
+                    "evidence_ids": [],
+                },
+            )
+            assert changed_reason_replay.status_code == 409, changed_reason_replay.text
 
             first_read = client.get("/api/v1/care-continuity/decisions", headers=headers)
             assert first_read.status_code == 200, first_read.text
