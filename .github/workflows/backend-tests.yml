@@ -234,6 +234,9 @@ jobs:
           print(f"PostgreSQL legacy-schema migration passed at {expected_revision}; no caregiver rows fabricated.")
           PY
 
+      - name: Verify bounded privacy export expiry on PostgreSQL
+        run: python -m pytest backend/tests/test_privacy_export_expiry_postgres.py -q
+
       - name: Verify decision and outcome continuity against PostgreSQL
         run: python -m pytest backend/tests/test_decision_outcome_continuity_postgres.py -q -vv
 
