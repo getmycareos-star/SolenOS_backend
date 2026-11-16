@@ -11,6 +11,7 @@ on:
       - "railway.json"
       - ".dockerignore"
       - ".github/workflows/backend-tests.yml"
+      - ".github/workflows/postgres-migration-validation.yml"
   pull_request:
     paths:
       - "backend/**"
@@ -20,6 +21,7 @@ on:
       - "railway.json"
       - ".dockerignore"
       - ".github/workflows/backend-tests.yml"
+      - ".github/workflows/postgres-migration-validation.yml"
 
   workflow_dispatch:
 
