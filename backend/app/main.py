@@ -76,6 +76,7 @@ from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
 from app.services.qwen_background_worker import qwen_worker_loop
 from app.services.reminder_delivery import reminder_delivery_loop
+from app.services.privacy_export_expiry import expire_privacy_exports_once
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,20 @@ async def correction_recovery_loop():
         await asyncio.sleep(15)
 
 
+async def privacy_export_expiry_loop():
+    """Enforce expiry of short-lived privacy export archives in bounded batches."""
+    while True:
+        try:
+            result = await asyncio.to_thread(expire_privacy_exports_once, 100)
+            if result["deleted"]:
+                logger.info("Expired privacy export artifacts: %s", result["deleted"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Privacy export expiry scan failed")
+        await asyncio.sleep(300)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Own background worker tasks for the complete ASGI application lifespan."""
@@ -240,6 +255,8 @@ async def lifespan(app: FastAPI):
         tasks.append(app.state.reminder_delivery_task)
         app.state.correction_recovery_task = asyncio.create_task(correction_recovery_loop())
         tasks.append(app.state.correction_recovery_task)
+        app.state.privacy_export_expiry_task = asyncio.create_task(privacy_export_expiry_loop())
+        tasks.append(app.state.privacy_export_expiry_task)
         yield
     finally:
         for task in tasks:
