@@ -4910,6 +4910,23 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         raise
     except Exception as exc:
         db.rollback()
+        # A concurrent retry can win the person-scoped unique idempotency key
+        # between the pre-insert lookup and INSERT. Resolve that race to the
+        # already committed canonical row instead of returning a false failure.
+        if resource == "decisions" and data.get("client_reference_id"):
+            try:
+                existing = db.execute(select(table).where(
+                    table.c.person_id == person_id,
+                    table.c.client_reference_id == data["client_reference_id"],
+                )).mappings().first()
+                if existing is not None:
+                    if existing.get("title") != data.get("title") or existing.get("decision_text") != data.get("decision_text"):
+                        raise HTTPException(status_code=409, detail="This decision capture reference was already used for different content")
+                    return _jsonable(dict(existing))
+            except HTTPException:
+                raise
+            except Exception:
+                db.rollback()
         raise HTTPException(status_code=422, detail=f"Care-continuity record could not be saved ({type(exc).__name__}); check linked IDs and field types") from exc
 
 
