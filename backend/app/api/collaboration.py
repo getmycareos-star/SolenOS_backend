@@ -6232,7 +6232,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 + item["content"].strip()[:600]
                 for item in conversation_items
             ]
-            shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
+            if not shared_lcr_context.get("temporal_window"):
+                shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 200)
             document_question_for_fallback = bool(re.search(
                 r"\b(?:uploaded document|document|file|attachment|letter|pdf|discharge summary|medical record)\b",
                 user_text,
