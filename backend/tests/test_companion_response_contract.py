@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
+from app.models.care_continuity import CareAssertion, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
@@ -2775,7 +2775,39 @@ def test_medication_dose_recall_quotes_saved_uncertainty_instead_of_model_comple
             created_by_caregiver_id=caregiver_id,
             time_provenance="caregiver_reported",
         )
-        db.add_all([evidence, event])
+        # A later reviewed medication assertion is not evidence of the new
+        # prescription asked about. It must not eclipse the uncertain report.
+        prior_medication_assertion = CareAssertion(
+            person_id=person_id,
+            subject_type="medication",
+            subject_id="metformin",
+            field="dose",
+            asserted_value="500 mg",
+            source_label="Existing reviewed medication record",
+            source_text=(
+                "Caregiver reported metformin as currently being used. "
+                "Reported dose: 500 mg. This is an older reviewed medication record."
+            ),
+            assertion_status="accepted",
+            epistemic_state="reported",
+            observed_at=event_time + timedelta(days=1),
+            created_by_caregiver_id=caregiver_id,
+        )
+        prior_medication_event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=event_time + timedelta(days=1),
+            title="Existing medication record",
+            description=(
+                "Caregiver reported metformin as currently being used. "
+                "Reported dose: 500 mg. This is an older reviewed medication record."
+            ),
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([evidence, event, prior_medication_event, prior_medication_assertion])
         db.commit()
         event_id = event.id
         evidence_id = evidence.id
