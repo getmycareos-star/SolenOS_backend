@@ -3036,3 +3036,32 @@ def test_retrieval_receipt_marks_unscanned_source_and_remaining_page_incomplete(
     assert receipt["retrieval_completeness"] == "partial_or_unknown"
     assert receipt["page_limit_reached"] is True
     assert receipt["source_gaps"] == ["events"]
+
+
+def test_incomplete_retrieval_deterministically_qualifies_historical_answer():
+    qualify = collaboration._qualify_reply_for_incomplete_retrieval
+    reply = qualify(
+        "The retrieved notes describe mobility difficulties.",
+        {"retrieval_completeness": "partial_or_unknown"},
+        historical_question=True,
+    )
+    assert reply.endswith(
+        "I couldn't verify that all relevant saved history was reviewed, "
+        "so this may not reflect the full care picture."
+    )
+    assert qualify(
+        "Hello there.",
+        {"retrieval_completeness": "partial_or_unknown"},
+        historical_question=False,
+    ) == "Hello there."
+    assert qualify(
+        "The records support this.",
+        {"retrieval_completeness": "complete_for_retrieval_scope"},
+        historical_question=True,
+    ) == "The records support this."
+    already_qualified = reply + " " + "I couldn't verify that all relevant saved history was reviewed, so this may not reflect the full care picture."
+    assert qualify(
+        already_qualified,
+        {"retrieval_completeness": "partial_or_unknown"},
+        historical_question=True,
+    ) == already_qualified
