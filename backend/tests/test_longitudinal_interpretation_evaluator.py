@@ -88,3 +88,11 @@ def test_evaluator_does_not_mutate_source_references_or_create_a_care_record():
     assert item["source_record_refs"] == refs
     assert result["source_evidence_mutated"] is False
     assert result["creates_competing_care_record"] is False
+
+def test_complete_comparison_with_no_emitted_change_is_not_mislabeled_insufficient():
+    result = evaluate_longitudinal_interpretations(
+        [], history_coverage={"complete": True}
+    )
+    assert result["overall_status"] == "no_change_detected"
+    assert result["caregiver_visible"] is False
+    assert result["counts"]["no_change_detected"] == 1
