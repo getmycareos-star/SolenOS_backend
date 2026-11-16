@@ -30,7 +30,16 @@ from app.core.change_enums import ChangeType, ChangeDirection, PatternType, Sign
 
 NOW = datetime.now(timezone.utc)
 _benchmark_database_url = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL")
-if not _benchmark_database_url or not _benchmark_database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
+if not _benchmark_database_url:
+    # The general backend suite has no database service. This PostgreSQL-only
+    # module is exercised by the dedicated PostgreSQL benchmark workflow.
+    # Never substitute SQLite: without the explicit PostgreSQL URL, skip the
+    # module rather than silently running a weaker in-memory variant.
+    pytest.skip(
+        "Longitudinal messy-care persistence tests require the dedicated PostgreSQL workflow.",
+        allow_module_level=True,
+    )
+if not _benchmark_database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
     raise RuntimeError(
         "The longitudinal messy-care benchmark requires SOLENOS_BENCHMARK_DATABASE_URL "
         "to point to PostgreSQL. SQLite is not supported."
