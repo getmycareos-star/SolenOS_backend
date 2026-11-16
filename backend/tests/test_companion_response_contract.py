@@ -658,7 +658,8 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
-        assert len(calls) == 1
+        assert len(calls) == 0, "an explicit saved-history lookup must use exact source retrieval instead of model inference"
+        assert response.json()["response_mode"] == "source_quoted_care_history"
         assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
     finally:
         teardown()
@@ -2803,3 +2804,64 @@ def test_medication_dose_recall_quotes_saved_uncertainty_instead_of_model_comple
     finally:
         teardown()
 
+
+
+
+def test_multi_topic_caregiver_history_is_source_quoted_when_inference_is_unavailable(monkeypatch):
+    client = setup_client(monkeypatch)
+    inference_calls = 0
+
+    def unavailable(*args, **kwargs):
+        nonlocal inference_calls
+        inference_calls += 1
+        raise collaboration.HTTPException(status_code=503, detail="model unavailable")
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_run_companion_inference_with_metrics", unavailable)
+    reports = [
+        "Mum slept poorly last night and seemed more unsettled this morning.",
+        "Mum barely touched her lunch today. She drank some water, though.",
+        "Mum was calmer this evening. She ate a little more at dinner and is now resting.",
+    ]
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        events = [
+            CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime(2026, 11, 14, 18 + index, 0, tzinfo=timezone.utc),
+                title=f"Care report {index + 1}",
+                description=report,
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            )
+            for index, report in enumerate(reports)
+        ]
+        db.add_all(events)
+        db.commit()
+        event_ids = [str(event.id) for event in events]
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "What has the caregiver recorded about sleep, lunch and dinner?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert inference_calls == 0
+        assert data["ai_generated"] is False
+        assert data["response_mode"] == "source_quoted_care_history"
+        assert data["written_to_lcr"] is False
+        assert all(report in data["reply"] for report in reports)
+        assert set(event_ids).issubset(set(data["source_event_ids"]))
+        assert "saved caregiver entries" in (data.get("safety_note") or "").casefold()
+        assert data["persistence"] == "conversation_only"
+    finally:
+        teardown()
