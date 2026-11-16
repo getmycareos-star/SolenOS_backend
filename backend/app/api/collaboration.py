@@ -6333,6 +6333,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         assertion_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 20)
         )
+        care_history_assertion_lines: list[str] = []
         # A direct "what have I told you about X?" question must retain
         # caregiver-reviewed assertions even when lexical ranking would discard
         # the source label or field name. Match only explicit user-topic terms.
@@ -6358,15 +6359,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             retained_assertion_ids = set(_context_record_ids(assertion_context, "assertion_id"))
             for assertion in care_history_assertions:
                 assertion_id = str(assertion.id)
-                if assertion_id in retained_assertion_ids:
-                    continue
                 information_status, interpretation_limit = assertion_information_status(
                     assertion.epistemic_state, assertion.assertion_status,
                 )
-                assertion_context.append(
+                assertion_line = (
                     "Caregiver-attributed LCR assertion (status preserved): "
                     + json.dumps({
                         "assertion_id": assertion_id,
+                        "source_id": assertion_id,
                         "source_type": "care_assertions",
                         "caregiver_attributed": bool(assertion.created_by_caregiver_id),
                         "field": assertion.field,
@@ -6381,7 +6381,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "interpretation_limit": interpretation_limit,
                     }, ensure_ascii=False)
                 )
-                retained_assertion_ids.add(assertion_id)
+                care_history_assertion_lines.append(assertion_line)
+                if assertion_id not in retained_assertion_ids:
+                    assertion_context.append(assertion_line)
+                    retained_assertion_ids.add(assertion_id)
         appointment_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, appointment_context, 15)
         )
@@ -6403,6 +6406,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ]))
         else:
             shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
+        # Direct caregiver-history questions must send the exact caregiver-
+        # attributed assertions retained above into the model context and the
+        # deterministic source-quote fallback. Keeping them only in the
+        # purpose-specific ranking list silently drops them before inference.
+        if care_history_assertion_lines:
+            shared_lcr_lines = list(dict.fromkeys([
+                *shared_lcr_lines, *care_history_assertion_lines,
+            ]))
         # An explicit document question must not lose its verified upload because
         # a lexical token filter fails to match a paraphrase (e.g. walking/walker).
         # These records are already person-, caregiver-, upload-, and hash-verified.
