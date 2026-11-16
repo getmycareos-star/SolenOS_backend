@@ -16,6 +16,9 @@ on:
       - ".github/workflows/postgres-migration-validation.yml"
       - ".github/workflows/backend-tests.yml"
   workflow_dispatch:
+  schedule:
+    # Weekly synthetic PostgreSQL backup/restore regression check; this is NOT a production backup.
+    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
