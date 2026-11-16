@@ -103,7 +103,7 @@ def test_invalid_source_reference_overrides_conflicting_interpretation():
         classification="conflicting",
         source_record_refs=[
             {"record_type": "unknown_source_type", "record_id": "unverifiable-report"},
-            {"record_type": "care_event", "record_id": "event-2"},
+            {"record_type": "unregistered_source_type", "record_id": "unverifiable-report-2"},
         ],
     )
     result = evaluate_longitudinal_interpretations([item], db=object(), person_id="person-1")
@@ -111,4 +111,4 @@ def test_invalid_source_reference_overrides_conflicting_interpretation():
     assert item["interpretation_status"] == "unsupported"
     assert item["interpretation_caregiver_visible"] is False
     assert item["interpretation_supporting_evidence_ids"] == []
-    assert item["interpretation_invalid_source_ids"] == ["unverifiable-report", "event-2"]
+    assert item["interpretation_invalid_source_ids"] == ["unverifiable-report", "unverifiable-report-2"]
