@@ -5600,6 +5600,71 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     return False
 
 
+def _build_retrieval_receipt(
+    coverage: dict,
+    included_context_lines: list[str],
+    *,
+    request_id: str | None,
+    request_sha256: str,
+    context_truncated: bool,
+    prompt_context_chars: int,
+    prompt_context_budget_chars: int,
+) -> dict[str, Any]:
+    """Build a content-free audit receipt for the exact care context selected for Companion."""
+    source_receipts = {}
+    for name, source in (coverage.get("sources") or {}).items():
+        if not isinstance(source, dict):
+            continue
+        source_receipts[str(name)] = {
+            "status": source.get("status", "unknown"),
+            "candidate_count": source.get("candidate_count"),
+            "retrieved_count": int(source.get("returned_count") or 0),
+            "selected_for_answer": int(source.get("selected_for_answer") or 0),
+            "candidate_scan_complete": bool(source.get("candidate_scan_complete")),
+            "has_more": bool(source.get("has_more")),
+            "selection_truncated": bool(source.get("selection_truncated")),
+        }
+    context_payload = "\\n".join(included_context_lines)
+    context_hash = hashlib.sha256(context_payload.encode("utf-8")).hexdigest()
+    projection_complete = bool(coverage.get("retrieval_projection_complete"))
+    page_limit_reached = bool(coverage.get("page_limit_reached"))
+    if coverage.get("status", "").startswith("not_retrieved"):
+        completeness = "not_assessed"
+    elif projection_complete and not page_limit_reached and not context_truncated:
+        completeness = "complete_for_retrieval_scope"
+    else:
+        completeness = "partial_or_unknown"
+    return {
+        "schema_version": "1",
+        "request_id": str(request_id) if request_id else None,
+        "request_sha256": request_sha256,
+        "retrieval_completeness": completeness,
+        "retrieval_scan_complete": bool(coverage.get("retrieval_scan_complete")),
+        "retrieval_projection_complete": projection_complete,
+        "page_limit_reached": page_limit_reached,
+        "pages_fetched": coverage.get("pages_fetched"),
+        "temporal_window": coverage.get("temporal_window"),
+        "missing_required_sources": list(coverage.get("missing_required_sources") or []),
+        "missing_optional_sources": list(coverage.get("missing_optional_sources") or []),
+        "sources": source_receipts,
+        "prompt_context": {
+            "status": "truncated" if context_truncated else "complete_for_selected_package",
+            "selected_line_count": len(included_context_lines),
+            "characters": int(prompt_context_chars),
+            "budget_characters": int(prompt_context_budget_chars),
+            "sha256": context_hash,
+            "interpretation_limit": (
+                "Hash identifies the selected context lines, not model-provider receipt or semantic sufficiency."
+            ),
+        },
+        "answer_restriction": (
+            "qualify_or_withhold_history_conclusion"
+            if completeness != "complete_for_retrieval_scope"
+            else "absence_claim_limited_to_retrieved_record"
+        ),
+    }
+
+
 def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) -> str:
     """Prevent a bounded or incomplete LCR projection from being described as absence."""
     retrieval_incomplete = (
@@ -6843,6 +6908,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
         lcr_context_coverage["prompt_context_budget_chars"] = 16000
+        retrieval_receipt = _build_retrieval_receipt(
+            lcr_context_coverage,
+            included_model_context_lines,
+            request_id=companion_request_id,
+            request_sha256=request_sha256,
+            context_truncated=context_truncated,
+            prompt_context_chars=context_chars,
+            prompt_context_budget_chars=16000,
+        )
+        lcr_context_coverage["retrieval_receipt"] = retrieval_receipt
         missing_context_instruction = _lcr_missing_context_instruction(lcr_context_coverage, context_truncated)
         # Keep retrieval completeness in the system role as well as the data
         # message. This prevents a lower-priority prompt or retry instruction
@@ -7789,6 +7864,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_freshness_assessment_ids": source_freshness_assessment_ids,
         "freshness_source_status": freshness_source_status,
         "lcr_context_coverage": lcr_context_coverage,
+        "retrieval_receipt": lcr_context_coverage.get("retrieval_receipt", {
+            "schema_version": "1",
+            "retrieval_completeness": "not_assessed",
+            "answer_restriction": "no_care_history_completeness_claim",
+        }),
         "ai_generated": ai_generated,
         "response_mode": (
             "source_quoted_care_history"
