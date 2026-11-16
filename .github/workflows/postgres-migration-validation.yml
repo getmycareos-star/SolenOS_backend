@@ -9,6 +9,8 @@ on:
       - "backend/tests/**"
       - "backend/scripts/**"
       - ".github/workflows/postgres-migration-validation.yml"
+      - ".github/workflows/backend-tests.yml"
+      - ".github/workflows/backup-recovery.yml"
   push:
     branches: [main]
     paths:
@@ -17,6 +19,8 @@ on:
       - "backend/tests/**"
       - "backend/scripts/**"
       - ".github/workflows/postgres-migration-validation.yml"
+      - ".github/workflows/backend-tests.yml"
+      - ".github/workflows/backup-recovery.yml"
 
   workflow_dispatch:
 
