@@ -6296,6 +6296,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         event_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, event_context, 30)
         )
+        # Keep the bounded, person-scoped accepted assertion set available for
+        # readback even when lexical ranking omits an inflected caregiver phrase.
+        unfiltered_assertion_context = list(assertion_context)
         assertion_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 20)
         )
@@ -6587,7 +6590,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # person-scoped accepted assertion must not disappear merely because the
         # projection's bounded candidate scan did not return it. Add only missing
         # assertion IDs, preserving caregiver attribution and the original status.
-        for assertion_line in assertion_context:
+        for assertion_line in unfiltered_assertion_context:
             try:
                 assertion_payload = json.loads(assertion_line[assertion_line.index("{"):])
                 assertion_id = str(assertion_payload.get("assertion_id") or "")
