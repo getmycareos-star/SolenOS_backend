@@ -161,7 +161,7 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
         first = create_session(client, "PostgreSQL caregiver")
         headers = {"Authorization": f"Bearer {first['access_token']}"}
         source = "Her sleep has been worse since last Friday."
-        response = send(client, first, source, "companion-care-report-postgres-0001")
+        response = send(client, first, source, "companion-care-postgres-0001")
         assert response.status_code == 200, response.text
         body = response.json()
         message_id = body["source_message_id"]
@@ -245,7 +245,7 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
                 "text": "What have I told you about her sleep?",
                 # No session_id: this must create a new conversation and use
                 # persisted LCR evidence rather than replaying the original chat.
-                "client_turn_id": "companion-care-report-postgres-readback-0001",
+                "client_turn_id": "companion-readback-0001",
             },
         )
         assert follow_up.status_code == 200, follow_up.text
@@ -262,7 +262,7 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
             json={
                 "person_id": first["person"]["id"],
                 "text": "What did I mention about her sleep?",
-                "client_turn_id": "companion-care-report-postgres-readback-0002",
+                "client_turn_id": "companion-readback-0002",
             },
         )
         assert natural_recall.status_code == 200, natural_recall.text
