@@ -4505,7 +4505,20 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             decisions_table.c.client_reference_id == reference_id,
         )).mappings().first()
         if existing is not None:
-            if existing.get("title") != data.get("title") or existing.get("decision_text") != data.get("decision_text"):
+            existing_evidence_ids = existing.get("evidence_ids") or []
+            if isinstance(existing_evidence_ids, str):
+                try:
+                    existing_evidence_ids = json.loads(existing_evidence_ids)
+                except (TypeError, ValueError):
+                    existing_evidence_ids = []
+            requested_evidence_ids = data.get("evidence_ids") or []
+            if (
+                existing.get("title") != data.get("title")
+                or existing.get("decision_text") != data.get("decision_text")
+                or str(existing.get("decision_status") or "") != str(data.get("decision_status") or "")
+                or (existing.get("context") or "") != (data.get("context") or "")
+                or sorted(map(str, existing_evidence_ids)) != sorted(map(str, requested_evidence_ids))
+            ):
                 raise HTTPException(status_code=409, detail="This decision capture reference was already used for different content")
             return _jsonable(dict(existing))
     if resource == "follow-up-links" and str(data.get("status") or "").strip().lower() == "completed":
