@@ -2214,6 +2214,55 @@ def test_care_delta_api_persists_deterministically_without_local_model(monkeypat
         assert saved_payload["interpretation_evaluation"]["version"] == "longitudinal-interpretation-evaluator-v1"
         assert saved_payload["interpretation_evaluation"]["source_evidence_mutated"] is False
 
+def test_review_expired_care_assertion_is_marked_stale_from_postgresql():
+    """The evaluator uses the persisted review window, not only caller-supplied flags."""
+    from app.services.delta_engine import evaluate_longitudinal_interpretations
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "expired-assertion")
+        assertion = CareAssertion(
+            person_id=person.id,
+            subject_type="person",
+            subject_id=person.id,
+            field="nutrition",
+            assertion_kind="current_state",
+            asserted_value="Eating less than usual",
+            source_label="family caregiver",
+            evidence_ids=[],
+            assertion_status="reported",
+            epistemic_state="reported",
+            observed_at=NOW - timedelta(days=30),
+            review_after_days=7,
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add(assertion)
+        db.flush()
+
+        item = {
+            "authoritative_change_id": "expired-review-window",
+            "domain": "nutrition",
+            "name": "eating",
+            "change_type": "decrease",
+            "classification": "potential_worsening",
+            "certainty": "candidate",
+            "evidence_supported": True,
+            "claim_supported": True,
+            "source_reference_status": "matched",
+            "baseline_coverage_status": "covered",
+            "current_coverage_status": "covered",
+            "source_record_refs": [{
+                "record_type": "care_assertion",
+                "record_id": assertion.id,
+            }],
+        }
+        result = evaluate_longitudinal_interpretations([item], db=db, person_id=person.id)
+
+        assert result["overall_status"] == "stale_evidence"
+        assert item["interpretation_status"] == "stale_evidence"
+        assert item["interpretation_caregiver_visible"] is False
+        assert item["interpretation_stale_source_ids"] == [assertion.id]
+
+
 def test_persisted_misleading_delta_is_rejected_when_source_belongs_to_another_person():
     """The evaluator catches a persisted comparison whose cited record is outside its person scope."""
     from app.models.care_continuity import CareDeltaRun
