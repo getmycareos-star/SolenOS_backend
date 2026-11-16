@@ -28,9 +28,18 @@ def _expiry_db(monkeypatch):
 
 
 def _artifact(session, artifact_id, expires_at):
+    request_id = f"request-{artifact_id}"
+    session.add(DataSubjectRequest(
+        id=request_id,
+        requester_id="caregiver-synthetic",
+        request_type="export",
+        request_status="approved_pending_fulfilment_assessment",
+        requested_at=datetime.now(timezone.utc),
+    ))
+    session.flush()
     row = PrivacyExportArtifact(
         id=artifact_id,
-        request_id=f"request-{artifact_id}",
+        request_id=request_id,
         person_id="person-synthetic",
         caregiver_id="caregiver-synthetic",
         filename="export.zip",
