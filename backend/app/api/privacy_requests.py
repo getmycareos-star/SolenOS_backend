@@ -1076,6 +1076,13 @@ def fulfil_approved_deletion(
     # Delete in reverse FK dependency order. Core deletes intentionally bypass
     # append-only ORM listeners: erasure is an explicit, reviewed privacy action.
     try:
+        # This transaction is entered only after the deletion request has
+        # passed the independent reviewer and legal-hold checks. Set the
+        # transaction-local erasure capability before raw-table cleanup too.
+        # Database append-only triggers allow DELETE only while this flag is on.
+        if bind.dialect.name == "postgresql":
+            db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+
         # Remove legacy lifecycle tables created by generic migrations but not
         # represented by ORM models. Keep the canonical request, audit and legal
         # hold records for explicit redaction/retention handling below.
@@ -1206,12 +1213,9 @@ def fulfil_approved_deletion(
             prior.caregiver_id = None
             prior.record_metadata = {"redacted_for_privacy_erasure": True}
 
-        # The document-review history is append-only for ordinary operations.
-        # A separately reviewed privacy erasure may delete it only inside this
-        # transaction; the database trigger rejects all other deletes and every update.
-        if bind.dialect.name == "postgresql":
-            db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
-
+        # The document-review history and security incident timeline are
+        # append-only for ordinary operations. The transaction-local erasure
+        # capability was set before the raw-table cleanup above.
         for table in reversed(tables):
             if table.name in excluded_tables:
                 continue
