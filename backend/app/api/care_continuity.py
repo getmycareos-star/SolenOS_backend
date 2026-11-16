@@ -1065,7 +1065,7 @@ WRITABLE = {
     "integrity-resolutions": {"finding_id", "resolution_status", "resolution_notes", "evidence_ids"},
     "decisions": {"title", "decision_text", "decision_status", "decided_at", "context", "evidence_ids", "client_reference_id"},
     "decision-outcomes": {"decision_id", "outcome_status", "observed_at", "description",
-                          "evidence_ids", "is_intended_outcome", "client_reference_id"},
+                          "evidence_ids", "source_event_ids", "is_intended_outcome", "client_reference_id"},
     "reconciliations": {"target_type", "target_id", "reconciliation_status", "competing_claim_ids",
                         "evidence_ids", "decision_notes"},
     "follow-up-links": {"source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "owner_caregiver_id"},
@@ -1106,7 +1106,7 @@ def _table(db: Session, name: str) -> Table:
         raise HTTPException(status_code=503, detail=f"Care-continuity schema is not ready: {name}") from exc
 
 JSON_TEXT_FIELDS = {
-    "evidence_ids", "source_ids", "source_assertion_ids", "matching_candidate_ids",
+    "evidence_ids", "source_event_ids", "source_ids", "source_assertion_ids", "matching_candidate_ids",
     "claim_refs", "competing_claim_ids", "context", "criteria", "metadata",
     "context_payload", "section_payload", "snapshot_payload", "before_state", "after_state",
 }
@@ -1166,6 +1166,19 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         ).scalars().all()
         if set(map(str, found)) != set(map(str, evidence_ids)):
             raise HTTPException(status_code=404, detail="One or more evidence references are outside this care record")
+
+    source_event_ids = payload.get("source_event_ids") or []
+    if not isinstance(source_event_ids, list):
+        raise HTTPException(status_code=422, detail="source_event_ids must be a JSON array")
+    if source_event_ids:
+        events = _table(db, "care_events")
+        found_event_ids = db.execute(
+            select(events.c.id).where(
+                events.c.person_id == person_id, events.c.id.in_(source_event_ids)
+            )
+        ).scalars().all()
+        if set(map(str, found_event_ids)) != set(map(str, source_event_ids)):
+            raise HTTPException(status_code=404, detail="One or more source event references are outside this care record")
 
     typed_tables = {
         "care_fact": "care_facts", "fact": "care_facts",
@@ -4486,12 +4499,20 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 except (TypeError, ValueError):
                     existing_evidence_ids = []
             requested_evidence_ids = data.get("evidence_ids") or []
+            existing_source_event_ids = existing.get("source_event_ids") or []
+            if isinstance(existing_source_event_ids, str):
+                try:
+                    existing_source_event_ids = json.loads(existing_source_event_ids)
+                except (TypeError, ValueError):
+                    existing_source_event_ids = []
+            requested_source_event_ids = data.get("source_event_ids") or []
             if (
                 str(existing.get("decision_id")) != str(data.get("decision_id"))
                 or str(existing.get("outcome_status")) != str(data.get("outcome_status"))
                 or (existing.get("description") or "") != (data.get("description") or "")
                 or bool(existing.get("is_intended_outcome")) != bool(data.get("is_intended_outcome"))
                 or sorted(map(str, existing_evidence_ids)) != sorted(map(str, requested_evidence_ids))
+                or sorted(map(str, existing_source_event_ids)) != sorted(map(str, requested_source_event_ids))
             ):
                 raise HTTPException(status_code=409, detail="This outcome capture reference was already used for different content")
             return _jsonable(dict(existing))
