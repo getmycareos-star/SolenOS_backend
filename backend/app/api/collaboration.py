@@ -5624,13 +5624,33 @@ def _build_retrieval_receipt(
             "has_more": bool(source.get("has_more")),
             "selection_truncated": bool(source.get("selection_truncated")),
         }
-    context_payload = "\\n".join(included_context_lines)
+    context_payload = "\n".join(included_context_lines)
     context_hash = hashlib.sha256(context_payload.encode("utf-8")).hexdigest()
     projection_complete = bool(coverage.get("retrieval_projection_complete"))
+    scan_complete = bool(coverage.get("retrieval_scan_complete"))
     page_limit_reached = bool(coverage.get("page_limit_reached"))
+    missing_required = list(coverage.get("missing_required_sources") or [])
+    missing_optional = list(coverage.get("missing_optional_sources") or [])
+    source_gaps = []
+    for source_name, source in source_receipts.items():
+        if source.get("status") not in {"available", "empty"}:
+            source_gaps.append(source_name)
+        if source.get("has_more") or source.get("selection_truncated"):
+            source_gaps.append(source_name)
+        if source.get("candidate_scan_complete") is not True:
+            source_gaps.append(source_name)
+    source_gaps = sorted(set(source_gaps))
     if str(coverage.get("status") or "").startswith("not_retrieved"):
         completeness = "not_assessed"
-    elif projection_complete and not page_limit_reached and not context_truncated:
+    elif (
+        projection_complete
+        and scan_complete
+        and not page_limit_reached
+        and not context_truncated
+        and not missing_required
+        and not missing_optional
+        and not source_gaps
+    ):
         completeness = "complete_for_retrieval_scope"
     else:
         completeness = "partial_or_unknown"
@@ -5639,9 +5659,12 @@ def _build_retrieval_receipt(
         "request_id": str(request_id) if request_id else None,
         "request_sha256": request_sha256,
         "retrieval_completeness": completeness,
-        "retrieval_scan_complete": bool(coverage.get("retrieval_scan_complete")),
+        "retrieval_scan_complete": scan_complete,
         "retrieval_projection_complete": projection_complete,
         "page_limit_reached": page_limit_reached,
+        "missing_required_sources": missing_required,
+        "missing_optional_sources": missing_optional,
+        "source_gaps": source_gaps,
         "pages_fetched": coverage.get("pages_fetched"),
         "temporal_window": coverage.get("temporal_window"),
         "missing_required_sources": list(coverage.get("missing_required_sources") or []),
