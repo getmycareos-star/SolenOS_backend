@@ -145,6 +145,57 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
+      - name: Verify security incident timeline is append-only on PostgreSQL
+        run: |
+          python - <<'PY'
+          import os
+          import uuid
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          conn.autocommit = False
+          event_id = str(uuid.uuid4())
+          with conn.cursor() as cur:
+              cur.execute("""
+                  SELECT tgname FROM pg_trigger
+                  WHERE tgrelid = 'privacy_incident_events'::regclass
+                    AND NOT tgisinternal
+              """)
+              triggers = {row[0] for row in cur.fetchall()}
+              if "trg_privacy_incident_events_append_only" not in triggers:
+                  raise SystemExit("PostgreSQL append-only incident event trigger is missing")
+              cur.execute("""
+                  INSERT INTO privacy_incident_events
+                    (id, incident_id, event_type, occurred_at, actor_id, notes_redacted)
+                  VALUES (%s, %s, %s, now(), %s, %s)
+              """, (event_id, "synthetic-ci-incident", "ci_append_only_test", "ci", "Synthetic CI event only"))
+              conn.commit()
+
+              for statement in (
+                  "UPDATE privacy_incident_events SET notes_redacted='mutated' WHERE id=%s",
+                  "DELETE FROM privacy_incident_events WHERE id=%s",
+              ):
+                  cur.execute("SAVEPOINT append_only_probe")
+                  try:
+                      cur.execute(statement, (event_id,))
+                  except psycopg2.Error as exc:
+                      if "append-only" not in str(exc).lower():
+                          raise SystemExit(f"Unexpected append-only rejection: {exc}")
+                      conn.rollback()
+                  else:
+                      raise SystemExit("Incident event mutation unexpectedly succeeded")
+                  finally:
+                      if conn.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
+                          with conn.cursor() as reset:
+                              reset.execute("ROLLBACK TO SAVEPOINT append_only_probe")
+              cur.execute("SELECT COUNT(*) FROM privacy_incident_events WHERE id=%s", (event_id,))
+              if cur.fetchone()[0] != 1:
+                  raise SystemExit("Incident event was not preserved after rejected mutations")
+          conn.commit()
+          conn.close()
+          print("PASS: PostgreSQL rejects UPDATE and DELETE on security incident timeline events.")
+          PY
+
       - name: Verify schema reconciliation and migration head
         run: |
           python - <<'PY'
