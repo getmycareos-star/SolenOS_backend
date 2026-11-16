@@ -273,12 +273,18 @@ def _normalise(value: Any) -> str:
 
 
 
-def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]) -> dict[str, Any]:
-    """Independently grade persisted change interpretations without changing source evidence.
+def evaluate_longitudinal_interpretations(
+    computed_changes: list[dict[str, Any]],
+    *,
+    db: Session | None = None,
+    person_id: str | None = None,
+) -> dict[str, Any]:
+    """Independently grade interpretations without changing source evidence.
 
-    This verifier checks the evidence/provenance and coverage contract after the
-    Delta Engine has produced its interpretation. It is deliberately deterministic:
-    it does not call a model, infer causes, rewrite observations, or create care facts.
+    When a database session is supplied, each source reference is re-checked
+    against the same person-scoped source table before an interpretation can pass.
+    This deterministic verifier never calls a model, infers causes, rewrites
+    observations, or creates care facts.
     """
     counts = {
         "supported": 0,
@@ -294,22 +300,59 @@ def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]
             ref for ref in (item.get("source_record_refs") or [])
             if isinstance(ref, dict) and str(ref.get("record_id") or "").strip()
         ]
-        reference_ids = list(dict.fromkeys(str(ref["record_id"]) for ref in references))
+        verified_references = []
+        invalid_reference_ids = []
+        for ref in references:
+            record_id = str(ref["record_id"])
+            record_type = str(ref.get("record_type") or "")
+            exists = True
+            if db is not None:
+                exists = False
+                if person_id:
+                    if record_type == "care_event":
+                        exists = db.query(CareEvent.id).filter(
+                            CareEvent.id == record_id, CareEvent.person_id == person_id
+                        ).first() is not None
+                    elif record_type == "evidence":
+                        exists = db.query(Evidence.id).filter(
+                            Evidence.id == record_id, Evidence.person_id == person_id
+                        ).first() is not None
+                    elif record_type == "care_assertion":
+                        exists = db.query(CareAssertion.id).filter(
+                            CareAssertion.id == record_id, CareAssertion.person_id == person_id
+                        ).first() is not None
+                    elif record_type == "evidence_observation":
+                        exists = db.query(EvidenceObservation.id).filter(
+                            EvidenceObservation.id == record_id, EvidenceObservation.person_id == person_id
+                        ).first() is not None
+            if exists:
+                verified_references.append(ref)
+            else:
+                invalid_reference_ids.append(record_id)
+
+        reference_ids = list(dict.fromkeys(str(ref["record_id"]) for ref in verified_references))
         explicit_stale = item.get("historical_only") is True or any(
             str(ref.get("freshness_status") or ref.get("status") or "").casefold()
             in {"stale", "historical_only", "needs_confirmation"}
-            for ref in references
+            for ref in verified_references
         )
         change_kind = str(item.get("change_type") or item.get("classification") or "").casefold()
         if change_kind == "conflicting" or item.get("classification") == "conflicting":
-            status = "conflicting"
-            justification = "Competing reports are preserved; the evaluator does not choose which report is correct."
+            if len(reference_ids) >= 2 and not invalid_reference_ids:
+                status = "conflicting"
+                justification = "Competing reports are preserved; the evaluator does not choose which report is correct."
+            else:
+                status = "insufficient_evidence"
+                justification = "The disagreement does not have two independently verified source records."
         elif explicit_stale:
             status = "stale_evidence"
             justification = "The linked source is explicitly marked historical or requiring confirmation."
         elif not reference_ids:
             status = "insufficient_evidence"
             justification = "No verifiable source record is linked to this interpretation."
+        elif invalid_reference_ids:
+            status = "unsupported"
+            justification = "One or more linked source records could not be verified for this care record."
         elif item.get("evidence_supported") is not True or item.get("source_reference_status") not in (None, "matched"):
             status = "unsupported"
             justification = "The linked records do not satisfy the source-verification requirement."
@@ -324,10 +367,11 @@ def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]
                 justification = "Source records are linked, but the comparison window is not fully covered."
             else:
                 status = "supported"
-                justification = "Source records are linked and the existing deterministic support checks passed; this is not a clinical conclusion."
+                justification = "Source records are independently verified and existing deterministic comparison checks passed; this is not a clinical conclusion."
         else:
             status = "partially_supported"
             justification = "Some source support exists, but the interpretation has not passed every support check."
+
         item["interpretation_status"] = status
         item["interpretation_caregiver_visible"] = status in {
             "supported", "partially_supported", "conflicting"
@@ -338,6 +382,7 @@ def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]
         item["interpretation_contradictory_evidence_ids"] = (
             reference_ids if status == "conflicting" else []
         )
+        item["interpretation_invalid_source_ids"] = invalid_reference_ids
         item["interpretation_uncertainty_justification"] = justification
         counts[status] += 1
         evaluated.append({
@@ -346,6 +391,7 @@ def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]
             "status": status,
             "supporting_evidence_ids": item["interpretation_supporting_evidence_ids"],
             "contradictory_evidence_ids": item["interpretation_contradictory_evidence_ids"],
+            "invalid_source_ids": invalid_reference_ids,
             "uncertainty_justification": justification,
             "caregiver_visible": item["interpretation_caregiver_visible"],
         })
@@ -365,7 +411,7 @@ def evaluate_longitudinal_interpretations(computed_changes: list[dict[str, Any]]
         overall = "supported"
     return {
         "version": "longitudinal-interpretation-evaluator-v1",
-        "evaluator": "deterministic_post_delta_provenance_and_coverage_check",
+        "evaluator": "deterministic_post_delta_person_scoped_source_and_coverage_check",
         "overall_status": overall,
         "caregiver_visible": any(item["caregiver_visible"] for item in evaluated),
         "source_evidence_mutated": False,
@@ -2286,7 +2332,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 detail="The reconciliation could not be persisted; the transaction was rolled back.",
             ) from exc
 
-    result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(computed)
+    result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(computed, db=db, person_id=person_id)
     result["computed_changes"] = computed
     result["provenance"] = {
         "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
