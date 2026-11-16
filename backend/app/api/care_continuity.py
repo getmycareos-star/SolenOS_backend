@@ -4102,6 +4102,84 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
     return output
 
 
+@router.patch("/follow-up-links/{follow_up_id}")
+def update_follow_up_link(
+    follow_up_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Update a person's follow-up; completion requires evidence and a timestamp."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    table = _table(db, "care_follow_up_links")
+    allowed = WRITABLE["follow-up-links"] - {"source_type", "source_id", "target_type", "target_id", "follow_up_kind"}
+    changes = {key: value for key, value in payload.items() if key in allowed}
+    if not changes:
+        raise HTTPException(status_code=422, detail="No supported follow-up fields supplied")
+    try:
+        current = db.execute(
+            select(table).where(
+                table.c.id == follow_up_id,
+                table.c.person_id == person_id,
+            ).with_for_update()
+        ).mappings().first()
+        if current is None:
+            raise HTTPException(status_code=404, detail="Follow-up not found")
+        merged = dict(current)
+        merged.update(changes)
+        if str(merged.get("status") or "").strip().lower() == "completed":
+            evidence_ids = merged.get("evidence_ids") or []
+            if not isinstance(evidence_ids, list) or not evidence_ids:
+                raise HTTPException(status_code=422, detail="A follow-up cannot be completed without linked evidence")
+            if not merged.get("completed_at"):
+                raise HTTPException(status_code=422, detail="A completed follow-up requires its completion time")
+        if "evidence_ids" in changes:
+            evidence_ids = changes["evidence_ids"]
+            if not isinstance(evidence_ids, list) or any(not isinstance(item, str) or not item.strip() for item in evidence_ids):
+                raise HTTPException(status_code=422, detail="evidence_ids must be a list of non-empty evidence IDs")
+            if len(evidence_ids) != len(set(evidence_ids)):
+                raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
+            if evidence_ids:
+                evidence_table = _table(db, "evidence")
+                found = set(db.execute(
+                    select(evidence_table.c.id).where(
+                        evidence_table.c.person_id == person_id,
+                        evidence_table.c.id.in_(evidence_ids),
+                    )
+                ).scalars().all())
+                if found != set(evidence_ids):
+                    raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
+        for key, value in list(changes.items()):
+            column = table.c.get(key)
+            if column is not None and isinstance(column.type, SQLDateTime) and isinstance(value, str):
+                try:
+                    changes[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=f"{key} must be a valid ISO-8601 datetime") from exc
+            elif column is not None and isinstance(value, (list, dict)) and not isinstance(column.type, SQLJSON):
+                if not isinstance(column.type, SQLText):
+                    raise HTTPException(status_code=422, detail=f"{key} must match the persisted column type")
+                changes[key] = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        if "updated_at" in table.c:
+            changes["updated_at"] = datetime.now(timezone.utc)
+        db.execute(update(table).where(
+            table.c.id == follow_up_id,
+            table.c.person_id == person_id,
+        ).values(**changes))
+        updated = db.execute(select(table).where(
+            table.c.id == follow_up_id,
+            table.c.person_id == person_id,
+        )).mappings().one()
+        db.commit()
+        return _jsonable(dict(updated))
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Follow-up update could not be committed") from exc
+
+
 @router.patch("/{resource}/{record_id}")
 def update_care_continuity_resource(
     resource: str,
@@ -4200,84 +4278,6 @@ def update_care_continuity_resource(
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Decision update and revision could not be committed") from exc
-
-
-@router.patch("/follow-up-links/{follow_up_id}")
-def update_follow_up_link(
-    follow_up_id: str,
-    payload: dict[str, Any],
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    """Update a person's follow-up; completion requires evidence and a timestamp."""
-    person_id, caregiver_id = _scoped_identity(request, db)
-    table = _table(db, "care_follow_up_links")
-    allowed = WRITABLE["follow-up-links"] - {"source_type", "source_id", "target_type", "target_id", "follow_up_kind"}
-    changes = {key: value for key, value in payload.items() if key in allowed}
-    if not changes:
-        raise HTTPException(status_code=422, detail="No supported follow-up fields supplied")
-    try:
-        current = db.execute(
-            select(table).where(
-                table.c.id == follow_up_id,
-                table.c.person_id == person_id,
-            ).with_for_update()
-        ).mappings().first()
-        if current is None:
-            raise HTTPException(status_code=404, detail="Follow-up not found")
-        merged = dict(current)
-        merged.update(changes)
-        if str(merged.get("status") or "").strip().lower() == "completed":
-            evidence_ids = merged.get("evidence_ids") or []
-            if not isinstance(evidence_ids, list) or not evidence_ids:
-                raise HTTPException(status_code=422, detail="A follow-up cannot be completed without linked evidence")
-            if not merged.get("completed_at"):
-                raise HTTPException(status_code=422, detail="A completed follow-up requires its completion time")
-        if "evidence_ids" in changes:
-            evidence_ids = changes["evidence_ids"]
-            if not isinstance(evidence_ids, list) or any(not isinstance(item, str) or not item.strip() for item in evidence_ids):
-                raise HTTPException(status_code=422, detail="evidence_ids must be a list of non-empty evidence IDs")
-            if len(evidence_ids) != len(set(evidence_ids)):
-                raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
-            if evidence_ids:
-                evidence_table = _table(db, "evidence")
-                found = set(db.execute(
-                    select(evidence_table.c.id).where(
-                        evidence_table.c.person_id == person_id,
-                        evidence_table.c.id.in_(evidence_ids),
-                    )
-                ).scalars().all())
-                if found != set(evidence_ids):
-                    raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
-        for key, value in list(changes.items()):
-            column = table.c.get(key)
-            if column is not None and isinstance(column.type, SQLDateTime) and isinstance(value, str):
-                try:
-                    changes[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                except ValueError as exc:
-                    raise HTTPException(status_code=422, detail=f"{key} must be a valid ISO-8601 datetime") from exc
-            elif column is not None and isinstance(value, (list, dict)) and not isinstance(column.type, SQLJSON):
-                if not isinstance(column.type, SQLText):
-                    raise HTTPException(status_code=422, detail=f"{key} must match the persisted column type")
-                changes[key] = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-        if "updated_at" in table.c:
-            changes["updated_at"] = datetime.now(timezone.utc)
-        db.execute(update(table).where(
-            table.c.id == follow_up_id,
-            table.c.person_id == person_id,
-        ).values(**changes))
-        updated = db.execute(select(table).where(
-            table.c.id == follow_up_id,
-            table.c.person_id == person_id,
-        )).mappings().one()
-        db.commit()
-        return _jsonable(dict(updated))
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Follow-up update could not be committed") from exc
 
 
 @router.get("/{resource}")
