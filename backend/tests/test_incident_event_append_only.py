@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, text
 
 
 def test_incident_timeline_migration_leaves_sqlite_erasure_compatible():
@@ -38,9 +38,6 @@ def test_incident_timeline_migration_leaves_sqlite_erasure_compatible():
             # SQLite has no transaction-local erasure authorization setting.
             # Production PostgreSQL gets the append-only trigger; SQLite remains
             # compatible with the reviewed privacy-erasure path.
-            trigger_names = {
-                item["name"] for item in inspect(connection).get_schema_names()
-            } if False else set()
             connection.execute(text("""
                 INSERT INTO privacy_incident_events
                     (id, incident_id, event_type, occurred_at, actor_id, notes_redacted)
@@ -56,7 +53,9 @@ def test_incident_timeline_migration_leaves_sqlite_erasure_compatible():
                 "SELECT COUNT(*) FROM privacy_incident_events WHERE id='event-1'"
             )).scalar_one() == 0
         with engine.connect() as connection:
-            triggers = inspect(connection).get_table_names()
-            assert "privacy_incident_events" in triggers
+            trigger_names = connection.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='privacy_incident_events'"
+            )).scalars().all()
+            assert trigger_names == []
     finally:
         engine.dispose()
