@@ -70,31 +70,51 @@ jobs:
       # On main/scheduled runs, production must run the current main runtime code.
       - name: Verify deployed source revision matches main runtime
         if: github.event_name != 'pull_request'
+        timeout-minutes: 17
         run: |
           set -Eeuo pipefail
-          curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json
-          deployed_commit=$(python -c 'import json; print(json.load(open("/tmp/solenos-ready.json")).get("deployment_commit") or "")')
-          echo "Production reports source commit: $deployed_commit"
-          echo "GitHub main monitor target: $GITHUB_SHA"
-          if ! [[ "$deployed_commit" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Production /ready did not expose a valid Railway source commit: '$deployed_commit'" >&2
-            exit 1
-          fi
-          git merge-base --is-ancestor "$deployed_commit" "$GITHUB_SHA" || {
-            echo "Production source commit is not an ancestor of main: deployed=$deployed_commit main=$GITHUB_SHA" >&2
-            exit 1
-          }
-          changed=$(git diff --name-only "$deployed_commit..$GITHUB_SHA")
-          CHANGED_FILES="$changed" python - <<'PY'
+          matched=0
+          deployed_commit=""
+          for attempt in $(seq 1 48); do
+            if ! curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json; then
+              echo "Attempt $attempt: production readiness endpoint is not reachable yet."
+              sleep 20
+              continue
+            fi
+            deployed_commit=$(python -c 'import json; print(json.load(open("/tmp/solenos-ready.json")).get("deployment_commit") or "")')
+            if ! [[ "$deployed_commit" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Attempt $attempt: /ready did not expose a valid Railway source commit: '$deployed_commit'"
+              sleep 20
+              continue
+            fi
+            if ! git merge-base --is-ancestor "$deployed_commit" "$GITHUB_SHA"; then
+              echo "Attempt $attempt: deployed source is not an ancestor of main yet: deployed=$deployed_commit main=$GITHUB_SHA"
+              sleep 20
+              continue
+            fi
+            changed=$(git diff --name-only "$deployed_commit..$GITHUB_SHA")
+            runtime_changes=$(CHANGED_FILES="$changed" python - <<'PY'
           import os
           paths = os.environ["CHANGED_FILES"].splitlines()
           ignored = ("backend/tests/", "backend/live_tests/", ".github/workflows/", "docs/")
-          runtime_changes = [path for path in paths if not path.startswith(ignored)]
-          if runtime_changes:
-              print("Production is behind main by runtime or migration changes:", file=__import__("sys").stderr)
-              print("\n".join(runtime_changes), file=__import__("sys").stderr)
-              raise SystemExit(1)
+          print("\n".join(path for path in paths if not path.startswith(ignored)))
           PY
+          )
+            if [ -n "$runtime_changes" ]; then
+              echo "Attempt $attempt: waiting for Railway to deploy these runtime/migration changes:"
+              printf '%s\n' "$runtime_changes"
+              sleep 20
+              continue
+            fi
+            matched=1
+            break
+          done
+          echo "Production reports source commit: $deployed_commit"
+          echo "GitHub main monitor target: $GITHUB_SHA"
+          test "$matched" = "1" || {
+            echo "Production did not converge to main runtime within 16 minutes." >&2
+            exit 1
+          }
           echo "PASS: deployed source revision $deployed_commit matches main runtime code."
 
       # Care-continuity release readiness is independent of the optional Qwen runtime.
