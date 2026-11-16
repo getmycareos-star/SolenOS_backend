@@ -2619,60 +2619,79 @@ def _humanize_model_context_line(line: str) -> str:
         return (line or "").strip()
     record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
     prefix = (line[:brace].split(":", 1)[0] or "").casefold()
-    label = str(payload.get("source_type") or "").replace("_", " ").strip()
-    if not label and "lineage" in prefix:
-        label = "Evidence lineage"
-    if not label and "caregiver-provided evidence" in prefix:
-        label = "Caregiver-provided evidence"
-    if not label:
-        if "event_id" in record:
-            label = "Care event"
-        elif "assertion_id" in record:
-            label = "Care assertion"
-        elif "appointment_id" in record:
-            label = "Appointment record"
-        elif "evidence_id" in record:
-            label = "Evidence record"
-        else:
-            label = "Care record"
-    fields = (
-        ("title", "title"),
-        ("filename", "filename"),
-        ("description", "description"),
-        ("source_text", "document text"),
-        ("fact_value", "care fact reported value"),
-        ("summary", "summary"),
-        ("content", "content"),
-        ("field", "field"),
-        ("value", "recorded value"),
-        ("status", "status"),
-        ("freshness_status", "freshness review status"),
-        ("rationale", "recorded rationale"),
-        ("source_time_kind", "source time basis"),
-        ("source_time", "source time"),
-        ("age_days", "age in days"),
-        ("event_type", "event type"),
-        ("occurred_at", "event date"),
-        ("occurred_at_timezone", "event time zone"),
-        ("reported_at", "reported date"),
-        ("collected_at", "collected date"),
-        ("uploaded_at", "recorded in SolenOS"),
-        ("recorded_at", "recorded date"),
-        ("reported_by_label", "reported by"),
-        ("original_author", "original author"),
-        ("appointment_date", "appointment date"),
-        ("scheduled_at", "scheduled time"),
-        ("date", "date"),
-        ("medication_name", "medication"),
-        ("instruction", "documented instruction"),
-        ("dose", "documented dose"),
-        ("outcome", "outcome"),
-        ("decision", "decision"),
-        ("result", "result"),
-        ("time_provenance", "time provenance"),
-        ("information_status", "information status"),
-        ("interpretation_limit", "interpretation limit"),
-    )
+    source_type = str(payload.get("source_type") or "")
+    label = source_type.replace("_", " ").strip()
+    if source_type == "assertions":
+        # The shared projection is the prompt's canonical source set. Preserve
+        # the actual accepted assertion and its source/review status here;
+        # omitting asserted_value silently turned a retrieved record into an
+        # empty label for Companion.
+        label = "Caregiver-attributed LCR assertion"
+        fields = (
+            ("field", "care record field"),
+            ("asserted_value", "caregiver-approved statement"),
+            ("source_label", "source"),
+            ("assertion_status", "review status"),
+            ("epistemic_state", "recorded certainty"),
+            ("information_status", "information status"),
+            ("interpretation_limit", "interpretation limit"),
+            ("source_text", "original source context"),
+            ("recorded_at", "recorded date"),
+        )
+    else:
+        if not label and "lineage" in prefix:
+            label = "Evidence lineage"
+        if not label and "caregiver-provided evidence" in prefix:
+            label = "Caregiver-provided evidence"
+        if not label:
+            if "event_id" in record:
+                label = "Care event"
+            elif "assertion_id" in record:
+                label = "Care assertion"
+            elif "appointment_id" in record:
+                label = "Appointment record"
+            elif "evidence_id" in record:
+                label = "Evidence record"
+            else:
+                label = "Care record"
+        fields = (
+            ("title", "title"),
+            ("filename", "filename"),
+            ("description", "description"),
+            ("source_text", "document text"),
+            ("fact_value", "care fact reported value"),
+            ("summary", "summary"),
+            ("content", "content"),
+            ("field", "field"),
+            ("value", "recorded value"),
+            ("status", "status"),
+            ("freshness_status", "freshness review status"),
+            ("rationale", "recorded rationale"),
+            ("source_time_kind", "source time basis"),
+            ("source_time", "source time"),
+            ("age_days", "age in days"),
+            ("event_type", "event type"),
+            ("occurred_at", "event date"),
+            ("occurred_at_timezone", "event time zone"),
+            ("reported_at", "reported date"),
+            ("collected_at", "collected date"),
+            ("uploaded_at", "recorded in SolenOS"),
+            ("recorded_at", "recorded date"),
+            ("reported_by_label", "reported by"),
+            ("original_author", "original author"),
+            ("appointment_date", "appointment date"),
+            ("scheduled_at", "scheduled time"),
+            ("date", "date"),
+            ("medication_name", "medication"),
+            ("instruction", "documented instruction"),
+            ("dose", "documented dose"),
+            ("outcome", "outcome"),
+            ("decision", "decision"),
+            ("result", "result"),
+            ("time_provenance", "time provenance"),
+            ("information_status", "information status"),
+            ("interpretation_limit", "interpretation limit"),
+        )
     parts = []
     # Internal row identifiers remain in response provenance metadata and are
     # deliberately excluded from model prompt content.
