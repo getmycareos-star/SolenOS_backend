@@ -1112,6 +1112,17 @@ def _reconcile_from_change_intelligence(
         },
     }
 
+    # The default production path is the persisted Change Intelligence
+    # reconciliation, not the optional model-enrichment path. Grade the
+    # actual caregiver-facing result here as well; otherwise the evaluator
+    # would exist in code but be bypassed by the default API workflow.
+    result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(
+        computed_changes,
+        db=db,
+        person_id=person_id,
+        history_coverage=history_coverage,
+    )
+
     if persist:
         validate_source_snapshot()
         run = CareDeltaRun(
