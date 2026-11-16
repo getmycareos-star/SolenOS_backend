@@ -5304,7 +5304,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         if not topics or candidate[4] - covered_topics:
             selected.append(candidate)
             covered_topics.update(candidate[4])
-    if topics and len(covered_topics) == len(topics):
+        if topics and len(covered_topics) == len(topics):
             break
         if not topics and len(selected) >= 3:
             break
