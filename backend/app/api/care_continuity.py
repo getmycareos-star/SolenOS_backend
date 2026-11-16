@@ -4283,6 +4283,18 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
+    if resource == "follow-up-links" and str(data.get("status") or "").strip().lower() == "completed":
+        evidence_ids = data.get("evidence_ids")
+        if not isinstance(evidence_ids, list) or not evidence_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="A follow-up cannot be marked completed without linked evidence",
+            )
+        if not data.get("completed_at"):
+            raise HTTPException(
+                status_code=422,
+                detail="A completed follow-up requires its completion time",
+            )
     if resource == "assertions":
         epistemic_state = str(data.get("epistemic_state") or "reported").strip().lower()
         if epistemic_state not in {"reported", "observed", "verified", "inferred", "uncertain", "conflicting", "missing"}:
