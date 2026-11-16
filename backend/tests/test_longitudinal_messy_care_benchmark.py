@@ -2200,3 +2200,40 @@ def test_care_delta_api_persists_deterministically_without_local_model(monkeypat
         ).one()
         assert saved.model_name == "deterministic-change-intelligence"
         assert json.loads(saved.delta_json)["provenance"]["delta_run_id"] == str(saved.id)
+
+def test_longitudinal_interpretation_evaluator_rejects_cross_person_source_reference():
+    """A valid source ID belonging to another person cannot support this interpretation."""
+    from app.services.delta_engine import evaluate_longitudinal_interpretations
+
+    with TestingSessionLocal() as db:
+        person_a, caregiver_a = make_person(db, "evaluator-person-a")
+        person_b, caregiver_b = make_person(db, "evaluator-person-b")
+        foreign_event = add_event(
+            db, person_b, caregiver_b, "nutrition", 1,
+            "Foreign person's eating observation",
+        )
+        item = {
+            "authoritative_change_id": "cross-person-change",
+            "domain": "nutrition",
+            "name": "eating",
+            "change_type": "increase",
+            "classification": "potential_worsening",
+            "certainty": "candidate",
+            "evidence_supported": True,
+            "claim_supported": True,
+            "source_reference_status": "matched",
+            "baseline_coverage_status": "covered",
+            "current_coverage_status": "covered",
+            "source_record_refs": [{
+                "record_type": "care_event",
+                "record_id": foreign_event.id,
+                "source_excerpt": "Foreign person's eating observation",
+            }],
+        }
+        result = evaluate_longitudinal_interpretations(
+            [item], db=db, person_id=person_a.id
+        )
+        assert result["overall_status"] == "unsupported"
+        assert item["interpretation_status"] == "unsupported"
+        assert item["interpretation_caregiver_visible"] is False
+        assert item["interpretation_invalid_source_ids"] == [foreign_event.id]
