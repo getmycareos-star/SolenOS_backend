@@ -5630,6 +5630,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     caregiver_question_direct_answer_used = False
     care_history_direct_answer: str | None = None
     care_history_direct_answer_used = False
+    care_history_extractive_fallback_used = False
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
 
