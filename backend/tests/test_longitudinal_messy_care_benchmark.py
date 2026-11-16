@@ -2201,8 +2201,9 @@ def test_care_delta_api_persists_deterministically_without_local_model(monkeypat
         assert saved.model_name == "deterministic-change-intelligence"
         assert json.loads(saved.delta_json)["provenance"]["delta_run_id"] == str(saved.id)
 
-def test_longitudinal_interpretation_evaluator_rejects_cross_person_source_reference():
-    """A valid source ID belonging to another person cannot support this interpretation."""
+def test_persisted_misleading_delta_is_rejected_when_source_belongs_to_another_person():
+    """The evaluator catches a persisted comparison whose cited record is outside its person scope."""
+    from app.models.care_continuity import CareDeltaRun
     from app.services.delta_engine import evaluate_longitudinal_interpretations
 
     with TestingSessionLocal() as db:
@@ -2212,7 +2213,7 @@ def test_longitudinal_interpretation_evaluator_rejects_cross_person_source_refer
             db, person_b, caregiver_b, "nutrition", 1,
             "Foreign person's eating observation",
         )
-        item = {
+        misleading_item = {
             "authoritative_change_id": "cross-person-change",
             "domain": "nutrition",
             "name": "eating",
@@ -2230,10 +2231,26 @@ def test_longitudinal_interpretation_evaluator_rejects_cross_person_source_refer
                 "source_excerpt": "Foreign person's eating observation",
             }],
         }
-        result = evaluate_longitudinal_interpretations(
-            [item], db=db, person_id=person_a.id
+        saved = CareDeltaRun(
+            person_id=person_a.id,
+            source="adversarial_misleading_comparison",
+            event_date=NOW,
+            source_event_id=None,
+            evidence_ids=[foreign_event.id],
+            delta_json=json.dumps({"computed_changes": [misleading_item]}),
+            model_name="adversarial-test",
         )
+        db.add(saved)
+        db.flush()
+
+        persisted_payload = json.loads(
+            db.query(CareDeltaRun).filter(CareDeltaRun.id == saved.id).one().delta_json
+        )
+        result = evaluate_longitudinal_interpretations(
+            persisted_payload["computed_changes"], db=db, person_id=person_a.id
+        )
+        evaluated = persisted_payload["computed_changes"][0]
         assert result["overall_status"] == "unsupported"
-        assert item["interpretation_status"] == "unsupported"
-        assert item["interpretation_caregiver_visible"] is False
-        assert item["interpretation_invalid_source_ids"] == [foreign_event.id]
+        assert evaluated["interpretation_status"] == "unsupported"
+        assert evaluated["interpretation_caregiver_visible"] is False
+        assert evaluated["interpretation_invalid_source_ids"] == [foreign_event.id]
