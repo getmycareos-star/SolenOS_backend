@@ -390,6 +390,22 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         assert "Caregiver-attributed LCR assertion" in follow_up_prompt
         assert source in follow_up_prompt
 
+        natural_recall = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": first["person"]["id"],
+                "text": "What did I mention about her sleep?",
+                "client_turn_id": "companion-report-readback-0002",
+            },
+        )
+        assert natural_recall.status_code == 200, natural_recall.text
+        natural_recall_prompt = "\\n".join(
+            str(item.get("content", "")) for item in captured_prompts[-1]
+        )
+        assert "Caregiver-attributed LCR assertion" in natural_recall_prompt
+        assert source in natural_recall_prompt
+
         db = TestingSessionLocal()
         try:
             assertion = db.query(CareAssertion).filter_by(id=assertion_id).one()
