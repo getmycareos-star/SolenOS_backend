@@ -82,6 +82,36 @@ def create_authenticated_session(client, person_name: str):
 
 
 @pytest.mark.session_security
+def test_get_situation_rejects_missing_or_invalid_bearer_and_accepts_valid_session():
+    """Unauthenticated hydration is rejected; a server-issued session can hydrate its own record."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+
+        missing = client.get("/api/situation")
+        assert missing.status_code == 401, missing.text
+
+        invalid = client.get(
+            "/api/situation",
+            headers={"Authorization": "Bearer not-a-real-session-token"},
+        )
+        assert invalid.status_code == 401, invalid.text
+
+        created, headers = create_authenticated_session(client, "Authenticated Hydration")
+        accepted = client.get(
+            f"/api/situation?care_session_id=sess-test-{created['person']['id']}",
+            headers=headers,
+        )
+        assert accepted.status_code == 200, accepted.text
+        payload = accepted.json()
+        assert payload["person_id"] == created["person"]["id"]
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
 def test_post_situation_creates_evidence_and_event():
     setup_db()
     try:
