@@ -196,7 +196,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "follow_up_links": {
         "table": "care_follow_up_links",
         "required": False,
-        "fields": ["id", "source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "created_by_caregiver_id", "created_at"],
+        "fields": ["id", "source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "owner_caregiver_id", "created_by_caregiver_id", "created_at"],
         "order": ["created_at"],
     },
     "reconciliations": {
