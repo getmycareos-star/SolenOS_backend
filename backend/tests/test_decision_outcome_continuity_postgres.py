@@ -104,12 +104,39 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                     "outcome_status": "observed",
                     "observed_at": datetime.now(UTC).isoformat(),
                     "description": "Caregiver later reported that evening support began.",
+                    "client_reference_id": "outcome-" + suffix,
                     "evidence_ids": [],
                     "is_intended_outcome": False,
                 },
             )
             assert outcome.status_code == 201, outcome.text
             assert outcome.json()["decision_id"] == decision_id
+            replayed_outcome = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={
+                    "decision_id": decision_id,
+                    "outcome_status": "observed",
+                    "observed_at": datetime.now(UTC).isoformat(),
+                    "description": "Caregiver later reported that evening support began.",
+                    "client_reference_id": "outcome-" + suffix,
+                    "evidence_ids": [],
+                    "is_intended_outcome": False,
+                },
+            )
+            assert replayed_outcome.status_code == 201, replayed_outcome.text
+            assert replayed_outcome.json()["id"] == outcome.json()["id"]
+            conflicting_outcome = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={
+                    "decision_id": decision_id,
+                    "outcome_status": "observed",
+                    "description": "Different content under the same outcome reference.",
+                    "client_reference_id": "outcome-" + suffix,
+                },
+            )
+            assert conflicting_outcome.status_code == 409, conflicting_outcome.text
 
             ambiguous_outcome = client.post(
                 "/api/v1/care-continuity/decision-outcomes",
