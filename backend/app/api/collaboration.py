@@ -5628,7 +5628,7 @@ def _build_retrieval_receipt(
     context_hash = hashlib.sha256(context_payload.encode("utf-8")).hexdigest()
     projection_complete = bool(coverage.get("retrieval_projection_complete"))
     page_limit_reached = bool(coverage.get("page_limit_reached"))
-    if coverage.get("status", "").startswith("not_retrieved"):
+    if str(coverage.get("status") or "").startswith("not_retrieved"):
         completeness = "not_assessed"
     elif projection_complete and not page_limit_reached and not context_truncated:
         completeness = "complete_for_retrieval_scope"
@@ -7959,6 +7959,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_record_refs": source_record_refs,
         "claim_provenance": claim_provenance,
         "lcr_context_coverage": lcr_context_coverage,
+        "retrieval_receipt": lcr_context_coverage.get("retrieval_receipt", {
+            "schema_version": "1",
+            "retrieval_completeness": "not_assessed",
+            "answer_restriction": "no_care_history_completeness_claim",
+        }),
         "ai_generated": ai_generated,
         "response_mode": (
             "source_quoted_care_history"
