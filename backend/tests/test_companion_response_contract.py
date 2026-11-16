@@ -2926,10 +2926,12 @@ def test_retrieval_receipt_distinguishes_retrieval_from_prompt_inclusion():
         prompt_context_chars=9,
         prompt_context_budget_chars=16000,
     )
-    assert complete["retrieval_completeness"] == "complete_for_retrieval_scope"
+    assert complete["retrieval_completeness"] == "partial_or_unknown"
     assert complete["sources"]["events"]["retrieved_count"] == 2
     assert complete["sources"]["events"]["selected_for_answer"] == 1
     assert complete["sources"]["events"]["selection_truncated"] is True
+    assert complete["source_gaps"] == ["events"]
+    assert complete["answer_restriction"] == "qualify_or_withhold_history_conclusion"
     assert complete["prompt_context"]["selected_line_count"] == 1
     assert len(complete["prompt_context"]["sha256"]) == 64
     assert "model-provider receipt" in complete["prompt_context"]["interpretation_limit"]
@@ -2963,3 +2965,74 @@ def test_retrieval_receipt_distinguishes_retrieval_from_prompt_inclusion():
     assert not_retrieved["retrieval_completeness"] == "not_assessed"
 
 # Retrieval receipt tests are part of the Companion response contract.
+
+
+def test_retrieval_receipt_never_calls_missing_or_unscanned_sources_complete():
+    build = collaboration._build_retrieval_receipt
+    receipt = build(
+        {
+            "retrieval_scan_complete": True,
+            "retrieval_projection_complete": True,
+            "page_limit_reached": False,
+            "missing_required_sources": ["documents"],
+            "missing_optional_sources": [],
+            "sources": {
+                "events": {
+                    "status": "available",
+                    "returned_count": 1,
+                    "selected_for_answer": 1,
+                    "candidate_scan_complete": True,
+                    "has_more": False,
+                    "selection_truncated": False,
+                },
+                "documents": {
+                    "status": "unavailable",
+                    "returned_count": 0,
+                    "selected_for_answer": 0,
+                    "candidate_scan_complete": False,
+                    "has_more": False,
+                    "selection_truncated": False,
+                },
+            },
+        },
+        ["event one"],
+        request_id="request-3",
+        request_sha256="request-hash",
+        context_truncated=False,
+        prompt_context_chars=9,
+        prompt_context_budget_chars=16000,
+    )
+    assert receipt["retrieval_completeness"] == "partial_or_unknown"
+    assert receipt["missing_required_sources"] == ["documents"]
+    assert receipt["source_gaps"] == ["documents"]
+    assert receipt["answer_restriction"] == "qualify_or_withhold_history_conclusion"
+
+
+def test_retrieval_receipt_marks_unscanned_source_and_remaining_page_incomplete():
+    build = collaboration._build_retrieval_receipt
+    receipt = build(
+        {
+            "retrieval_scan_complete": False,
+            "retrieval_projection_complete": False,
+            "page_limit_reached": True,
+            "sources": {
+                "events": {
+                    "status": "available",
+                    "returned_count": 20,
+                    "selected_for_answer": 20,
+                    "candidate_scan_complete": False,
+                    "has_more": True,
+                    "selection_truncated": False,
+                }
+            },
+        },
+        ["event one"],
+        request_id="request-4",
+        request_sha256="request-hash",
+        context_truncated=False,
+        prompt_context_chars=9,
+        prompt_context_budget_chars=16000,
+    )
+    assert receipt["retrieval_completeness"] == "partial_or_unknown"
+    assert receipt["page_limit_reached"] is True
+    assert receipt["source_gaps"] == ["events"]
