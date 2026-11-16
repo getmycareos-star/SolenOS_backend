@@ -208,22 +208,29 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             )
             assert denied_update.status_code == 404, denied_update.text
 
-        # A new HTTP client/session using the same authenticated capability sees the same PostgreSQL rows.
+            rotated = client.post("/api/v1/sessions/refresh", headers=headers)
+            assert rotated.status_code == 200, rotated.text
+            refreshed_headers = {"Authorization": "Bearer " + rotated.json()["access_token"]}
+            assert rotated.json()["person_id"] == person_id
+            old_token_denied = client.get("/api/v1/care-continuity/decisions", headers=headers)
+            assert old_token_denied.status_code == 401, old_token_denied.text
+
+        # A new HTTP client with the rotated server-issued capability retrieves the same PostgreSQL rows.
         with TestClient(app) as refreshed_client:
             fresh_read = refreshed_client.get(
                 "/api/v1/care-continuity/decisions",
-                headers=headers,
+                headers=refreshed_headers,
             )
             assert fresh_read.status_code == 200, fresh_read.text
             assert any(row["id"] == decision_id for row in fresh_read.json())
             fresh_outcomes = refreshed_client.get(
                 "/api/v1/care-continuity/decision-outcomes",
-                headers=headers,
+                headers=refreshed_headers,
             )
             assert any(row["id"] == outcome.json()["id"] for row in fresh_outcomes.json())
             fresh_followups = refreshed_client.get(
                 "/api/v1/care-continuity/follow-up-links",
-                headers=headers,
+                headers=refreshed_headers,
             )
             assert any(row["id"] == follow_up_id and row["status"] == "completed" for row in fresh_followups.json())
     finally:
