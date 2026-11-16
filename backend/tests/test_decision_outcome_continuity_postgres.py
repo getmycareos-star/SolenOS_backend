@@ -157,6 +157,19 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                 },
             )
             assert conflicting_outcome.status_code == 409, conflicting_outcome.text
+            changed_intent_replay = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={
+                    "decision_id": decision_id,
+                    "outcome_status": "observed",
+                    "description": "Caregiver later reported that evening support began.",
+                    "client_reference_id": "outcome-" + suffix,
+                    "evidence_ids": [],
+                    "is_intended_outcome": True,
+                },
+            )
+            assert changed_intent_replay.status_code == 409, changed_intent_replay.text
 
             ambiguous_outcome = client.post(
                 "/api/v1/care-continuity/decision-outcomes",
