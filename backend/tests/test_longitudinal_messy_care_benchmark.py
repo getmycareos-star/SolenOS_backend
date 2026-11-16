@@ -14,7 +14,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, create_engine, func
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 import app.main as main_module
@@ -30,13 +29,13 @@ from app.services.pattern_detection import detect_patterns
 from app.core.change_enums import ChangeType, ChangeDirection, PatternType, SignificanceVerdict, BaselineType, BaselineConfidence
 
 NOW = datetime.now(timezone.utc)
-_benchmark_database_url = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL", "sqlite:///:memory:")
-_engine_options = {}
-if _benchmark_database_url.startswith("sqlite"):
-    _engine_options["connect_args"] = {"check_same_thread": False}
-    if _benchmark_database_url == "sqlite:///:memory:":
-        _engine_options["poolclass"] = StaticPool
-engine = create_engine(_benchmark_database_url, **_engine_options)
+_benchmark_database_url = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL")
+if not _benchmark_database_url or not _benchmark_database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
+    raise RuntimeError(
+        "The longitudinal messy-care benchmark requires SOLENOS_BENCHMARK_DATABASE_URL "
+        "to point to PostgreSQL. SQLite is not supported."
+    )
+engine = create_engine(_benchmark_database_url, pool_pre_ping=True)
 if "care_facts" not in Base.metadata.tables:
     Table(
         "care_facts", Base.metadata,
@@ -87,33 +86,29 @@ def override_get_db():
 
 @pytest.fixture(autouse=True)
 def isolated_database():
-    is_postgres = engine.dialect.name == "postgresql"
-    if is_postgres:
-        # The CI PostgreSQL database is migrated before this suite starts. Never
-        # drop migrated production-shaped tables: foreign keys and append-only
-        # audit history intentionally make metadata.drop_all unsafe here.
-        # Reset only row data in this disposable CI database, preserving the
-        # migration-owned schema and alembic_version.
-        from sqlalchemy import inspect, text
+    if engine.dialect.name != "postgresql":
+        raise RuntimeError("The longitudinal messy-care benchmark must run against PostgreSQL.")
+    # The CI PostgreSQL database is migrated before this suite starts. Never
+    # drop migrated production-shaped tables: foreign keys and append-only
+    # audit history intentionally make metadata.drop_all unsafe here.
+    # Reset only row data in this disposable CI database, preserving the
+    # migration-owned schema and alembic_version.
+    from sqlalchemy import inspect, text
 
-        table_names = [
-            name for name in inspect(engine).get_table_names()
-            if name != "alembic_version"
-        ]
-        if table_names:
-            quoted = ", ".join(f'"{name.replace(chr(34), chr(34) * 2)}"' for name in table_names)
-            with engine.begin() as connection:
-                connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
-    else:
-        Base.metadata.create_all(bind=engine)
+    table_names = [
+        name for name in inspect(engine).get_table_names()
+        if name != "alembic_version"
+    ]
+    if table_names:
+        quoted = ", ".join(f'"{name.replace(chr(34), chr(34) * 2)}"' for name in table_names)
+        with engine.begin() as connection:
+            connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
 
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestingSessionLocal
     yield
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
-    if not is_postgres:
-        Base.metadata.drop_all(bind=engine)
 
 
 def make_person(db, suffix="a"):
