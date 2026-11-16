@@ -35,6 +35,7 @@ from app.services.care_continuity import (
 )
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.appointment_followup_sync import sync_appointment_followups
+from app.services.lcr_context import build_lcr_context
 
 logger = logging.getLogger(__name__)
 
@@ -248,9 +249,25 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     """Return a bounded, source-linked LCR preparation view without inferring clinical meaning."""
     if window_days < 1 or window_days > 365:
         raise HTTPException(status_code=422, detail="window_days must be between 1 and 365")
-    person_id, _ = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window_days)
+    try:
+        # Shared read-only LCR projection is the authoritative source inventory.
+        # The bounded legacy arrays below remain for existing caregiver UI clients.
+        living_care_record_context = build_lcr_context(
+            db, person_id, caregiver_id=caregiver_id,
+            limit_per_source=40, include_all_history=True,
+        )
+    except Exception:
+        logger.exception("Shared LCR retrieval failed for appointment preparation")
+        living_care_record_context = {
+            "person_id": person_id, "read_only": True,
+            "retrieval_scan_complete": False, "retrieval_projection_complete": False,
+            "schema_status": "failed", "missing_required_sources": [],
+            "missing_optional_sources": [], "sources": {},
+            "retrieval_error": "shared_lcr_retrieval_failed",
+        }
 
     fact_has_more = None
     try:
@@ -665,6 +682,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "contradictions": contradiction_items,
         "documents": documents,
         "source_completeness": source_completeness,
+        "living_care_record_context": living_care_record_context,
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
         "freshness_assessment_scope": {
