@@ -145,9 +145,6 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
-      - name: Verify decision and outcome continuity against PostgreSQL
-        run: python -m pytest backend/tests/test_decision_outcome_continuity_postgres.py -q -vv
-
       - name: Verify schema reconciliation and migration head
         run: |
           python - <<'PY'
@@ -187,6 +184,9 @@ jobs:
           conn.close()
           print(f"PostgreSQL legacy-schema migration passed at {expected_revision}; no caregiver rows fabricated.")
           PY
+
+      - name: Verify decision and outcome continuity against PostgreSQL
+        run: python -m pytest backend/tests/test_decision_outcome_continuity_postgres.py -q -vv
 
       - name: Verify Daily Care to LCR retrieval on PostgreSQL
         run: python -m pytest backend/tests/test_unified_care_spine_capture.py -q
