@@ -12,6 +12,7 @@ on:
       - ".dockerignore"
       - ".github/workflows/backend-tests.yml"
       - ".github/workflows/postgres-migration-validation.yml"
+      - ".github/workflows/backup-recovery.yml"
   pull_request:
     paths:
       - "backend/**"
