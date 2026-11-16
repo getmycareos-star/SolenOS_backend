@@ -5670,8 +5670,6 @@ def _build_retrieval_receipt(
         "source_gaps": source_gaps,
         "pages_fetched": coverage.get("pages_fetched"),
         "temporal_window": coverage.get("temporal_window"),
-        "missing_required_sources": list(coverage.get("missing_required_sources") or []),
-        "missing_optional_sources": list(coverage.get("missing_optional_sources") or []),
         "sources": source_receipts,
         "prompt_context": {
             "status": "truncated" if context_truncated else "complete_for_selected_package",
@@ -5700,7 +5698,7 @@ def _qualify_reply_for_incomplete_retrieval(
     """Deterministically qualify historical answers when retrieval is not complete."""
     if (
         not historical_question
-        or receipt.get("retrieval_completeness") != "partial_or_unknown"
+        or receipt.get("retrieval_completeness") == "complete_for_retrieval_scope"
         or not isinstance(reply, str)
         or not reply.strip()
     ):
