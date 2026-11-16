@@ -168,10 +168,14 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             revised = client.patch(
                 f"/api/v1/care-continuity/decisions/{decision_id}",
                 headers=headers,
-                json={"decision_text": "Family agreed to trial evening home support three days each week."},
+                json={
+                    "decision_text": "Family agreed to trial evening home support three days each week.",
+                    "context": '{"reason":"Evening coverage was difficult","alternatives":["daytime support"],"context_summary":"Family planning discussion"}',
+                },
             )
             assert revised.status_code == 200, revised.text
             assert revised.json()["decision_text"].endswith("three days each week.")
+            assert "Evening coverage was difficult" in revised.json()["context"]
 
             revisions = client.get("/api/v1/care-continuity/decision-revisions", headers=headers)
             assert revisions.status_code == 200, revisions.text
