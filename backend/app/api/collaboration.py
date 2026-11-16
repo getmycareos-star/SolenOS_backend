@@ -5234,7 +5234,7 @@ def _medication_dose_recall_context_lines(
 
 
 def _care_history_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
-    """Return only caregiver-authored event descriptions relevant to a history question."""
+    """Return caregiver-authored event text and caregiver-reviewed assertion text for history questions."""
     if not _CARE_HISTORY_INTENT_PATTERN.search(user_text or ""):
         return None
 
@@ -5249,16 +5249,31 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             payload = json.loads(line[brace:])
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(payload, dict) or payload.get("source_type") != "events":
+        if not isinstance(payload, dict):
             continue
-        record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
-        # Only summarize an explicitly caregiver-authored, recorded event.
-        # Pending or otherwise unknown event states must not become settled history.
-        if not record.get("created_by_caregiver_id"):
+        source_type = payload.get("source_type")
+        if source_type == "events":
+            record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+            # Only summarize an explicitly caregiver-authored, recorded event.
+            # Pending or otherwise unknown event states must not become settled history.
+            if not record.get("created_by_caregiver_id"):
+                continue
+            if str(record.get("status") or "").strip().casefold() != "recorded":
+                continue
+            description = _care_history_event_text(record)
+        elif source_type == "care_assertions":
+            # The caller emits this source type only after a person-scoped query
+            # for accepted/reviewed assertions. Require explicit caregiver
+            # attribution again here; never quote a model-only assertion.
+            if payload.get("caregiver_attributed") is not True:
+                continue
+            if str(payload.get("status") or "").strip().casefold() not in {
+                "accepted", "caregiver_reviewed", "reported",
+            }:
+                continue
+            description = str(payload.get("source_text") or payload.get("value") or "").strip()
+        else:
             continue
-        if str(record.get("status") or "").strip().casefold() != "recorded":
-            continue
-        description = _care_history_event_text(record)
         if not description:
             continue
         terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
@@ -6352,6 +6367,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "Caregiver-attributed LCR assertion (status preserved): "
                     + json.dumps({
                         "assertion_id": assertion_id,
+                        "source_type": "care_assertions",
+                        "caregiver_attributed": bool(assertion.created_by_caregiver_id),
                         "field": assertion.field,
                         "value": assertion.asserted_value,
                         "assertion_kind": assertion.assertion_kind,
