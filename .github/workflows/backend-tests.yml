@@ -145,6 +145,9 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
+      - name: Verify decision and outcome continuity against PostgreSQL
+        run: python -m pytest backend/tests/test_decision_outcome_continuity_postgres.py -q -vv
+
       - name: Verify schema reconciliation and migration head
         run: |
           python - <<'PY'
