@@ -5633,6 +5633,10 @@ def _build_retrieval_receipt(
     missing_optional = list(coverage.get("missing_optional_sources") or [])
     source_gaps = []
     for source_name, source in source_receipts.items():
+        # Prior Companion dialogue is explicitly non-evidentiary and is not
+        # part of care-source completeness.
+        if source_name == "companion_conversation":
+            continue
         if source.get("status") not in {"available", "empty"}:
             source_gaps.append(source_name)
         if source.get("has_more") or source.get("selection_truncated"):
@@ -5648,7 +5652,6 @@ def _build_retrieval_receipt(
         and not page_limit_reached
         and not context_truncated
         and not missing_required
-        and not missing_optional
         and not source_gaps
     ):
         completeness = "complete_for_retrieval_scope"
@@ -5686,6 +5689,29 @@ def _build_retrieval_receipt(
             else "absence_claim_limited_to_retrieved_record"
         ),
     }
+
+
+def _qualify_reply_for_incomplete_retrieval(
+    reply: str,
+    receipt: dict,
+    *,
+    historical_question: bool,
+) -> str:
+    """Deterministically qualify historical answers when retrieval is not complete."""
+    if (
+        not historical_question
+        or receipt.get("retrieval_completeness") != "partial_or_unknown"
+        or not isinstance(reply, str)
+        or not reply.strip()
+    ):
+        return reply
+    qualifier = (
+        "I couldn't verify that all relevant saved history was reviewed, "
+        "so this may not reflect the full care picture."
+    )
+    if qualifier.casefold() in reply.casefold():
+        return reply
+    return f"{reply.rstrip()} {qualifier}"
 
 
 def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) -> str:
@@ -7525,6 +7551,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 detail="Companion could not produce a clear, sufficiently grounded response. No reply was saved; please clarify or retry.",
             )
         reply = reply.strip()
+        historical_question = bool(
+            _CARE_HISTORY_INTENT_PATTERN.search(user_text or "")
+            or _is_broad_temporal_history_request(user_text)
+            or (lcr_context_coverage.get("temporal_window") is not None)
+            or trend_assessment is not None
+        )
+        reply = _qualify_reply_for_incomplete_retrieval(
+            reply,
+            retrieval_receipt,
+            historical_question=historical_question,
+        )
         if unsupported_trend:
             verdict = "blocked"
             safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
