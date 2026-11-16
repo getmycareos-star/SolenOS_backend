@@ -377,11 +377,13 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
             json={
                 "person_id": first["person"]["id"],
                 "text": "What have I told you about her sleep?",
-                "session_id": body["session_id"],
+                # Deliberately omit session_id: retrieval must work in a new
+                # conversation, not by replaying the original chat context.
                 "client_turn_id": "companion-report-readback-0001",
             },
         )
         assert follow_up.status_code == 200, follow_up.text
+        assert follow_up.json()["session_id"] != body["session_id"]
         follow_up_prompt = "\\n".join(
             str(item.get("content", "")) for item in captured_prompts[-1]
         )
