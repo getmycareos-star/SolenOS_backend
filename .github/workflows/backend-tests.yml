@@ -179,15 +179,13 @@ jobs:
                   try:
                       cur.execute(statement, (event_id,))
                   except psycopg2.Error as exc:
+                      cur.execute("ROLLBACK TO SAVEPOINT append_only_probe")
                       if "append-only" not in str(exc).lower():
                           raise SystemExit(f"Unexpected append-only rejection: {exc}")
-                      conn.rollback()
                   else:
                       raise SystemExit("Incident event mutation unexpectedly succeeded")
                   finally:
-                      if conn.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
-                          with conn.cursor() as reset:
-                              reset.execute("ROLLBACK TO SAVEPOINT append_only_probe")
+                      cur.execute("RELEASE SAVEPOINT append_only_probe")
               cur.execute("SELECT COUNT(*) FROM privacy_incident_events WHERE id=%s", (event_id,))
               if cur.fetchone()[0] != 1:
                   raise SystemExit("Incident event was not preserved after rejected mutations")
