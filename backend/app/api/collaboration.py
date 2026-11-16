@@ -5288,7 +5288,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             len(matched_topics),
             len(terms & query_terms),
             order,
-            re.sub(r"\\s+", " ", description).strip(),
+            re.sub(r"\s+", " ", description).strip(),
             matched_topics,
         ))
         order += 1
