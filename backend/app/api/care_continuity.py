@@ -4102,6 +4102,106 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
     return output
 
 
+@router.patch("/{resource}/{record_id}")
+def update_care_continuity_resource(
+    resource: str,
+    record_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Update a decision and append its immutable revision in the same transaction."""
+    if resource != "decisions":
+        raise HTTPException(status_code=404, detail="This care-continuity resource has no update workflow")
+    person_id, caregiver_id = _scoped_identity(request, db)
+    allowed = WRITABLE["decisions"]
+    changes = {key: value for key, value in payload.items() if key in allowed}
+    if not changes:
+        raise HTTPException(status_code=422, detail="No supported decision fields supplied")
+
+    table = _table(db, RESOURCES["decisions"])
+    revision_table = _table(db, "care_decision_revisions")
+    try:
+        current_row = db.execute(
+            select(table).where(
+                table.c.id == record_id,
+                table.c.person_id == person_id,
+            ).with_for_update()
+        ).mappings().first()
+        if current_row is None:
+            raise HTTPException(status_code=404, detail="Decision not found")
+
+        for key, value in list(changes.items()):
+            column = table.c.get(key)
+            if column is None:
+                changes.pop(key)
+                continue
+            if value is None:
+                continue
+            if isinstance(column.type, SQLDateTime) and isinstance(value, str):
+                try:
+                    changes[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=f"{key} must be a valid ISO-8601 datetime") from exc
+            elif key == "evidence_ids":
+                if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+                    raise HTTPException(status_code=422, detail="evidence_ids must be a list of non-empty evidence IDs")
+                if len(value) != len(set(value)):
+                    raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
+                if value:
+                    evidence_table = _table(db, "evidence")
+                    found = set(db.execute(
+                        select(evidence_table.c.id).where(
+                            evidence_table.c.person_id == person_id,
+                            evidence_table.c.id.in_(value),
+                        )
+                    ).scalars().all())
+                    if found != set(value):
+                        raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
+            elif isinstance(value, (list, dict)) and not isinstance(column.type, SQLJSON):
+                if not isinstance(column.type, SQLText):
+                    raise HTTPException(status_code=422, detail=f"{key} must match the persisted column type")
+                changes[key] = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+        if not changes:
+            raise HTTPException(status_code=422, detail="No supported decision fields supplied")
+        before = _jsonable(dict(current_row))
+        changes["updated_at"] = datetime.now(timezone.utc) if "updated_at" in table.c else None
+        changes = {key: value for key, value in changes.items() if key in table.c and value is not None}
+        db.execute(
+            update(table).where(
+                table.c.id == record_id,
+                table.c.person_id == person_id,
+            ).values(**changes)
+        )
+        updated_row = db.execute(
+            select(table).where(
+                table.c.id == record_id,
+                table.c.person_id == person_id,
+            )
+        ).mappings().one()
+        _append_revision_for_change_item(
+            db,
+            person_id,
+            caregiver_id,
+            {
+                "target_type": "care_decision",
+                "target_id": record_id,
+                "operation": "updated",
+                "before_value": before,
+                "after_value": _jsonable(dict(updated_row)),
+            },
+        )
+        db.commit()
+        return _jsonable(dict(updated_row))
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Decision update and revision could not be committed") from exc
+
+
 @router.get("/{resource}")
 def list_resource(resource: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
     if resource not in RESOURCES:
