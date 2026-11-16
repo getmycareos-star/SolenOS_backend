@@ -1065,7 +1065,7 @@ WRITABLE = {
     "integrity-resolutions": {"finding_id", "resolution_status", "resolution_notes", "evidence_ids"},
     "decisions": {"title", "decision_text", "decision_status", "decided_at", "context", "evidence_ids", "client_reference_id"},
     "decision-outcomes": {"decision_id", "outcome_status", "observed_at", "description",
-                          "evidence_ids", "is_intended_outcome"},
+                          "evidence_ids", "is_intended_outcome", "client_reference_id"},
     "reconciliations": {"target_type", "target_id", "reconciliation_status", "competing_claim_ids",
                         "evidence_ids", "decision_notes"},
     "follow-up-links": {"source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "owner_caregiver_id"},
@@ -4469,6 +4469,23 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
+    if resource == "decision-outcomes" and data.get("client_reference_id"):
+        reference_id = data["client_reference_id"]
+        if not isinstance(reference_id, str) or not reference_id.strip() or len(reference_id) > 120:
+            raise HTTPException(status_code=422, detail="client_reference_id must be a non-empty string of at most 120 characters")
+        outcomes_table = _table(db, "decision_outcomes")
+        existing = db.execute(select(outcomes_table).where(
+            outcomes_table.c.person_id == person_id,
+            outcomes_table.c.client_reference_id == reference_id,
+        )).mappings().first()
+        if existing is not None:
+            if (
+                str(existing.get("decision_id")) != str(data.get("decision_id"))
+                or str(existing.get("outcome_status")) != str(data.get("outcome_status"))
+                or (existing.get("description") or "") != (data.get("description") or "")
+            ):
+                raise HTTPException(status_code=409, detail="This outcome capture reference was already used for different content")
+            return _jsonable(dict(existing))
     if resource == "decisions" and data.get("client_reference_id"):
         reference_id = data["client_reference_id"]
         if not isinstance(reference_id, str) or not reference_id.strip() or len(reference_id) > 120:
