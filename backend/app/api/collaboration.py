@@ -7134,15 +7134,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # let the model restate an old observation as a recent trend or imply
             # direction indirectly. Return the evidence-derived limit directly.
             reply = _trend_uncertainty_response(trend_assessment)
-        history_source_lines = list(dict.fromkeys([
-            *included_model_context_lines,
-            *event_context,
-            *shared_lcr_lines,
-        ]))
-        care_history_extractive_answer = _care_history_extractive_answer(
-            user_text,
-            history_source_lines,
-        )
         medication_dose_recall_fallback_used = _should_use_medication_dose_recall_fallback(
             user_text,
             emergency=emergency,
@@ -7150,6 +7141,22 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             conflict_response=conflict_response,
             missing_measurement_reply=missing_measurement_reply,
             medication_change_reply=medication_change_reply,
+        )
+        if medication_dose_recall_fallback_used:
+            # Do not let a general-context assertion about an older dose
+            # override the directly retrieved caregiver report about a change.
+            history_source_lines = list(dict.fromkeys(
+                medication_recall_context["event_lines"]
+            ))
+        else:
+            history_source_lines = list(dict.fromkeys([
+                *included_model_context_lines,
+                *event_context,
+                *shared_lcr_lines,
+            ]))
+        care_history_extractive_answer = _care_history_extractive_answer(
+            user_text,
+            history_source_lines,
         )
         if medication_dose_recall_fallback_used:
             # Medication recall is answered from the caregiver-authored report,
@@ -7164,6 +7171,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 and care_history_extractive_answer.startswith("The saved notes mention medication:")
             )
             care_history_extractive_fallback_used = medication_dose_recall_source_quote_used
+            # Public provenance must describe only the direct medication-event
+            # records used for this answer, not unrelated assertions or context.
+            source_event_ids = _context_record_ids(
+                medication_recall_context["event_lines"], "event_id",
+            )
+            source_evidence_ids = _context_record_ids(
+                medication_recall_context["evidence_lines"], "evidence_id",
+            )
+            source_assertion_ids = []
+            source_appointment_ids = []
+            source_document_analysis_ids = []
+            source_freshness_assessment_ids = []
+            source_lcr_context_ids = []
+            source_lcr_record_refs = []
+            selected_ids_by_type["handoffs"] = []
         if (
             care_history_extractive_answer
             and not (emergency or unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
