@@ -349,12 +349,12 @@ def evaluate_longitudinal_interpretations(
         elif explicit_stale:
             status = "stale_evidence"
             justification = "The linked source is explicitly marked historical or requiring confirmation."
-        elif not reference_ids:
-            status = "insufficient_evidence"
-            justification = "No verifiable source record is linked to this interpretation."
         elif invalid_reference_ids:
             status = "unsupported"
             justification = "One or more linked source records could not be verified for this care record."
+        elif not reference_ids:
+            status = "insufficient_evidence"
+            justification = "No verifiable source record is linked to this interpretation."
         elif item.get("evidence_supported") is not True or item.get("source_reference_status") not in (None, "matched"):
             status = "unsupported"
             justification = "The linked records do not satisfy the source-verification requirement."
