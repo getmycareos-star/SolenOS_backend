@@ -146,6 +146,13 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
     assert all(item["source_id"] != "other-person-fact" for item in body["source_references"])
     assert "MUST NOT LEAK" not in response.text
     assert body["source_statuses"]["community"]["status"] == "not_authorized"
+    assert body["retrieval_complete"] is False, "unavailable required schemas must keep the handoff visibly incomplete"
+    blocking_limitations = {
+        item["source"] for item in body["limitations"]
+        if item["status"] in {"unavailable", "failed", "partial"}
+    }
+    assert blocking_limitations == {"decision_outcomes", "care_timeline_entries"}
+    assert "community" not in blocking_limitations, "disabled Community is not an authorized care-record source and must not block retrieval"
     assert body["source_statuses"]["documents"]["status"] == "empty"
     with engine.connect() as connection:
         saved = connection.execute(
