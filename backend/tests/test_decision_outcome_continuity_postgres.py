@@ -108,6 +108,7 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                     "target_type": "decision",
                     "target_id": decision_id,
                     "follow_up_kind": "check_in",
+                    "owner_caregiver_id": caregiver_id,
                     "status": "open",
                     "due_at": (datetime.now(UTC) + timedelta(days=3)).isoformat(),
                     "notes": "Check whether the evening support arrangement is working.",
@@ -115,6 +116,7 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                 },
             )
             assert follow_up.status_code == 201, follow_up.text
+            assert follow_up.json()["owner_caregiver_id"] == caregiver_id
             follow_up_id = follow_up.json()["id"]
 
             rejected_completion = client.patch(
