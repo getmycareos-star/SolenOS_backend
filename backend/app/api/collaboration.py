@@ -5239,8 +5239,10 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         return None
 
     topics = _care_history_requested_topics(user_text)
-    candidates: list[tuple[int, int, str, set[str]]] = []
+    query_terms = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold())) - _CARE_HISTORY_STOPWORDS
+    candidates: list[tuple[int, int, int, str, set[str]]] = []
     order = 0
+
     for line in context_lines:
         brace = (line or "").find("{")
         if brace < 0:
@@ -5284,26 +5286,31 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             continue
         candidates.append((
             len(matched_topics),
+            len(terms & query_terms),
             order,
-            re.sub(r"\s+", " ", description).strip(),
+            re.sub(r"\\s+", " ", description).strip(),
             matched_topics,
         ))
         order += 1
 
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    selected: list[tuple[int, int, str, set[str]]] = []
+    # Prefer the caregiver entry that best matches the actual question, not
+    # merely the first medication-related note in the timeline. A newer or
+    # previously reviewed dose must not eclipse a report about a possible
+    # medication change yesterday.
+    candidates.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    selected: list[tuple[int, int, int, str, set[str]]] = []
     covered_topics: set[str] = set()
     for candidate in candidates:
-        if not topics or candidate[3] - covered_topics:
+        if not topics or candidate[4] - covered_topics:
             selected.append(candidate)
-            covered_topics.update(candidate[3])
-        if topics and len(covered_topics) == len(topics):
+            covered_topics.update(candidate[4])
+    if topics and len(covered_topics) == len(topics):
             break
         if not topics and len(selected) >= 3:
             break
 
-    selected.sort(key=lambda item: item[1])
-    descriptions = [item[2] for item in selected[:3]]
+    selected.sort(key=lambda item: item[2])
+    descriptions = [item[3] for item in selected[:3]]
     if topics:
         missing_topics = [
             label for label, _ in topics if label not in covered_topics
@@ -7052,11 +7059,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 missing_measurement_reply=missing_measurement_fallback,
                 medication_change_reply=medication_safety_fallback,
             ):
-                history_source_lines = list(dict.fromkeys([
-                    *included_model_context_lines,
-                    *event_context,
-                    *shared_lcr_lines,
-                ]))
+                # Dose-recall answers must be grounded only in the direct
+                # person-scoped caregiver medication-event lookup. General
+                # context may contain an older reviewed dose assertion that
+                # is not evidence of the new prescription asked about.
+                history_source_lines = list(dict.fromkeys(
+                    medication_recall_context["event_lines"]
+                ))
                 reply = _care_history_extractive_answer(
                     user_text, history_source_lines
                 ) or (
