@@ -1063,7 +1063,7 @@ WRITABLE = {
     "integrity-findings": {"finding_type", "severity", "status", "target_type", "target_id",
                            "description", "evidence_ids", "detected_by"},
     "integrity-resolutions": {"finding_id", "resolution_status", "resolution_notes", "evidence_ids"},
-    "decisions": {"title", "decision_text", "decision_status", "decided_at", "context", "evidence_ids"},
+    "decisions": {"title", "decision_text", "decision_status", "decided_at", "context", "evidence_ids", "client_reference_id"},
     "decision-outcomes": {"decision_id", "outcome_status", "observed_at", "description",
                           "evidence_ids", "is_intended_outcome"},
     "reconciliations": {"target_type", "target_id", "reconciliation_status", "competing_claim_ids",
@@ -4469,6 +4469,19 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
+    if resource == "decisions" and data.get("client_reference_id"):
+        reference_id = data["client_reference_id"]
+        if not isinstance(reference_id, str) or not reference_id.strip() or len(reference_id) > 120:
+            raise HTTPException(status_code=422, detail="client_reference_id must be a non-empty string of at most 120 characters")
+        decisions_table = _table(db, "care_decisions")
+        existing = db.execute(select(decisions_table).where(
+            decisions_table.c.person_id == person_id,
+            decisions_table.c.client_reference_id == reference_id,
+        )).mappings().first()
+        if existing is not None:
+            if existing.get("title") != data.get("title") or existing.get("decision_text") != data.get("decision_text"):
+                raise HTTPException(status_code=409, detail="This decision capture reference was already used for different content")
+            return _jsonable(dict(existing))
     if resource == "follow-up-links" and str(data.get("status") or "").strip().lower() == "completed":
         evidence_ids = data.get("evidence_ids")
         if not isinstance(evidence_ids, list) or not evidence_ids:
