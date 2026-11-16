@@ -5963,6 +5963,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ))[:12]
         synonym_terms = sorted(_expanded_context_terms(retrieval_query) - set(ranking_terms))[:12]
         retrieval_terms = _ordered_context_search_terms(user_text, retrieval_query, limit=24)
+        # Keep explicit care-history topic variants in the database search even
+        # when broad stopword/ranking rules would otherwise discard them.
+        requested_history_terms = [
+            term
+            for _, variants in _care_history_requested_topics(user_text)
+            for term in sorted(variants)
+            if len(term) >= 4
+        ]
+        retrieval_terms = list(dict.fromkeys([
+            *retrieval_terms, *requested_history_terms,
+        ]))[:36]
         existing_event_ids = {str(event.id) for event in recent_events}
         if retrieval_terms:
             matching_events = (
@@ -6311,6 +6322,28 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if document_question
             else _filter_context_lines_to_query(retrieval_query, ranked_evidence_context)
         )
+        temporal_event_lines: list[str] = []
+        if isinstance(lcr_context_coverage, dict) and lcr_context_coverage.get("temporal_window"):
+            # The projection has already applied the requested date window.
+            # Preserve its dated care events even when the caregiver's wording
+            # ("what happened last week?") has no lexical overlap with event text.
+            for shared_line in shared_lcr_lines:
+                brace = (shared_line or "").find("{")
+                if brace < 0:
+                    continue
+                try:
+                    shared_payload = json.loads(shared_line[brace:])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                record = shared_payload.get("record") if isinstance(shared_payload, dict) else None
+                if (
+                    isinstance(record, dict)
+                    and record.get("event_type")
+                    and record.get("occurred_at")
+                    and shared_payload.get("source_id")
+                ):
+                    temporal_event_lines.append(shared_line)
+
         if document_question:
             relevant_shared_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
             # A document question is an explicit request for source material.
@@ -6323,6 +6356,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ]))
         else:
             shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
+            if temporal_event_lines:
+                shared_lcr_lines = list(dict.fromkeys([
+                    *shared_lcr_lines, *temporal_event_lines,
+                ]))
         # An explicit document question must not lose its verified upload because
         # a lexical token filter fails to match a paraphrase (e.g. walking/walker).
         # These records are already person-, caregiver-, upload-, and hash-verified.
@@ -6450,7 +6487,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 lcr_context_coverage["page_limit_reached"] = True
 
         source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
-        source_event_ids = _context_record_ids(event_context, "event_id")
+        temporal_event_ids = []
+        for temporal_line in temporal_event_lines:
+            brace = (temporal_line or "").find("{")
+            if brace < 0:
+                continue
+            try:
+                temporal_payload = json.loads(temporal_line[brace:])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            temporal_source_id = temporal_payload.get("source_id") if isinstance(temporal_payload, dict) else None
+            if temporal_source_id:
+                temporal_event_ids.append(str(temporal_source_id))
+        source_event_ids = list(dict.fromkeys([
+            *_context_record_ids(event_context, "event_id"), *temporal_event_ids,
+        ]))
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
         source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
@@ -7745,7 +7796,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "response_mode": (
-            "source_quoted_caregiver_question"
+            "source_quoted_care_history"
+            if care_history_direct_answer_used
+            else "source_quoted_caregiver_question"
             if caregiver_question_direct_answer_used
             else "deterministic_low_capacity_support_fallback"
             if low_capacity_support_fallback_used else "model_or_grounded_fallback"
