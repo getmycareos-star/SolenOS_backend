@@ -116,6 +116,14 @@ Every incident record must include: incident ID/status/severity/type/owner; dete
 
 Append a timeline event for every material action or decision. Correct earlier events with a superseding correction event; do not silently rewrite history.
 
+### Database mutation protection
+
+Migration `20261116_05_incident_events_append_only` installs a PostgreSQL trigger that rejects ordinary `UPDATE` and `DELETE` operations on `privacy_incident_events`. This protects the incident timeline from routine application or operator mutation.
+
+The only deletion exception is the transaction-local `solenos.privacy_erasure = 'on'` capability used by the separately reviewed privacy-erasure workflow. The application sets it only after the deletion request has passed reviewer and legal-hold checks, and before scoped raw-table cleanup. The trigger does not permit updates, even in that transaction. The SQLite development/test database does not install this trigger because SQLite lacks an equivalent transaction-local erasure capability.
+
+This is database-level protection against ordinary mutation, not protection from a privileged database administrator, storage-level compromise or a compromised application role. It does not replace independent evidence export, SHA-256 verification and restricted evidence storage. The PostgreSQL CI regression verifies that ordinary update/delete fail and that the approved erasure capability can delete the scoped event.
+
 ### Restricted operator API
 
 The current backend routes are:
