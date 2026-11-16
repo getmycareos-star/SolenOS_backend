@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.database import get_db
 from app.main import app
 import app.main as main_module
-from app.models.care import Evidence
+from app.models.care import CareEvent, Evidence
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(
@@ -129,6 +129,31 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             )
             assert cross_person_outcome.status_code == 404, cross_person_outcome.text
 
+            source_event_id = str(uuid.uuid4())
+            foreign_event_id = str(uuid.uuid4())
+            with Session(engine) as db:
+                db.add_all([
+                    CareEvent(
+                        id=source_event_id,
+                        person_id=person_id,
+                        event_type="caregiver_report",
+                        occurred_at=datetime.now(UTC),
+                        title="Evening support check-in",
+                        description="Caregiver recorded the support visit.",
+                        created_by_caregiver_id=caregiver_id,
+                    ),
+                    CareEvent(
+                        id=foreign_event_id,
+                        person_id=other.json()["person"]["id"],
+                        event_type="caregiver_report",
+                        occurred_at=datetime.now(UTC),
+                        title="Other person's event",
+                        description="Must not be linked across people.",
+                        created_by_caregiver_id=other.json()["caregiver"]["id"],
+                    ),
+                ])
+                db.commit()
+
             outcome = client.post(
                 "/api/v1/care-continuity/decision-outcomes",
                 headers=headers,
@@ -139,11 +164,24 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                     "description": "Caregiver later reported that evening support began.",
                     "client_reference_id": "outcome-" + suffix,
                     "evidence_ids": [],
+                    "source_event_ids": [source_event_id],
                     "is_intended_outcome": False,
                 },
             )
             assert outcome.status_code == 201, outcome.text
             assert outcome.json()["decision_id"] == decision_id
+            assert outcome.json()["source_event_ids"] == [source_event_id]
+            foreign_source_event = client.post(
+                "/api/v1/care-continuity/decision-outcomes",
+                headers=headers,
+                json={
+                    "decision_id": decision_id,
+                    "outcome_status": "observed",
+                    "description": "Must reject a source event from another person.",
+                    "source_event_ids": [foreign_event_id],
+                },
+            )
+            assert foreign_source_event.status_code == 404, foreign_source_event.text
             replayed_outcome = client.post(
                 "/api/v1/care-continuity/decision-outcomes",
                 headers=headers,
@@ -154,6 +192,7 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                     "description": "Caregiver later reported that evening support began.",
                     "client_reference_id": "outcome-" + suffix,
                     "evidence_ids": [],
+                    "source_event_ids": [source_event_id],
                     "is_intended_outcome": False,
                 },
             )
@@ -304,7 +343,10 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
                 "/api/v1/care-continuity/decision-outcomes",
                 headers=refreshed_headers,
             )
-            assert any(row["id"] == outcome.json()["id"] for row in fresh_outcomes.json())
+            assert any(
+                row["id"] == outcome.json()["id"] and row["source_event_ids"] == [source_event_id]
+                for row in fresh_outcomes.json()
+            )
             fresh_followups = refreshed_client.get(
                 "/api/v1/care-continuity/follow-up-links",
                 headers=refreshed_headers,
