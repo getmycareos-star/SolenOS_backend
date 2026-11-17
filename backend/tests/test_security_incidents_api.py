@@ -49,12 +49,16 @@ def _incident_test_database():
 
 def test_incident_operator_api_requires_configured_high_entropy_token(monkeypatch):
     monkeypatch.delenv("SOLENOS_INCIDENT_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("SOLENOS_INCIDENT_ADMIN_ID", raising=False)
     client = TestClient(app)
     response = client.get("/api/v1/security/incidents")
     assert response.status_code == 503
     assert response.json()["detail"] == "Incident operator access is not configured"
 
     monkeypatch.setenv("SOLENOS_INCIDENT_ADMIN_TOKEN", "x" * 40)
+    response = client.get("/api/v1/security/incidents")
+    assert response.status_code == 503
+    monkeypatch.setenv("SOLENOS_INCIDENT_ADMIN_ID", "synthetic-incident-operator")
     response = client.get(
         "/api/v1/security/incidents",
         headers={"X-SolenOS-Incident-Admin-Token": "wrong"},
@@ -65,6 +69,7 @@ def test_incident_operator_api_requires_configured_high_entropy_token(monkeypatc
 def test_incident_operator_api_creates_and_appends_auditable_timeline(monkeypatch):
     token = "test-only-incident-operator-token-0123456789"
     monkeypatch.setenv("SOLENOS_INCIDENT_ADMIN_TOKEN", token)
+    monkeypatch.setenv("SOLENOS_INCIDENT_ADMIN_ID", "synthetic-incident-operator")
     engine = _incident_test_database()
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
@@ -129,6 +134,15 @@ def test_incident_operator_api_creates_and_appends_auditable_timeline(monkeypatc
             "containment_started",
             "status_changed",
         ]
+        with engine.connect() as connection:
+            incident_actor = connection.execute(text(
+                "SELECT actor_id FROM privacy_incidents WHERE id=:id"
+            ), {"id": incident_id}).scalar_one()
+            event_actors = connection.execute(text(
+                "SELECT DISTINCT actor_id FROM privacy_incident_events WHERE incident_id=:id"
+            ), {"id": incident_id}).scalars().all()
+        assert incident_actor == "synthetic-incident-operator"
+        assert event_actors == ["synthetic-incident-operator"]
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
