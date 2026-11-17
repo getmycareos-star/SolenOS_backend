@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import uuid
 
 import pytest
+from sqlalchemy import text
 
 from app.core.database import engine, SessionLocal
 from app.models.privacy_delivery import AuditLogEvent
@@ -49,6 +50,14 @@ def test_expired_export_cleanup_uses_postgresql_row_lock_and_persists_receipt():
         assert receipt.outcome == "deleted"
         assert receipt.record_metadata["expiry_enforced"] is True
         assert receipt.record_metadata["size_bytes"] == len(b"synthetic-encrypted-export")
+        heartbeat = db.execute(text("""
+            SELECT last_outcome, last_success_at, last_processed_count
+            FROM operational_worker_heartbeats
+            WHERE worker_name='privacy_export_expiry'
+        """)).one()
+        assert heartbeat.last_outcome == "success"
+        assert heartbeat.last_success_at is not None
+        assert heartbeat.last_processed_count >= 1
     finally:
         db.rollback()
         db.query(PrivacyExportArtifact).filter_by(id=artifact_id).delete(synchronize_session=False)
