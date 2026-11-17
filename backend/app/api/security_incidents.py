@@ -24,11 +24,12 @@ IncidentStatus = Literal["open", "investigating", "contained", "notification_ass
 
 def _operator(token: str | None = Header(default=None, alias="X-SolenOS-Incident-Admin-Token")) -> str:
     expected = os.getenv("SOLENOS_INCIDENT_ADMIN_TOKEN", "").strip()
-    if len(expected) < 32:
+    actor_id = os.getenv("SOLENOS_INCIDENT_ADMIN_ID", "").strip()
+    if len(expected) < 32 or not actor_id or len(actor_id) > 255:
         raise HTTPException(status_code=503, detail="Incident operator access is not configured")
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid incident operator credentials")
-    return "incident_operator"
+    return actor_id
 
 
 def _table(db: Session, name: str) -> Table:
