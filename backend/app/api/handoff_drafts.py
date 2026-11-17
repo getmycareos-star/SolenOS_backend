@@ -1981,8 +1981,11 @@ def prepare_handoff_draft(
     ).with_for_update().first()
     if existing is not None:
         if existing.request_fingerprint != request_fingerprint:
-            raise HTTPException(status_code=409, detail="Draft request ID was already used for different source content")
-        return _draft_response(existing)
+            raise HTTPException(status_code=409, detail="Draft request ID was already used for different request parameters")
+        return {
+            **_draft_response(existing),
+            "source_freshness": _draft_source_freshness(db, existing),
+        }
 
     generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
     structured_content["generation"] = generated_document
@@ -2064,7 +2067,10 @@ def prepare_handoff_draft(
             HandoffDraft.request_id == request_id,
         ).first()
         if existing is not None and existing.request_fingerprint == request_fingerprint:
-            return _draft_response(existing)
+            return {
+                **_draft_response(existing),
+                "source_freshness": _draft_source_freshness(db, existing),
+            }
         raise HTTPException(status_code=409, detail="A concurrent draft request used this idempotency key") from exc
     except Exception as exc:
         logger.exception(
@@ -2103,5 +2109,6 @@ def prepare_handoff_draft(
         "limitations": gaps,
         "retrieval_complete": retrieval_complete,
         "partial_sources": partial_sources,
+        "source_freshness": _draft_source_freshness(db, persisted_draft),
         "warning": "This is a draft from the listed saved records only. Unavailable or partially retrieved sources were not fully read. Verify every item and resolve uncertainty before sharing.",
     }
