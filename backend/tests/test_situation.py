@@ -2206,3 +2206,20 @@ def test_caregiver_situation_state_changes_require_linked_sources_and_persist_hi
     finally:
         teardown_db()
 
+
+
+def test_care_source_excerpt_extracts_original_daily_capture_without_storage_json():
+    from app.api.change import _care_source_excerpt
+
+    source = {
+        "original_capture": {
+            "observation": "Caregiver reports restless sleep and three overnight awakenings.",
+            "source": "critical_care_journey_e2e",
+            "capture_idempotency_key": "internal-only-key",
+        }
+    }
+    excerpt = _care_source_excerpt(__import__("json").dumps(source))
+
+    assert excerpt == "Caregiver reports restless sleep and three overnight awakenings."
+    assert "original_capture" not in excerpt
+    assert "internal-only-key" not in excerpt
