@@ -812,6 +812,16 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
             {"value": "Caregiver reports a difficult morning.", "id": "stale-handoff-fact"},
         )
 
+    # A retry is the same request even though its source snapshot is now stale.
+    # It must return the original draft; freshness validation still blocks use.
+    retried = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "family_transition", "window_days": 30},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["draft_id"] == draft_id
+
     retrieved = test_client.get(
         f"/api/v1/handoff-drafts/{draft_id}",
         headers={"Authorization": f"Bearer {session['access_token']}"},
