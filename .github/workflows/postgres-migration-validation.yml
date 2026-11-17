@@ -122,6 +122,12 @@ jobs:
               connection.execute(text(
                   "DROP TABLE IF EXISTS caregiver_responsibility_transfers CASCADE"
               ))
+              # The migration stamp below moves the database revision backwards.
+              # Remove objects introduced after that revision as well, otherwise
+              # the test is not a valid historical-schema simulation.
+              connection.execute(text(
+                  "DROP TABLE IF EXISTS operational_worker_heartbeats CASCADE"
+              ))
           PY
           # Simulate a production database whose earlier caregiver-access
           # revision is stamped although this one table is missing.
