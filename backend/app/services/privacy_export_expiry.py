@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_export import PrivacyExportArtifact
+from app.services.operational_heartbeats import record_worker_heartbeat
 
 
 def expire_privacy_exports_once(batch_size: int = 100) -> dict:
@@ -55,9 +56,24 @@ def expire_privacy_exports_once(batch_size: int = 100) -> dict:
             db.delete(artifact)
             deleted += 1
         db.commit()
+        record_worker_heartbeat(
+            "privacy_export_expiry",
+            outcome="success",
+            processed_count=deleted,
+        )
         return {"examined": deleted, "deleted": deleted, "failed": 0}
-    except Exception:
+    except Exception as exc:
         db.rollback()
+        try:
+            record_worker_heartbeat(
+                "privacy_export_expiry",
+                outcome="error",
+                processed_count=deleted,
+                error_type=type(exc).__name__,
+            )
+        except Exception:
+            # Preserve the original failure; the application logger records it.
+            pass
         raise
     finally:
         db.close()
