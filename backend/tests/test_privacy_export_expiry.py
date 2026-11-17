@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -22,6 +22,19 @@ def _expiry_db(monkeypatch):
         PrivacyExportArtifact.__table__,
         AuditLogEvent.__table__,
     ])
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE operational_worker_heartbeats (
+                worker_name VARCHAR(100) PRIMARY KEY,
+                last_started_at DATETIME NOT NULL,
+                last_completed_at DATETIME NOT NULL,
+                last_success_at DATETIME,
+                last_outcome VARCHAR(20) NOT NULL,
+                last_error_type VARCHAR(120),
+                last_processed_count INTEGER NOT NULL DEFAULT 0,
+                updated_at DATETIME NOT NULL
+            )
+        """))
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     monkeypatch.setattr(privacy_export_expiry, "SessionLocal", Session)
     return engine, Session
@@ -81,6 +94,14 @@ def test_expiry_worker_deletes_only_expired_export_bytes_and_writes_receipt(monk
                 "expiry_enforced": True,
             }
             assert b"encrypted-synthetic-export" not in str(receipt.record_metadata).encode()
+            heartbeat = db.execute(text("""
+                SELECT last_outcome, last_success_at, last_processed_count
+                FROM operational_worker_heartbeats
+                WHERE worker_name='privacy_export_expiry'
+            """)).one()
+            assert heartbeat.last_outcome == "success"
+            assert heartbeat.last_success_at is not None
+            assert heartbeat.last_processed_count == 1
         finally:
             db.close()
     finally:
