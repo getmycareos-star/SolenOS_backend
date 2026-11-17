@@ -128,6 +128,42 @@ def test_privacy_request_list_is_scoped_to_the_requesting_caregiver_and_record()
     assert other.json()["requests"] == []
 
 
+def test_documents_only_caregiver_can_read_and_submit_own_privacy_requests():
+    client = TestClient(app)
+    session = create_session(client, "Documents-only recipient")
+    headers = {"Authorization": "Bearer " + session["access_token"]}
+
+    # A documents-only grant must still allow the caregiver to exercise privacy
+    # rights. The route itself remains scoped to this caregiver and care record.
+    from app.models.caregiver_access import CaregiverAccessGrant
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=session["person"]["id"],
+        ).one()
+        grant.access_scope = "documents_only"
+        db.commit()
+    finally:
+        db.close()
+
+    listed = client.get("/api/v1/privacy/requests", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["requests"] == []
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=headers,
+        json={
+            "request_type": "deletion",
+            "authority_basis": "authorized_caregiver",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    listed_after_submit = client.get("/api/v1/privacy/requests", headers=headers)
+    assert listed_after_submit.status_code == 200, listed_after_submit.text
+    assert [row["id"] for row in listed_after_submit.json()["requests"]] == [submitted.json()["id"]]
+
 def test_privacy_request_rejects_unattested_authority():
     client = TestClient(app)
     session = create_session(client, "Care recipient")
