@@ -2181,6 +2181,11 @@ def test_caregiver_situation_state_changes_require_linked_sources_and_persist_hi
             "state-transition-event",
             "state-transition-evidence",
         }.issubset(detail_source_ids)
+        detail_by_id = {item["id"]: item for item in detail_sources}
+        assert detail_by_id["state-transition-event"]["excerpt"] == "Caregiver reports more help is needed with walking."
+        assert detail_by_id["state-transition-evidence"]["excerpt"] is None, (
+            "the linked evidence row must retain provenance without repeating the same caregiver-authored sentence"
+        )
         history = detail.json()["state_history"]
         assert [entry["new_state"] for entry in history] == ["worsening", "resolved"]
         assert all(entry["source"] == "caregiver_confirmed" for entry in history)
