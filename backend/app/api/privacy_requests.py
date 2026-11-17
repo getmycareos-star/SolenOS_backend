@@ -146,6 +146,36 @@ def submit_privacy_request(
             detail="You must confirm your authority to submit this request.",
         )
 
+    # Serialize deletion intake for the same care recipient on PostgreSQL.
+    # The browser also prevents duplicate submissions, but the server remains
+    # authoritative across tabs, devices, retries and direct API clients.
+    if payload.request_type == "deletion":
+        db.query(Person).filter(Person.id == person_id).with_for_update().first()
+        existing = (
+            db.query(DataSubjectRequest)
+            .filter(
+                DataSubjectRequest.person_id == person_id,
+                DataSubjectRequest.caregiver_id == caregiver_id,
+                DataSubjectRequest.actor_id == caregiver_id,
+                DataSubjectRequest.request_type == "deletion",
+                DataSubjectRequest.request_status.in_([
+                    "received_pending_authority_review",
+                    "approved_pending_fulfilment_assessment",
+                ]),
+            )
+            .order_by(DataSubjectRequest.requested_at.desc())
+            .first()
+        )
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "deletion_request_already_open",
+                    "request": _serialize(existing),
+                    "message": "A care-record erasure request is already awaiting review or fulfilment assessment.",
+                },
+            )
+
     correction_fields = (
         payload.correction_target_type,
         payload.correction_target_id,
