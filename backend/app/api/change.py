@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 import hashlib
+import json
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -538,6 +539,36 @@ def list_situations(person_id: str, request: Request, db: Session = Depends(get_
     "/situations/{person_id}/{situation_id}/detail",
     response_model=SituationDetailResponse,
 )
+
+def _care_event_excerpt(event: CareEvent) -> Optional[str]:
+    """Return caregiver-authored text from a persisted event, not its storage JSON."""
+    raw = str(event.description or "").strip()
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return raw[:1000]
+    if isinstance(payload, str):
+        return payload.strip()[:1000] or None
+    if not isinstance(payload, dict):
+        return raw[:1000]
+    capture = payload.get("original_capture")
+    if not isinstance(capture, dict):
+        capture = payload
+    quick_check_in = capture.get("quick_check_in")
+    candidates = [
+        quick_check_in.get("note") if isinstance(quick_check_in, dict) else None,
+        capture.get("observation"),
+        capture.get("note"),
+        capture.get("notes"),
+        capture.get("text"),
+        capture.get("description"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()[:1000]
+    return "Caregiver recorded a structured Daily Care entry."
 def get_situation_detail(
     person_id: str,
     situation_id: str,
@@ -589,7 +620,7 @@ def get_situation_detail(
             id=event.id,
             source_type="care_record",
             title=str(event.title or event.event_type or "Care record")[:240],
-            excerpt=str(event.description or "")[:1000] or None,
+            excerpt=_care_event_excerpt(event),
             occurred_at=event.occurred_at,
             recorded_at=getattr(event, "recorded_at", None) or getattr(event, "created_at", None),
             source_label="Care record",
@@ -635,7 +666,7 @@ def get_situation_detail(
                 id=event.id,
                 source_type="care_record",
                 title=str(event.title or event.event_type or "Care record")[:240],
-                excerpt=str(event.description or "")[:1000] or None,
+                excerpt=_care_event_excerpt(event),
                 occurred_at=event.occurred_at,
                 recorded_at=getattr(event, "recorded_at", None) or getattr(event, "created_at", None),
                 source_label="Care record",
