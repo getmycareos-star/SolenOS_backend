@@ -459,6 +459,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 "/api/v1/evidence",
                 "/api/v1/appointment-workspaces",
                 "/api/v1/appointments",
+                # Privacy requests remain available to authorized document-limited caregivers.
+                # The handler scopes each request to the authenticated caregiver and record.
+                "/api/v1/privacy/requests",
                 "/api/documents",
                 "/api/v1/sessions/refresh",
             )
