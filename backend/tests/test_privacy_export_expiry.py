@@ -38,13 +38,7 @@ def _expiry_db(monkeypatch):
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     monkeypatch.setattr(privacy_export_expiry, "SessionLocal", Session)
     monkeypatch.setattr(operational_heartbeats, "SessionLocal", Session)
-    heartbeats = []
-    monkeypatch.setattr(
-        privacy_export_expiry,
-        "record_worker_heartbeat",
-        lambda worker_name, **kwargs: heartbeats.append((worker_name, kwargs)),
-    )
-    return engine, Session, heartbeats
+    return engine, Session
 
 
 def _artifact(session, artifact_id, expires_at):
@@ -73,7 +67,7 @@ def _artifact(session, artifact_id, expires_at):
 
 
 def test_expiry_worker_deletes_only_expired_export_bytes_and_writes_receipt(monkeypatch):
-    engine, Session, heartbeats = _expiry_db(monkeypatch)
+    engine, Session = _expiry_db(monkeypatch)
     now = datetime.now(timezone.utc)
     db = Session()
     try:
@@ -85,10 +79,6 @@ def test_expiry_worker_deletes_only_expired_export_bytes_and_writes_receipt(monk
     try:
         result = privacy_export_expiry.expire_privacy_exports_once()
         assert result == {"examined": 1, "deleted": 1, "failed": 0}
-        assert heartbeats == [(
-            "privacy_export_expiry",
-            {"outcome": "success", "processed_count": 1},
-        )]
         db = Session()
         try:
             assert db.query(PrivacyExportArtifact).filter_by(id="expired").count() == 0
@@ -114,12 +104,14 @@ def test_expiry_worker_deletes_only_expired_export_bytes_and_writes_receipt(monk
             assert heartbeat.last_success_at is not None
             assert heartbeat.last_processed_count == 1
             last_success = heartbeat.last_success_at
+            db.close()
             operational_heartbeats.record_worker_heartbeat(
                 "privacy_export_expiry",
                 outcome="error",
                 processed_count=0,
                 error_type="SyntheticFailure",
             )
+            db = Session()
             failed_heartbeat = db.execute(text("""
                 SELECT last_outcome, last_success_at, last_error_type
                 FROM operational_worker_heartbeats
@@ -148,9 +140,17 @@ def test_expiry_worker_is_idempotent_and_batch_bounded(monkeypatch):
         assert privacy_export_expiry.expire_privacy_exports_once(batch_size=2)["deleted"] == 2
         assert privacy_export_expiry.expire_privacy_exports_once(batch_size=2)["deleted"] == 1
         assert privacy_export_expiry.expire_privacy_exports_once(batch_size=2)["deleted"] == 0
-        assert [item[1]["processed_count"] for item in heartbeats] == [2, 1, 0]
-        assert all(item[0] == "privacy_export_expiry" for item in heartbeats)
-        assert all(item[1]["outcome"] == "success" for item in heartbeats)
+        db = Session()
+        try:
+            heartbeat = db.execute(text("""
+                SELECT last_outcome, last_processed_count
+                FROM operational_worker_heartbeats
+                WHERE worker_name='privacy_export_expiry'
+            """)).one()
+            assert heartbeat.last_outcome == "success"
+            assert heartbeat.last_processed_count == 0
+        finally:
+            db.close()
     finally:
         engine.dispose()
 
