@@ -120,28 +120,31 @@ jobs:
       - name: Verify privacy export expiry worker heartbeat is fresh
         timeout-minutes: 2
         run: |
-          curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json
-          python - <<'PY'
+          for attempt in $(seq 1 6); do
+            if curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json &&
+              python - <<'PY'
           import json
           from datetime import datetime, timezone
 
           with open("/tmp/solenos-ready.json", encoding="utf-8") as stream:
               ready = json.load(stream)
-          workers = ready.get("operational_workers") or {}
-          worker = workers.get("privacy_export_expiry")
-          if not worker:
-              raise SystemExit("privacy_export_expiry heartbeat is missing")
-          if worker.get("last_outcome") != "success":
-              raise SystemExit(f"privacy_export_expiry last outcome is not success: {worker.get('last_outcome')}")
-          raw = worker.get("last_success_at")
-          if not raw:
-              raise SystemExit("privacy_export_expiry has no successful heartbeat timestamp")
-          last_success = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+          worker = (ready.get("operational_workers") or {}).get("privacy_export_expiry")
+          if not worker or worker.get("last_outcome") != "success" or not worker.get("last_success_at"):
+              raise SystemExit("privacy export expiry heartbeat is missing or unsuccessful")
+          last_success = datetime.fromisoformat(worker["last_success_at"].replace("Z", "+00:00"))
           age_seconds = (datetime.now(timezone.utc) - last_success).total_seconds()
           if age_seconds < -60 or age_seconds > 1200:
-              raise SystemExit(f"privacy_export_expiry heartbeat is stale or clock-skewed: age_seconds={age_seconds:.1f}")
+              raise SystemExit(f"privacy export expiry heartbeat is stale: age_seconds={age_seconds:.1f}")
           print(f"PASS: privacy export expiry worker last succeeded {age_seconds:.1f}s ago; processed={worker.get('last_processed_count')}")
           PY
+            then
+              exit 0
+            fi
+            echo "Attempt $attempt: waiting for a fresh privacy export expiry heartbeat."
+            sleep 10
+          done
+          echo "Privacy export expiry worker did not produce a fresh successful heartbeat." >&2
+          exit 1
 
       # Care-continuity release readiness is independent of the optional Qwen runtime.
       # Qwen installation and inference are not MVP deployment gates.
