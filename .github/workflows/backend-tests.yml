@@ -229,7 +229,7 @@ jobs:
                   VALUES (%s, 'synthetic-actor', 'synthetic-subject',
                           'synthetic-person', 'synthetic-caregiver',
                           'ci.audit_integrity_probe', 'ci_probe', %s,
-                          now(), 'success', '{}'::jsonb)
+                          now(), 'success', '{}'::json)
               """, (event_id, event_id))
               conn.commit()
 
@@ -256,7 +256,7 @@ jobs:
                   UPDATE audit_log_events
                   SET actor_id=NULL, subject_id=NULL, person_id=NULL,
                       caregiver_id=NULL, target_id=NULL,
-                      metadata=jsonb_build_object('redacted_for_privacy_erasure', true)
+                      metadata=json_build_object('redacted_for_privacy_erasure', true)
                   WHERE id=%s
               """, (event_id,))
               cur.execute("SAVEPOINT audit_erasure_delete_probe")
