@@ -60,8 +60,23 @@ def test_expired_export_cleanup_uses_postgresql_row_lock_and_persists_receipt():
         assert heartbeat.last_processed_count >= 1
     finally:
         db.rollback()
+        # Audit events are append-only. Use the same transaction-local capability
+        # as reviewed erasure to redact this synthetic fixture, never delete it.
+        db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+        db.query(AuditLogEvent).filter_by(target_id=artifact_id).update(
+            {
+                AuditLogEvent.actor_id: None,
+                AuditLogEvent.subject_id: None,
+                AuditLogEvent.person_id: None,
+                AuditLogEvent.caregiver_id: None,
+                AuditLogEvent.target_id: None,
+                AuditLogEvent.request_id: None,
+                AuditLogEvent.correlation_id: None,
+                AuditLogEvent.record_metadata: {"redacted_for_test": True},
+            },
+            synchronize_session=False,
+        )
         db.query(PrivacyExportArtifact).filter_by(id=artifact_id).delete(synchronize_session=False)
-        db.query(AuditLogEvent).filter_by(target_id=artifact_id).delete(synchronize_session=False)
         db.query(DataSubjectRequest).filter_by(id=request_id).delete(synchronize_session=False)
         db.commit()
         db.close()
