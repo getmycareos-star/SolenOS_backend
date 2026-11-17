@@ -79,6 +79,15 @@ jobs:
           set -Eeuo pipefail
           matched=0
           deployed_commit=""
+          # A push-triggered monitor may start after a later commit has already
+          # reached production. Compare against the latest main head, not the
+          # older event SHA, or a valid newer deployment is falsely rejected.
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          main_sha=$(git rev-parse refs/remotes/origin/main)
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "$main_sha"; then
+            echo "Monitor event commit is no longer an ancestor of current main: event=$GITHUB_SHA main=$main_sha" >&2
+            exit 1
+          fi
           for attempt in $(seq 1 48); do
             if ! curl --silent --show-error --fail --max-time 10 'https://solenosbackend-production.up.railway.app/ready' -o /tmp/solenos-ready.json; then
               echo "Attempt $attempt: production readiness endpoint is not reachable yet."
@@ -91,12 +100,12 @@ jobs:
               sleep 10
               continue
             fi
-            if ! git merge-base --is-ancestor "$deployed_commit" "$GITHUB_SHA"; then
-              echo "Attempt $attempt: deployed source is not an ancestor of main yet: deployed=$deployed_commit main=$GITHUB_SHA"
+            if ! git merge-base --is-ancestor "$deployed_commit" "$main_sha"; then
+              echo "Attempt $attempt: deployed source is not an ancestor of current main yet: deployed=$deployed_commit main=$main_sha"
               sleep 10
               continue
             fi
-            changed=$(git diff --name-only "$deployed_commit..$GITHUB_SHA")
+            changed=$(git diff --name-only "$deployed_commit..$main_sha")
             runtime_changes=$(CHANGED_FILES="$changed" python - <<'PY'
           import os
           paths = os.environ["CHANGED_FILES"].splitlines()
@@ -114,12 +123,12 @@ jobs:
             break
           done
           echo "Production reports source commit: $deployed_commit"
-          echo "GitHub main monitor target: $GITHUB_SHA"
+          echo "Current GitHub main head: $main_sha"
           test "$matched" = "1" || {
-            echo "Production did not converge to main runtime within 16 minutes." >&2
+            echo "Production did not converge to current main runtime within 16 minutes." >&2
             exit 1
           }
-          echo "PASS: deployed source revision $deployed_commit matches main runtime code."
+          echo "PASS: deployed source revision $deployed_commit contains the current main runtime code."
 
       - name: Verify privacy export expiry worker heartbeat is fresh
         timeout-minutes: 2
