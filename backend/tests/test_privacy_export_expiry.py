@@ -127,7 +127,7 @@ def test_expiry_worker_deletes_only_expired_export_bytes_and_writes_receipt(monk
 
 
 def test_expiry_worker_is_idempotent_and_batch_bounded(monkeypatch):
-    engine, Session, heartbeats = _expiry_db(monkeypatch)
+    engine, Session = _expiry_db(monkeypatch)
     db = Session()
     try:
         now = datetime.now(timezone.utc) - timedelta(minutes=1)
