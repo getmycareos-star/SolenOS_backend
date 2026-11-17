@@ -535,11 +535,6 @@ def list_situations(person_id: str, request: Request, db: Session = Depends(get_
     return db.query(Situation).filter(Situation.person_id == person_id).order_by(Situation.created_at.desc()).all()
 
 
-@router.get(
-    "/situations/{person_id}/{situation_id}/detail",
-    response_model=SituationDetailResponse,
-)
-
 def _care_event_excerpt(event: CareEvent) -> Optional[str]:
     """Return caregiver-authored text from a persisted event, not its storage JSON."""
     raw = str(event.description or "").strip()
@@ -569,6 +564,10 @@ def _care_event_excerpt(event: CareEvent) -> Optional[str]:
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()[:1000]
     return "Caregiver recorded a structured Daily Care entry."
+@router.get(
+    "/situations/{person_id}/{situation_id}/detail",
+    response_model=SituationDetailResponse,
+)
 def get_situation_detail(
     person_id: str,
     situation_id: str,
