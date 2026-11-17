@@ -202,6 +202,94 @@ jobs:
           print("PASS: PostgreSQL rejects UPDATE and DELETE on security incident timeline events.")
           PY
 
+      - name: Verify PostgreSQL audit events are append-only with reviewed erasure redaction
+        run: |
+          python - <<'PY'
+          import os
+          import uuid
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          conn.autocommit = False
+          event_id = str(uuid.uuid4())
+          with conn.cursor() as cur:
+              cur.execute("""
+                  SELECT tgname FROM pg_trigger
+                  WHERE tgrelid = 'audit_log_events'::regclass
+                    AND NOT tgisinternal
+              """)
+              triggers = {row[0] for row in cur.fetchall()}
+              if "trg_audit_log_events_append_only" not in triggers:
+                  raise SystemExit("PostgreSQL audit append-only trigger is missing")
+
+              cur.execute("""
+                  INSERT INTO audit_log_events
+                    (id, actor_id, subject_id, person_id, caregiver_id, action,
+                     target_type, target_id, occurred_at, outcome, metadata)
+                  VALUES (%s, 'synthetic-actor', 'synthetic-subject',
+                          'synthetic-person', 'synthetic-caregiver',
+                          'ci.audit_integrity_probe', 'ci_probe', %s,
+                          now(), 'success', '{}'::jsonb)
+              """, (event_id, event_id))
+              conn.commit()
+
+              for statement in (
+                  "UPDATE audit_log_events SET actor_id='mutated' WHERE id=%s",
+                  "DELETE FROM audit_log_events WHERE id=%s",
+              ):
+                  cur.execute("SAVEPOINT audit_append_only_probe")
+                  try:
+                      cur.execute(statement, (event_id,))
+                  except psycopg2.Error as exc:
+                      cur.execute("ROLLBACK TO SAVEPOINT audit_append_only_probe")
+                      if "append-only" not in str(exc).lower():
+                          raise SystemExit(f"Unexpected audit mutation rejection: {exc}")
+                  else:
+                      raise SystemExit("Audit event mutation unexpectedly succeeded")
+                  finally:
+                      cur.execute("RELEASE SAVEPOINT audit_append_only_probe")
+
+              # Approved erasure may redact identifying fields, but cannot remove
+              # the audit event or rewrite its action/target/outcome evidence.
+              cur.execute("SET LOCAL solenos.privacy_erasure = 'on'")
+              cur.execute("""
+                  UPDATE audit_log_events
+                  SET actor_id=NULL, subject_id=NULL, person_id=NULL,
+                      caregiver_id=NULL, target_id=NULL,
+                      metadata=jsonb_build_object('redacted_for_privacy_erasure', true)
+                  WHERE id=%s
+              """, (event_id,))
+              cur.execute("SAVEPOINT audit_erasure_delete_probe")
+              try:
+                  cur.execute("DELETE FROM audit_log_events WHERE id=%s", (event_id,))
+              except psycopg2.Error as exc:
+                  cur.execute("ROLLBACK TO SAVEPOINT audit_erasure_delete_probe")
+                  if "append-only" not in str(exc).lower():
+                      raise SystemExit(f"Unexpected audit delete rejection: {exc}")
+              else:
+                  raise SystemExit("Privacy erasure unexpectedly deleted the audit event")
+              finally:
+                  cur.execute("RELEASE SAVEPOINT audit_erasure_delete_probe")
+
+              cur.execute("""
+                  SELECT actor_id, subject_id, person_id, caregiver_id, target_id,
+                         action, target_type, outcome, metadata
+                  FROM audit_log_events WHERE id=%s
+              """, (event_id,))
+              row = cur.fetchone()
+              if not row:
+                  raise SystemExit("Audit event disappeared during privacy erasure")
+              if any(value is not None for value in row[:5]):
+                  raise SystemExit("Audit event identifying fields were not redacted")
+              if row[5:8] != ("ci.audit_integrity_probe", "ci_probe", "success"):
+                  raise SystemExit("Audit event evidence fields changed during privacy erasure")
+              if row[8] != {"redacted_for_privacy_erasure": True}:
+                  raise SystemExit("Audit event redaction metadata is incorrect")
+          conn.commit()
+          conn.close()
+          print("PASS: audit events reject ordinary UPDATE/DELETE; approved erasure redacts but never deletes.")
+          PY
+
       - name: Verify schema reconciliation and migration head
         run: |
           python - <<'PY'
