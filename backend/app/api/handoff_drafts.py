@@ -1959,17 +1959,14 @@ def prepare_handoff_draft(
         "sections": sections,
         "caregiver_notes": [],
     }
-    fingerprint_snapshot = {
-        "source_statuses": statuses,
-        "source_records": records,
-        "evidence_lineage": evidence_lineage,
-    }
-    canonical_snapshot = json.dumps(fingerprint_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    # Idempotency binds the caller-supplied request, not a live source snapshot.
+    # A retry with the same key and parameters must return the original immutable
+    # draft even if the care record changed after the first request. Source
+    # freshness is checked separately before approval or sharing.
     request_fingerprint = hashlib.sha256(json.dumps({
         "purpose": payload.purpose,
         "audience": payload.audience,
         "window_days": payload.window_days,
-        "source_snapshot_sha256": hashlib.sha256(canonical_snapshot.encode("utf-8")).hexdigest(),
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if db.get_bind().dialect.name == "postgresql":
         lock_key = int.from_bytes(
