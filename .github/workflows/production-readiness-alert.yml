@@ -14,7 +14,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Create or update the production readiness incident issue
+      - name: Create or update the operational control alert issue
         uses: actions/github-script@v7
         with:
           script: |
@@ -33,7 +33,7 @@ jobs:
               "",
               "This issue contains operational metadata only. Do not add caregiver data, credentials, tokens, request bodies, or medical information.",
               "",
-              "Triage: inspect the failed workflow step and current production deployment; record the incident in the restricted incident register; close this issue only after a successful monitor run and documented resolution."
+              "Triage: inspect the failed workflow step and current production deployment; record the incident in the restricted incident register; close this issue only after the corresponding operational control succeeds and the resolution is documented."
             ].join("\n");
             const existing = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
