@@ -718,12 +718,7 @@ def get_situation_detail(
     ).all()
     for evidence in evidence_rows:
         evidence_excerpt = _care_source_excerpt(evidence.source_text)
-        evidence_kind = str(getattr(evidence, "evidence_kind", "") or "").lower()
-        if (
-            evidence_kind == "caregiver_report"
-            and evidence_excerpt
-            and event_excerpt_by_evidence_id.get(str(evidence.id)) == evidence_excerpt
-        ):
+        if evidence_excerpt and event_excerpt_by_evidence_id.get(str(evidence.id)) == evidence_excerpt:
             continue
         source_records.append(SituationSourceRecord(
             id=evidence.id,
