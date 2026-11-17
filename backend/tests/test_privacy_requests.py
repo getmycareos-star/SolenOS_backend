@@ -1494,3 +1494,29 @@ def test_export_manifest_discloses_unscoped_orm_registered_tables():
         db.close()
         table.drop(bind=engine, checkfirst=True)
         Base.metadata.remove(table)
+
+def test_duplicate_open_deletion_request_is_rejected_and_does_not_create_second_row():
+    client = TestClient(app)
+    session = create_session(client, "Duplicate deletion recipient")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    payload = {
+        "request_type": "deletion",
+        "authority_basis": "self",
+        "authority_attested": True,
+    }
+
+    first = client.post("/api/v1/privacy/requests", headers=headers, json=payload)
+    assert first.status_code == 201, first.text
+
+    duplicate = client.post("/api/v1/privacy/requests", headers=headers, json=payload)
+    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.json()["detail"]["code"] == "deletion_request_already_open"
+    assert duplicate.json()["detail"]["request"]["id"] == first.json()["id"]
+
+    listed = client.get("/api/v1/privacy/requests", headers=headers)
+    deletion_requests = [
+        item for item in listed.json()["requests"]
+        if item["request_type"] == "deletion"
+    ]
+    assert len(deletion_requests) == 1
+
