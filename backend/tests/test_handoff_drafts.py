@@ -821,6 +821,12 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
     )
     assert retried.status_code == 200, retried.text
     assert retried.json()["draft_id"] == draft_id
+    changed_request = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "family_transition", "window_days": 14},
+    )
+    assert changed_request.status_code == 409, changed_request.text
 
     retrieved = test_client.get(
         f"/api/v1/handoff-drafts/{draft_id}",
