@@ -60,6 +60,7 @@ def expire_privacy_exports_once(batch_size: int = 100) -> dict:
             "privacy_export_expiry",
             outcome="success",
             processed_count=deleted,
+            started_at=now,
         )
         return {"examined": deleted, "deleted": deleted, "failed": 0}
     except Exception as exc:
@@ -70,6 +71,7 @@ def expire_privacy_exports_once(batch_size: int = 100) -> dict:
                 outcome="error",
                 processed_count=deleted,
                 error_type=type(exc).__name__,
+                started_at=now,
             )
         except Exception:
             # Preserve the original failure; the application logger records it.
