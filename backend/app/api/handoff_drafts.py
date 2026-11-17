@@ -2109,6 +2109,5 @@ def prepare_handoff_draft(
         "limitations": gaps,
         "retrieval_complete": retrieval_complete,
         "partial_sources": partial_sources,
-        "source_freshness": _draft_source_freshness(db, persisted_draft),
-        "warning": "This is a draft from the listed saved records only. Unavailable or partially retrieved sources were not fully read. Verify every item and resolve uncertainty before sharing.",
+        "warning": "This is a draft from the listed saved records only. Unavailable or partially retrieved sources were not fully read. Verify every item and resolve uncertainty before sharing."
     }
