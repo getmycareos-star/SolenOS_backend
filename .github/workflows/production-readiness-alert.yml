@@ -2,7 +2,7 @@ name: Production readiness failure alert
 
 on:
   workflow_run:
-    workflows: ["Production readiness monitor"]
+    workflows: ["Production readiness monitor", "Backup and recovery verification"]
     types: [completed]
 
 permissions:
@@ -19,9 +19,12 @@ jobs:
         with:
           script: |
             const run = context.payload.workflow_run;
-            const title = "[Production readiness] Scheduled production monitor failing";
+            const control = run.name === "Backup and recovery verification"
+              ? "Scheduled backup/recovery verification"
+              : "Production readiness monitor";
+            const title = `[Operational control] ${control} failing`;
             const body = [
-              "The scheduled SolenOS production readiness monitor failed.",
+              `The SolenOS ${control.toLowerCase()} failed.`,
               "",
               `- Run: ${run.html_url}`,
               `- Source SHA: ${run.head_sha}`,
