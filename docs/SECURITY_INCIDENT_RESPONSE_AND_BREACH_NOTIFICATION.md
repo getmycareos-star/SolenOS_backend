@@ -118,11 +118,11 @@ Append a timeline event for every material action or decision. Correct earlier e
 
 ### Database mutation protection
 
-Migration `20261116_05_incident_events_append_only` installs a PostgreSQL trigger that rejects ordinary `UPDATE` and `DELETE` operations on `privacy_incident_events`. This protects the incident timeline from routine application or operator mutation.
+Migration `20261116_05_incident_events_append_only` installs a PostgreSQL trigger that rejects ordinary `UPDATE` and `DELETE` operations on `privacy_incident_events`. Migration `20261116_07_audit_events_append_only` similarly rejects ordinary `UPDATE` and `DELETE` on `audit_log_events`; a reviewed privacy-erasure transaction may redact identifying fields but may never delete an audit event. These protections block routine application or operator mutation.
 
 The only deletion exception is the transaction-local `solenos.privacy_erasure = 'on'` capability used by the separately reviewed privacy-erasure workflow. The application sets it only after the deletion request has passed reviewer and legal-hold checks, and before scoped raw-table cleanup. The trigger does not permit updates, even in that transaction. The SQLite development/test database does not install this trigger because SQLite lacks an equivalent transaction-local erasure capability.
 
-This is database-level protection against ordinary mutation, not protection from a privileged database administrator, storage-level compromise or a compromised application role. It does not replace independent evidence export, SHA-256 verification and restricted evidence storage. The PostgreSQL CI regression verifies that ordinary update/delete fail and that the approved erasure capability can delete the scoped event.
+This is database-level protection against ordinary mutation, not protection from a privileged database administrator, storage-level compromise or a compromised application role. It does not establish a hash chain, prevent privileged storage tampering, or replace independent evidence export, SHA-256 verification and restricted evidence storage. PostgreSQL CI verifies incident-event mutation rejection and the scoped erasure exception; the audit-event mutation/redaction regression has been added and awaits exact-current-main execution.
 
 ### Restricted operator API
 
@@ -134,7 +134,7 @@ The current backend routes are:
 - `POST /api/v1/security/incidents/{incident_id}/events` — append a redacted timeline event.
 - `PATCH /api/v1/security/incidents/{incident_id}/status` — update status and append a status-change event.
 
-All routes require the `X-SolenOS-Incident-Admin-Token` header. The backend compares it against `SOLENOS_INCIDENT_ADMIN_TOKEN` and records the configured individual operator identity from `SOLENOS_INCIDENT_ADMIN_ID`. If the token is absent/shorter than 32 characters or the operator ID is missing/invalid, the API returns 503. A missing or incorrect request token returns 401.
+All routes require the `X-SolenOS-Incident-Admin-Token` header. The backend compares it against `SOLENOS_INCIDENT_ADMIN_TOKEN` and records the configured operator identity from `SOLENOS_INCIDENT_ADMIN_ID`. If the token is absent/shorter than 32 characters or the operator ID is missing/invalid, the API returns 503. A missing or incorrect request token returns 401.
 
 **Security limitations:** this is a shared-secret gate with a configured operator attribution ID, not independent individual authentication or role-based access control. The recorded ID is an operator-supplied configuration value, not cryptographic proof of the human who made the request. Do not share the token between people; issue separate credentials and identities only after a proper multi-operator authentication system exists. Do not expose this token to the frontend, browser, mobile application, client logs, source control or general-purpose automation. Configure it only as a restricted backend secret and use the API only from a controlled operator environment. Rotate it immediately if exposure is suspected. Do not treat the API as a complete incident console or as proof of immutable audit history.
 
