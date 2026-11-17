@@ -12,6 +12,7 @@ def record_worker_heartbeat(
     outcome: str,
     processed_count: int = 0,
     error_type: str | None = None,
+    started_at: datetime | None = None,
 ) -> None:
     if not worker_name or len(worker_name) > 100:
         raise ValueError("worker_name must contain 1-100 characters")
@@ -21,6 +22,7 @@ def record_worker_heartbeat(
         raise ValueError("processed_count must be a non-negative integer")
 
     now = datetime.now(timezone.utc)
+    started_at = started_at or now
     db = SessionLocal()
     try:
         db.execute(
@@ -29,7 +31,7 @@ def record_worker_heartbeat(
                     worker_name, last_started_at, last_completed_at, last_success_at,
                     last_outcome, last_error_type, last_processed_count, updated_at
                 ) VALUES (
-                    :worker_name, :now, :now,
+                    :worker_name, :started_at, :now,
                     CASE WHEN :outcome = 'success' THEN :now ELSE NULL END,
                     :outcome, :error_type, :processed_count, :now
                 )
@@ -49,6 +51,7 @@ def record_worker_heartbeat(
             {
                 "worker_name": worker_name,
                 "now": now,
+                "started_at": started_at,
                 "outcome": outcome,
                 "error_type": error_type[:120] if error_type else None,
                 "processed_count": processed_count,
