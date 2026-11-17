@@ -56,6 +56,8 @@ Encrypted privacy export artifacts now have a dedicated application lifespan wor
 - Is idempotent and retries on the next pass after transient failures.
 - Does not delete care records, source evidence, original documents, conversations, accounts, or audit history.
 - Has focused tests for expired-versus-live artifacts, bounded batches, idempotency and invalid batch sizes.
+- Persists a durable success/failure heartbeat in PostgreSQL; `/ready` exposes the last successful scan and the production readiness monitor fails if the heartbeat is missing, unsuccessful or older than 20 minutes.
+- PostgreSQL CI verifies the expiry receipt and persisted worker heartbeat.
 
 This implements expiry of the short-lived privacy export archive only. It does **not** complete the retention schedule or prove deletion from database backups, provider logs, replicas or external processors.
 
