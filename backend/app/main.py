@@ -1835,6 +1835,7 @@ def readiness_check(db: Session = Depends(get_db)):
     migration_state = "not_checked"
     migration_head = None
     continuity_schema = "orm_verified"
+    operational_workers = {}
     # On PostgreSQL, also verify that Alembic has applied the same graph this
     # image ships and that migration-created LCR/privacy tables actually exist.
     # These reflected tables are not all represented in SQLAlchemy ORM metadata.
@@ -1911,6 +1912,7 @@ def readiness_check(db: Session = Depends(get_db)):
                 "handoff_access_logs",
                 "handoff_acknowledgements",
                 "delivery_failure_events",
+                "operational_worker_heartbeats",
             ]) | set(CARE_CONTINUITY_RESOURCES.values())
             missing_migration_tables = sorted(
                 name for name in required_migration_tables if not inspector.has_table(name)
@@ -1925,6 +1927,21 @@ def readiness_check(db: Session = Depends(get_db)):
                     detail={"message": "Migration-created continuity schema is incomplete",
                             "missing_tables": missing_migration_tables},
                 )
+            heartbeat_rows = db.execute(text("""
+                SELECT worker_name, last_completed_at, last_success_at,
+                       last_outcome, last_error_type, last_processed_count
+                FROM operational_worker_heartbeats
+            """)).mappings().all()
+            operational_workers = {
+                row["worker_name"]: {
+                    "last_completed_at": row["last_completed_at"].isoformat() if row["last_completed_at"] else None,
+                    "last_success_at": row["last_success_at"].isoformat() if row["last_success_at"] else None,
+                    "last_outcome": row["last_outcome"],
+                    "last_error_type": row["last_error_type"],
+                    "last_processed_count": row["last_processed_count"],
+                }
+                for row in heartbeat_rows
+            }
             migration_state = "current"
             migration_head = sorted(applied_heads)[0]
             continuity_schema = "verified"
@@ -1944,6 +1961,7 @@ def readiness_check(db: Session = Depends(get_db)):
         "migration_state": migration_state,
         "migration_head": migration_head,
         "continuity_schema": continuity_schema,
+        "operational_workers": operational_workers,
         # Railway injects this immutable source revision at build/deploy time.
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
         "app": settings.app_name,
