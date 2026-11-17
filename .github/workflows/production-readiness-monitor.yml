@@ -128,6 +128,11 @@ jobs:
 
           with open("/tmp/solenos-ready.json", encoding="utf-8") as stream:
               ready = json.load(stream)
+          triggers = set(ready.get("operational_integrity_triggers") or [])
+          required_triggers = {"trg_privacy_incident_events_append_only", "trg_audit_log_events_append_only"}
+          missing_triggers = required_triggers - triggers
+          if missing_triggers:
+              raise SystemExit(f"database append-only integrity triggers are missing: {sorted(missing_triggers)}")
           worker = (ready.get("operational_workers") or {}).get("privacy_export_expiry")
           if not worker or worker.get("last_outcome") != "success" or not worker.get("last_success_at"):
               raise SystemExit("privacy export expiry heartbeat is missing or unsuccessful")
