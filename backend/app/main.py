@@ -1836,6 +1836,7 @@ def readiness_check(db: Session = Depends(get_db)):
     migration_head = None
     continuity_schema = "orm_verified"
     operational_workers = {}
+    operational_integrity_triggers = []
     # On PostgreSQL, also verify that Alembic has applied the same graph this
     # image ships and that migration-created LCR/privacy tables actually exist.
     # These reflected tables are not all represented in SQLAlchemy ORM metadata.
@@ -1927,6 +1928,33 @@ def readiness_check(db: Session = Depends(get_db)):
                     detail={"message": "Migration-created continuity schema is incomplete",
                             "missing_tables": missing_migration_tables},
                 )
+            trigger_rows = db.execute(text("""
+                SELECT tgname
+                FROM pg_trigger
+                WHERE tgrelid IN (
+                    'privacy_incident_events'::regclass,
+                    'audit_log_events'::regclass
+                )
+                  AND NOT tgisinternal
+            """)).scalars().all()
+            operational_integrity_triggers = sorted(trigger_rows)
+            required_integrity_triggers = {
+                "trg_privacy_incident_events_append_only",
+                "trg_audit_log_events_append_only",
+            }
+            missing_integrity_triggers = sorted(
+                required_integrity_triggers - set(operational_integrity_triggers)
+            )
+            if missing_integrity_triggers:
+                logger.error(
+                    "Readiness failed: missing database integrity triggers: %s",
+                    missing_integrity_triggers,
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database audit integrity protections are incomplete",
+                )
+
             heartbeat_rows = db.execute(text("""
                 SELECT worker_name, last_completed_at, last_success_at,
                        last_outcome, last_error_type, last_processed_count
@@ -1962,6 +1990,7 @@ def readiness_check(db: Session = Depends(get_db)):
         "migration_head": migration_head,
         "continuity_schema": continuity_schema,
         "operational_workers": operational_workers,
+        "operational_integrity_triggers": operational_integrity_triggers,
         # Railway injects this immutable source revision at build/deploy time.
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
         "app": settings.app_name,
