@@ -8,7 +8,7 @@ from app.core.database import Base
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
 from app.models.privacy_export import PrivacyExportArtifact
-from app.services import privacy_export_expiry
+from app.services import operational_heartbeats, privacy_export_expiry
 
 
 def _expiry_db(monkeypatch):
@@ -37,6 +37,7 @@ def _expiry_db(monkeypatch):
         """))
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     monkeypatch.setattr(privacy_export_expiry, "SessionLocal", Session)
+    monkeypatch.setattr(operational_heartbeats, "SessionLocal", Session)
     heartbeats = []
     monkeypatch.setattr(
         privacy_export_expiry,
