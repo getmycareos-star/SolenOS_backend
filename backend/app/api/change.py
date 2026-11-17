@@ -702,16 +702,34 @@ def get_situation_detail(
         if observation.evidence_id:
             source_ids.add(str(observation.evidence_id))
 
+    # A caregiver report is stored both as a care event and as immutable
+    # source evidence. When the event already exposes that exact source excerpt,
+    # do not render the same note twice in the situation evidence list.
+    event_excerpt_by_evidence_id = {
+        str(evidence_id): source_record.excerpt
+        for source_record in source_records
+        if source_record.source_type == "care_record" and source_record.excerpt
+        for evidence_id in source_record.evidence_ids
+    }
+
     evidence_rows = db.query(Evidence).filter(
         Evidence.person_id == person_id,
         Evidence.id.in_(source_ids or {"__none__"}),
     ).all()
     for evidence in evidence_rows:
+        evidence_excerpt = _care_source_excerpt(evidence.source_text)
+        evidence_kind = str(getattr(evidence, "evidence_kind", "") or "").lower()
+        if (
+            evidence_kind == "caregiver_report"
+            and evidence_excerpt
+            and event_excerpt_by_evidence_id.get(str(evidence.id)) == evidence_excerpt
+        ):
+            continue
         source_records.append(SituationSourceRecord(
             id=evidence.id,
             source_type="document",
             title=str(evidence.type or evidence.source_type or "Care document")[:240],
-            excerpt=_care_source_excerpt(evidence.source_text),
+            excerpt=evidence_excerpt,
             occurred_at=evidence.occurred_at,
             recorded_at=evidence.reported_at or evidence.uploaded_at or evidence.ingested_at,
             source_label=str(evidence.reported_by_label or evidence.original_author or evidence.source_type or "Care document"),
