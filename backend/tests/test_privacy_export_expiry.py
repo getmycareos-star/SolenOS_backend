@@ -113,6 +113,21 @@ def test_expiry_worker_deletes_only_expired_export_bytes_and_writes_receipt(monk
             assert heartbeat.last_outcome == "success"
             assert heartbeat.last_success_at is not None
             assert heartbeat.last_processed_count == 1
+            last_success = heartbeat.last_success_at
+            operational_heartbeats.record_worker_heartbeat(
+                "privacy_export_expiry",
+                outcome="error",
+                processed_count=0,
+                error_type="SyntheticFailure",
+            )
+            failed_heartbeat = db.execute(text("""
+                SELECT last_outcome, last_success_at, last_error_type
+                FROM operational_worker_heartbeats
+                WHERE worker_name='privacy_export_expiry'
+            """)).one()
+            assert failed_heartbeat.last_outcome == "error"
+            assert failed_heartbeat.last_success_at == last_success
+            assert failed_heartbeat.last_error_type == "SyntheticFailure"
         finally:
             db.close()
     finally:
