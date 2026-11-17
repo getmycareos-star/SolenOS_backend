@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: production-readiness-monitor-${{ github.ref }}
+  cancel-in-progress: true
+
 # This monitor intentionally runs separately from push CI so a deployment
 # cannot be blocked by a smoke test waiting for that same deployment.
 jobs:
