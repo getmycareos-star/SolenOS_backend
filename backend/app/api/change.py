@@ -719,7 +719,9 @@ def get_situation_detail(
     for evidence in evidence_rows:
         evidence_excerpt = _care_source_excerpt(evidence.source_text)
         if evidence_excerpt and event_excerpt_by_evidence_id.get(str(evidence.id)) == evidence_excerpt:
-            continue
+            # Keep the evidence record and its provenance metadata, but do not
+            # repeat the exact caregiver sentence already shown on its care event.
+            evidence_excerpt = None
         source_records.append(SituationSourceRecord(
             id=evidence.id,
             source_type="document",
