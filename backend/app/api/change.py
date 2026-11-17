@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 import hashlib
 import json
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.care import CareEvent
@@ -535,9 +535,9 @@ def list_situations(person_id: str, request: Request, db: Session = Depends(get_
     return db.query(Situation).filter(Situation.person_id == person_id).order_by(Situation.created_at.desc()).all()
 
 
-def _care_event_excerpt(event: CareEvent) -> Optional[str]:
-    """Return caregiver-authored text from a persisted event, not its storage JSON."""
-    raw = str(event.description or "").strip()
+def _care_source_excerpt(source_text: Any) -> Optional[str]:
+    """Return readable source text without exposing serialized ingestion payloads."""
+    raw = str(source_text or "").strip()
     if not raw:
         return None
     try:
@@ -559,11 +559,16 @@ def _care_event_excerpt(event: CareEvent) -> Optional[str]:
         capture.get("notes"),
         capture.get("text"),
         capture.get("description"),
+        payload.get("original_notes"),
     ]
     for candidate in candidates:
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()[:1000]
-    return "Caregiver recorded a structured Daily Care entry."
+    return "Caregiver recorded a structured care entry."
+
+
+def _care_event_excerpt(event: CareEvent) -> Optional[str]:
+    return _care_source_excerpt(event.description)
 @router.get(
     "/situations/{person_id}/{situation_id}/detail",
     response_model=SituationDetailResponse,
@@ -706,7 +711,7 @@ def get_situation_detail(
             id=evidence.id,
             source_type="document",
             title=str(evidence.type or evidence.source_type or "Care document")[:240],
-            excerpt=str(evidence.source_text or "")[:1000] or None,
+            excerpt=_care_source_excerpt(evidence.source_text),
             occurred_at=evidence.occurred_at,
             recorded_at=evidence.reported_at or evidence.uploaded_at or evidence.ingested_at,
             source_label=str(evidence.reported_by_label or evidence.original_author or evidence.source_type or "Care document"),
