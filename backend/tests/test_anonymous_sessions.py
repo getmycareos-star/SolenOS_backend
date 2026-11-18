@@ -597,6 +597,7 @@ def test_required_privacy_and_optional_improvement_choice_persist_per_session():
 def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     client = TestClient(app)
     created = create_session(client, "Feedback consent recipient")
+    other = create_session(client, "Other feedback recipient")
     query = {
         "person_id": created["person"]["id"],
         "caregiver_id": created["caregiver"]["id"],
@@ -631,6 +632,23 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     assert recorded.status_code == 200, recorded.text
     assert recorded.json()["event_type"] == "feedback"
     assert recorded.json()["source_type"] == "feedback"
+
+    # The learning-event read route must inherit the bearer session scope in
+    # middleware, then independently enforce its explicit person_id path.
+    learning_events = client.get(
+        f"/api/v1/learning-events/{created['person']['id']}",
+        headers=headers,
+    )
+    assert learning_events.status_code == 200, learning_events.text
+    assert any(
+        item["event_type"] == "feedback" and item["source_type"] == "feedback"
+        for item in learning_events.json()
+    )
+    cross_person_read = client.get(
+        f"/api/v1/learning-events/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+    )
+    assert cross_person_read.status_code == 403, cross_person_read.text
 
     from app.models.improvement_training_example import ImprovementTrainingExample
     from app.models.memory import LearningEvent, ReasoningMemory
