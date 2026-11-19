@@ -78,8 +78,14 @@ def request(method: str, path: str, *, body=None, token: str | None = None):
         if exc.code >= 500:
             log_path = Path("/tmp/solenos-postgres-e2e-uvicorn.log")
             if log_path.exists():
-                tail = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-160:])
+                tail = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-200:])
                 print(f"HTTP_5XX_SERVER_LOG_TAIL {method} {path}\n{tail}", flush=True)
+            else:
+                print(
+                    f"HTTP_5XX_SERVER_LOG_MISSING {method} {path} "
+                    f"cwd={Path.cwd()} exists={log_path.exists()}",
+                    flush=True,
+                )
         return exc.code, decoded
     except TimeoutError:
         print(f"HTTP_REQUEST_TIMEOUT {method} {path}", flush=True)
