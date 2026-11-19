@@ -177,6 +177,48 @@ def test_background_job_retries_and_fails_closed_after_bounded_attempts(tmp_path
     db.close()
 
 
+@pytest.mark.parametrize(
+    ("detail", "expected_status", "expected_error_code"),
+    [
+        (
+            {"code": "runtime_unreachable", "reason": "ConnectionRefusedError"},
+            "queued",
+            "runtime_unreachable",
+        ),
+        (
+            {"code": "unsupported_care_claim"},
+            "failed",
+            "unsupported_care_claim",
+        ),
+    ],
+)
+def test_worker_handles_structured_qwen_failures_without_sticking_jobs(
+    tmp_path, monkeypatch, detail, expected_status, expected_error_code
+):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(sessions)
+
+    async def classify(*args, **kwargs):
+        return "appointment"
+
+    async def fail_assist(*args, **kwargs):
+        raise HTTPException(status_code=503, detail=detail)
+
+    monkeypatch.setattr(worker, "_classify_task", classify)
+    from app.api import collaboration
+    monkeypatch.setattr(collaboration, "qwen_support_assist", fail_assist)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert job.status == expected_status
+    assert job.attempt_count == 1
+    assert job.error_code == expected_error_code
+    assert job.result_text is None
+    assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+    db.close()
+
+
 def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     stale_lock = datetime.now(timezone.utc) - timedelta(minutes=20)
