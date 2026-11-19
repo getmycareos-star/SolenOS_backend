@@ -4,8 +4,38 @@ name: Document lifecycle PostgreSQL integration
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "backend/app/**"
+      - "backend/alembic/**"
+      - "backend/tests/**"
+      - "backend/scripts/**"
+      - "backend/pyproject.toml"
+      - "backend/alembic.ini"
+      - "ci/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - "railway.json"
+      - ".dockerignore"
+      - ".github/workflows/document-lifecycle-postgres.yml"
+      - ".github/workflows/postgres-migration-validation.yml"
+      - ".github/workflows/backend-tests.yml"
   push:
     branches: [main]
+    paths:
+      - "backend/app/**"
+      - "backend/alembic/**"
+      - "backend/tests/**"
+      - "backend/scripts/**"
+      - "backend/pyproject.toml"
+      - "backend/alembic.ini"
+      - "ci/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - "railway.json"
+      - ".dockerignore"
+      - ".github/workflows/document-lifecycle-postgres.yml"
+      - ".github/workflows/postgres-migration-validation.yml"
+      - ".github/workflows/backend-tests.yml"
   workflow_dispatch:
 
 permissions:

@@ -4,8 +4,42 @@ name: Backend validation
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "backend/app/**"
+      - "backend/alembic/**"
+      - "backend/tests/**"
+      - "backend/scripts/**"
+      - "backend/pyproject.toml"
+      - "backend/alembic.ini"
+      - "ci/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - "railway.json"
+      - ".dockerignore"
+      - ".github/workflows/backend-validation.yml"
+      - ".github/workflows/backend-tests.yml"
+      - ".github/workflows/postgres-migration-validation.yml"
+      - ".github/workflows/backup-recovery.yml"
+      - ".github/workflows/document-lifecycle-postgres.yml"
   push:
     branches: [main]
+    paths:
+      - "backend/app/**"
+      - "backend/alembic/**"
+      - "backend/tests/**"
+      - "backend/scripts/**"
+      - "backend/pyproject.toml"
+      - "backend/alembic.ini"
+      - "ci/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - "railway.json"
+      - ".dockerignore"
+      - ".github/workflows/backend-validation.yml"
+      - ".github/workflows/backend-tests.yml"
+      - ".github/workflows/postgres-migration-validation.yml"
+      - ".github/workflows/backup-recovery.yml"
+      - ".github/workflows/document-lifecycle-postgres.yml"
   workflow_dispatch:
 
 permissions:
