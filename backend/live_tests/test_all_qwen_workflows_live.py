@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -73,6 +74,89 @@ def _record_fixture(client: TestClient, session: dict, detail: str = "Caregiver 
 def test_enabled_workflow_contract_is_complete():
     assert len(ENABLED_WORKFLOWS) == 39, ENABLED_WORKFLOWS
     assert set(WORKFLOW_REQUESTS) == set(ENABLED_WORKFLOWS)
+
+
+def test_real_qwen_generates_family_and_appointment_briefings_only_from_lcr(live_qwen_context):
+    client = live_qwen_context["client"]
+    session = live_qwen_context["session"]
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+
+    appointment_response = client.post(
+        "/api/v1/appointments",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "title": "Primary care follow-up",
+            "scheduled_at": (datetime.now(timezone.utc) + timedelta(days=5)).isoformat(),
+            "scheduled_at_timezone": "UTC",
+            "provider": "Primary care clinician",
+            "preparation_notes": "Bring the current care notes.",
+            "medication_questions": ["Confirm the current medication list is accurate."],
+            "created_by_caregiver_id": caregiver_id,
+        },
+    )
+    assert appointment_response.status_code == 200, appointment_response.text
+    appointment_id = appointment_response.json()["id"]
+
+    def prepare(payload: dict, request_id: str) -> dict:
+        response = client.post(
+            "/api/v1/handoff-drafts/prepare",
+            headers={**headers, "x-request-id": request_id},
+            json=payload,
+        )
+        assert response.status_code == 200, response.text
+        draft = response.json()
+        assert draft["generation_status"] == "generated", draft
+        assert draft["validation_status"] == "exact_quote_reference_validation_passed", draft
+        assert draft["source_of_truth"] == "living_care_record"
+        assert draft["source_freshness"]["status"] == "current"
+        assert len(draft["source_snapshot_sha256"]) == 64
+        generation = draft["generation"]
+        assert generation.get("provider") == "ollama", generation
+        assert "qwen" in str(generation.get("model", "")).lower(), generation
+        sections = generation.get("sections") or []
+        assert sections, draft
+        source_refs = {
+            f"{item.get('source_table')}:{item.get('source_id')}"
+            for item in draft.get("source_references", [])
+            if item.get("source_table") and item.get("source_id")
+        }
+        for section in sections:
+            assert section.get("source_ref") in source_refs, section
+            assert section.get("supporting_quote"), section
+            assert section.get("semantic_entailment_status") in {
+                "source_text_only_no_paraphrase",
+                "paraphrase_requires_human_review",
+                "exact_source_quote",
+            }, section
+        return draft
+
+    family = prepare(
+        {"purpose": "family_transition", "audience": "family", "window_days": 30},
+        "qwen-live-family-briefing-" + str(uuid.uuid4()),
+    )
+    assert family["audience"] == "family"
+    assert family["purpose"] == "family_transition"
+
+    appointment = prepare(
+        {
+            "purpose": "professional_appointment",
+            "audience": "professional",
+            "window_days": 30,
+            "appointment_id": appointment_id,
+        },
+        "qwen-live-appointment-briefing-" + str(uuid.uuid4()),
+    )
+    assert appointment["audience"] == "professional"
+    assert appointment["purpose"] == "professional_appointment"
+    assert appointment["appointment_id"] == appointment_id
+    assert appointment["selected_appointment"]["id"] == appointment_id
+    assert any(
+        item.get("source_table") == "appointments" and item.get("source_id") == appointment_id
+        for item in appointment.get("source_references", [])
+    )
 
 
 @pytest.fixture(scope="module")
