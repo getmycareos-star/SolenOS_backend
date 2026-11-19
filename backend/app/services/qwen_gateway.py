@@ -159,11 +159,25 @@ def qwen_chat(
         retry_seconds = max(0.0, min(float(os.getenv("OLLAMA_STARTUP_RETRY_SECONDS", str(timeout or configured_timeout))), 180.0))
     except (TypeError, ValueError):
         retry_seconds = 45.0
-    retry_deadline = time.monotonic() + retry_seconds
+    retry_deadline = None
+    overall_retry_deadline = None
+    last_startup_error = None
+    first_attempt = True
     try:
         while True:
+            if first_attempt:
+                attempt_timeout = timeout or configured_timeout
+            else:
+                remaining_total = overall_retry_deadline - time.monotonic()
+                if remaining_total <= 0:
+                    raise last_startup_error
+                # A retry must not outlive the bounded startup-retry window.
+                # urlopen's socket timeout applies to each request, not to the
+                # retry loop as a whole, so cap every subsequent attempt by the
+                # remaining wall-clock budget.
+                attempt_timeout = min(timeout or configured_timeout, remaining_total)
             try:
-                with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
+                with urllib.request.urlopen(request, timeout=attempt_timeout) as response:
                     result = json.loads(response.read().decode("utf-8"))
                 break
             except urllib.error.URLError as exc:
@@ -178,9 +192,14 @@ def qwen_chat(
                         http.client.RemoteDisconnected,
                     ),
                 )
+                if first_attempt:
+                    retry_deadline = time.monotonic() + retry_seconds
+                    overall_retry_deadline = retry_deadline + (timeout or configured_timeout)
                 remaining = retry_deadline - time.monotonic()
                 if not retryable_startup_failure or remaining <= 0:
                     raise
+                last_startup_error = exc
+                first_attempt = False
                 logger.info("Local Qwen runtime is still starting; retrying inference connection")
                 time.sleep(min(1.0, remaining))
     except urllib.error.HTTPError as exc:
