@@ -678,6 +678,8 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
             "sections": [{
                 "section": "Care preferences",
                 "source_ref": "care_facts:persisted-handoff-fact",
+                "summary": "The caregiver reports a preference for tea.",
+                "supporting_quote": source["text"],
                 "text": source["text"],
                 "epistemic_status": source["epistemic_status"],
                 "record_status": source["record_status"],
@@ -792,6 +794,8 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
             "sections": [{
                 "section": "Recent observations and changes",
                 "source_ref": "care_facts:stale-handoff-fact",
+                "summary": "The caregiver reports a calm morning.",
+                "supporting_quote": source["text"],
                 "text": source["text"],
             }],
         }
@@ -1166,6 +1170,8 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
     assert observed["timeout"] == 150
     assert observed["options"]["num_predict"] == 384
     assert observed["response_format"]["properties"]["items"]["maxItems"] == 6
+    assert "summary" in observed["response_format"]["properties"]["items"]["items"]["required"]
+    assert "supporting_quote" in observed["response_format"]["properties"]["items"]["items"]["required"]
     assert observed["response_format"]["properties"]["items"]["items"]["properties"]["source_ref"]["enum"] == ["care_events:real-event"]
     prompt_sources = json.loads(observed["messages"][1]["content"])["sources"]
     assert len(prompt_sources) == 1
@@ -1216,10 +1222,12 @@ def test_qwen_handoff_generation_bounds_context_and_attaches_only_selected_sourc
     assert result["sources_available"] == 10
     assert result["sources_considered"] == 6
     assert len(prompt_sources) == 6
-    assert all(len(item["excerpt"]) <= 240 for item in prompt_sources)
+    assert all(len(item["source_text"]) <= 600 for item in prompt_sources)
     assert prompt_sources[0]["source_ref"] == "care_events:event-9"
     assert result["sections"][0]["source_ref"] == "care_events:event-9"
     assert result["sections"][0]["text"] == records[9]["text"][:1200]
+    assert result["sections"][0]["supporting_quote"] == "Exact source text for event 9."
+    assert result["sections"][0]["summary"] == "The source records exact event 9 text."
 
 def test_handoff_claim_provenance_links_each_exact_quote_to_its_own_source():
     from app.api.handoff_drafts import _handoff_claim_provenance
@@ -1230,11 +1238,15 @@ def test_handoff_claim_provenance_links_each_exact_quote_to_its_own_source():
                 {
                     "section": "Recent observations",
                     "text": "Caregiver reported a quiet morning.",
+                    "summary": "The caregiver reported a quiet morning.",
+                    "supporting_quote": "Caregiver reported a quiet morning.",
                     "source_ref": "care_events:event-1",
                 },
                 {
                     "section": "Earlier history",
                     "text": "A clinic note mentioned unsteadiness.",
+                    "summary": "A clinic note mentioned unsteadiness.",
+                    "supporting_quote": "A clinic note mentioned unsteadiness.",
                     "source_ref": "evidence:note-2",
                 },
             ]
@@ -1265,8 +1277,8 @@ def test_handoff_claim_provenance_links_each_exact_quote_to_its_own_source():
         ]
     }
     provenance = _handoff_claim_provenance(content, snapshot)
-    assert provenance["coverage"] == "all_sections_linked"
-    assert provenance["claims"][0]["support_status"] == "matched_saved_wording"
+    assert provenance["coverage"] == "all_claims_have_source_quotes"
+    assert provenance["claims"][0]["support_status"] == "matched_saved_source_quote"
     assert provenance["claims"][0]["source_references"][0]["record_id"] == "event-1"
     assert provenance["claims"][0]["source_references"][0]["related_evidence"][0]["reported_by_label"] == "Daughter"
     assert provenance["claims"][1]["support_status"] == "matched_historical_only"
