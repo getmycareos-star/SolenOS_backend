@@ -468,10 +468,15 @@ def _extract(
             native_pages = []
             for page in reader.pages:
                 try:
-                    page_text = page.extract_text(extraction_mode="layout") or ""
-                except TypeError:
-                    # Older pypdf versions do not expose layout extraction.
-                    page_text = page.extract_text() or ""
+                    try:
+                        page_text = page.extract_text(extraction_mode="layout") or ""
+                    except TypeError:
+                        # Older pypdf versions do not expose layout extraction.
+                        page_text = page.extract_text() or ""
+                except Exception:
+                    # A damaged text layer on one page must not prevent OCR
+                    # from recovering that page or discard readable pages.
+                    page_text = ""
                 native_pages.append(page_text.strip())
         except HTTPException:
             raise
