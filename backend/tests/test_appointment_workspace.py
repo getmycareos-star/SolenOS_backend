@@ -477,9 +477,62 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
             semantic_sufficiency="not_automatically_verified",
             assessed_by_caregiver_id=caregiver_id,
         )
+        foreign_review = EvidenceReviewRecord(
+            id="other-person-review",
+            person_id=other["person"]["id"],
+            evidence_id=evidence.id,
+            review_type="reliability",
+            outcome="supported",
+            rationale="This review belongs to another care record.",
+            criteria=[],
+            policy_version="evidence-review-v1",
+            source_attribution_snapshot="{}",
+            reviewed_by_caregiver_id=other["caregiver"]["id"],
+        )
+        foreign_claim_assessment = EvidenceClaimAssessment(
+            id="other-person-claim-assessment",
+            person_id=other["person"]["id"],
+            claim_id=claim.id,
+            claim_version=2,
+            status="supported",
+            rationale="This assessment belongs to another care record.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[],
+            reviewed_by_caregiver_id=other["caregiver"]["id"],
+        )
+        foreign_completeness_policy = EvidenceCompletenessPolicy(
+            id="other-person-completeness-policy",
+            person_id=other["person"]["id"],
+            domain_key="document_history",
+            purpose_key="professional_handoff",
+            policy_version="completeness-v1",
+            required_fields=["author"],
+            rationale="Other person's checklist.",
+            created_by_caregiver_id=other["caregiver"]["id"],
+        )
+        foreign_completeness_assessment = EvidenceCompletenessAssessment(
+            id="other-person-completeness-assessment",
+            person_id=other["person"]["id"],
+            policy_id=foreign_completeness_policy.id,
+            policy_version="completeness-v1",
+            subject_type="evidence",
+            subject_id=evidence.id,
+            assessment_status="complete",
+            required_fields=["author"],
+            satisfied_fields=["author"],
+            missing_fields=[],
+            field_evidence_json="{}",
+            evidence_ids=[evidence.id],
+            rationale="This assessment belongs to another care record.",
+            assessment_basis="linked_source_coverage_only",
+            semantic_sufficiency="not_automatically_verified",
+            assessed_by_caregiver_id=other["caregiver"]["id"],
+        )
         db.add_all([
             evidence, policy, assessment, event, claim, review, claim_assessment,
             completeness_policy, prior_completeness_assessment, completeness_assessment,
+            foreign_review, foreign_claim_assessment, foreign_completeness_policy,
+            foreign_completeness_assessment,
         ])
         db.commit()
     finally:
@@ -506,6 +559,9 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     assert any(item["assessment_id"] == "appointment-claim-assessment" for item in body["claim_assessments"])
     assert [item["assessment_id"] for item in body["completeness_assessments"]] == ["appointment-completeness-assessment"]
     assert body["completeness_assessments"][0]["assessment_status"] == "partial"
+    assert all(item["review_id"] != "other-person-review" for item in body["evidence_review_records"])
+    assert all(item["assessment_id"] != "other-person-claim-assessment" for item in body["claim_assessments"])
+    assert all(item["assessment_id"] != "other-person-completeness-assessment" for item in body["completeness_assessments"])
     evidence_source = body["events"][0]["evidence_sources"][0]
     assert evidence_source["evidence_reviews"][0]["outcome"] == "unverified"
     assert evidence_source["completeness_assessments"][0]["semantic_sufficiency"] == "not_automatically_verified"
