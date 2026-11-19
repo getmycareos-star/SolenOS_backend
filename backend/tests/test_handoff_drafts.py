@@ -1768,8 +1768,10 @@ def test_handoff_paginates_source_history_and_discloses_the_safety_ceiling(clien
     test_client, session = client
     person_id = session["person"]["id"]
     with engine.begin() as connection:
+        shared_timestamp = datetime.now(timezone.utc)
         for index in range(501):
-            timestamp = datetime.now(timezone.utc) - timedelta(minutes=index)
+            # Identical timestamps exercise the stable primary-key page tie-breaker.
+            timestamp = shared_timestamp
             connection.execute(text("""
                 INSERT INTO care_facts
                     (id, person_id, subject_type, fact_type, fact_value,
@@ -1796,6 +1798,12 @@ def test_handoff_paginates_source_history_and_discloses_the_safety_ceiling(clien
     body = response.json()
     facts = body["source_statuses"]["care_facts"]
     assert facts["returned_count"] == 500
+    fact_refs = [
+        item["source_id"] for item in body["source_references"]
+        if item.get("source_table") == "care_facts"
+    ]
+    assert len(fact_refs) == 500
+    assert len(set(fact_refs)) == 500
     assert facts["has_more"] is True
     assert facts["retrieval_complete"] is False
     assert body["retrieval_complete"] is False
