@@ -408,6 +408,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             historical_after_days=180,
             rationale="Explicit caregiver-selected review boundary.",
             created_by_caregiver_id=caregiver_id,
+            created_at=source_time,
         )
         assessment = EvidenceFreshnessAssessment(
             id="handoff-freshness-assessment",
@@ -418,7 +419,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             freshness_status="needs_review",
             source_time=source_time,
             source_time_kind="event_occurrence",
-            assessed_at=datetime.now(timezone.utc),
+            assessed_at=source_time,
             age_days=45,
             rationale="The explicit review boundary has elapsed; re-confirm before relying on currentness.",
             assessed_by_caregiver_id=caregiver_id,
