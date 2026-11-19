@@ -23,6 +23,29 @@ from app.services.qwen_workflows import ENABLED_WORKFLOWS
 logger = logging.getLogger(__name__)
 
 
+def _qwen_exception_error_code(exc: Exception) -> str:
+    """Persist a bounded, non-sensitive error code for both string and structured HTTP details."""
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, dict):
+            value = detail.get("code") or detail.get("error_code") or detail.get("reason")
+            return str(value or f"http_{exc.status_code}")[:48]
+        return str(detail or f"http_{exc.status_code}")[:48]
+    if isinstance(exc, ValueError):
+        return str(exc)[:48]
+    return "qwen_processing_failed"
+
+
+def _is_permanent_qwen_http_error(exc: Exception) -> bool:
+    """Do not retry deterministic safety rejections; retry transient provider failures."""
+    if not isinstance(exc, HTTPException):
+        return False
+    status = int(exc.status_code)
+    if 400 <= status < 500:
+        return status != 429
+    return "unsupported_care_claim" in _qwen_exception_error_code(exc).casefold()
+
+
 def _process_document_evidence(evidence_id: str, person_id: str, caregiver_id: str) -> tuple[dict, dict]:
     """Run OCR and document understanding in a worker thread with its own DB session."""
     from types import SimpleNamespace
@@ -1355,14 +1378,8 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 if current is not None:
                     previous_status = current.status
                     current.locked_at = None
-                    current.error_code = exc.detail[:48] if isinstance(exc, HTTPException) else (
-                        str(exc)[:48] if isinstance(exc, ValueError) else "qwen_processing_failed"
-                    )
-                    permanent_http_error = (
-                        isinstance(exc, HTTPException)
-                        and 400 <= int(exc.status_code) < 500
-                        and int(exc.status_code) != 429
-                    )
+                    current.error_code = _qwen_exception_error_code(exc)
+                    permanent_http_error = _is_permanent_qwen_http_error(exc)
                     if (
                         isinstance(exc, ValueError) and str(exc) == "community_disabled"
                     ) or permanent_http_error:
