@@ -2344,7 +2344,13 @@ def prepare_handoff_draft(
                         query = query.where(in_window)
                 else:
                     query = query.where(in_window)
-                query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
+                # Offset pagination needs a deterministic tie-breaker. Without
+                # the primary key, rows sharing the same timestamp can move
+                # between pages and be omitted or duplicated in the snapshot.
+                order_columns = [column.desc().nullslast() for column in reversed(timestamp_columns)]
+                if "id" in table.c:
+                    order_columns.append(table.c.id.asc())
+                query = query.order_by(*order_columns)
             # Read every source page up to the explicit safety ceiling. A further
             # probe distinguishes a complete projection from a safety-capped one.
             rows = []
