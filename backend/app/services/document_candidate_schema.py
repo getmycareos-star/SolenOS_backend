@@ -212,20 +212,20 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
     # truth. A past-time qualifier dates the described state; explicit
     # transition language otherwise identifies a change from an earlier state.
     historical_marker = re.search(
-        r"\\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week|\\d+ days? ago|\\d+ weeks? ago|\\d+ months? ago|\\d+ years? ago)\\b",
+        r"\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week|\d+ days? ago|\d+ weeks? ago|\d+ months? ago|\d+ years? ago)\b",
         lowered,
         re.I,
     )
     change_marker = re.search(
-        r"\\b(?:no longer|discontinued|was stopped|were stopped|has stopped|have stopped|"
+        r"\b(?:no longer|discontinued|was stopped|were stopped|has stopped|have stopped|"
         r"dosage changed|dose changed|dose increased|dose decreased|dosage increased|"
         r"dosage decreased|changed from|differs from|different from|resolved|"
-        r"worsened|improved|replaced|restarted)\\b",
+        r"worsened|improved|replaced|restarted)\b",
         lowered,
         re.I,
     )
     current_marker = re.search(
-        r"\\b(?:currently|current|at present|as of today|now)\\b",
+        r"\b(?:currently|current|at present|as of today|now)\b",
         lowered,
         re.I,
     )
