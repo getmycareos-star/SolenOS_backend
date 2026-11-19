@@ -173,7 +173,7 @@ def qwen_chat(
                     raise
                 logger.info("Local Qwen runtime is still starting; retrying inference connection")
                 time.sleep(min(1.0, remaining))
-        except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError as exc:
         _mark_inference_unverified(model)
         failure_category = "upstream_http_error"
         failure_reason = f"http_{exc.code}"
