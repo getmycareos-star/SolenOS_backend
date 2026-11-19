@@ -1155,7 +1155,7 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
     )
 
     assert result["status"] == "generated"
-    assert observed["timeout"] == 90
+    assert observed["timeout"] == 150
     assert observed["options"]["num_predict"] == 384
     assert observed["response_format"]["properties"]["items"]["maxItems"] == 6
     assert observed["response_format"]["properties"]["items"]["items"]["properties"]["source_ref"]["enum"] == ["care_events:real-event"]
