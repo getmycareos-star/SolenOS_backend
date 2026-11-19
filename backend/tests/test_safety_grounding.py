@@ -619,11 +619,19 @@ class TestSafetyAPI:
         assert result.total_tests == 1
         assert result.score >= 0.0
 
-    def test_adversarial_tests(self):
-        response = self.client.post("/api/v1/adversarial-tests")
+    def test_adversarial_tests(self, monkeypatch):
+        monkeypatch.setenv("SOLENOS_INTERNAL_API_KEY", "test-internal-safety-key")
+        response = self.client.post(
+            "/api/v1/adversarial-tests",
+            headers={"X-SolenOS-Internal-Key": "test-internal-safety-key"},
+        )
         assert response.status_code == 200
         data = response.json()
         assert "total_adversarial_tests" in data
+
+    def test_adversarial_tests_are_not_public(self):
+        response = self.client.post("/api/v1/adversarial-tests")
+        assert response.status_code == 404
 
 
 def test_public_safety_input_cannot_self_certify_reviewed_evidence():
