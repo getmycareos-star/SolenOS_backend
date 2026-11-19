@@ -858,6 +858,8 @@ def test_qwen_handoff_generation_rejects_fabricated_source_reference(monkeypatch
             "items": [{
                 "section": "Recent observations and changes",
                 "source_ref": "care_events:invented-id",
+                "summary": "A quiet morning was reported.",
+                "supporting_quote": "Caregiver reported a quiet morning.",
             }]
         }),
     )
@@ -890,6 +892,8 @@ def test_qwen_handoff_generation_attaches_exact_source_text_to_selected_referenc
             "items": [{
                 "section": "Recent observations",
                 "source_ref": "care_events:real-event",
+                "summary": "The caregiver reported a quiet morning.",
+                "supporting_quote": "Caregiver reported a quiet morning.",
             }]
         }),
     )
@@ -924,6 +928,8 @@ def test_qwen_handoff_generation_rejects_unsupported_section_label(monkeypatch):
             "items": [{
                 "section": "Diagnosis",
                 "source_ref": "care_events:real-event",
+                "summary": "The caregiver reported a quiet morning.",
+                "supporting_quote": "Caregiver reported a quiet morning.",
             }]
         }),
     )
@@ -1136,6 +1142,8 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
         return json.dumps({"items": [{
             "section": "Recent observations and changes",
             "source_ref": "care_events:real-event",
+                "summary": "The caregiver reported a quiet morning.",
+                "supporting_quote": "Caregiver reported a quiet morning.",
         }]})
 
     monkeypatch.setattr(handoff_drafts, "qwen_chat", capture_inference)
@@ -1177,6 +1185,8 @@ def test_qwen_handoff_generation_bounds_context_and_attaches_only_selected_sourc
             "items": [{
                 "section": "Recent observations and changes",
                 "source_ref": "care_events:event-9",
+                "summary": "The source records exact event 9 text.",
+                "supporting_quote": "Exact source text for event 9.",
             }]
         })
 
