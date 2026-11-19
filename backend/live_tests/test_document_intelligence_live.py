@@ -94,9 +94,6 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert any("walked 20 metres" in candidate["source_quote"] for candidate in candidates), candidates
         assert any("ate half of lunch" in candidate["source_quote"] for candidate in candidates), candidates
 
-            "Live Qwen plus exact-source fallback did not preserve both explicit "
-            f"care observations: {candidates!r}"
-        )
         assert all(candidate["review_status"] == "pending_review" for candidate in candidates)
         assert all(candidate["source_quote"] in source for candidate in candidates)
         assert all(candidate["page_number"] in set(range(1, 4 + len(semantic_dataset["cases"]))) for candidate in candidates)
