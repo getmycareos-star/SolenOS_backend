@@ -2028,6 +2028,7 @@ def current_care_projection(
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
+            "source_context": row.get("source_context") if source_name == "assertions" else None,
             "evidence_link_validation": (
                 "same_care_record_evidence_reference_verified"
                 if evidence_ids else "no_authorized_evidence_reference_returned"
