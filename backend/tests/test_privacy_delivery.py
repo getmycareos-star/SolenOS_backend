@@ -950,6 +950,8 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
                 "recipient_caregiver_ids": [recipient_id],
                 "scope": ["lcr_summary"],
                 "expires_at": None,
+                "reviewed_source_refs": [f"care_events:{source_id}"],
+                "semantic_review_acknowledged": True,
             },
         )
         db.add(draft)
