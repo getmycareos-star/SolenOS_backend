@@ -329,7 +329,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             approved_draft.review_status not in {"approved_for_sharing", "shared"}
             or approved_draft.approved_by_caregiver_id != caregiver_id
             or approved_draft.approval_revision != approved_draft.revision_number
-            or approved_draft.generation_status != "generated"
+            or approved_draft.generation_status not in {"generated", "source_only_fallback"}
             or approved_draft.validation_status != "exact_quote_reference_validation_passed"
         ):
             raise HTTPException(status_code=409, detail="The handoff draft is not approved in its current revision")
