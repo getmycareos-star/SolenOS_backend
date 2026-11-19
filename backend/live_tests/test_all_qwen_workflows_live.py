@@ -92,12 +92,18 @@ def live_qwen_context():
             session,
             "Medication observation: caregiver reported that the morning medication was taken.",
         )
+        _, handoff_evidence_ids = _record_fixture(
+            client,
+            session,
+            "Caregiver reported that the person prefers a quiet room after lunch.",
+        )
         yield {
             "client": client,
             "session": session,
             "event_id": event_id,
             "medication_event_id": medication_event_id,
             "medication_evidence_ids": medication_evidence_ids,
+            "handoff_evidence_ids": handoff_evidence_ids,
         }
 
 
@@ -170,7 +176,7 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
     """Exercise the separate handoff-draft generator, not only the handoff assist workflow."""
     client = live_qwen_context["client"]
     session = live_qwen_context["session"]
-    evidence_ids = live_qwen_context["medication_evidence_ids"]
+    evidence_ids = live_qwen_context["handoff_evidence_ids"]
     headers = {
         "Authorization": f"Bearer {session['access_token']}",
         "X-Request-ID": str(uuid.uuid4()),
