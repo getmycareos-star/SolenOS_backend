@@ -625,10 +625,45 @@ def test_change_item_appends_same_person_fact_revision():
               "fact_type": "care_need", "fact_value": "needs support"},
     )
     assert fact.status_code == 201, fact.text
+
+    evidence_id = "revision-evidence-source"
+    db = TestingSessionLocal()
+    try:
+        db.add(Evidence(
+            id=evidence_id,
+            person_id=session["person"]["id"],
+            type="caregiver_report",
+            source_text="Family caregiver report supports this recorded care need.",
+            uploaded_by_caregiver_id=session["caregiver"]["id"],
+            evidence_status="reported",
+            source_type="caregiver_report",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    provenance = client.post(
+        "/api/v1/care-continuity/record-provenance",
+        headers=headers,
+        json={
+            "source_type": "evidence",
+            "source_id": evidence_id,
+            "author_label": "Family caregiver",
+            "method": "manual",
+            "reason": "Source for the care-fact revision",
+        },
+    )
+    assert provenance.status_code == 201, provenance.text
+
     change_set = client.post(
         "/api/v1/care-continuity/record-change-sets",
         headers=headers,
-        json={"care_record_id": record.json()["id"], "operation": "update", "reason": "Correction review"},
+        json={
+            "care_record_id": record.json()["id"],
+            "operation": "update",
+            "reason": "Correction review",
+            "provenance_id": provenance.json()["id"],
+        },
     )
     assert change_set.status_code == 201, change_set.text
 
@@ -638,7 +673,8 @@ def test_change_item_appends_same_person_fact_revision():
         json={"change_set_id": change_set.json()["id"], "target_type": "care_fact",
               "target_id": fact.json()["id"], "operation": "update",
               "before_value": {"fact_value": "needs support"},
-              "after_value": {"fact_value": "needs daily support"}},
+              "after_value": {"fact_value": "needs daily support"},
+              "provenance_id": provenance.json()["id"]},
     )
     assert first.status_code == 201, first.text
     second = client.post(
@@ -647,7 +683,8 @@ def test_change_item_appends_same_person_fact_revision():
         json={"change_set_id": change_set.json()["id"], "target_type": "care_fact",
               "target_id": fact.json()["id"], "operation": "update",
               "before_value": {"fact_value": "needs daily support"},
-              "after_value": {"fact_value": "needs daily support with supervision"}},
+              "after_value": {"fact_value": "needs daily support with supervision"},
+              "provenance_id": provenance.json()["id"]},
     )
     assert second.status_code == 201, second.text
     revisions = client.get("/api/v1/care-continuity/fact-revisions", headers=headers)
@@ -659,6 +696,22 @@ def test_change_item_appends_same_person_fact_revision():
     assert timeline.status_code == 200, timeline.text
     assert len(timeline.json()) == 3
     assert timeline.json()[0]["revision_type"] == "care_fact_revisions"
+
+    reconstructed = client.get(
+        "/api/v1/care-continuity/state-reconstruction/as-of",
+        headers=headers,
+        params={"as_of": datetime.now(timezone.utc).isoformat()},
+    )
+    assert reconstructed.status_code == 200, reconstructed.text
+    fact_state = next(
+        item for item in reconstructed.json()["items"]
+        if item["target_type"] == "care_facts" and item["target_id"] == fact.json()["id"]
+    )
+    assert fact_state["revision_number"] == 3
+    assert fact_state["state"]["subject_type"] == "care_recipient"
+    assert fact_state["state"]["fact_type"] == "care_need"
+    assert fact_state["state"]["fact_value"] == "needs daily support with supervision"
+    assert fact_state["evidence_ids"] == [evidence_id]
 
 
 def test_lcr_sections_upsert_and_record_status_history_is_persisted():

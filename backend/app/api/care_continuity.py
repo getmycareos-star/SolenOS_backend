@@ -27,7 +27,7 @@ from app.services.lcr_context import build_lcr_context
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.care_attention_intelligence import build_care_attention_assessment
 from app.services.care_continuity import get_freshness
-from app.models.care import Evidence, Caregiver, CareEvent
+from app.models.care import Evidence, Caregiver, CareEvent, Person
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.change import Situation as SituationModel, Change, Baseline
@@ -1277,30 +1277,47 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
 def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: str, data: dict):
     target_type = str(data.get("target_type") or "").lower()
     revision_specs = {
-        "care_fact": ("care_fact_revisions", "care_fact_id"),
-        "fact": ("care_fact_revisions", "care_fact_id"),
-        "care_assertion": ("care_assertion_revisions", "assertion_id"),
-        "assertion": ("care_assertion_revisions", "assertion_id"),
-        "care_decision": ("care_decision_revisions", "decision_id"),
-        "decision": ("care_decision_revisions", "decision_id"),
-        "care_event": ("care_event_revisions", "event_id"),
-        "event": ("care_event_revisions", "event_id"),
-        "caregiver_observation": ("care_observation_revisions", "observation_id"),
-        "care_observation": ("care_observation_revisions", "observation_id"),
-        "observation": ("care_observation_revisions", "observation_id"),
-        "care_change": ("care_change_revisions", "change_id"),
-        "change": ("care_change_revisions", "change_id"),
-        "care_situation": ("care_situation_revisions", "situation_id"),
-        "situation": ("care_situation_revisions", "situation_id"),
-        "care_evidence": ("care_evidence_revisions", "evidence_id"),
-        "evidence": ("care_evidence_revisions", "evidence_id"),
+        "care_fact": ("care_fact_revisions", "care_fact_id", "care_facts"),
+        "fact": ("care_fact_revisions", "care_fact_id", "care_facts"),
+        "care_assertion": ("care_assertion_revisions", "assertion_id", "care_assertions"),
+        "assertion": ("care_assertion_revisions", "assertion_id", "care_assertions"),
+        "care_decision": ("care_decision_revisions", "decision_id", "care_decisions"),
+        "decision": ("care_decision_revisions", "decision_id", "care_decisions"),
+        "care_event": ("care_event_revisions", "event_id", "care_events"),
+        "event": ("care_event_revisions", "event_id", "care_events"),
+        "caregiver_observation": ("care_observation_revisions", "observation_id", "caregiver_observations"),
+        "care_observation": ("care_observation_revisions", "observation_id", "caregiver_observations"),
+        "observation": ("care_observation_revisions", "observation_id", "caregiver_observations"),
+        "care_change": ("care_change_revisions", "change_id", "changes"),
+        "change": ("care_change_revisions", "change_id", "changes"),
+        "care_situation": ("care_situation_revisions", "situation_id", "situations"),
+        "situation": ("care_situation_revisions", "situation_id", "situations"),
+        "care_evidence": ("care_evidence_revisions", "evidence_id", "evidence"),
+        "evidence": ("care_evidence_revisions", "evidence_id", "evidence"),
     }
     spec = revision_specs.get(target_type)
     if spec is None:
         raise HTTPException(status_code=422, detail="This target type does not have an LCR revision schema")
-    revision_table_name, target_column = spec
+    revision_table_name, target_column, state_target_type = spec
+    target_id = str(data.get("target_id") or "").strip()
+    if not target_id:
+        raise HTTPException(status_code=422, detail="A revision target ID is required")
+
+    # Serialize Core-based revision writers for this person, and lock the
+    # target row so these writes cannot race the ORM revision listener.
+    db.query(Person.id).filter(Person.id == person_id).with_for_update().one()
+    target_table = _table(db, state_target_type)
+    target_row = db.execute(
+        select(target_table).where(
+            target_table.c.id == target_id,
+            target_table.c.person_id == person_id,
+        ).with_for_update()
+    ).mappings().first()
+    if target_row is None:
+        raise HTTPException(status_code=404, detail="Revision target was not found in this care record")
+    db.flush()
+
     revision_table = _table(db, revision_table_name)
-    target_id = data.get("target_id")
     latest = db.execute(
         select(revision_table.c.revision_number)
         .where(revision_table.c[target_column] == target_id, revision_table.c.person_id == person_id)
@@ -1312,6 +1329,7 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         select(change_sets.c.reason, change_sets.c.provenance_id)
         .where(change_sets.c.id == data.get("change_set_id"), change_sets.c.person_id == person_id)
     ).mappings().first()
+    provenance_id = data.get("provenance_id") or (change_set.get("provenance_id") if change_set else None)
     db.execute(insert(revision_table).values(
         id=str(uuid.uuid4()),
         person_id=person_id,
@@ -1320,7 +1338,122 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         previous_payload=data.get("before_value"),
         current_payload=data.get("after_value"),
         revision_reason=(change_set.get("reason") if change_set else None) or data.get("operation"),
-        provenance_id=data.get("provenance_id") or (change_set.get("provenance_id") if change_set else None),
+        provenance_id=provenance_id,
+        changed_by_caregiver_id=caregiver_id,
+        changed_at=datetime.now(timezone.utc),
+    ))
+
+    previous_revision = db.query(CareStateRevision).filter(
+        CareStateRevision.person_id == person_id,
+        CareStateRevision.target_type == state_target_type,
+        CareStateRevision.target_id == target_id,
+    ).order_by(desc(CareStateRevision.revision_number)).first()
+    previous_state = None
+    if previous_revision is not None and previous_revision.after_state:
+        try:
+            previous_state = json.loads(previous_revision.after_state)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail="The previous care-state revision is not valid JSON") from exc
+    elif data.get("before_value") is not None:
+        previous_state = data.get("before_value")
+
+    operation = str(data.get("operation") or "").strip().casefold()
+    change_kind = (
+        "created" if operation in {"create", "created", "add", "added"}
+        else "deleted" if operation in {"delete", "deleted", "remove", "removed", "retract", "retracted"}
+        else "updated"
+    )
+    incoming_state = data.get("after_value")
+    if change_kind == "deleted":
+        current_state = None
+    elif isinstance(previous_state, dict) and isinstance(incoming_state, dict):
+        # Change-set payloads may contain only the changed fields. Preserve the
+        # rest of the last recorded state so as-of reconstruction stays useful.
+        current_state = {**previous_state, **incoming_state}
+    else:
+        current_state = incoming_state if incoming_state is not None else previous_state
+
+    raw_evidence_ids = []
+    target_evidence_ids = target_row.get("evidence_ids") if hasattr(target_row, "get") else None
+    if target_evidence_ids is not None:
+        if isinstance(target_evidence_ids, str):
+            try:
+                target_evidence_ids = json.loads(target_evidence_ids)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise HTTPException(status_code=422, detail="Stored evidence_ids are not a valid JSON array") from exc
+        if not isinstance(target_evidence_ids, list):
+            raise HTTPException(status_code=422, detail="Stored evidence_ids are not a JSON array")
+        raw_evidence_ids.extend(target_evidence_ids)
+
+    if state_target_type == "care_facts" and inspect(db.connection()).has_table("care_fact_evidence"):
+        fact_evidence = _table(db, "care_fact_evidence")
+        raw_evidence_ids.extend(
+            row[0] for row in db.execute(
+                select(fact_evidence.c.evidence_id).where(
+                    fact_evidence.c.person_id == person_id,
+                    fact_evidence.c.fact_id == target_id,
+                )
+            ).all()
+        )
+
+    if provenance_id and inspect(db.connection()).has_table("record_provenance"):
+        provenance_table = _table(db, "record_provenance")
+        provenance = db.execute(
+            select(
+                provenance_table.c.source_type,
+                provenance_table.c.source_id,
+                provenance_table.c.metadata,
+            ).where(
+                provenance_table.c.id == provenance_id,
+                provenance_table.c.person_id == person_id,
+            )
+        ).mappings().first()
+        if provenance is not None:
+            source_type = str(provenance.get("source_type") or "").strip().casefold()
+            source_id = provenance.get("source_id")
+            if source_type in {"evidence", "care_evidence"} and source_id:
+                raw_evidence_ids.append(str(source_id))
+            metadata_value = provenance.get("metadata")
+            if isinstance(metadata_value, str):
+                try:
+                    metadata_value = json.loads(metadata_value)
+                except (TypeError, json.JSONDecodeError):
+                    metadata_value = {}
+            if isinstance(metadata_value, dict):
+                metadata_evidence_ids = metadata_value.get("evidence_ids") or []
+                if isinstance(metadata_evidence_ids, list):
+                    raw_evidence_ids.extend(metadata_evidence_ids)
+
+    candidate_evidence_ids = sorted({
+        str(value).strip() for value in raw_evidence_ids
+        if isinstance(value, (str, int)) and str(value).strip()
+    })
+    evidence_ids = []
+    if candidate_evidence_ids:
+        authorized_evidence_ids = {
+            row[0] for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(candidate_evidence_ids),
+            ).all()
+        }
+        evidence_ids = [value for value in candidate_evidence_ids if value in authorized_evidence_ids]
+
+    db.add(CareStateRevision(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        target_type=state_target_type,
+        target_id=target_id,
+        revision_number=int(previous_revision.revision_number if previous_revision else 0) + 1,
+        change_kind=change_kind,
+        before_state=(
+            json.dumps(previous_state, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+            if previous_state is not None else None
+        ),
+        after_state=(
+            json.dumps(current_state, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+            if current_state is not None else None
+        ),
+        evidence_ids=evidence_ids,
         changed_by_caregiver_id=caregiver_id,
         changed_at=datetime.now(timezone.utc),
     ))
@@ -4981,6 +5114,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                     "operation": "created",
                     "before_value": None,
                     "after_value": _jsonable(dict(row)),
+                    "evidence_ids": row.get("evidence_ids") or [],
                 },
             )
         if resource == "assertions":
