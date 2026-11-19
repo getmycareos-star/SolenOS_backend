@@ -1949,3 +1949,9 @@ def test_appointment_briefing_requires_and_retrieves_one_person_scoped_appointme
         if item["source_table"] == "appointments"
     ]
     assert [item["source_id"] for item in appointment_refs] == ["briefing-selected-appointment"]
+
+
+def test_postgres_enum_filter_uses_the_database_responsibility_status_label():
+    from app.api.handoff_drafts import SOURCES
+
+    assert SOURCES["caregiver_responsibilities"]["active_status_values"] == ("ACTIVE",)
