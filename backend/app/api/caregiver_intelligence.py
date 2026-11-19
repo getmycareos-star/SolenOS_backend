@@ -201,7 +201,7 @@ def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, 
         f"Created caregiver profile for {db_profile.name}",
         "caregiver_profile",
         source_id=db_profile.id,
-        caregiver_id=db_profile.id,
+        caregiver_id=session_caregiver_id,
     )
     return db_profile
 
@@ -261,7 +261,7 @@ def create_caregiver_role(role: CaregiverRoleCreate, request: Request, db: Sessi
         f"Care role assigned: {db_role.role_type.value}",
         "caregiver_role",
         db_role.id,
-        current_profile.id,
+        session_caregiver_id,
     )
     return db_role
 
@@ -281,7 +281,7 @@ def list_caregiver_roles(person_id: str, request: Request, caregiver_id: Optiona
 
 @router.patch("/caregiver-roles/{role_id}/end", response_model=CaregiverRole)
 def end_caregiver_role(role_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
     role = db.query(CaregiverRoleModel).filter(
         CaregiverRoleModel.id == str(role_id),
         CaregiverRoleModel.person_id == person_id,
@@ -301,7 +301,7 @@ def end_caregiver_role(role_id: str, request: Request, db: Session = Depends(get
         f"Care role ended: {role.role_type.value}",
         "caregiver_role",
         role.id,
-        current_profile.id,
+        session_caregiver_id,
     )
     db.commit()
     db.refresh(role)
@@ -324,7 +324,7 @@ def create_responsibility(responsibility: CaregiverResponsibilityCreate, request
         f"Assigned {db_resp.responsibility_type} to caregiver {db_resp.caregiver_id}",
         "responsibility",
         source_id=db_resp.id,
-        caregiver_id=db_resp.caregiver_id,
+        caregiver_id=session_caregiver_id,
     )
     return db_resp
 
@@ -338,7 +338,7 @@ def list_responsibilities(person_id: str, request: Request, caregiver_id: Option
 
 @router.patch("/caregiver-responsibilities/{responsibility_id}/end", response_model=CaregiverResponsibility)
 def end_responsibility(responsibility_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
     responsibility = db.query(CaregiverResponsibilityModel).filter(
         CaregiverResponsibilityModel.id == str(responsibility_id),
         CaregiverResponsibilityModel.person_id == person_id,
@@ -358,7 +358,7 @@ def end_responsibility(responsibility_id: str, request: Request, db: Session = D
         f"Ended responsibility: {responsibility.responsibility_type}",
         "responsibility",
         responsibility.id,
-        current_profile.id,
+        session_caregiver_id,
     )
     db.commit()
     db.refresh(responsibility)
@@ -393,7 +393,7 @@ def create_observation(observation: CaregiverObservationCreate, request: Request
         f"Recorded observation by caregiver {db_obs.caregiver_id}",
         "caregiver_observation",
         source_id=db_obs.id,
-        caregiver_id=db_obs.caregiver_id,
+        caregiver_id=session_caregiver_id,
     )
     return db_obs
 
@@ -488,7 +488,7 @@ def create_handoff(handoff: CaregiverHandoffCreate, request: Request, db: Sessio
         f"Handoff from {db_handoff.from_caregiver_id} to {db_handoff.to_caregiver_id} for {db_handoff.responsibility_type}",
         "handoff",
         source_id=db_handoff.id,
-        caregiver_id=db_handoff.from_caregiver_id,
+        caregiver_id=session_caregiver_id,
     )
     return db_handoff
 
@@ -561,7 +561,7 @@ def create_communication(communication: CaregiverCommunicationCreate, request: R
         f"Communication from {db_comm.from_caregiver_id} to {db_comm.to_caregiver_id or 'group'}",
         "communication",
         source_id=db_comm.id,
-        caregiver_id=db_comm.from_caregiver_id,
+        caregiver_id=session_caregiver_id,
     )
     return db_comm
 
