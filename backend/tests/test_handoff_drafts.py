@@ -375,6 +375,10 @@ def test_handoff_explicit_evidence_reference_parser_keeps_only_declared_links():
     }) == ["evidence-a", "evidence-b", "evidence-c"]
     assert _explicit_evidence_ids({"evidence_ids": None, "source_evidence_id": None}) == []
     assert _explicit_evidence_ids({"evidence_ids": "evidence-d"}) == ["evidence-d"]
+    assert _explicit_evidence_ids({
+        "evidence_id": "evidence-e",
+        "evidence_links": '[{"evidence_id": "evidence-f", "relationship": "neutral"}]',
+    }) == ["evidence-e", "evidence-f"]
 
 
 
