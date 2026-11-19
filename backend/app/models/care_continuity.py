@@ -11,7 +11,7 @@ from datetime import date, datetime
 from enum import Enum
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index
+    Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, Index
 )
 from sqlalchemy.sql import func
 from sqlalchemy import event, inspect, select, text
@@ -82,6 +82,7 @@ class CareAssertion(Base):
     source_event_id = Column(String, ForeignKey("care_events.id"), nullable=True)
     source_label = Column(String, nullable=False)
     source_text = Column(Text, nullable=True)
+    source_context = Column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
     source_conversation_id = Column(String, ForeignKey("conversation_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
     source_message_id = Column(String, ForeignKey("conversation_messages.id", ondelete="SET NULL"), nullable=True, index=True)
     source_proposal_id = Column(String, ForeignKey("ai_output_lcr_proposals.id", ondelete="SET NULL"), nullable=True, unique=True)
