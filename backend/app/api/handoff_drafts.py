@@ -284,7 +284,7 @@ TEMPLATES = {
         ("start_here", "What matters most right now", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Current situation", "Immediate care needs", "What the next caregiver must know")),
         ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries", "care_events", "uncertainty_assessments", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Today", "Change from baseline", "Uncertainty", "Freshness policy status and review rationale")),
         ("daily_routine", "How to care for them", (), ("Daily routine", "Communication preferences", "Comfort and preferences", "Known distress triggers and helpful responses")),
-        ("health_medication", "Health and medication information", ("appointments",), ("Documented health concerns", "Verified medication list", "Allergies and reactions", "Appointments and clinician instructions")),
+        ("health_medication", "Health and medication information", ("appointments", "medications"), ("Documented health concerns", "Verified medication list", "Allergies and reactions", "Appointments and clinician instructions")),
         ("next_actions", "What needs to happen next", ("actions", "care_decisions", "open_questions", "information_gaps"), ("Action", "Named owner", "Due time/date", "Status", "Outcome")),
         ("safety_contingencies", "Safety and when to seek help", (), ("Documented safety needs", "Existing care-plan instructions", "Emergency and clinical contacts")),
         ("family_coordination", "Family coordination", (), ("Primary caregiver", "Backup caregiver", "Next check-in", "Practical support needs")),
@@ -294,7 +294,7 @@ TEMPLATES = {
         ("transition_summary", "Executive summary and current situation", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Reason for handoff", "Current situation", "Immediate priorities", "Clinician-assessed acuity if documented")),
         ("baseline", "Relevant history and baseline", ("care_facts", "care_timeline_entries", "care_events"), ("Documented diagnoses and source", "Relevant history", "Cognitive and functional baseline", "Changes from baseline", "Person's goals and preferences")),
         ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Freshness policy and assessment status", "Conflicts", "Corrections")),
-        ("medication_reconciliation", "Medication reconciliation", (), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
+        ("medication_reconciliation", "Medication reconciliation", ("medications",), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
         ("clinical_functional", "Current clinical and functional assessment", (), ("Observations and measurements", "Symptoms and events", "Cognition/communication", "Mobility/ADLs", "Nutrition/hydration", "Sleep/mood/behaviour", "Equipment/environment")),
         ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "uncertainty_assessments", "care_facts", "care_events", "actions", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Issue", "Evidence/status", "Freshness review status", "Required response", "Owner", "Deadline")),
         ("care_plan", "Treatment and care plan", ("care_decisions", "actions"), ("Authorised plan", "Care delivered", "Response", "Pending investigations/consultations", "Unresolved decisions", "Escalation instructions")),
@@ -328,7 +328,12 @@ def _template_coverage(audience: str, statuses: dict) -> list[dict]:
             "required_fields": list(fields),
             "source_tables": list(source_tables),
             "coverage_status": coverage,
-            "coverage_note": "Source coverage only; each field still requires review and may be missing or unverified.",
+            "coverage_note": (
+                "Medication coverage includes only caregiver-reviewed current reports; allergies have no connected authoritative source and must be confirmed separately. "
+                "Each field still requires review and may be missing or unverified."
+                if key in {"health_medication", "medication_reconciliation"}
+                else "Source coverage only; each field still requires review and may be missing or unverified."
+            ),
         })
     return result
 
@@ -1457,6 +1462,102 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
         return {"status": "failed", "reason": "source_retrieval_failed", "label": "Uploaded documents and extracted text", "count": 0}, []
 
 
+def _verified_medication_source(db: Session, request: Request) -> tuple[dict, list[dict]]:
+    """Project only the existing caregiver-reviewed medication assertions into briefing evidence."""
+    try:
+        # Reuse the canonical medication selector; do not create a second medication authority.
+        from app.api.care_continuity import current_medication_records
+
+        projection = current_medication_records(request, db)
+        medications = [
+            (item, "caregiver_reviewed_current_report")
+            for item in projection.get("medications", [])
+        ] + [
+            (item, item.get("record_status", "awaiting_caregiver_review"))
+            for item in projection.get("pending_review", [])
+        ]
+        if not medications:
+            return {
+                "status": "empty", "label": "Caregiver-reviewed medication reports",
+                "count": 0, "returned_count": 0, "has_more": False,
+                "retrieval_complete": True,
+            }, []
+
+        bind = db.get_bind()
+        inspector = inspect(bind)
+        if not inspector.has_table("care_assertions"):
+            raise RuntimeError("care_assertions_source_unavailable")
+        table = Table("care_assertions", MetaData(), autoload_with=bind)
+        spec = SOURCES["care_assertions"]
+        selected_names = list(spec["fields"]) + ["evidence_ids", "source_evidence_id"]
+        selected = [table.c[name] for name in dict.fromkeys(selected_names) if name in table.c]
+        output: list[dict] = []
+        seen_assertions: set[str] = set()
+        for medication, projection_status in medications:
+            refs = medication.get("assertion_refs") or {}
+            for field_name in ("name", "status", "dose"):
+                assertion_id = refs.get(field_name)
+                if not assertion_id or str(assertion_id) in seen_assertions:
+                    continue
+                query = select(*selected).where(
+                    table.c.id == str(assertion_id),
+                    table.c.person_id == medication.get("person_id", projection.get("person_id")) if "person_id" in medication else table.c.person_id == _scoped_identity_from_request(request, db),
+                )
+                row = db.execute(query).mappings().first()
+                if row is None:
+                    raise RuntimeError("medication_assertion_not_retrievable")
+                row_data = dict(row)
+                source_text = str(row_data.get("source_text") or "").strip()
+                seen_assertions.add(str(assertion_id))
+                output.append({
+                    "source_type": "medication_assertion",
+                    "source_key": "medications",
+                    "source_table": "care_assertions",
+                    "source_id": str(assertion_id),
+                    "source_fingerprint": _fingerprint(_normalize_reflected_fingerprint_row(row_data)),
+                    "source_revision": _iso(row_data.get("recorded_at")),
+                    "source_revision_status": "timestamp_available" if row_data.get("recorded_at") is not None else "revision_unavailable",
+                    "event_at": _iso(row_data.get("observed_at")),
+                    "recorded_at": _iso(row_data.get("recorded_at")),
+                    "due_at": None,
+                    "details": {
+                        "medication_id": medication.get("medication_id"),
+                        "medication_name": medication.get("name"),
+                        "medication_field": field_name,
+                        "asserted_value": row_data.get("asserted_value"),
+                        "projection_status": projection_status,
+                        "review_overdue": medication.get("review_overdue"),
+                        "interpretation_limit": medication.get("interpretation_limit") or projection.get("interpretation_limit"),
+                    },
+                    "epistemic_status": str(row_data.get("epistemic_state") or "not_recorded"),
+                    "record_status": str(row_data.get("assertion_status") or projection_status),
+                    "evidence_ids": _explicit_evidence_ids(row_data),
+                    "text": source_text,
+                    "stale_warning": False,
+                })
+        return {
+            "status": "available" if output else "unavailable",
+            "reason": None if output else "medication_assertion_sources_unavailable",
+            "label": "Caregiver-reviewed medication reports",
+            "count": len(medications),
+            "returned_count": len(medications),
+            "has_more": False,
+            "retrieval_complete": bool(output),
+        }, output
+    except Exception:
+        logger.exception("Handoff medication source retrieval failed")
+        return {
+            "status": "failed", "reason": "medication_source_retrieval_failed",
+            "label": "Caregiver-reviewed medication reports", "count": 0,
+            "returned_count": 0, "has_more": False, "retrieval_complete": False,
+        }, []
+
+
+def _scoped_identity_from_request(request: Request, db: Session) -> str:
+    person_id, _ = _scoped_identity(request, db)
+    return person_id
+
+
 def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str) -> dict:
     """Qwen drafts a concise briefing from retrieved LCR records; the backend binds and validates every source quote.
 
@@ -1860,6 +1961,16 @@ def prepare_handoff_draft(
     document_status, document_records = _verified_document_source(db, person_id, caregiver_id)
     statuses["documents"] = document_status
     records.extend(document_records)
+    medication_status, medication_records = _verified_medication_source(db, request)
+    statuses["medications"] = medication_status
+    records.extend(medication_records)
+    # No authoritative allergy adapter is present. Never interpret that as "no allergies".
+    statuses["allergies"] = {
+        "status": "unavailable",
+        "reason": "no_authoritative_allergy_source_adapter",
+        "label": "Allergy records",
+        "count": 0,
+    }
     statuses["community"] = {"status": "not_authorized", "reason": "community_source_not_enabled", "count": 0}
 
     # Resolve only explicitly linked evidence and keep author/reporter/uploader,
