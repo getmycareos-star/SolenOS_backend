@@ -159,20 +159,21 @@ def qwen_chat(
     except (TypeError, ValueError):
         retry_seconds = 45.0
     retry_deadline = time.monotonic() + retry_seconds
-    while True:
-        try:
-            with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            break
-        except urllib.error.URLError as exc:
-            reason = getattr(exc, "reason", exc)
-            retryable_startup_failure = isinstance(reason, (ConnectionRefusedError, ConnectionResetError))
-            remaining = retry_deadline - time.monotonic()
-            if not retryable_startup_failure or remaining <= 0:
-                raise
-            logger.info("Local Qwen runtime is still starting; retrying inference connection")
-            time.sleep(min(1.0, remaining))
-    except urllib.error.HTTPError as exc:
+    try:
+        while True:
+            try:
+                with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.URLError as exc:
+                reason = getattr(exc, "reason", exc)
+                retryable_startup_failure = isinstance(reason, (ConnectionRefusedError, ConnectionResetError))
+                remaining = retry_deadline - time.monotonic()
+                if not retryable_startup_failure or remaining <= 0:
+                    raise
+                logger.info("Local Qwen runtime is still starting; retrying inference connection")
+                time.sleep(min(1.0, remaining))
+        except urllib.error.HTTPError as exc:
         _mark_inference_unverified(model)
         failure_category = "upstream_http_error"
         failure_reason = f"http_{exc.code}"
