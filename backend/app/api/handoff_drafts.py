@@ -1530,7 +1530,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
     try:
         raw = qwen_chat(
             messages,
-            timeout=90,
+            timeout=150,
             response_format=response_schema,
             options={"temperature": 0, "num_predict": 384},
         )
