@@ -268,6 +268,32 @@ def _request_delta_json(messages: list[dict[str, str]], *, timeout: float) -> di
                 raise
     raise HTTPException(status_code=502, detail="The local model could not produce a complete Delta response; no delta was persisted.")
 
+def _safe_assertion_source_context(value: Any) -> dict[str, Any]:
+    """Project only source qualifiers needed to interpret document assertions."""
+    if not isinstance(value, dict):
+        return {}
+    result = {
+        key: value[key]
+        for key in ("kind", "authority", "review_status")
+        if isinstance(value.get(key), str)
+    }
+    candidate = value.get("document_candidate")
+    if isinstance(candidate, dict):
+        allowed = (
+            "source_attribution", "negation_status", "modality", "conditionality",
+            "temporal_context", "statement_kind", "field_type", "page_number",
+            "event_date", "recorded_date",
+        )
+        projected = {
+            key: candidate[key]
+            for key in allowed
+            if isinstance(candidate.get(key), (str, int, float, bool))
+        }
+        if projected:
+            result["document_candidate"] = projected
+    return result
+
+
 def _normalise(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
@@ -1257,6 +1283,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "epistemic_state": item.epistemic_state or "reported",
         "observed_at": item.observed_at.isoformat() if item.observed_at else None,
         "status": item.assertion_status, "evidence_ids": item.evidence_ids or [],
+        "source_context": _safe_assertion_source_context(getattr(item, "source_context", None)),
     } for item in active_assertions]
 
     # Include the existing LCR's real source material as context too. Many older
