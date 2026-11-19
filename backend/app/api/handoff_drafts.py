@@ -1463,7 +1463,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
 
 
 def _verified_medication_source(db: Session, request: Request) -> tuple[dict, list[dict]]:
-    """Project only the existing caregiver-reviewed medication assertions into briefing evidence."""
+    """Project the canonical current and pending medication assertions into briefing evidence."""
     try:
         # Reuse the canonical medication selector; do not create a second medication authority.
         from app.api.care_continuity import current_medication_records
@@ -1478,7 +1478,7 @@ def _verified_medication_source(db: Session, request: Request) -> tuple[dict, li
         ]
         if not medications:
             return {
-                "status": "empty", "label": "Caregiver-reviewed medication reports",
+                "status": "empty", "label": "Medication assertions and review status",
                 "count": 0, "returned_count": 0, "has_more": False,
                 "retrieval_complete": True,
             }, []
@@ -1539,7 +1539,7 @@ def _verified_medication_source(db: Session, request: Request) -> tuple[dict, li
         return {
             "status": "available" if output else "unavailable",
             "reason": None if output else "medication_assertion_sources_unavailable",
-            "label": "Caregiver-reviewed medication reports",
+            "label": "Medication assertions and review status",
             "count": len(medications),
             "returned_count": len(medications),
             "has_more": False,
@@ -1549,7 +1549,7 @@ def _verified_medication_source(db: Session, request: Request) -> tuple[dict, li
         logger.exception("Handoff medication source retrieval failed")
         return {
             "status": "failed", "reason": "medication_source_retrieval_failed",
-            "label": "Caregiver-reviewed medication reports", "count": 0,
+            "label": "Medication assertions and review status", "count": 0,
             "returned_count": 0, "has_more": False, "retrieval_complete": False,
         }, []
 
