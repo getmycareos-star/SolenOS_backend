@@ -347,8 +347,29 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             "scope": sorted(payload.scope),
             "expires_at": requested_expiry,
         }
-        if approval_parameters != expected_parameters:
-            raise HTTPException(status_code=409, detail="Recipients, sharing scope, or expiry differ from the caregiver-approved parameters")
+        generation = (approved_draft.structured_content or {}).get("generation")
+        generated_sections = generation.get("sections") if isinstance(generation, dict) else None
+        expected_reviewed_source_refs = {
+            str(item.get("source_ref")).strip()
+            for item in (generated_sections or [])
+            if isinstance(item, dict)
+            and isinstance(item.get("source_ref"), str)
+            and item.get("source_ref").strip()
+        }
+        reviewed_source_refs = approval_parameters.get("reviewed_source_refs")
+        review_was_complete = (
+            approval_parameters.get("semantic_review_acknowledged") is True
+            and isinstance(reviewed_source_refs, list)
+            and len(reviewed_source_refs) == len(set(reviewed_source_refs))
+            and set(reviewed_source_refs) == expected_reviewed_source_refs
+            and bool(expected_reviewed_source_refs)
+        )
+        approved_sharing_parameters = {
+            key: approval_parameters.get(key)
+            for key in expected_parameters
+        }
+        if not review_was_complete or approved_sharing_parameters != expected_parameters:
+            raise HTTPException(status_code=409, detail="Recipients, sharing scope, expiry, or source review differ from the caregiver-approved parameters")
         content = approved_draft.structured_content or {}
         generation = content.get("generation") if isinstance(content, dict) else None
         generated_sections = generation.get("sections") if isinstance(generation, dict) else None
