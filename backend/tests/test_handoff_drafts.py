@@ -440,7 +440,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             source_context={
                 "kind": "caregiver_reviewed_document_candidate",
                 "authority": "caregiver_reviewed_report_not_independently_verified",
-                "document_candidate": {"source_attribution": "caregiver_reported", "conditionality": "conditional"},
+                "document_candidate": {"source_attribution": "caregiver_reported", "negation_status": "explicitly_negated", "modality": "tentative", "conditionality": "conditional", "temporal_context": "historical", "statement_kind": "recommendation", "page_number": 3, "source_excerpt": "private raw quote", "source_span_start": 10},
             },
             evidence_ids=[evidence.id],
             assertion_status="reported",
@@ -612,6 +612,13 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     assert refs["handoff-review-claim"]["details"]["source_context"]["document_candidate"]["source_attribution"] == "caregiver_reported"
     assert "source_excerpt" not in refs["handoff-review-claim"]["details"]["source_context"]["document_candidate"]
     assert "source_span_start" not in refs["handoff-review-claim"]["details"]["source_context"]["document_candidate"]
+    safe_document_context = refs["handoff-review-claim"]["details"]["source_context"]["document_candidate"]
+    assert safe_document_context["negation_status"] == "explicitly_negated"
+    assert safe_document_context["modality"] == "tentative"
+    assert safe_document_context["temporal_context"] == "historical"
+    assert safe_document_context["statement_kind"] == "recommendation"
+    assert safe_document_context["page_number"] == 3
+    assert "source_excerpt" not in safe_document_context
     assert "handoff-claim-assessment" in refs
     assert refs["handoff-claim-assessment"]["source_table"] == "evidence_claim_assessments"
     assert refs["handoff-claim-assessment"]["details"]["status"] == "unverified"
