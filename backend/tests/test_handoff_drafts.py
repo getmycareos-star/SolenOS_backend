@@ -1824,6 +1824,32 @@ def test_draft_includes_caregiver_reviewable_medication_assertions_with_source_l
     created_body = created.json()
     assert created_body["record_status"] == "awaiting_caregiver_review"
 
+    historical_assertion_id = "handoff-historical-medication-assertion"
+    historical_at = datetime.now(timezone.utc) - timedelta(days=120)
+    history_db = TestSessionLocal()
+    try:
+        history_db.add(CareAssertion(
+            id=historical_assertion_id,
+            person_id=session["person"]["id"],
+            subject_type="medication",
+            subject_id="historical-medication-subject",
+            field="status",
+            assertion_kind="event",
+            asserted_value="discontinued",
+            source_label="Caregiver report",
+            source_text="Caregiver reported that Example medicine was discontinued four months ago.",
+            source_context={},
+            evidence_ids=[],
+            assertion_status="historical",
+            epistemic_state="reported",
+            observed_at=historical_at,
+            recorded_at=historical_at,
+            created_by_caregiver_id=session["caregiver"]["id"],
+        ))
+        history_db.commit()
+    finally:
+        history_db.close()
+
     appointment = Appointment(
         id="handoff-medication-appointment",
         person_id=session["person"]["id"],
@@ -1854,6 +1880,11 @@ def test_draft_includes_caregiver_reviewable_medication_assertions_with_source_l
     assert all(item["source_table"] == "care_assertions" for item in medication_refs)
     assert all(item["epistemic_status"] == "reported" for item in medication_refs)
     assert all(item["record_status"] in {"reported", "review_required"} for item in medication_refs)
+    assert any(
+        item["source_id"] == historical_assertion_id
+        and item["record_status"] == "historical"
+        for item in body["source_references"]
+    ), "latest historical medication assertions must remain visible outside the requested event window"
     assert body["retrieval_complete"] is False, "unavailable allergy evidence must remain an explicit completeness gap"
     assert any(item["source"] == "allergies" for item in body["limitations"])
 
