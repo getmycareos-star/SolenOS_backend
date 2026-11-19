@@ -32,6 +32,16 @@ on:
       - "backend/tests/test_qwen_startup_script.py"
       - "backend/tests/test_qwen_retry_budget.py"
       - "backend/tests/test_handoff_drafts.py"
+      - "backend/app/api/document_intelligence.py"
+      - "backend/app/api/document_lifecycle.py"
+      - "backend/app/services/document_candidate_schema.py"
+      - "backend/app/services/care_continuity_execution.py"
+      - "backend/app/services/change_intelligence_reconciliation.py"
+      - "backend/app/services/delta_engine.py"
+      - "backend/tests/test_document_candidate_schema.py"
+      - "backend/tests/test_document_intelligence_lifecycle.py"
+      - "backend/tests/test_document_intelligence_postgres.py"
+      - "backend/live_tests/test_document_intelligence_live.py"
       - "start-with-qwen.sh"
 permissions:
   contents: read
