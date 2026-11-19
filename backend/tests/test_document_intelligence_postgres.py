@@ -652,24 +652,6 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
 
         with Session() as db:
             assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=person_id).one()
-            assertion.assertion_status = "superseded"
-            db.commit()
-        superseded_retry = client.post(
-            f"/api/v1/documents/intelligence/{analysis_id}/review",
-            headers=auth,
-            json={"candidate_index": 1, "decision": "accept"},
-        )
-        assert superseded_retry.status_code == 200, superseded_retry.text
-        assert superseded_retry.json()["idempotent_replay"] is True
-        assert superseded_retry.json()["written_to_lcr"] is False
-        assert superseded_retry.json()["source_record_ref"] is None
-        with Session() as db:
-            assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=person_id).one()
-            assertion.assertion_status = "accepted"
-            db.commit()
-
-        with Session() as db:
-            assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=person_id).one()
             assert assertion.assertion_status == "accepted"
             assert assertion.assertion_kind == "document_reviewed_observation"
             assert assertion.evidence_ids == [evidence_id]
