@@ -588,12 +588,20 @@ def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
             })
         claims.append({
             "claim_id": f"handoff-section-{index + 1}",
-            "claim_type": "qwen_lcr_paraphrase",
+            "claim_type": (
+                "source_only_lcr_excerpt"
+                if generation.get("status") == "source_only_fallback"
+                else "qwen_lcr_paraphrase"
+            ),
             "text": str(item.get("summary") or ""),
             "supporting_quote": str(quote or ""),
             "support_status": support_status,
             "validation_basis": "exact_quote_substring_in_saved_lcr_snapshot" if exact_match else "supporting_quote_not_matched_to_snapshot",
-            "semantic_entailment_status": "caregiver_review_required",
+            "semantic_entailment_status": (
+                "not_applicable_no_paraphrase"
+                if generation.get("status") == "source_only_fallback"
+                else "caregiver_review_required"
+            ),
             "source_references": references,
         })
     unmatched = sum(1 for item in claims if item["support_status"] not in {"matched_saved_source_quote", "matched_historical_only"})
