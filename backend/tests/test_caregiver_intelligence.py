@@ -589,6 +589,14 @@ def test_responsibility_history_preserved():
         assert response.status_code == 200
         history = response.json()
         assert len(history) == 2
+
+        # Caller-controlled person IDs must not disclose another care record.
+        assert client.get("/api/v1/caregiver-roles/other-person").status_code == 403
+        assert client.get("/api/v1/caregiver-responsibilities/other-person").status_code == 403
+        assert client.get(
+            f"/api/v1/caregiver-responsibilities/history/{profile_id}",
+            params={"person_id": "other-person"},
+        ).status_code == 403
     finally:
         teardown_db()
 
