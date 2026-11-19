@@ -1436,6 +1436,12 @@ def review_document_candidate(
                     asserted_value=asserted_value,
                     source_label=source_label,
                     source_text=quote,
+                    source_context={
+                        "kind": "caregiver_reviewed_document_candidate",
+                        "authority": "caregiver_reviewed_report_not_independently_verified",
+                        "review_status": "accepted_by_caregiver",
+                        "document_candidate": canonical,
+                    },
                     evidence_ids=[evidence_id],
                     # A document candidate accepted by the caregiver remains
                     # a reported source, not a clinically verified instruction.
