@@ -4284,9 +4284,21 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             raise HTTPException(status_code=403, detail="One or more evidence items are outside this care-record session")
         for evidence_id in payload.evidence_ids:
             row = by_id[evidence_id]
+            source_metadata = {
+                "source_type": row.source_type or "not_recorded",
+                "evidence_kind": row.evidence_kind or "not_recorded",
+                "epistemic_status": row.epistemic_status or "not_recorded",
+                "original_author": row.original_author or "not_recorded",
+                "reported_by": row.reported_by_label or "not_recorded",
+                "time_provenance": row.time_provenance or "not_recorded",
+                "evidence_status": row.evidence_status or "not_recorded",
+            }
             context_lines.append(
-                f"Caregiver-provided evidence [{row.id}] ({row.type}, status={row.evidence_status}): "
-                f"{(row.source_text or '')[:1800]}"
+                f"Supplied source evidence [{row.id}] ({row.type}) "
+                f"metadata={json.dumps(source_metadata, ensure_ascii=False)}. "
+                "The uploader is not necessarily the source author; reported authorship "
+                "is source metadata, not independent authentication. "
+                f"Original source text: {(row.source_text or '')[:1800]}"
             )
             source_evidence_ids.append(str(row.id))
 
