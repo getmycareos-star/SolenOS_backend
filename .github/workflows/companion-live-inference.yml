@@ -17,6 +17,8 @@ on:
       - "backend/live_tests/**"
       - "backend/tests/test_companion_care_update_postgres.py"
       - "backend/tests/test_qwen_background_worker.py"
+      - "backend/tests/test_qwen_startup_script.py"
+      - "start-with-qwen.sh"
 permissions:
   contents: read
 

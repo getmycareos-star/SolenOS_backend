@@ -11,6 +11,7 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export QWEN_INSTALL_STATE_FILE="${QWEN_INSTALL_STATE_FILE:-/tmp/qwen-installation-status.json}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
+export OLLAMA_READINESS_TIMEOUT_SECONDS="${OLLAMA_READINESS_TIMEOUT_SECONDS:-60}"
 
 write_qwen_state() {
   local state="$1"
@@ -35,14 +36,20 @@ finally:
     if os.path.exists(temporary):
         os.unlink(temporary)
 PY
+  printf 'QWEN_INSTALL_STATE state=%s model=%s reason=%s\\n' "$state" "$OLLAMA_MODEL" "${reason:-none}" >&2
 }
 
 write_qwen_state "not_started"
 OLLAMA_PID=""
 UVICORN_PID=""
+OLLAMA_MANAGER_PID=""
 
 cleanup() {
   if [[ -n "$UVICORN_PID" ]]; then kill "$UVICORN_PID" 2>/dev/null || true; fi
+  if [[ -n "$OLLAMA_MANAGER_PID" ]]; then
+    kill "$OLLAMA_MANAGER_PID" 2>/dev/null || true
+    wait "$OLLAMA_MANAGER_PID" 2>/dev/null || true
+  fi
   if [[ -n "$OLLAMA_PID" ]]; then
     kill "$OLLAMA_PID" 2>/dev/null || true
     wait "$OLLAMA_PID" 2>/dev/null || true
@@ -51,27 +58,27 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "${OLLAMA_SIDECAR_ENABLED,,}" == "true" ]]; then
-  ollama serve >/tmp/ollama-runtime.log 2>&1 &
+  # Keep the API and the optional inference runtime independent. Ollama can take
+  # longer than a short startup probe on a cold Railway container; the manager
+  # keeps checking while FastAPI starts immediately.
+  ollama serve > >(tee -a /tmp/ollama-runtime.log >&2) 2>&1 &
   OLLAMA_PID=$!
 
-  # Bound sidecar startup to 10 seconds. FastAPI startup must not depend on it.
-  OLLAMA_READY=0
-  for attempt in $(seq 1 10); do
-    if curl -fsS "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1; then
-      OLLAMA_READY=1
-      break
-    fi
-    if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
-      echo "Optional Ollama sidecar did not start; core APIs will start without inference." >&2
-      break
-    fi
-    sleep 1
-  done
+  (
+    OLLAMA_READY=0
+    for attempt in $(seq 1 "$OLLAMA_READINESS_TIMEOUT_SECONDS"); do
+      if curl -fsS "$OLLAMA_BASE_URL/api/tags" >/dev/null 2>&1; then
+        OLLAMA_READY=1
+        break
+      fi
+      if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
+        echo "Optional Ollama sidecar exited before becoming ready." >&2
+        break
+      fi
+      sleep 1
+    done
 
-  # Model pull is deliberately asynchronous. A missing model may make Companion
-  # inference unavailable temporarily, but must not block care-record operations.
-  if [[ "$OLLAMA_READY" == "1" ]]; then
-    (
+    if [[ "$OLLAMA_READY" == "1" ]]; then
       if ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
         write_qwen_state "installed"
       else
@@ -91,10 +98,11 @@ if [[ "${OLLAMA_SIDECAR_ENABLED,,}" == "true" ]]; then
           fi
         fi
       fi
-    ) >/tmp/qwen-model-pull.log 2>&1 &
-  else
-    write_qwen_state "failed" "ollama_runtime_not_ready"
-  fi
+    else
+      write_qwen_state "failed" "ollama_runtime_not_ready"
+    fi
+  ) > >(tee -a /tmp/qwen-model-pull.log >&2) 2>&1 &
+  OLLAMA_MANAGER_PID=$!
 else
   write_qwen_state "failed" "ollama_sidecar_disabled"
 fi
