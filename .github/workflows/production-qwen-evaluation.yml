@@ -9,7 +9,9 @@ on:
       - ".github/workflows/production-qwen-evaluation.yml"
       - "backend/app/services/qwen*"
       - "backend/app/api/collaboration.py"
+      - "backend/app/api/handoff_drafts.py"
       - "backend/scripts/run_production_qwen_evaluation.py"
+      - "backend/tests/test_handoff_drafts.py"
       - "backend/tests/test_qwen_readiness.py"
       - "start-with-qwen.sh"
   workflow_dispatch:
@@ -40,7 +42,7 @@ jobs:
           python-version: "3.11"
       - name: Identify the deployed production-code commit
         run: |
-          expected=$(git log -1 --format=%H HEAD -- backend/app/services/qwen_gateway.py backend/app/api/collaboration.py start-with-qwen.sh)
+          expected=$(git log -1 --format=%H HEAD -- backend/app/services/qwen_gateway.py backend/app/api/collaboration.py backend/app/api/handoff_drafts.py start-with-qwen.sh)
           test -n "$expected"
           echo "EXPECTED_DEPLOYMENT_COMMIT=$expected" >> "$GITHUB_ENV"
       - name: Wait for Railway to deploy this exact commit and finish model installation
