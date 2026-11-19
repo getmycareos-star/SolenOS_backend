@@ -5,6 +5,7 @@ Ollama's native HTTP API; it never calls a hosted inference provider.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -167,7 +168,16 @@ def qwen_chat(
                 break
             except urllib.error.URLError as exc:
                 reason = getattr(exc, "reason", exc)
-                retryable_startup_failure = isinstance(reason, (ConnectionRefusedError, ConnectionResetError))
+                retryable_startup_failure = isinstance(
+                    reason,
+                    (
+                        ConnectionRefusedError,
+                        ConnectionResetError,
+                        ConnectionAbortedError,
+                        BrokenPipeError,
+                        http.client.RemoteDisconnected,
+                    ),
+                )
                 remaining = retry_deadline - time.monotonic()
                 if not retryable_startup_failure or remaining <= 0:
                     raise
