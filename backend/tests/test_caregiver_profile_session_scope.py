@@ -354,3 +354,14 @@ def test_caregiver_observation_write_uses_server_bound_profile_identity():
         },
     )
     assert spoofed.status_code == 403, spoofed.text
+
+def test_current_caregiver_profile_is_resolved_from_authenticated_session():
+    client = TestClient(app)
+    session = create_session(client)
+    response = client.get(
+        "/api/v1/caregiver-profiles/current",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == session["caregiver"]["profile_id"]
+    assert response.json()["person_id"] == session["person"]["id"]
