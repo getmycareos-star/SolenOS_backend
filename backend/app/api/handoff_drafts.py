@@ -1715,8 +1715,10 @@ def _source_only_handoff_fallback(records: list[dict], reason: str) -> dict:
     eligible_by_ref = {}
     for item in records:
         source_ref = f"{item['source_table']}:{item['source_id']}"
-        if source_ref in eligible_by_ref or not str(item.get("text") or "").strip():
+        if not str(item.get("text") or "").strip():
             continue
+        # Later specialized adapters carry the richer source wording for the same
+        # persisted assertion and therefore replace the generic projection.
         eligible_by_ref[source_ref] = {
             "source_ref": source_ref,
             "source_type": item["source_type"],
