@@ -97,5 +97,9 @@ class SituationResponse(BaseModel):
     return_continuity: Optional[Dict[str, Any]] = None
     qwen_extraction_status: Literal["queued", "available", "unavailable", "not_applicable"] = "not_applicable"
     qwen_candidates: Optional[Dict[str, Any]] = None
+    qwen_analysis_id: Optional[str] = None
+    qwen_job_id: Optional[str] = None
+    qwen_job_ids: List[str] = Field(default_factory=list)
+    care_continuity_execution: Optional[Dict[str, Any]] = None
     qwen_review_required: bool = False
     qwen_written_to_lcr: bool = False
