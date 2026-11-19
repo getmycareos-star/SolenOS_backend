@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.care import Evidence
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, CareDeltaRun
 from app.models.collaboration import EvidenceUpload
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 
@@ -191,6 +191,9 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert accepted.json()["written_to_lcr"] is True
         assert accepted.json()["longitudinal_retrieval_status"] == "verified"
         assert accepted.json()["candidate"]["longitudinal_retrieval_status"] == "verified"
+        assert accepted.json()["delta_reconciliation_status"] == "completed"
+        delta_run_id = accepted.json()["delta_run_id"]
+        assert delta_run_id
         assert len(execution_calls) == 1
         assert execution_calls[0]["source_caregiver_id"] == first["caregiver"]["id"]
         assert execution_calls[0]["source_evidence_id"] == evidence_id
@@ -205,6 +208,20 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert accepted_again.status_code == 200
         assert accepted_again.json()["source_record_ref"] == accepted.json()["source_record_ref"]
         assert accepted_again.json()["longitudinal_retrieval_status"] == "verified"
+        assert accepted_again.json()["delta_reconciliation_status"] == "completed"
+        assert accepted_again.json()["delta_run_id"] == delta_run_id
+
+        db = Session()
+        try:
+            persisted_delta = db.query(CareDeltaRun).filter_by(
+                id=delta_run_id, person_id=first["person"]["id"]
+            ).one()
+            persisted_delta_json = json.loads(persisted_delta.delta_json)
+            assert persisted_delta.source == "SolenOS Document Intelligence"
+            assert persisted_delta.evidence_ids == [evidence_id]
+            assert persisted_delta_json["provenance"]["evidence_ids"] == [evidence_id]
+        finally:
+            db.close()
 
         history_response = client.get(
             f"/api/v1/documents/intelligence/{analysis_id}/review-history",
