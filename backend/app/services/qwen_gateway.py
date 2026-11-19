@@ -160,7 +160,6 @@ def qwen_chat(
     except (TypeError, ValueError):
         retry_seconds = 45.0
     retry_deadline = None
-    overall_retry_deadline = None
     last_startup_error = None
     first_attempt = True
     try:
@@ -168,14 +167,13 @@ def qwen_chat(
             if first_attempt:
                 attempt_timeout = timeout or configured_timeout
             else:
-                remaining_total = overall_retry_deadline - time.monotonic()
-                if remaining_total <= 0:
+                remaining = retry_deadline - time.monotonic()
+                if remaining <= 0:
                     raise last_startup_error
-                # A retry must not outlive the bounded startup-retry window.
                 # urlopen's socket timeout applies to each request, not to the
-                # retry loop as a whole, so cap every subsequent attempt by the
-                # remaining wall-clock budget.
-                attempt_timeout = min(timeout or configured_timeout, remaining_total)
+                # retry loop as a whole. Cap each retry by the remaining startup
+                # budget so a final connection attempt cannot overrun it.
+                attempt_timeout = min(timeout or configured_timeout, remaining)
             try:
                 with urllib.request.urlopen(request, timeout=attempt_timeout) as response:
                     result = json.loads(response.read().decode("utf-8"))
@@ -194,7 +192,6 @@ def qwen_chat(
                 )
                 if first_attempt:
                     retry_deadline = time.monotonic() + retry_seconds
-                    overall_retry_deadline = retry_deadline + (timeout or configured_timeout)
                 remaining = retry_deadline - time.monotonic()
                 if not retryable_startup_failure or remaining <= 0:
                     raise
