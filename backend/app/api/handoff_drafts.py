@@ -2231,14 +2231,21 @@ def prepare_handoff_draft(
                         if status_values else false()
                     )
             if spec.get("shared_only"):
+                has_explicit_sharing_boundary = False
                 if "is_promoted_to_shared" in table.c:
                     query = query.where(table.c.is_promoted_to_shared.is_(True))
+                    has_explicit_sharing_boundary = True
                 if "information_visibility" in table.c:
                     visibility_column = table.c.information_visibility
                     shared_label = _database_enum_label(visibility_column, "shared")
                     query = query.where(
                         visibility_column == shared_label if shared_label is not None else false()
                     )
+                    has_explicit_sharing_boundary = True
+                if not has_explicit_sharing_boundary:
+                    # Never expose an unfiltered caregiver observation when the
+                    # schema cannot prove that the record was explicitly shared.
+                    query = query.where(false())
             if spec.get("require_caregiver_owned_evidence"):
                 evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
                 query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
