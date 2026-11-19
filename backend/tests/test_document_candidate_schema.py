@@ -440,7 +440,7 @@ def test_explicit_no_longer_statement_retains_negation_and_temporal_context():
         source_text=f"[Page 1]\n{excerpt}",
     )
     assert candidate["negation_status"] == "explicitly_negated"
-    assert candidate["temporal_context"] == "historical"
+    assert candidate["temporal_context"] == "changed_over_time"
 
 
 def test_professional_reported_is_not_promoted_to_direct_observation():
