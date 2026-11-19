@@ -206,6 +206,12 @@ def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, 
     return db_profile
 
 
+@router.get("/caregiver-profiles/current", response_model=CaregiverProfile)
+def get_current_caregiver_profile(request: Request, db: Session = Depends(get_db)):
+    _person_id, _session_caregiver_id, profile = _session_profile(request, db)
+    return profile
+
+
 @router.get("/caregiver-profiles/{person_id}", response_model=List[CaregiverProfile])
 def list_caregiver_profiles(person_id: str, request: Request, db: Session = Depends(get_db)):
     _assert_person_scope(request, db, person_id)
