@@ -367,7 +367,7 @@ def test_definite_inability_is_not_mislabeled_as_tentative_language():
         document_id="doc-definite-inability",
         source_text=f"[Page 2]\n{excerpt}",
     )
-    assert candidate["negation_status"] == "explicitly_negated"
+    assert candidate["negation_status"] == "not_explicitly_marked", "inability is a positive functional limitation, not a negated care observation"
     assert candidate["modality"] == "not_explicitly_marked"
 
 
@@ -420,3 +420,24 @@ def test_document_issue_date_is_not_used_as_event_date():
 def test_event_date_not_present_in_source_quote_is_not_used():
     candidate = {"event_date": "2026-11-10"}
     assert _explicit_document_event_datetime(candidate, "No explicit event date in this passage.") is None
+
+
+def test_without_assistance_is_not_misclassified_as_negated():
+    excerpt = "The patient walks without assistance."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-without-assistance",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["negation_status"] == "not_explicitly_marked"
+
+
+def test_explicit_no_longer_statement_retains_negation_and_temporal_context():
+    excerpt = "The patient no longer requires assistance with walking."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-no-longer",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["negation_status"] == "explicitly_negated"
+    assert candidate["temporal_context"] == "historical"
