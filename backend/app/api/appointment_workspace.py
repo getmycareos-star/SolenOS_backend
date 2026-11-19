@@ -692,7 +692,16 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 .all()
             )
             completeness_has_more = len(completeness_rows) > 500
+            seen_completeness_scopes = set()
             for assessment in completeness_rows[:500]:
+                scope_key = (
+                    str(assessment.subject_type),
+                    str(assessment.subject_id),
+                    str(assessment.policy_id),
+                )
+                if scope_key in seen_completeness_scopes:
+                    continue
+                seen_completeness_scopes.add(scope_key)
                 linked_ids = [str(value) for value in (assessment.evidence_ids or [])]
                 if str(assessment.subject_id) not in referenced_evidence_ids and not referenced_evidence_ids.intersection(linked_ids):
                     continue
