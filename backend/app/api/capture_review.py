@@ -278,6 +278,7 @@ def review_capture_candidate(
     db.add(analysis)
 
     change_intelligence_status = "not_required"
+    longitudinal_retrieval_status = "not_applicable"
     execution = None
     if payload.decision == "accept":
         try:
@@ -329,14 +330,14 @@ def review_capture_candidate(
                 isinstance(item, dict) and str(item.get("id")) == str(assertion_id)
                 for item in assertion_items
             )
-            retrieval_status = (
+            longitudinal_retrieval_status = (
                 "verified"
                 if assertion_retrieved and not projection.get("missing_required_sources")
                 else "unavailable"
             )
         except Exception:
-            retrieval_status = "unavailable"
-        execution["stages"]["longitudinal_retrieval"] = retrieval_status
+            longitudinal_retrieval_status = "unavailable"
+        execution["stages"]["longitudinal_retrieval"] = longitudinal_retrieval_status
         analysis.execution_status = dict(execution["stages"])
         db.add(analysis)
         db.commit()
@@ -353,6 +354,7 @@ def review_capture_candidate(
         "change_intelligence_status": change_intelligence_status,
         "care_continuity_execution": execution,
         "written_to_lcr": payload.decision == "accept",
+        "longitudinal_retrieval_status": longitudinal_retrieval_status,
         "message": (
             "Caregiver-approved Daily Care observation saved as a source-linked LCR assertion."
             if payload.decision == "accept" and change_intelligence_status == "available"
