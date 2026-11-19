@@ -12,7 +12,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, false, text as sql_text
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, false, true, text as sql_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -75,6 +75,15 @@ def _database_enum_label(column: Any, requested: str) -> str | None:
         return requested
     matches = [label for label in labels if str(label).casefold() == str(requested).casefold()]
     return matches[0] if len(matches) == 1 else None
+
+
+def _database_enum_values(column: Any, requested_values: Any) -> tuple[str, ...]:
+    """Resolve known filter values while ignoring labels absent from this schema enum."""
+    return tuple(
+        resolved
+        for requested in requested_values
+        if (resolved := _database_enum_label(column, str(requested))) is not None
+    )
 
 
 def _shared_only_source_query(query: Any, table: Table) -> Any:
@@ -2221,11 +2230,15 @@ def prepare_handoff_draft(
             if table_name == "appointments" and payload.purpose == "professional_appointment":
                 query = query.where(table.c.id == payload.appointment_id)
             if table_name == "care_events" and "event_type" in table.c:
-                query = query.where(table.c.event_type.notin_(DAILY_CARE_EVENT_TYPES))
+                excluded_event_types = _database_enum_values(table.c.event_type, DAILY_CARE_EVENT_TYPES)
+                if excluded_event_types:
+                    query = query.where(table.c.event_type.notin_(excluded_event_types))
             if spec.get("active_open_questions_only") and "status" in table.c:
-                query = query.where(table.c.status.in_(("open", "unresolved")))
+                active_statuses = _database_enum_values(table.c.status, ("open", "unresolved"))
+                query = query.where(table.c.status.in_(active_statuses) if active_statuses else false())
             if spec.get("necessary_questions_only") and "necessity" in table.c:
-                query = query.where(table.c.necessity == "necessary")
+                necessary_label = _database_enum_label(table.c.necessity, "necessary")
+                query = query.where(table.c.necessity == necessary_label if necessary_label is not None else false())
             if spec.get("active_assessments_only"):
                 if "is_active" in table.c:
                     query = query.where(table.c.is_active.is_(True))
@@ -2277,21 +2290,27 @@ def prepare_handoff_draft(
                         active = and_(active, table.c.superseded_by_assessment_id.is_(None))
                     query = query.where(or_(active, in_window))
                 elif spec.get("include_unresolved_outside_window") and "resolution_status" in table.c:
+                    resolution_column = table.c.resolution_status
+                    resolved_values = _database_enum_values(resolution_column, ("resolved", "completed", "closed", "dismissed"))
                     unresolved = or_(
-                        table.c.resolution_status.is_(None),
-                        table.c.resolution_status.notin_(("resolved", "completed", "closed", "dismissed")),
+                        resolution_column.is_(None),
+                        resolution_column.notin_(resolved_values) if resolved_values else true(),
                     )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_unresolved_outside_window") and "decision_status" in table.c:
+                    decision_column = table.c.decision_status
+                    resolved_values = _database_enum_values(decision_column, ("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed"))
                     unresolved = or_(
-                        table.c.decision_status.is_(None),
-                        table.c.decision_status.notin_(("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed")),
+                        decision_column.is_(None),
+                        decision_column.notin_(resolved_values) if resolved_values else true(),
                     )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_unresolved_outside_window") and "status" in table.c:
+                    status_column_ref = table.c.status
+                    resolved_values = _database_enum_values(status_column_ref, ("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed"))
                     unresolved = or_(
-                        table.c.status.is_(None),
-                        table.c.status.notin_(("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed")),
+                        status_column_ref.is_(None),
+                        status_column_ref.notin_(resolved_values) if resolved_values else true(),
                     )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_upcoming_outside_window") and "scheduled_at" in table.c:
