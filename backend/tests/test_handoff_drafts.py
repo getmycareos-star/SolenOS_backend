@@ -1988,7 +1988,13 @@ def test_shared_only_handoff_projection_uses_enum_labels_and_fails_closed_withou
     compiled_enum = str(_shared_only_source_query(select(enum_table), enum_table).compile(
         dialect=postgresql.dialect()
     ))
-    assert "information_visibility = 'SHARED'" in compiled_enum
+    compiled = _shared_only_source_query(select(enum_table), enum_table).compile(
+        dialect=postgresql.dialect()
+    )
+    assert next(
+        value for key, value in compiled.params.items()
+        if key.startswith("information_visibility")
+    ) == "SHARED"
 
     promoted_table = Table(
         "promoted_observations",
