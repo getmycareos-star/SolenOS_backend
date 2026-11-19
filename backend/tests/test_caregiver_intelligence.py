@@ -673,6 +673,13 @@ def test_multi_caregiver_summary():
         data = response.json()
         assert len(data["caregivers"]) == 2
         assert len(data["active_responsibilities"]) == 2
+
+        # The UI uses the session-scoped endpoint so a stale browser person ID
+        # cannot cause a false 403 or be used to select another care record.
+        scoped_response = client.get("/api/v1/multi-caregiver-summary")
+        assert scoped_response.status_code == 200, scoped_response.text
+        assert scoped_response.json()["person_id"] == "person-1"
+        assert len(scoped_response.json()["caregivers"]) == 2
     finally:
         teardown_db()
 
