@@ -633,6 +633,10 @@ def _normalize_reflected_fingerprint_row(row: dict) -> dict:
 def _detail_value(value):
     if value is None or isinstance(value, dict):
         return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
     if isinstance(value, (datetime, date)):
         return _iso(value)
     if isinstance(value, list):
