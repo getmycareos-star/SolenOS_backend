@@ -559,7 +559,6 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         if not target_person_id and (
             path.startswith("/api/v1/evidence/")
             or path.startswith("/api/v1/events/")
-            or path.startswith("/api/v1/learning-events/")
             or path.startswith("/api/v1/persons/")
         ):
             # These legacy person-scoped endpoints use the care-recipient ID as
