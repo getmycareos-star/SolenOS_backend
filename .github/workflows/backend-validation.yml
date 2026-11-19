@@ -47,7 +47,8 @@ permissions:
 
 concurrency:
   group: backend-validation-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep the current-main validation result instead of cancelling it on the next push.
+  cancel-in-progress: false
 
 jobs:
   tests:
