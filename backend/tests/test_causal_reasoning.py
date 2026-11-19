@@ -708,8 +708,8 @@ def test_causal_api_requires_session_and_rejects_cross_record_access():
     try:
         db = TestingSessionLocal()
         seed_person(db, person_id="person-23")
-        seed_person(db, person_id="person-24")
-        db.close()
+        # A second database row is unnecessary: scope rejection must happen
+        # before the API looks up or reveals another care record.
 
         unauthenticated = TestClient(app)
         assert unauthenticated.get("/api/v1/causal/hypotheses/person-23").status_code == 401
