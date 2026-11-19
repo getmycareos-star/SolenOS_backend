@@ -319,7 +319,7 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
     def fake_extract(text_value, *, source_event_id, source_evidence_id=None):
         return {"observations": [{
             "subject": "Patient",
-            "observation": quote,
+            "observation": "Metformin 500 mg once daily.",
             "source_quote": quote,
             "extraction_method": "test_verbatim",
         }], "open_questions": []}
@@ -450,7 +450,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
-    quote = "Metformin 500 mg once daily. Event date 2026-10-12. Recorded on 2026-10-13."
+    quote = "Metformin 1000 mg twice daily. Event date 2026-10-12. Recorded on 2026-10-13."
     source = f"[Page 1]\nMedication reconciliation: {quote}"
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
@@ -471,6 +471,18 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
         assert understood.status_code == 201, understood.text
         analysis_id = understood.json()["analysis_id"]
+
+        unsupported_correction = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 0,
+                "decision": "correct",
+                "corrected_subject": "Metformin",
+                "corrected_observation": "Metformin 5000 mg daily.",
+            },
+        )
+        assert unsupported_correction.status_code == 409, unsupported_correction.text
 
         corrected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",

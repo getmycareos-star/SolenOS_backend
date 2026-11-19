@@ -1342,6 +1342,21 @@ def review_document_candidate(
         observation = (payload.corrected_observation if payload.corrected_observation is not None else candidate.get("observation", "")).strip()
         if not subject or not observation:
             raise HTTPException(status_code=422, detail="A subject and corrected observation are required")
+        quote = candidate.get("source_quote")
+        if (
+            not isinstance(quote, str)
+            or not quote
+            or quote not in (analysis.source_text or "")
+            or subject.casefold() not in quote.casefold()
+            or observation.casefold() not in quote.casefold()
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A document-derived correction must remain directly supported by its preserved source quotation. "
+                    "Record new caregiver-provided information as a separate care update instead."
+                ),
+            )
         candidate["subject"] = subject[:120]
         candidate["observation"] = observation[:500]
         candidate["field_type"] = classify_field(subject, observation, str(candidate.get("source_quote") or ""))
