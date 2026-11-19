@@ -15,6 +15,9 @@ from sqlalchemy import and_, case, cast, exists, literal, or_, String
 from sqlalchemy.exc import IntegrityError
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 import base64
 import hashlib
 
@@ -31,6 +34,24 @@ from app.services.web_push_config import vapid_configuration_error
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 30
 BATCH_SIZE = 100
+
+
+def _vapid_private_key_der(value):
+    """Convert supported VAPID key configuration to the DER form py_vapid expects."""
+    normalized = (value or "").replace("\\n", "\n").strip()
+    if normalized.startswith("-----BEGIN"):
+        private_key = serialization.load_pem_private_key(
+            normalized.encode("ascii"),
+            password=None,
+        )
+    else:
+        raw = base64.urlsafe_b64decode(normalized + ("=" * (-len(normalized) % 4)))
+        if len(raw) != 32:
+            raise ValueError("VAPID private key must be PEM or a 32-byte base64url scalar")
+        private_key = ec.derive_private_key(int.from_bytes(raw, "big"), ec.SECP256R1())
+    if not isinstance(private_key, ec.EllipticCurvePrivateKey) or not isinstance(private_key.curve, ec.SECP256R1):
+        raise ValueError("VAPID private key must use the P-256 curve")
+    return private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
 
 
 def _notification_id(reminder):
@@ -441,7 +462,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 webpush(
                     subscription_info=subscription_info,
                     data=payload,
-                    vapid_private_key=settings.vapid_private_key.replace("\\n", "\n"),
+                    vapid_private_key=_vapid_private_key_der(settings.vapid_private_key),
                     vapid_claims={"sub": settings.vapid_subject},
                     ttl=60 * 60,
                 )
@@ -491,7 +512,6 @@ def deliver_pending_web_pushes(db=None, now=None):
                 # credential-like values that provider exceptions may echo.
                 diagnostic = str(exc)
                 for sensitive in (
-                    subscription.endpoint,
                     settings.vapid_private_key,
                     settings.vapid_public_key,
                     settings.secret_key,
