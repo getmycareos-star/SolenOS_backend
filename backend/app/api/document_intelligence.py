@@ -1287,6 +1287,10 @@ def review_document_candidate(
                     if active_assertion else None
                 ),
                 "written_to_lcr": bool(active_assertion),
+                "longitudinal_retrieval_status": (
+                    candidate.get("longitudinal_retrieval_status", "not_verified")
+                    if active_assertion else "not_applicable"
+                ),
                 "review_required": False,
                 "idempotent_replay": True,
             }
