@@ -79,6 +79,24 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         ],
         "order": ["assessed_at"],
     },
+    "evidence_freshness_policies": {
+        "table": "evidence_freshness_policies",
+        "required": False,
+        "fields": [
+            "id", "domain_key", "policy_version", "max_age_days", "historical_after_days",
+            "rationale", "created_by_caregiver_id", "created_at",
+        ],
+        "order": ["created_at"],
+    },
+    "evidence_completeness_policies": {
+        "table": "evidence_completeness_policies",
+        "required": False,
+        "fields": [
+            "id", "domain_key", "purpose_key", "policy_version", "required_fields",
+            "rationale", "created_by_caregiver_id", "created_at",
+        ],
+        "order": ["created_at"],
+    },
     "evidence_completeness_assessments": {
         "table": "evidence_completeness_assessments",
         "required": False,
@@ -454,6 +472,16 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
             f"claim_assessment_{status}",
             "This is the latest retrieved human claim-assessment status, not an independent clinical verification. Preserve its rationale, evidence links, and version.",
         )
+    if source_name == "evidence_freshness_policies":
+        return (
+            "evidence_freshness_policy_defined",
+            "This is an explicitly recorded caregiver-selected freshness policy. Its thresholds are policy boundaries, not clinical guidance or proof that a source is accurate.",
+        )
+    if source_name == "evidence_completeness_policies":
+        return (
+            "evidence_completeness_policy_defined",
+            "This is a purpose-specific checklist for linked-source coverage. It does not establish semantic sufficiency or clinical completeness.",
+        )
     if source_name == "evidence_freshness_assessments":
         status = str(item.get("freshness_status") or "undetermined").casefold()
         return (
@@ -642,7 +670,9 @@ def build_lcr_context(
                 "evidence_reviews": ("created_at",),
                 "claim_assessments": ("created_at",),
                 "evidence_freshness_assessments": ("assessed_at",),
+                "evidence_freshness_policies": ("created_at",),
                 "evidence_completeness_assessments": ("assessed_at",),
+                "evidence_completeness_policies": ("created_at",),
                 "decisions": ("decided_at", "created_at"),
                 "decision_outcomes": ("observed_at", "created_at"),
                 "timeline": ("occurred_at", "created_at"),
