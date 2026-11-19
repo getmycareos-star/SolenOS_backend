@@ -142,3 +142,61 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
             assert event_id in data["source_event_ids"], (
                 f"{workflow} did not retrieve the authorized fixture event: {data}"
             )
+
+
+def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources():
+    """Exercise the separate handoff-draft generator, not only the handoff assist workflow."""
+    with TestClient(app) as client:
+        session = _new_session(client)
+        _, evidence_ids = _record_fixture(
+            client,
+            session,
+            "Caregiver reported that the person prefers a quiet room after lunch.",
+        )
+        headers = {
+            "Authorization": f"Bearer {session['access_token']}",
+            "X-Request-ID": str(uuid.uuid4()),
+        }
+        response = client.post(
+            "/api/v1/handoff-drafts/prepare",
+            headers=headers,
+            json={
+                "purpose": "family_transition",
+                "audience": "family",
+                "window_days": 30,
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        assert data.get("draft_persisted") is True, data
+        assert data.get("generation_status") == "generated", data
+        assert data.get("validation_status") == "exact_quote_reference_validation_passed", data
+        assert data.get("review_status") == "pending_review", data
+        assert data.get("read_only") is True, data
+        assert data.get("requires_caregiver_review") is True, data
+        assert data.get("creates_handoff") is False, data
+        assert data.get("updates_lcr") is False, data
+
+        generation = data.get("generation") or {}
+        assert generation.get("provider") == "ollama", generation
+        assert "qwen" in str(generation.get("model", "")).lower(), generation
+        sections = generation.get("sections") or []
+        assert sections, generation
+
+        source_refs = {
+            f"{item.get('source_table')}:{item.get('source_id')}"
+            for item in data.get("source_references", [])
+            if item.get("source_table") and item.get("source_id")
+        }
+        assert all(item.get("source_ref") in source_refs for item in sections), data
+
+        provenance = data.get("claim_provenance") or {}
+        assert provenance.get("coverage") == "all_sections_linked", provenance
+        assert provenance.get("unmatched_statement_count") == 0, provenance
+        referenced_evidence = {
+            str(evidence_id)
+            for item in data.get("source_references", [])
+            for evidence_id in (item.get("evidence_ids") or [])
+        }
+        assert set(evidence_ids).intersection(referenced_evidence), data
