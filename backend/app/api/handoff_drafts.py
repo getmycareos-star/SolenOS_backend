@@ -12,7 +12,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, false, true, text as sql_text
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, false, text as sql_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -2294,7 +2294,7 @@ def prepare_handoff_draft(
                     resolved_values = _database_enum_values(resolution_column, ("resolved", "completed", "closed", "dismissed"))
                     unresolved = or_(
                         resolution_column.is_(None),
-                        resolution_column.notin_(resolved_values) if resolved_values else true(),
+                        resolution_column.notin_(resolved_values) if resolved_values else false(),
                     )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_unresolved_outside_window") and "decision_status" in table.c:
@@ -2302,7 +2302,7 @@ def prepare_handoff_draft(
                     resolved_values = _database_enum_values(decision_column, ("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed"))
                     unresolved = or_(
                         decision_column.is_(None),
-                        decision_column.notin_(resolved_values) if resolved_values else true(),
+                        decision_column.notin_(resolved_values) if resolved_values else false(),
                     )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_unresolved_outside_window") and "status" in table.c:
@@ -2310,7 +2310,7 @@ def prepare_handoff_draft(
                     resolved_values = _database_enum_values(status_column_ref, ("resolved", "completed", "cancelled", "canceled", "closed", "superseded", "dismissed"))
                     unresolved = or_(
                         status_column_ref.is_(None),
-                        status_column_ref.notin_(resolved_values) if resolved_values else true(),
+                        status_column_ref.notin_(resolved_values) if resolved_values else false(),
                     )
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_upcoming_outside_window") and "scheduled_at" in table.c:
