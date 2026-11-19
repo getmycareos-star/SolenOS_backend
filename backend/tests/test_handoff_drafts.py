@@ -1190,6 +1190,7 @@ def test_qwen_handoff_generation_attaches_exact_source_text_to_selected_referenc
     assert result["sections"][0]["supporting_quote"] == "Caregiver reported a quiet morning."
     assert result["authority"] == "living_care_record_source_snapshot"
     assert result["semantic_entailment_status"] == "caregiver_review_required"
+    assert result["sections"][0]["semantic_entailment_status"] == "caregiver_review_required"
 
 
 def test_qwen_handoff_generation_rejects_quote_not_present_in_lcr_source(monkeypatch):
