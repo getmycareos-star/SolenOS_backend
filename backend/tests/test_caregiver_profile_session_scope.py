@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,8 +9,8 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Caregiver, Person
-from app.models.caregiver_intelligence import CaregiverProfile, CaregiverObservation, CaregiverHandoff
-from app.core.caregiver_enums import InformationVisibility
+from app.models.caregiver_intelligence import CaregiverProfile, CaregiverObservation, CaregiverHandoff, CaregiverRole
+from app.core.caregiver_enums import InformationVisibility, CaregiverRoleType
 
 pytestmark = pytest.mark.session_security
 
@@ -165,6 +166,61 @@ def test_handoff_acceptance_is_limited_to_the_intended_recipient():
         assert persisted.is_completed is False
     finally:
         db.close()
+
+
+def test_caregiver_role_lifecycle_is_scoped_and_persisted():
+    client = TestClient(app)
+    session = create_session(client)
+    person_id = session["person"]["id"]
+    own_profile_id = session["caregiver"]["profile_id"]
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+
+    created = client.post(
+        "/api/v1/caregiver-roles",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "caregiver_id": own_profile_id,
+            "role_type": "appointment_coordinator",
+            "scope": "Coordinate appointment dates and transport arrangements.",
+            "effective_start": "2026-11-19T00:00:00+00:00",
+            "is_current": True,
+            "assignment_source": "caregiver_self_reported",
+        },
+    )
+    assert created.status_code == 200, created.text
+    role_id = created.json()["id"]
+    listed = client.get(f"/api/v1/caregiver-roles/{person_id}", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == role_id for item in listed.json())
+
+    other_profile_id, _ = create_second_profile(person_id)
+    db = TestSessionLocal()
+    try:
+        other_role = CaregiverRole(
+            person_id=person_id,
+            caregiver_id=other_profile_id,
+            role_type=CaregiverRoleType.MEDICATION_MANAGER,
+            effective_start=datetime.now(timezone.utc),
+            is_current=True,
+            assignment_source="test_fixture",
+        )
+        db.add(other_role)
+        db.commit()
+        other_role_id = other_role.id
+    finally:
+        db.close()
+
+    denied = client.patch(f"/api/v1/caregiver-roles/{other_role_id}/end", headers=headers)
+    assert denied.status_code == 404, denied.text
+
+    ended = client.patch(f"/api/v1/caregiver-roles/{role_id}/end", headers=headers)
+    assert ended.status_code == 200, ended.text
+    assert ended.json()["is_current"] is False
+    assert ended.json()["effective_end"] is not None
+    remaining = client.get(f"/api/v1/caregiver-roles/{person_id}", headers=headers)
+    assert remaining.status_code == 200, remaining.text
+    assert all(item["id"] != role_id for item in remaining.json())
 
 
 def test_caregiver_profile_writes_cannot_change_another_profiles_involvement():
