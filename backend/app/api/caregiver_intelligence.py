@@ -492,6 +492,31 @@ def create_communication(communication: CaregiverCommunicationCreate, request: R
     return db_comm
 
 
+@router.get("/caregiver-communications", response_model=List[CaregiverCommunication])
+def list_scoped_communications(request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    communications = (
+        db.query(CaregiverCommunicationModel)
+        .filter(CaregiverCommunicationModel.person_id == person_id)
+        .order_by(CaregiverCommunicationModel.communication_time.desc())
+        .all()
+    )
+    visible = []
+    for item in communications:
+        recipients = set(item.recipient_caregiver_ids or [])
+        is_party = (
+            str(item.from_caregiver_id) == str(current_profile.id)
+            or str(item.to_caregiver_id or "") == str(current_profile.id)
+            or str(current_profile.id) in {str(value) for value in recipients}
+        )
+        visibility = getattr(item.visibility, "value", item.visibility)
+        is_restricted = bool(item.is_private) or str(visibility).lower() in {"private", "restricted"}
+        if is_restricted and not is_party:
+            continue
+        visible.append(item)
+    return visible
+
+
 @router.get("/caregiver-communications/{person_id}", response_model=List[CaregiverCommunication])
 def list_communications(person_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     scoped_person_id, _session_caregiver_id = _assert_person_scope(request, db, person_id)
@@ -546,6 +571,13 @@ def create_context(context: CaregiverContextCreate, request: Request, db: Sessio
     service = CaregiverIntelligenceService(db)
     db_context = service.create_context(context)
     return db_context
+
+
+@router.get("/caregiver-contexts", response_model=List[CaregiverContext])
+def list_scoped_contexts(request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id = _resolve_scoped_session(request, db)
+    service = CaregiverIntelligenceService(db)
+    return service.get_contexts(person_id)
 
 
 @router.get("/caregiver-contexts/{person_id}", response_model=List[CaregiverContext])
@@ -635,6 +667,13 @@ def get_scoped_multi_caregiver_summary(request: Request, db: Session = Depends(g
     person_id, _caregiver_id = _resolve_scoped_session(request, db)
     service = CaregiverIntelligenceService(db)
     return service.get_multi_caregiver_summary(person_id)
+
+
+@router.get("/care-network-state")
+def get_scoped_care_network_state(request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id = _resolve_scoped_session(request, db)
+    service = CaregiverIntelligenceService(db)
+    return service.get_care_network_state(person_id)
 
 
 @router.get("/care-network-state/{person_id}")
