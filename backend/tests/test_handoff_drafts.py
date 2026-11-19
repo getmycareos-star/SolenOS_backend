@@ -634,7 +634,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     assert any(item["source_table"] == "caregiver_roles" for item in refs.values())
     assert any(item["source_table"] == "caregiver_responsibilities" for item in refs.values())
     accepted_handoff = next(item for item in refs.values() if item["source_table"] == "caregiver_handoffs")
-    assert accepted_handoff["details"]["acceptance_status"] == "accepted"
+    assert accepted_handoff["details"]["acceptance_status"] == "ACCEPTED"
     assert accepted_handoff["details"]["is_completed"] is False
 
 
@@ -1201,8 +1201,12 @@ def test_qwen_handoff_generation_rejects_fabricated_source_reference(monkeypatch
         "family_transition",
         "family",
     )
-    assert result["status"] == "validation_failed"
-    assert result["sections"] == []
+    assert result["status"] == "source_only_fallback"
+    assert result["generation_contract"] == "exact_source_text_only_no_model_paraphrase"
+    assert len(result["sections"]) == 1
+    assert result["sections"][0]["source_ref"] == "care_events:real-event"
+    assert result["sections"][0]["summary"] == "Caregiver reported a quiet morning."
+    assert "invented-id" not in result["sections"][0]["source_ref"]
 
 
 def test_qwen_handoff_generation_attaches_exact_source_text_to_selected_reference(monkeypatch):
@@ -1269,8 +1273,10 @@ def test_qwen_handoff_generation_rejects_quote_not_present_in_lcr_source(monkeyp
         "recorded_at": None,
         "text": "Caregiver reported a quiet morning.",
     }], "family_transition", "family")
-    assert result["status"] == "validation_failed"
-    assert result["sections"] == []
+    assert result["status"] == "source_only_fallback"
+    assert result["generation_contract"] == "exact_source_text_only_no_model_paraphrase"
+    assert result["sections"][0]["summary"] == "Caregiver reported a quiet morning."
+    assert "The person fell twice." not in result["sections"][0]["summary"]
 
 
 def test_qwen_handoff_generation_rejects_unsupported_section_label(monkeypatch):
@@ -1303,8 +1309,10 @@ def test_qwen_handoff_generation_rejects_unsupported_section_label(monkeypatch):
         "family_transition",
         "family",
     )
-    assert result["status"] == "validation_failed"
-    assert result["sections"] == []
+    assert result["status"] == "source_only_fallback"
+    assert result["generation_contract"] == "exact_source_text_only_no_model_paraphrase"
+    assert result["sections"][0]["section"] != "Diagnosis"
+    assert result["sections"][0]["summary"] == "Caregiver reported a quiet morning."
 
 
 def test_document_adapter_preserves_failed_ocr_without_claiming_extraction(client):
@@ -1357,7 +1365,8 @@ def test_document_adapter_preserves_failed_ocr_without_claiming_extraction(clien
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["source_statuses"]["documents"]["status"] == "available"
+    assert body["source_statuses"]["documents"]["status"] == "partial"
+    assert body["source_statuses"]["documents"]["reason"] == "some_documents_not_extracted_or_extraction_failed"
     original_ref = next(row for row in body["source_references"] if row["source_id"] == "handoff-failed-ocr-document")
     assert original_ref["details"]["extraction_status"] == "failed"
     assert not any(row["source_type"] == "document_extracted_text" for row in body["source_references"])
@@ -1870,7 +1879,7 @@ def test_handoff_paginates_source_history_and_discloses_the_safety_ceiling(clien
     assert {"source": "care_facts", "status": "partial",
             "reason": "source_projection_reached_500_record_safety_limit",
             "returned_count": 500} in body["limitations"]
-    assert body["partial_sources"] == [{"source": "care_facts", "returned_count": 500}]
+    assert body["partial_sources"] == [{"source": "care_facts", "returned_count": 500, "reason": None}]
 
 def test_draft_includes_caregiver_reviewable_medication_assertions_with_source_lineage(client):
     test_client, session = client
