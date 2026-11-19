@@ -4,27 +4,37 @@ SolenOS Companion and Daily Capture extraction use **Qwen through Ollama's nativ
 
 ## Runtime configuration
 
-The default `OLLAMA_BASE_URL` is empty. SolenOS rejects loopback addresses such as `127.0.0.1` and `localhost` in every environment, so the backend never silently connects to a developer's desktop Ollama process. Configure the Railway private service hostname and model on the backend service:
+The backend supports two local Ollama topologies. Both use the native `POST /api/chat` endpoint, read `message.content`, and send no `Authorization` header or Qwen API key.
 
-- `OLLAMA_BASE_URL=http://${{ollama.RAILWAY_PRIVATE_DOMAIN}}:11434`
+### Current Railway production topology: bundled sidecar
+
+The current Railway backend container starts Ollama from `start-with-qwen.sh` alongside FastAPI. In this mode:
+
+- `OLLAMA_SIDECAR_ENABLED=true`
+- `OLLAMA_BASE_URL=http://127.0.0.1:11434`
 - `OLLAMA_MODEL=qwen3.5:4b`
-- `OLLAMA_TIMEOUT_SECONDS=180`
 
-No Qwen API key is needed or read by this integration.
+Loopback is accepted in production only when `OLLAMA_SIDECAR_ENABLED=true`; it refers to the Ollama process inside the same backend container, not a developer's computer. Railway logs have confirmed the bundled Ollama process and a successful native `POST /api/chat` response. Model inventory can become available before the model runner has finished loading, so inventory is not proof of inference readiness.
 
-The configured production model is `qwen3.5:4b`, matching the authenticated appointment-assist acceptance workflow and the production-image inference gate. This is a larger model than the earlier `qwen2.5:0.5b` configuration. The model has passed isolated real-inference CI, but Railway memory, CPU latency, and restart-time model installation must be verified before deployment; no production deployment is implied by these repository checks. The backend calls Ollama's native `POST /api/chat` endpoint and reads `message.content`. It sends no `Authorization` header. It does not fall back to Gemini, OpenAI, or a hosted Qwen endpoint if local Ollama is unavailable.
+### Optional topology: separate private Railway Ollama service
+
+If Ollama is moved to a separate Railway service, disable the bundled sidecar and use that service's private hostname:
+
+- `OLLAMA_SIDECAR_ENABLED=false`
+- `OLLAMA_BASE_URL=http://<service-name>.railway.internal:11434`
+- `OLLAMA_MODEL=qwen3.5:4b`
+
+Production rejects public model URLs. Do not point the backend at a public Ollama endpoint.
+
+The gateway defaults are `OLLAMA_TIMEOUT_SECONDS=180`, `OLLAMA_NUM_CTX=8192`, `OLLAMA_NUM_PREDICT=96`, and `OLLAMA_NUM_THREADS=2`; explicit Railway values override these defaults. Companion uses a separate bounded request timeout: `SOLENOS_COMPANION_TIMEOUT_SECONDS` defaults to 120 seconds and is capped at 180 seconds. The caregiver-facing request budget is 210 seconds.
+
+No Qwen API key is needed or read. The integration does not fall back to Gemini, OpenAI, or a hosted Qwen endpoint if local Ollama is unavailable. CI and production use the same model name and native API contract, but their process topologies differ: CI uses a dedicated Ollama service container while Railway production currently bundles Ollama in the backend container. Real production acceptance is therefore a separate release gate.
 
 ## Railway deployment
 
-**Do not use the local loopback URL in Railway.** Railway's backend container cannot reach Ollama on a developer's computer through `127.0.0.1`; loopback refers to the backend container itself.
+Do not interpret `127.0.0.1` as a remote model service. It is valid only for the bundled sidecar mode described above. For a separate Railway Ollama service, use its `.railway.internal` hostname and set `OLLAMA_SIDECAR_ENABLED=false`. The backend rejects public model URLs in production.
 
-For the Railway setup, follow [railway-qwen-deployment.md](railway-qwen-deployment.md). It provides a separate Ollama service image, persistent model storage instructions, and the required private service URL. The backend service must set:
-
-- `OLLAMA_BASE_URL=http://${{ollama.RAILWAY_PRIVATE_DOMAIN}}:11434`
-- `OLLAMA_MODEL=qwen3.5:4b`
-- `OLLAMA_TIMEOUT_SECONDS=180`
-
-The backend treats loopback and public model URLs as not configured in every environment; only a Railway private service URL is accepted. This prevents an incorrect localhost value from being treated as a valid remote model connection. This repository does not itself create Railway services, configure Railway variables, attach volumes, or deploy services.
+The repository defines the container startup and runtime checks; it does not create Railway services, set production variables, attach Railway volumes, or deploy production services. Verify the actual Railway source revision, variable names, volume, and deployment logs before changing the topology.
 
 ## How the three parts of SolenOS fit together
 
@@ -39,7 +49,7 @@ The user-facing mental model is: **Capture it in Daily Care. Understand it in th
 ## Runtime behavior and safety
 
 - Emergency-like language bypasses model inference and uses the existing emergency safety response.
-- If Ollama is unavailable or returns invalid output, Companion reports an explicit provider error rather than inventing a substitute answer.
+- If Ollama is unavailable or returns invalid output, Companion never marks the response as AI-generated. It may return a deterministic safety response or an exact, source-grounded excerpt only when the authorized record supports it; otherwise it returns an explicit unavailable response. The frontend labels every non-Qwen reply so it cannot be mistaken for successful model inference.
 - Companion receives only the selected, authorized care recipient's context and filters model-returned evidence IDs against evidence supplied to the model.
 - Daily Capture extraction requires candidate source quotes to match saved evidence verbatim.
 - Extracted observations remain `pending_review`; they are not automatically written as authoritative Living Care Record facts.
@@ -47,6 +57,13 @@ The user-facing mental model is: **Capture it in Daily Care. Understand it in th
 
 ## Verification
 
-After Ollama is running and the configured model is present, verify an authorized test account through `POST /api/v1/conversation/message` and submit a test capture through the supported capture route. Confirm Companion reports `provider_status=connected` and `ai_generated=true` only after a real model response; capture extraction should report `pending_review` only when grounded candidates are actually returned. Test missing models, timeouts, emergency wording, and cross-account access.
+Use an authenticated caregiver session for the checks below:
 
-Mocked CI responses verify request contracts only; they do not prove the model is installed or reachable. Before production use, confirm the live Railway service can make a real inference request and that the model remains available after restart.
+1. `GET /api/v1/assistant/installation` reports runtime reachability and model inventory only. It must not claim inference is available merely because the model appears in `/api/tags`.
+2. `GET /api/v1/assistant/readiness` remains an inventory/readiness signal and must not run a hidden model request.
+3. `GET /api/v1/assistant/status` reports `available=true` only after a recent successful generation.
+4. `POST /api/v1/conversation/message` must return `ai_generated=true` for a Qwen-generated answer, `written_to_lcr=false`, and `persistence=conversation_only`. A deterministic source or safety response must remain `ai_generated=false` and visibly labelled in the frontend.
+5. `POST /api/v1/assistant/assist` must return a real model response with `ai_generated=true`, `review_required=true`, `written_to_lcr=false`, and `persistence=read_only_assistance` for supported read-only workflows.
+6. Test cold model loading, concurrent authenticated caregivers, missing models, timeouts, long prompts, document extraction, emergency wording, cross-caregiver isolation, and recovery after an inference failure. Confirm failed inference does not remove the original upload or saved caregiver event.
+
+Mocked CI responses verify request contracts only. Isolated live-Qwen CI verifies real inference in the CI runtime. Neither substitutes for the deployed Railway acceptance workflow, which must verify the exact deployed source commit and real authenticated production inference.
