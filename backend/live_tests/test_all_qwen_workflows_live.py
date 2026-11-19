@@ -75,8 +75,34 @@ def test_enabled_workflow_contract_is_complete():
     assert set(WORKFLOW_REQUESTS) == set(ENABLED_WORKFLOWS)
 
 
+@pytest.fixture(scope="module")
+def live_qwen_context():
+    """Reuse one real PostgreSQL-backed client and source fixture across 39 model calls.
+
+    Recreating TestClient for every workflow restarts the application lifespan,
+    its background workers, and the database fixture setup 39 times. A single
+    isolated synthetic care record keeps the real Qwen calls and source checks
+    intact while avoiding repeated worker startup and duplicate capture jobs.
+    """
+    with TestClient(app) as client:
+        session = _new_session(client)
+        event_id, _ = _record_fixture(client, session)
+        medication_event_id, medication_evidence_ids = _record_fixture(
+            client,
+            session,
+            "Medication observation: caregiver reported that the morning medication was taken.",
+        )
+        yield {
+            "client": client,
+            "session": session,
+            "event_id": event_id,
+            "medication_event_id": medication_event_id,
+            "medication_evidence_ids": medication_evidence_ids,
+        }
+
+
 @pytest.mark.parametrize("workflow", ENABLED_WORKFLOWS)
-def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_output(workflow, monkeypatch):
+def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_output(workflow, live_qwen_context, monkeypatch):
     # Test-only capture: if a real-model draft is rejected, expose the synthetic
     # draft and repair output in the CI assertion so the failing validator rule
     # can be diagnosed. Nothing is added to production logs or caregiver data.
@@ -91,15 +117,13 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
         return draft
 
     monkeypatch.setattr(collaboration_api, "qwen_chat", capture_qwen_chat)
-    with TestClient(app) as client:
-        session = _new_session(client)
-        event_id, _ = _record_fixture(client, session)
-        medication_event_id, medication_evidence_ids = _record_fixture(
-            client, session,
-            "Medication observation: caregiver reported that the morning medication was taken.",
-        )
-        headers = {"Authorization": f"Bearer {session['access_token']}"}
-        response = client.post(
+    client = live_qwen_context["client"]
+    session = live_qwen_context["session"]
+    event_id = live_qwen_context["event_id"]
+    medication_event_id = live_qwen_context["medication_event_id"]
+    medication_evidence_ids = live_qwen_context["medication_evidence_ids"]
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    response = client.post(
             "/api/v1/assistant/assist",
             headers=headers,
             json={
@@ -144,20 +168,16 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
             )
 
 
-def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources():
+def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qwen_context):
     """Exercise the separate handoff-draft generator, not only the handoff assist workflow."""
-    with TestClient(app) as client:
-        session = _new_session(client)
-        _, evidence_ids = _record_fixture(
-            client,
-            session,
-            "Caregiver reported that the person prefers a quiet room after lunch.",
-        )
-        headers = {
-            "Authorization": f"Bearer {session['access_token']}",
-            "X-Request-ID": str(uuid.uuid4()),
-        }
-        response = client.post(
+    client = live_qwen_context["client"]
+    session = live_qwen_context["session"]
+    evidence_ids = live_qwen_context["medication_evidence_ids"]
+    headers = {
+        "Authorization": f"Bearer {session['access_token']}",
+        "X-Request-ID": str(uuid.uuid4()),
+    }
+    response = client.post(
             "/api/v1/handoff-drafts/prepare",
             headers=headers,
             json={
