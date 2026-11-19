@@ -729,3 +729,117 @@ def test_postgres_concurrent_tracked_record_updates_allocate_unique_revision_num
             db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
             db.commit()
         engine.dispose()
+
+def test_postgres_core_revision_writer_shares_orm_target_lock():
+    """Core LCR revisions must hold the same target lock as ORM revisions."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from app.api.care_continuity import _append_revision_for_change_item
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"core-revision-lock-person-{suffix}"
+    caregiver_id = f"core-revision-lock-caregiver-{suffix}"
+    event_id = f"core-revision-lock-event-{suffix}"
+    lock_key = f"care-state-revision:care_events:{person_id}:{event_id}"
+    core_revision_written = Event()
+    release_core_writer = Event()
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Core revision lock fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Core revision lock caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person_id,
+                event_type="daily_observation",
+                status="recorded",
+                occurred_at=REFERENCE_TIME,
+                title="Initial core revision-lock fixture",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+        def write_core_revision():
+            with Session() as db:
+                _append_revision_for_change_item(
+                    db,
+                    person_id,
+                    caregiver_id,
+                    {
+                        "target_type": "care_event",
+                        "target_id": event_id,
+                        "operation": "updated",
+                        "before_value": {"title": "Initial core revision-lock fixture"},
+                        "after_value": {"title": "Initial core revision-lock fixture"},
+                    },
+                )
+                core_revision_written.set()
+                if not release_core_writer.wait(timeout=15):
+                    raise AssertionError("Core revision lock test was not released")
+                db.commit()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(write_core_revision)
+            try:
+                assert core_revision_written.wait(timeout=15), "Core revision writer did not finish its locked write"
+                with Session() as probe:
+                    acquired = probe.execute(
+                        text("SELECT pg_try_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+                        {"lock_key": lock_key},
+                    ).scalar_one()
+                    probe.rollback()
+                assert acquired is False, (
+                    "Core revision writer must hold the same target-scoped advisory lock as the ORM listener"
+                )
+            finally:
+                release_core_writer.set()
+            future.result(timeout=20)
+
+        with Session() as db:
+            revisions = db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+                CareStateRevision.target_type == "care_events",
+                CareStateRevision.target_id == event_id,
+            ).order_by(CareStateRevision.revision_number.asc()).all()
+            assert [row.revision_number for row in revisions] == [1, 2]
+            core_revisions = db.execute(
+                text(
+                    "SELECT revision_number FROM care_event_revisions "
+                    "WHERE person_id = :person_id AND event_id = :event_id"
+                ),
+                {"person_id": person_id, "event_id": event_id},
+            ).scalars().all()
+            assert core_revisions == [1]
+    finally:
+        release_core_writer.set()
+        with Session() as db:
+            db.execute(
+                text("DELETE FROM care_event_revisions WHERE person_id = :person_id"),
+                {"person_id": person_id},
+            )
+            db.execute(
+                text("DELETE FROM care_state_revisions WHERE person_id = :person_id"),
+                {"person_id": person_id},
+            )
+            db.query(CareEvent).filter(
+                CareEvent.id == event_id,
+                CareEvent.person_id == person_id,
+            ).delete(synchronize_session=False)
+            db.query(Caregiver).filter(
+                Caregiver.id == caregiver_id,
+                Caregiver.person_id == person_id,
+            ).delete(synchronize_session=False)
+            db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()
+
