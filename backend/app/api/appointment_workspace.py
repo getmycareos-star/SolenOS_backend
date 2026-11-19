@@ -21,7 +21,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, CareAssertion, CareStateRevision
+from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.uncertainty import Contradiction, OpenQuestion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
@@ -582,6 +582,156 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     for evidence_id, source in evidence_sources.items():
         source["freshness_assessments"] = freshness_by_evidence.get(str(evidence_id), [])
 
+    # Source review, claim assessment and completeness are distinct persisted
+    # records. Retrieve them only inside this person's preparation scope and
+    # preserve the limits of each assessment instead of collapsing them into
+    # a single "verified" flag.
+    evidence_review_records = []
+    evidence_reviews_by_evidence: dict[str, list[dict]] = {}
+    evidence_review_schema_available = inspect(db.get_bind()).has_table("evidence_review_records")
+    evidence_review_status = "empty" if evidence_review_schema_available else "unavailable"
+    if referenced_evidence_ids and evidence_review_schema_available:
+        try:
+            review_rows = (
+                db.query(EvidenceReviewRecord)
+                .filter(
+                    EvidenceReviewRecord.person_id == person_id,
+                    EvidenceReviewRecord.evidence_id.in_(sorted(referenced_evidence_ids)),
+                )
+                .order_by(EvidenceReviewRecord.created_at.desc())
+                .limit(101)
+                .all()
+            )
+            review_has_more = len(review_rows) > 100
+            seen_review_pairs = set()
+            for review in review_rows[:100]:
+                pair = (str(review.evidence_id), str(review.review_type))
+                if pair in seen_review_pairs:
+                    continue
+                seen_review_pairs.add(pair)
+                item = {
+                    "review_id": str(review.id),
+                    "evidence_id": str(review.evidence_id),
+                    "review_type": review.review_type,
+                    "outcome": review.outcome,
+                    "rationale": review.rationale,
+                    "criteria": review.criteria or [],
+                    "policy_version": review.policy_version,
+                    "reviewed_by_caregiver_id": str(review.reviewed_by_caregiver_id) if review.reviewed_by_caregiver_id else None,
+                    "created_at": _iso(review.created_at),
+                    "interpretation_limit": "This is a recorded source review, not independent confirmation of a care fact or clinical instruction.",
+                }
+                evidence_review_records.append(item)
+                evidence_reviews_by_evidence.setdefault(str(review.evidence_id), []).append(item)
+            evidence_review_status = "available" if evidence_review_records else "empty"
+        except Exception:
+            db.rollback()
+            evidence_review_records = []
+            evidence_reviews_by_evidence = {}
+            evidence_review_status = "failed"
+
+    claim_assessments = []
+    claim_assessments_by_claim: dict[str, dict] = {}
+    claim_assessment_schema_available = inspect(db.get_bind()).has_table("evidence_claim_assessments")
+    claim_assessment_status = "empty" if claim_assessment_schema_available else "unavailable"
+    assertion_ids = [str(row["source_id"]) for row in assertion_items]
+    if assertion_ids and claim_assessment_schema_available:
+        try:
+            claim_rows = (
+                db.query(EvidenceClaimAssessment)
+                .filter(
+                    EvidenceClaimAssessment.person_id == person_id,
+                    EvidenceClaimAssessment.claim_id.in_(assertion_ids),
+                )
+                .order_by(EvidenceClaimAssessment.created_at.desc(), EvidenceClaimAssessment.claim_version.desc())
+                .limit(101)
+                .all()
+            )
+            claim_has_more = len(claim_rows) > 100
+            for assessment in claim_rows[:100]:
+                claim_id = str(assessment.claim_id)
+                if claim_id in claim_assessments_by_claim:
+                    continue
+                item = {
+                    "assessment_id": str(assessment.id),
+                    "claim_id": claim_id,
+                    "claim_version": assessment.claim_version,
+                    "status": assessment.status,
+                    "rationale": assessment.rationale,
+                    "policy_version": assessment.policy_version,
+                    "evidence_links": assessment.evidence_links or [],
+                    "reviewed_by_caregiver_id": str(assessment.reviewed_by_caregiver_id),
+                    "supersedes_assessment_id": str(assessment.supersedes_assessment_id) if assessment.supersedes_assessment_id else None,
+                    "superseded_by_claim_id": str(assessment.superseded_by_claim_id) if assessment.superseded_by_claim_id else None,
+                    "created_at": _iso(assessment.created_at),
+                    "interpretation_limit": "Claim assessment status is not an independent clinical verification; retain its evidence links and rationale.",
+                }
+                claim_assessments.append(item)
+                claim_assessments_by_claim[claim_id] = item
+            claim_assessment_status = "available" if claim_assessments else "empty"
+        except Exception:
+            db.rollback()
+            claim_assessments = []
+            claim_assessments_by_claim = {}
+            claim_assessment_status = "failed"
+
+    completeness_assessments = []
+    completeness_by_evidence: dict[str, list[dict]] = {}
+    completeness_schema_available = inspect(db.get_bind()).has_table("evidence_completeness_assessments")
+    completeness_status = "empty" if completeness_schema_available else "unavailable"
+    if referenced_evidence_ids and completeness_schema_available:
+        try:
+            completeness_rows = (
+                db.query(EvidenceCompletenessAssessment)
+                .filter(EvidenceCompletenessAssessment.person_id == person_id)
+                .order_by(EvidenceCompletenessAssessment.assessed_at.desc())
+                .limit(501)
+                .all()
+            )
+            completeness_has_more = len(completeness_rows) > 500
+            for assessment in completeness_rows[:500]:
+                linked_ids = [str(value) for value in (assessment.evidence_ids or [])]
+                if str(assessment.subject_id) not in referenced_evidence_ids and not referenced_evidence_ids.intersection(linked_ids):
+                    continue
+                item = {
+                    "assessment_id": str(assessment.id),
+                    "policy_id": str(assessment.policy_id),
+                    "policy_version": assessment.policy_version,
+                    "subject_type": assessment.subject_type,
+                    "subject_id": str(assessment.subject_id),
+                    "assessment_status": assessment.assessment_status,
+                    "required_fields": assessment.required_fields or [],
+                    "satisfied_fields": assessment.satisfied_fields or [],
+                    "missing_fields": assessment.missing_fields or [],
+                    "field_evidence": assessment.field_evidence_json,
+                    "evidence_ids": linked_ids,
+                    "rationale": assessment.rationale,
+                    "assessment_basis": assessment.assessment_basis,
+                    "semantic_sufficiency": assessment.semantic_sufficiency,
+                    "assessed_at": _iso(assessment.assessed_at),
+                    "interpretation_limit": "Completeness describes recorded field coverage only; it does not prove semantic sufficiency or care safety.",
+                }
+                completeness_assessments.append(item)
+                for evidence_id in set(linked_ids + ([str(assessment.subject_id)] if assessment.subject_type == "evidence" else [])):
+                    if evidence_id in referenced_evidence_ids:
+                        completeness_by_evidence.setdefault(evidence_id, []).append(item)
+            completeness_status = "available" if completeness_assessments else "empty"
+        except Exception:
+            db.rollback()
+            completeness_assessments = []
+            completeness_by_evidence = {}
+            completeness_status = "failed"
+
+    for evidence_id, source in evidence_sources.items():
+        source["evidence_reviews"] = evidence_reviews_by_evidence.get(str(evidence_id), [])
+        source["completeness_assessments"] = completeness_by_evidence.get(str(evidence_id), [])
+
+    for row in assertion_items:
+        row["claim_assessments"] = (
+            [claim_assessments_by_claim[row["source_id"]]]
+            if row["source_id"] in claim_assessments_by_claim else []
+        )
+
     for row in facts + event_items + appointment_items + assertion_items + question_items + contradiction_items:
         row["freshness_assessments"] = [
             assessment
@@ -667,6 +817,25 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "retrieval_complete": freshness_schema_available and not freshness_has_more,
             "record_limit": 100,
         },
+        "evidence_review_records": {
+            "returned_count": len(evidence_review_records),
+            "retrieval_complete": evidence_review_status in {"available", "empty"},
+            "status": evidence_review_status,
+            "record_limit": 100,
+        },
+        "evidence_claim_assessments": {
+            "returned_count": len(claim_assessments),
+            "retrieval_complete": claim_assessment_status in {"available", "empty"},
+            "status": claim_assessment_status,
+            "record_limit": 100,
+        },
+        "evidence_completeness_assessments": {
+            "returned_count": len(completeness_assessments),
+            "has_more": completeness_has_more if "completeness_has_more" in locals() else False,
+            "retrieval_complete": completeness_status in {"available", "empty"} and not (completeness_has_more if "completeness_has_more" in locals() else False),
+            "status": completeness_status,
+            "record_limit": 500,
+        },
     }
     return {
         "person_scope_verified": True,
@@ -685,6 +854,9 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "living_care_record_context": living_care_record_context,
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
+        "evidence_review_records": evidence_review_records,
+        "claim_assessments": claim_assessments,
+        "completeness_assessments": completeness_assessments,
         "freshness_assessment_scope": {
             "status": (
                 "unavailable_schema" if not freshness_schema_available
@@ -714,6 +886,9 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "unavailable" if not freshness_schema_available
                 else "available" if freshness_assessments else "empty"
             ),
+            "evidence_review_records": evidence_review_status,
+            "evidence_claim_assessments": claim_assessment_status,
+            "evidence_completeness_assessments": completeness_status,
             "medications_and_allergies": "unavailable",
             "documents": document_source_status,
             "community": "not_authorized",
