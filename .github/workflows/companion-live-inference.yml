@@ -148,7 +148,7 @@ jobs:
         run: |
           failed=0
           for suite in DOCUMENT WORKFLOWS COMPANION DAILY_CAPTURE APPOINTMENT; do
-            variable_name="\${suite}_OUTCOME"
+            variable_name="${suite}_OUTCOME"
             outcome="$(printenv "$variable_name")"
             printf '%s: %s\n' "$suite" "$outcome"
             if [ "$outcome" != "success" ]; then failed=1; fi
