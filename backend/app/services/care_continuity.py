@@ -414,15 +414,18 @@ def _record_open_question_revision(
     db.flush()
 
 
-def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True, source_context: dict | None = None) -> CareAssertion:
+def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True, source_context: dict | None = None, assertion_status: str = "reported") -> CareAssertion:
     """Store every report; create/update unresolved conflict metadata without selecting a winner."""
     if payload.epistemic_state == "verified":
         raise HTTPException(status_code=422, detail="Verified assertions require a persisted verification review; direct assertion creation cannot self-certify")
     if payload.epistemic_state in {"conflicting", "missing"}:
         raise HTTPException(status_code=422, detail="Conflicting and missing are derived record states and cannot be assigned to an individual assertion")
+    if assertion_status not in {"reported", "accepted", "review_required", "caregiver_reviewed"}:
+        raise ValueError("assertion_status must be assigned by a trusted review workflow")
     assertion = CareAssertion(**payload.model_dump())
     if source_context is not None:
         assertion.source_context = source_context
+    assertion.assertion_status = assertion_status
     # AI proposal lineage is an interpretation, never a caregiver report or verified fact.
     if payload.source_proposal_id:
         assertion.epistemic_state = "inferred"
@@ -441,7 +444,6 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
         found = {row[0] for row in evidence_rows}
         if found != set(payload.evidence_ids):
             raise HTTPException(status_code=422, detail="Every evidence ID must exist and belong to the same care record")
-    assertion.assertion_status = "reported"
     db.add(assertion)
     db.flush()
 
