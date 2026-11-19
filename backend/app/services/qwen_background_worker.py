@@ -544,8 +544,13 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
 
     try:
         evidence_payload = json.loads(evidence.source_text or "{}")
+        evidence_payload_is_json = True
     except (TypeError, ValueError):
+        # The legacy Add Record route stores the caregiver's original sentence
+        # directly as evidence.source_text rather than inside a JSON envelope.
+        # Preserve that exact source when processing its durable background job.
         evidence_payload = {}
+        evidence_payload_is_json = False
     try:
         job_context = json.loads(job.context_text or "{}")
     except (TypeError, ValueError):
@@ -582,6 +587,13 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         if not isinstance(source_text, str) or not source_text.strip():
             quick_check_in = evidence_payload.get("quick_check_in") if isinstance(evidence_payload, dict) else None
             source_text = json.dumps(quick_check_in, ensure_ascii=False, sort_keys=True, default=str) if isinstance(quick_check_in, dict) else None
+    if (
+        (not isinstance(source_text, str) or not source_text.strip())
+        and not evidence_payload_is_json
+        and isinstance(evidence.source_text, str)
+        and evidence.source_text.strip()
+    ):
+        source_text = evidence.source_text
     if not isinstance(source_text, str) or not source_text.strip():
         try:
             event_detail = json.loads(event.description or "{}")
