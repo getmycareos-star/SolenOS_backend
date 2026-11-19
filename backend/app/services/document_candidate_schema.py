@@ -268,6 +268,8 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str, subject:
         warnings.append("The source wording is conditional; retain the condition and do not present it as a universal instruction.")
     if markers["temporal_context"] == "historical":
         warnings.append("The source wording is historical; do not present it as the current care state without reconciliation.")
+    if markers["temporal_context"] == "changed_over_time":
+        warnings.append("The source describes a change from an earlier state; preserve the earlier and later context rather than treating this as a standalone current fact.")
     if markers["statement_kind"] == "recommendation":
         warnings.append("This passage contains a recommendation; the document does not establish that the recommendation was completed or followed.")
     if not excerpt.strip():
