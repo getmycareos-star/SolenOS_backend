@@ -230,7 +230,8 @@ def test_delta_json_contract_bounds_each_finding_list_for_compact_inference():
         _parse_model_json(json.dumps(payload))
     assert exc.value.status_code == 502
     assert "item limit" in str(exc.value.detail)
-    assert DELTA_JSON_CONTRACT["properties"]["medications"]["maxItems"] == 5
+    for finding_list in ("medications", "conditions", "symptoms", "tests", "follow_ups", "contradictions", "clinical_gaps"):
+        assert DELTA_JSON_CONTRACT["properties"][finding_list]["maxItems"] == 5
 
 
 def test_care_state_revision_snapshot_detects_new_rows_with_identical_timestamps():
