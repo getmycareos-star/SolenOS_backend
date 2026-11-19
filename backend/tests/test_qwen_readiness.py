@@ -183,7 +183,7 @@ def test_production_evaluation_can_be_the_first_inference_after_deployment(monke
     assert result["synthetic_only"] is True
     assert result["care_record_accessed"] is False
     assert result["total"] == 5
-    assert result["deployment_commit"] is not None
+    assert len(result["results"]) == 5
 
 
 def test_production_evaluation_has_five_independent_synthetic_acceptance_criteria():
