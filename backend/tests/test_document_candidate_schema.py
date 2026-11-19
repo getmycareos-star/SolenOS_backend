@@ -356,3 +356,24 @@ def test_generic_assertion_input_cannot_forge_server_derived_document_context():
         },
     )
     assert "source_context" not in payload.model_dump()
+
+
+def test_definite_inability_is_not_mislabeled_as_tentative_language():
+    excerpt = "The patient could not walk without assistance."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-definite-inability",
+        source_text=f"[Page 2]\n{excerpt}",
+    )
+    assert candidate["negation_status"] == "explicitly_negated"
+    assert candidate["modality"] == "not_explicitly_marked"
+
+
+def test_temporal_when_clause_is_not_automatically_treated_as_conditional_instruction():
+    excerpt = "The patient was assessed when admitted on 2026-11-10."
+    candidate = canonical_candidate(
+        {"subject": "hospital event", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-temporal-when",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["conditionality"] == "not_explicitly_marked"
