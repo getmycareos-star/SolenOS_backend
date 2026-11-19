@@ -424,7 +424,7 @@ def _assertion_is_qualified_document_context(assertion: CareAssertion) -> bool:
         return False
     return (
         candidate.get("statement_kind") == "recommendation"
-        or candidate.get("temporal_context") == "historical"
+        or candidate.get("temporal_context") in {"historical", "changed_over_time"}
         or candidate.get("modality") == "tentative"
         or candidate.get("conditionality") == "conditional"
     )
