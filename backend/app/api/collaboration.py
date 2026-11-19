@@ -3862,7 +3862,9 @@ def evaluate_deployed_qwen(request: Request):
                     {"role": "system", "content": case["system"]},
                     {"role": "user", "content": case["context"] + "\n\nQuestion: " + case["question"]},
                 ],
-                timeout=30.0,
+                # The first request after a Railway restart must include model load time.
+                # Keep the per-case budget aligned with the provider's 180-second cap.
+                timeout=180.0,
                 options={"temperature": 0, "num_predict": 128, "num_ctx": 512},
             )
             normalized = answer.casefold()

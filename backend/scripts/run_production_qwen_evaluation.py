@@ -68,6 +68,21 @@ def semantic_pass(item: dict) -> tuple[bool, dict]:
     return bool(checks) and all(checks.values()), checks
 
 
+def deployment_contains_expected_source(expected_commit: str, deployed_commit: str) -> bool:
+    """Verify the deployed revision contains the Qwen source revision under test."""
+    if not expected_commit or not re.fullmatch(r"[0-9a-f]{40}", deployed_commit):
+        return False
+    try:
+        return subprocess.run(
+            ["git", "merge-base", "--is-ancestor", expected_commit, deployed_commit],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+    except OSError:
+        return False
+
+
 def main() -> int:
     base = os.getenv("SOLENOS_PRODUCTION_API_BASE_URL", "https://solenosbackend-production.up.railway.app").strip().rstrip("/")
     token = os.getenv("GITHUB_TOKEN", "").strip()
@@ -83,7 +98,7 @@ def main() -> int:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=240) as response:
+        with urllib.request.urlopen(request, timeout=960) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read(4000).decode("utf-8", errors="replace")
@@ -94,13 +109,7 @@ def main() -> int:
         return 1
 
     deployed_commit = str(payload.get("deployment_commit") or "").strip()
-    source_check = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", expected_commit, deployed_commit],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    ) if re.fullmatch(r"[0-9a-f]{40}", deployed_commit) else None
-    if source_check is None or source_check.returncode != 0:
+    if not deployment_contains_expected_source(expected_commit, deployed_commit):
         print(
             "Production evaluation response is not from a deployment containing the expected source commit.",
             file=sys.stderr,
@@ -119,7 +128,15 @@ def main() -> int:
     evaluated = {}
     for criterion in sorted(EXPECTED):
         passed, checks = semantic_pass(by_criterion[criterion])
-        evaluated[criterion] = {"passed": passed, "checks": checks}
+        item = by_criterion[criterion]
+        evaluated[criterion] = {
+            "passed": passed,
+            "checks": checks,
+            "server_passed": bool(item.get("passed")),
+            "server_checks": item.get("checks") or {},
+            "failure_reason": item.get("failure_reason"),
+            "answer_excerpt": str(item.get("answer") or "")[:500] or None,
+        }
     semantic_passed = sum(1 for item in evaluated.values() if item["passed"])
     report = {
         "model": payload.get("model"),
