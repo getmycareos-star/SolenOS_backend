@@ -201,6 +201,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert accepted.status_code == 200, accepted.text
     accepted_body = accepted.json()
     assert accepted_body["written_to_lcr"] is True
+    assert accepted_body["longitudinal_retrieval_status"] == "verified"
     assert accepted_body["assertion_id"]
     assert accepted_body["candidate"]["review_status"] == "accepted_by_caregiver"
     assert accepted_body["care_continuity_execution"]["source_caregiver_id"] == session["caregiver"]["id"]
