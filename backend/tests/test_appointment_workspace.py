@@ -11,7 +11,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion, CareStateRevision
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 
 engine = create_engine(
@@ -387,7 +387,81 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver_id,
         )
-        db.add_all([evidence, policy, assessment, event])
+        claim = CareAssertion(
+            id="appointment-claim",
+            person_id=person_id,
+            subject_type="care_recipient",
+            subject_id=person_id,
+            field="sleep",
+            assertion_kind="current_state",
+            asserted_value="Caregiver reported a change in sleep.",
+            source_label="Daily Care report",
+            source_text="Caregiver reported a change in sleep.",
+            evidence_ids=[evidence.id],
+            assertion_status="reported",
+            epistemic_state="reported",
+            created_by_caregiver_id=caregiver_id,
+        )
+        review = EvidenceReviewRecord(
+            id="appointment-evidence-review",
+            person_id=person_id,
+            evidence_id=evidence.id,
+            review_type="reliability",
+            outcome="unverified",
+            rationale="The original author has not been confirmed.",
+            criteria=[{"criterion": "source attribution", "result": "incomplete"}],
+            policy_version="evidence-review-v1",
+            source_attribution_snapshot="{}",
+            reviewed_by_caregiver_id=caregiver_id,
+        )
+        claim_assessment = EvidenceClaimAssessment(
+            id="appointment-claim-assessment",
+            person_id=person_id,
+            claim_id=claim.id,
+            claim_version=1,
+            status="unverified",
+            rationale="The caregiver report is retained but not independently verified.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[{
+                "evidence_id": evidence.id,
+                "relationship": "neutral",
+                "source_passage": "A dated source event",
+                "scope_note": "Source attribution remains unverified.",
+            }],
+            reviewed_by_caregiver_id=caregiver_id,
+        )
+        completeness_policy = EvidenceCompletenessPolicy(
+            id="appointment-completeness-policy",
+            person_id=person_id,
+            domain_key="document_history",
+            purpose_key="professional_handoff",
+            policy_version="completeness-v1",
+            required_fields=["author", "date"],
+            rationale="Required source fields for appointment preparation.",
+            created_by_caregiver_id=caregiver_id,
+        )
+        completeness_assessment = EvidenceCompletenessAssessment(
+            id="appointment-completeness-assessment",
+            person_id=person_id,
+            policy_id=completeness_policy.id,
+            policy_version="completeness-v1",
+            subject_type="evidence",
+            subject_id=evidence.id,
+            assessment_status="partial",
+            required_fields=["author", "date"],
+            satisfied_fields=["date"],
+            missing_fields=["author"],
+            field_evidence_json="{}",
+            evidence_ids=[evidence.id],
+            rationale="The source author is not identified.",
+            assessment_basis="linked_source_coverage_only",
+            semantic_sufficiency="not_automatically_verified",
+            assessed_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([
+            evidence, policy, assessment, event, claim, review, claim_assessment,
+            completeness_policy, completeness_assessment,
+        ])
         db.commit()
     finally:
         db.close()
@@ -405,7 +479,18 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     assert body["source_coverage"]["community"] == "not_authorized"
     assert body["source_coverage"]["medications_and_allergies"] == "unavailable"
     assert body["source_coverage"]["evidence_freshness_assessments"] == "available"
+    assert body["source_coverage"]["evidence_review_records"] == "available"
+    assert body["source_coverage"]["evidence_claim_assessments"] == "available"
+    assert body["source_coverage"]["evidence_completeness_assessments"] == "available"
     assert any(item["assessment_id"] == "appointment-freshness-assessment" for item in body["freshness_assessments"])
+    assert any(item["review_id"] == "appointment-evidence-review" for item in body["evidence_review_records"])
+    assert any(item["assessment_id"] == "appointment-claim-assessment" for item in body["claim_assessments"])
+    assert any(item["assessment_id"] == "appointment-completeness-assessment" for item in body["completeness_assessments"])
+    evidence_source = body["events"][0]["evidence_sources"][0]
+    assert evidence_source["evidence_reviews"][0]["outcome"] == "unverified"
+    assert evidence_source["completeness_assessments"][0]["semantic_sufficiency"] == "not_automatically_verified"
+    claim_row = next(item for item in body["assertions"] if item["source_id"] == "appointment-claim")
+    assert claim_row["claim_assessments"][0]["status"] == "unverified"
     shared_lcr = body["living_care_record_context"]
     assert any(item["id"] == "appointment-freshness-event" for item in shared_lcr["sources"]["events"]["items"])
     assert any(item["id"] == "appointment-freshness-evidence" for item in shared_lcr["sources"]["evidence"]["items"])
@@ -1082,6 +1167,9 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
         "open_questions": "empty",
         "contradictions": "empty",
         "evidence_freshness_assessments": "empty",
+        "evidence_review_records": "empty",
+        "evidence_claim_assessments": "empty",
+        "evidence_completeness_assessments": "empty",
         "medications_and_allergies": "unavailable",
         "documents": "empty",
         "community": "not_authorized",
