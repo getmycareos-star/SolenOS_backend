@@ -565,7 +565,7 @@ def _template_coverage(audience: str, statuses: dict) -> list[dict]:
             "coverage_note": (
                 "Medication information includes current and unreviewed reports from caregivers. These reports have not been independently checked. "
                 "No medication record does not mean none are being taken. Allergy information is not available from a connected source and must be confirmed separately. "
-                "Each detail may be missing or unverified."
+                "Each detail still requires review and may be missing or unverified."
                 if key in {"health_medication", "medication_reconciliation"}
                 else "Source coverage only; each field still requires review and may be missing or unverified."
             ),
@@ -2409,7 +2409,16 @@ def prepare_handoff_draft(
                                 "conditionality", "temporal_context", "statement_kind",
                                 "field_type", "page_number", "event_date", "recorded_date",
                             )
-                            if (value := _detail_value(document_candidate.get(key))) is not None
+                            if (
+                                (value := (
+                                    document_candidate.get(key)
+                                    if key == "page_number"
+                                    and isinstance(document_candidate.get(key), int)
+                                    and not isinstance(document_candidate.get(key), bool)
+                                    and document_candidate.get(key) > 0
+                                    else _detail_value(document_candidate.get(key))
+                                )) is not None
+                            )
                         }
                         if safe_candidate:
                             safe_context["document_candidate"] = safe_candidate
