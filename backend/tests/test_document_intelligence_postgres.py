@@ -657,7 +657,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quote_correct
             assert assertion.asserted_value.startswith(
-                f"Subject: Person\nStatement: {quote_correct}\n"
+                f"Subject: Patient\nStatement: {quote_correct}\n"
                 "Event date: Not stated or unresolved\n"
                 "Source-recorded date: Not stated in document"
             )
