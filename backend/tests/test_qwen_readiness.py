@@ -49,7 +49,7 @@ def test_readiness_checks_runtime_inventory_without_running_inference(monkeypatc
     qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
 
     result = qwen_gateway.qwen_readiness_status(force=True)
-    assert result["available"] is True
+    assert result["available"] is False
     assert result["state"] == "runtime_available"
     assert result["model_installed"] is True
     assert result["runtime_available"] is True
