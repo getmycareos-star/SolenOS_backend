@@ -4565,6 +4565,10 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 detail="A completed follow-up requires its completion time",
             )
     if resource == "assertions":
+        # The reflected legacy table stores evidence_ids as non-null TEXT and
+        # has no database default. Omitted optional links must be persisted as
+        # an empty JSON array, not SQL NULL.
+        data.setdefault("evidence_ids", [])
         epistemic_state = str(data.get("epistemic_state") or "reported").strip().lower()
         if epistemic_state not in {"reported", "observed", "verified", "inferred", "uncertain", "conflicting", "missing"}:
             raise HTTPException(status_code=422, detail="Unsupported assertion epistemic state")
