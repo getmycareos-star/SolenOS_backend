@@ -92,6 +92,31 @@ def test_explicit_temporal_window_fetches_all_matching_history_pages():
     ) is True
 
 
+def test_broad_and_temporal_history_requests_use_the_same_bounded_page_contract():
+    assert collaboration.LCR_HISTORY_PAGE_SIZE == 50
+    assert collaboration._lcr_context_page_config(
+        {"temporal_window": None}, True
+    ) == {
+        "limit_per_source": 50,
+        "max_pages": collaboration.MAX_TEMPORAL_LCR_HISTORY_PAGES,
+        "include_all_history": True,
+    }
+    assert collaboration._lcr_context_page_config(
+        {"temporal_window": {"basis": "explicit_rolling_three_months"}}, False
+    ) == {
+        "limit_per_source": 50,
+        "max_pages": collaboration.MAX_TEMPORAL_LCR_HISTORY_PAGES,
+        "include_all_history": False,
+    }
+    assert collaboration._lcr_context_page_config(
+        {"temporal_window": None}, False
+    ) == {
+        "limit_per_source": 50,
+        "max_pages": 1,
+        "include_all_history": False,
+    }
+
+
 def test_temporal_history_page_collector_merges_pages_and_marks_complete(monkeypatch):
     initial = {
         "sources": {
