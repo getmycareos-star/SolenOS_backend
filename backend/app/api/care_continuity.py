@@ -1509,11 +1509,12 @@ def read_lcr_context(
 
 @router.get("/medications")
 def current_medication_records(request: Request, db: Session = Depends(get_db)):
-    """Return only caregiver-reviewed, in-window medication assertions from the LCR.
+    """Return reviewed current medication assertions and pending reports separately.
 
-    Historical medication events are deliberately not promoted into this list.
+    Historical medication events are deliberately not promoted into the current list.
     Each medication is grouped from existing CareAssertion rows sharing a stable
-    subject_id; both a name and an explicit active status are required.
+    subject_id; both a name and an explicit active status are required. Pending
+    reports remain visibly pending and are never promoted to reviewed current medication.
     """
     person_id, _ = _scoped_identity(request, db)
     rows = db.query(CareAssertion).filter(
