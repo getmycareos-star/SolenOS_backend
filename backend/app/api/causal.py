@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 from app.core.database import get_db
+from app.api.care_delta import _scoped_identity
+from app.models.causal import CausalHypothesis as CausalHypothesisModel, AlternativeExplanation as AlternativeExplanationModel
 from app.core.causal_enums import (
     CausalRelationshipStatus,
     EvidenceStrength,
@@ -27,15 +29,54 @@ from app.services.causal_reasoning import CausalReasoningEngine
 router = APIRouter(prefix="/causal", tags=["causal"])
 
 
-def get_engine(db: Session = Depends(get_db)) -> CausalReasoningEngine:
-    return CausalReasoningEngine(db)
+def get_engine(request: Request, db: Session = Depends(get_db)) -> CausalReasoningEngine:
+    # Causal records contain sensitive longitudinal care information. Resolve
+    # scope exclusively from the server-issued bearer session, never request IDs.
+    person_id, caregiver_id = _scoped_identity(request, db)
+    engine = CausalReasoningEngine(db)
+    engine._scoped_person_id = str(person_id)
+    engine._scoped_caregiver_id = str(caregiver_id)
+    return engine
+
+
+def _require_person_scope(engine: CausalReasoningEngine, person_id: str) -> str:
+    scoped_person_id = getattr(engine, "_scoped_person_id", None)
+    if not scoped_person_id:
+        raise HTTPException(status_code=401, detail="A valid care-record session is required")
+    if str(person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    return str(scoped_person_id)
+
+
+def _require_hypothesis(engine: CausalReasoningEngine, hypothesis_id: str):
+    person_id = _require_person_scope(engine, getattr(engine, "_scoped_person_id", ""))
+    item = engine.db.query(CausalHypothesisModel).filter(
+        CausalHypothesisModel.id == str(hypothesis_id),
+        CausalHypothesisModel.person_id == person_id,
+    ).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Causal hypothesis not found")
+    return item
+
+
+def _require_explanation(engine: CausalReasoningEngine, explanation_id: str):
+    person_id = _require_person_scope(engine, getattr(engine, "_scoped_person_id", ""))
+    item = engine.db.query(AlternativeExplanationModel).filter(
+        AlternativeExplanationModel.id == str(explanation_id),
+        AlternativeExplanationModel.person_id == person_id,
+    ).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Alternative explanation not found")
+    return item
 
 
 @router.post("/hypotheses", response_model=CausalHypothesis)
 def create_hypothesis(
     hypothesis: CausalHypothesisCreate, engine: CausalReasoningEngine = Depends(get_engine)
 ):
-    return engine.create_hypothesis(hypothesis)
+    person_id = _require_person_scope(engine, hypothesis.person_id)
+    payload = hypothesis.model_copy(update={"person_id": person_id, "created_by_caregiver_id": engine._scoped_caregiver_id})
+    return engine.create_hypothesis(payload)
 
 
 @router.get("/hypotheses/{person_id}", response_model=List[CausalHypothesis])
@@ -45,6 +86,7 @@ def list_hypotheses(
     is_active: bool = True,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     return engine.list_hypotheses(person_id, status, is_active)
 
 
@@ -52,6 +94,7 @@ def list_hypotheses(
 def get_hypothesis(
     hypothesis_id: str, engine: CausalReasoningEngine = Depends(get_engine)
 ):
+    _require_hypothesis(engine, hypothesis_id)
     result = engine.get_hypothesis(hypothesis_id)
     if not result:
         raise HTTPException(status_code=404, detail="Causal hypothesis not found")
@@ -64,6 +107,8 @@ def update_hypothesis(
     update: CausalHypothesisUpdate,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
+    _require_hypothesis(engine, hypothesis_id)
+    update = update.model_copy(update={"updated_by_caregiver_id": engine._scoped_caregiver_id})
     result = engine.update_hypothesis(hypothesis_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Causal hypothesis not found")
@@ -76,7 +121,8 @@ def reassess_hypothesis(
     caregiver_id: Optional[str] = None,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
-    result = engine.reassess_hypothesis(hypothesis_id, caregiver_id)
+    _require_hypothesis(engine, hypothesis_id)
+    result = engine.reassess_hypothesis(hypothesis_id, engine._scoped_caregiver_id)
     if not result:
         raise HTTPException(status_code=404, detail="Causal hypothesis not found")
     return result
@@ -87,6 +133,9 @@ def add_evidence(
     evidence: CausalEvidenceCreate, engine: CausalReasoningEngine = Depends(get_engine)
 ):
     try:
+        _require_person_scope(engine, evidence.person_id)
+        _require_hypothesis(engine, evidence.hypothesis_id)
+        evidence = evidence.model_copy(update={"caregiver_id": engine._scoped_caregiver_id})
         return engine.add_evidence(evidence)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -98,6 +147,7 @@ def list_evidence(
     role: Optional[EvidenceRole] = None,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
+    _require_hypothesis(engine, hypothesis_id)
     return engine.list_evidence(hypothesis_id, role)
 
 
@@ -106,6 +156,9 @@ def add_alternative_explanation(
     explanation: AlternativeExplanationCreate, engine: CausalReasoningEngine = Depends(get_engine)
 ):
     try:
+        _require_person_scope(engine, explanation.person_id)
+        _require_hypothesis(engine, explanation.hypothesis_id)
+        explanation = explanation.model_copy(update={"created_by_caregiver_id": engine._scoped_caregiver_id})
         return engine.add_alternative_explanation(explanation)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -117,6 +170,7 @@ def update_alternative_explanation(
     update: AlternativeExplanationUpdate,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
+    _require_explanation(engine, explanation_id)
     result = engine.update_alternative_explanation(explanation_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Alternative explanation not found")
@@ -128,6 +182,9 @@ def add_confounder(
     confounder: ConfounderCreate, engine: CausalReasoningEngine = Depends(get_engine)
 ):
     try:
+        _require_person_scope(engine, confounder.person_id)
+        _require_hypothesis(engine, confounder.hypothesis_id)
+        confounder = confounder.model_copy(update={"created_by_caregiver_id": engine._scoped_caregiver_id})
         return engine.add_confounder(confounder)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -137,6 +194,7 @@ def add_confounder(
 def get_evidence_trace(
     hypothesis_id: str, engine: CausalReasoningEngine = Depends(get_engine)
 ):
+    _require_hypothesis(engine, hypothesis_id)
     result = engine.get_evidence_trace(hypothesis_id)
     if not result:
         raise HTTPException(status_code=404, detail="Causal hypothesis not found")
@@ -152,6 +210,7 @@ def identify_temporal_associations(
     outcome_types: Optional[List[str]] = None,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     window = timedelta(days=window_days)
     return engine.identify_temporal_associations(
         person_id, reference_event_id, window, cause_types, outcome_types
@@ -173,6 +232,8 @@ def assess_relationship(
     window_days: int = 14,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
+    caregiver_id = engine._scoped_caregiver_id
     window = timedelta(days=window_days)
     return engine.assess_relationship(
         person_id=person_id,
@@ -206,6 +267,8 @@ def assess_and_persist(
     window_days: int = 14,
     engine: CausalReasoningEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
+    caregiver_id = engine._scoped_caregiver_id
     window = timedelta(days=window_days)
     analysis = engine.assess_relationship(
         person_id=person_id,
