@@ -739,9 +739,10 @@ def test_postgres_core_revision_writer_shares_orm_target_lock():
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     suffix = uuid.uuid4().hex
-    person_id = f"core-revision-lock-person-{suffix}"
-    caregiver_id = f"core-revision-lock-caregiver-{suffix}"
-    event_id = f"core-revision-lock-event-{suffix}"
+    # These identifiers map to varchar(36) primary-key columns.
+    person_id = str(uuid.uuid4())
+    caregiver_id = str(uuid.uuid4())
+    event_id = str(uuid.uuid4())
     lock_key = f"care-state-revision:care_events:{person_id}:{event_id}"
     core_revision_written = Event()
     release_core_writer = Event()
