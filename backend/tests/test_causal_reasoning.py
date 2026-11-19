@@ -703,6 +703,34 @@ def test_api_create_and_trace_hypothesis():
         teardown_db()
 
 
+def test_causal_api_requires_session_and_rejects_cross_record_access():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        seed_person(db, person_id="person-23")
+        seed_person(db, person_id="person-24")
+        db.close()
+
+        unauthenticated = TestClient(app)
+        assert unauthenticated.get("/api/v1/causal/hypotheses/person-23").status_code == 401
+
+        client = authenticated_client("person-23")
+        assert client.get("/api/v1/causal/hypotheses/person-24").status_code == 403
+        denied_create = client.post(
+            "/api/v1/causal/hypotheses",
+            json={
+                "person_id": "person-24",
+                "potential_cause_type": "medication",
+                "potential_cause_description": "Medication change",
+                "outcome_type": "fall",
+                "outcome_description": "Fall recorded",
+            },
+        )
+        assert denied_create.status_code == 403
+    finally:
+        teardown_db()
+
+
 def test_api_repeated_relationship_strengthens():
     setup_db()
     try:
