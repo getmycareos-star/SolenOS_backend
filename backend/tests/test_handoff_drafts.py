@@ -1725,3 +1725,67 @@ def test_qwen_unavailable_uses_exact_source_only_briefing_fallback(monkeypatch):
     assert result["sections"][0]["summary"] == source_text
     assert result["sections"][0]["supporting_quote"] == source_text
     assert result["sections"][0]["source_ref"] == "care_facts:fallback-fact-001"
+
+def test_appointment_briefing_requires_and_retrieves_one_person_scoped_appointment(client):
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    db = TestSessionLocal()
+    try:
+        selected = Appointment(
+            id="briefing-selected-appointment",
+            person_id=person_id,
+            title="Primary care follow-up",
+            scheduled_at=datetime.now(timezone.utc) + timedelta(days=3),
+            provider="Primary care clinician",
+            status="scheduled",
+            preparation_notes="Review recent sleep and appetite observations.",
+            created_by_caregiver_id=caregiver_id,
+        )
+        unrelated = Appointment(
+            id="briefing-unrelated-appointment",
+            person_id=person_id,
+            title="Dental appointment",
+            scheduled_at=datetime.now(timezone.utc) + timedelta(days=10),
+            provider="Dental clinic",
+            status="scheduled",
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([selected, unrelated])
+        db.commit()
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    missing = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+    )
+    assert missing.status_code == 422, missing.text
+
+    available = test_client.get("/api/v1/handoff-drafts/appointments", headers=headers)
+    assert available.status_code == 200, available.text
+    assert {item["id"] for item in available.json()["items"]} == {
+        "briefing-selected-appointment", "briefing-unrelated-appointment"
+    }
+
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={
+            "purpose": "professional_appointment",
+            "audience": "professional",
+            "window_days": 30,
+            "appointment_id": "briefing-selected-appointment",
+        },
+    )
+    assert prepared.status_code == 200, prepared.text
+    body = prepared.json()
+    assert body["appointment_id"] == "briefing-selected-appointment"
+    assert body["selected_appointment"]["title"] == "Primary care follow-up"
+    appointment_refs = [
+        item for item in body["source_references"]
+        if item["source_table"] == "appointments"
+    ]
+    assert [item["source_id"] for item in appointment_refs] == ["briefing-selected-appointment"]
