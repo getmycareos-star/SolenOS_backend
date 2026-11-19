@@ -1060,7 +1060,13 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         },
     )
     assert shared.status_code == 201, shared.text
-    assert shared.json()["draft_id"] == draft_id
+    assert shared.json()["id"]
+    shared_draft = test_client.get(
+        f"/api/v1/handoff-drafts/{draft_id}",
+        headers={"Authorization": "Bearer " + session["access_token"]},
+    )
+    assert shared_draft.status_code == 200, shared_draft.text
+    assert shared_draft.json()["review_status"] == "shared"
 
 
 def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(client, monkeypatch):
