@@ -26,7 +26,7 @@ If Ollama is moved to a separate Railway service, disable the bundled sidecar an
 
 Production rejects public model URLs. Do not point the backend at a public Ollama endpoint.
 
-The gateway defaults are `OLLAMA_TIMEOUT_SECONDS=180`, `OLLAMA_NUM_CTX=8192`, `OLLAMA_NUM_PREDICT=96`, and `OLLAMA_NUM_THREADS=2`; explicit Railway values override these defaults. The current Railway runner log showed a 4,096-token context (`llama-server -c 4096`). Resource metrics during model loading showed a peak of approximately 7.42 GB against an 8 GB service memory limit. The live-Qwen CI workflow is therefore set to 4,096 tokens to match the observed production context rather than testing with a larger window that production may not have memory headroom to run. Do not raise the production context without measuring peak memory and restart behavior.
+The gateway defaults are `OLLAMA_TIMEOUT_SECONDS=180`, `OLLAMA_NUM_CTX=4096`, `OLLAMA_NUM_PREDICT=96`, and `OLLAMA_NUM_THREADS=2`; explicit Railway values override these defaults. The current Railway runner log showed a 4,096-token context (`llama-server -c 4096`). Resource metrics during model loading showed a peak of approximately 7.42 GB against an 8 GB service memory limit. The live-Qwen CI workflow is therefore set to 4,096 tokens to match the observed production context rather than testing with a larger window that production may not have memory headroom to run. Do not raise the production context without measuring peak memory and restart behavior.
 
 Companion uses a separate bounded request timeout: `SOLENOS_COMPANION_TIMEOUT_SECONDS` defaults to 120 seconds and is capped at 180 seconds. The caregiver-facing request budget is 210 seconds.
 
