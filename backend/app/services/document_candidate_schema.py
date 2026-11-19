@@ -261,7 +261,7 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str, subject:
         warnings.append("This may be an outdated or superseded instruction; reconcile it before treating it as current.")
     markers = statement_context_markers(excerpt)
     if markers["negation_status"] == "explicitly_negated":
-        warnings.append("The source passage contains explicit negative wording; preserve it as a negative statement, not a positive care finding.")
+        warnings.append("The source passage contains explicit negative wording; preserve the wording and its subject rather than turning it into an affirmative statement.")
     if markers["modality"] == "tentative":
         warnings.append("The source wording is tentative; do not present this statement as established.")
     if markers["conditionality"] == "conditional":
