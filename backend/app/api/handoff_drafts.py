@@ -66,6 +66,17 @@ ALLOWED_HANDOFF_SECTION_LABELS = {
 }
 
 # Fixed allowlist: no user-supplied table or column names are accepted.
+def _database_enum_label(column: Any, requested: str) -> str | None:
+    """Resolve Python-facing enum values to the exact reflected PostgreSQL label."""
+    labels = getattr(getattr(column, "type", None), "enums", None)
+    if not labels:
+        return requested
+    if requested in labels:
+        return requested
+    matches = [label for label in labels if str(label).casefold() == str(requested).casefold()]
+    return matches[0] if len(matches) == 1 else None
+
+
 SOURCES = {
     "care_facts": {
         "label": "Living Care Record facts",
@@ -2209,12 +2220,25 @@ def prepare_handoff_draft(
             if spec.get("active_status_values"):
                 status_column = spec.get("active_status_column", "status")
                 if status_column in table.c:
-                    query = query.where(table.c[status_column].in_(tuple(spec["active_status_values"])))
+                    status_column_ref = table.c[status_column]
+                    status_values = [
+                        _database_enum_label(status_column_ref, value)
+                        for value in spec["active_status_values"]
+                    ]
+                    status_values = [value for value in status_values if value is not None]
+                    query = query.where(
+                        status_column_ref.in_(tuple(status_values))
+                        if status_values else false()
+                    )
             if spec.get("shared_only"):
                 if "is_promoted_to_shared" in table.c:
                     query = query.where(table.c.is_promoted_to_shared.is_(True))
                 if "information_visibility" in table.c:
-                    query = query.where(table.c.information_visibility == "shared")
+                    visibility_column = table.c.information_visibility
+                    shared_label = _database_enum_label(visibility_column, "shared")
+                    query = query.where(
+                        visibility_column == shared_label if shared_label is not None else false()
+                    )
             if spec.get("require_caregiver_owned_evidence"):
                 evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
                 query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
