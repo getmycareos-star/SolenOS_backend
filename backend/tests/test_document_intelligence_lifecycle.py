@@ -507,6 +507,16 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         assert accepted.json()["written_to_lcr"] is True
 
         with Session() as db:
+            review_events = db.query(DocumentReviewEvent).filter_by(
+                analysis_id=analysis_id,
+                candidate_index=0,
+            ).order_by(DocumentReviewEvent.decision_version.asc()).all()
+            assert len(review_events) == 2
+            assert [event.decision for event in review_events] == ["correct", "accept"]
+            assert review_events[0].before_state["observation"] == quote
+            assert review_events[0].after_state["observation"] == "Metformin 1000 mg twice daily."
+            assert review_events[0].after_state["source_quote"] == quote
+            assert review_events[1].before_state["observation"] == "Metformin 1000 mg twice daily."
             assertion = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"]
             ).one()

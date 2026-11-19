@@ -522,7 +522,7 @@ def test_synthetic_document_semantic_gold_dataset_preserves_manual_labels():
                 "source_quote": quote,
             },
             document_id=f"semantic-gold-{case['id']}",
-            source_text=f"[Page 1]\\n{quote}",
+            source_text=f"[Page 1]\n{quote}",
         )
         for field, expected in case["expected"].items():
             assert candidate[field] == expected, (
