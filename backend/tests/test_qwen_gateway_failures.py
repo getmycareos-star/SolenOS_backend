@@ -58,6 +58,41 @@ def test_qwen_gateway_distinguishes_connection_failure(monkeypatch):
     assert error.value.status_code == 503
     assert error.value.detail["code"] == "runtime_unreachable"
 
+def test_qwen_gateway_retries_connection_refused_during_model_cold_start(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setenv("OLLAMA_STARTUP_RETRY_SECONDS", "5")
+    monkeypatch.setattr(qwen_gateway.time, "sleep", lambda _seconds: None)
+    attempts = {"count": 0}
+
+    def start_after_first_attempt(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise urllib.error.URLError(ConnectionRefusedError(111, "connection refused"))
+        return FakeResponse(json.dumps({"message": {"content": "Model is ready."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", start_after_first_attempt)
+    assert qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}]) == "Model is ready."
+    assert attempts["count"] == 2
+
+
+def test_qwen_gateway_retries_remote_disconnect_during_model_cold_start(monkeypatch):
+    from http.client import RemoteDisconnected
+
+    configure_gateway(monkeypatch)
+    monkeypatch.setenv("OLLAMA_STARTUP_RETRY_SECONDS", "5")
+    monkeypatch.setattr(qwen_gateway.time, "sleep", lambda _seconds: None)
+    attempts = {"count": 0}
+
+    def start_after_first_attempt(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise urllib.error.URLError(RemoteDisconnected("connection closed during model startup"))
+        return FakeResponse(json.dumps({"message": {"content": "Model is ready."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", start_after_first_attempt)
+    assert qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}]) == "Model is ready."
+    assert attempts["count"] == 2
+
 
 def test_qwen_gateway_distinguishes_timeout(monkeypatch):
     configure_gateway(monkeypatch)
