@@ -39,7 +39,7 @@ from app.api.document_intelligence import (
     review_document_candidate,
 )
 from app.models.care import Caregiver, Person
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.uncertainty import OpenQuestion
 from app.models.collaboration import EvidenceUpload
@@ -323,6 +323,13 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert assertion.source_context["document_candidate"]["source_attribution"] == "patient_reported"
             assert assertion.source_context["document_candidate"]["page_number"] == 1
             assert "source_excerpt" not in assertion.source_context["document_candidate"]
+            assertion_revisions = db.query(CareStateRevision).filter_by(
+                person_id=person_id,
+                target_type="care_assertions",
+                target_id=assertion_id,
+            ).all()
+            assert len(assertion_revisions) == 1, "document qualifiers must be present in the initial assertion audit snapshot"
+            assert json.loads(assertion_revisions[0].after_state)["source_context"]["document_candidate"]["source_attribution"] == "patient_reported"
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 1
             lcr_context = build_lcr_context(db, person_id, limit_per_source=50)
             assertion_source = lcr_context["sources"]["assertions"]
