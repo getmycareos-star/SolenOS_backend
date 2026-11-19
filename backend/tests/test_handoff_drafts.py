@@ -854,6 +854,46 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
     assert approval.status_code == 409, approval.text
 
 
+
+def test_qwen_appointment_briefing_uses_only_lcr_snapshot_and_appointment_context(monkeypatch):
+    import json
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen-test", 30))
+    observed = {}
+
+    def capture(messages, **kwargs):
+        observed["messages"] = messages
+        observed.update(kwargs)
+        return json.dumps({"items": [{
+            "section": "Appointment purpose and context",
+            "source_ref": "appointments:visit-1",
+            "summary": "A follow-up appointment is recorded for the person.",
+            "supporting_quote": "Follow-up visit scheduled.",
+        }]})
+
+    monkeypatch.setattr(handoff_drafts, "qwen_chat", capture)
+    result = handoff_drafts._generate_grounded_handoff([{
+        "source_table": "appointments",
+        "source_id": "visit-1",
+        "source_type": "appointment",
+        "epistemic_status": "recorded",
+        "record_status": "active",
+        "event_at": "2026-11-20T09:00:00+00:00",
+        "recorded_at": "2026-11-10T09:00:00+00:00",
+        "text": "Follow-up visit scheduled.",
+    }], "professional_appointment", "professional")
+
+    system_prompt = observed["messages"][0]["content"]
+    request_payload = json.loads(observed["messages"][1]["content"])
+    assert result["status"] == "generated"
+    assert request_payload["authoritative_source"] == "Living Care Record"
+    assert request_payload["sources"][0]["source_ref"] == "appointments:visit-1"
+    assert "appointment briefing" in system_prompt.lower()
+    assert "do not use model memory" in system_prompt.lower()
+    assert result["sections"][0]["supporting_quote"] == "Follow-up visit scheduled."
+
+
 def test_qwen_handoff_generation_rejects_fabricated_source_reference(monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
 
