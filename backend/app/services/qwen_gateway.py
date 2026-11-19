@@ -123,8 +123,38 @@ def qwen_chat(
         "num_thread": num_thread,
         "temperature": 0.2,
     }
+    # Callers may tune generation quality, but must never bypass the gateway's
+    # memory/CPU ceilings or inject arbitrary Ollama runtime options. In
+    # particular, an unbounded num_ctx override can exceed Railway's memory
+    # budget and restart the API during a caregiver request.
     if options:
-        bounded_options.update(options)
+        allowed_quality_options = {"temperature", "top_p", "top_k", "repeat_penalty"}
+        for key in allowed_quality_options:
+            if key not in options:
+                continue
+            try:
+                value = float(options[key])
+            except (TypeError, ValueError):
+                continue
+            if key == "temperature":
+                bounded_options[key] = max(0.0, min(value, 2.0))
+            elif key == "top_p":
+                bounded_options[key] = max(0.0, min(value, 1.0))
+            elif key == "top_k":
+                bounded_options[key] = max(1, min(int(value), 100))
+            elif key == "repeat_penalty":
+                bounded_options[key] = max(0.5, min(value, 2.0))
+        for key, lower, upper in (
+            ("num_ctx", 1024, 8192),
+            ("num_predict", 64, 1024),
+            ("num_thread", 1, 8),
+        ):
+            if key not in options:
+                continue
+            try:
+                bounded_options[key] = max(lower, min(int(options[key]), upper))
+            except (TypeError, ValueError):
+                continue
     payload = {
         "model": model,
         "messages": messages,
