@@ -251,7 +251,8 @@ def create_caregiver_role(role: CaregiverRoleCreate, request: Request, db: Sessi
 
 
 @router.get("/caregiver-roles/{person_id}", response_model=List[CaregiverRole])
-def list_caregiver_roles(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_caregiver_roles(person_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+    _assert_person_scope(request, db, person_id)
     service = CaregiverIntelligenceService(db)
     if caregiver_id:
         return service.get_current_roles(caregiver_id, person_id)
@@ -284,13 +285,16 @@ def create_responsibility(responsibility: CaregiverResponsibilityCreate, request
 
 
 @router.get("/caregiver-responsibilities/{person_id}", response_model=List[CaregiverResponsibility])
-def list_responsibilities(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_responsibilities(person_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+    _assert_person_scope(request, db, person_id)
     service = CaregiverIntelligenceService(db)
     return service.get_active_responsibilities(person_id, caregiver_id)
 
 
 @router.get("/caregiver-responsibilities/history/{caregiver_id}", response_model=List[CaregiverResponsibility])
-def get_responsibility_history(caregiver_id: str, person_id: str, db: Session = Depends(get_db)):
+def get_responsibility_history(caregiver_id: str, person_id: str, request: Request, db: Session = Depends(get_db)):
+    _assert_person_scope(request, db, person_id)
+    _resolve_profile_target(db, caregiver_id, person_id)
     service = CaregiverIntelligenceService(db)
     return service.get_responsibility_history(person_id, caregiver_id)
 
