@@ -650,7 +650,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         accepted_document = next(row for row in active_reviewed_assertions if row["id"] == "accepted-assertion")
         assert accepted_document["source_context"]["authority"] == "caregiver_reviewed_report_not_independently_verified"
         assert accepted_document["source_context"]["document_candidate"]["negation_status"] == "explicitly_negated"
-        companion_prompt_context = format_lcr_context_for_prompt(context["sources"])
+        companion_prompt_context = format_lcr_context_for_prompt(context)
         assert "caregiver_reviewed_report_not_independently_verified" in companion_prompt_context
         assert '"negation_status": "explicitly_negated"' in companion_prompt_context
         assert '"page_number": 2' in companion_prompt_context
