@@ -684,7 +684,8 @@ def get_care_network_state(person_id: str, request: Request, db: Session = Depen
 
 
 @router.post("/unknown-actor-activity")
-def record_unknown_actor_activity(person_id: str, activity_type: str, description: str, occurred_at: str, shared_account_id: Optional[str] = None, db: Session = Depends(get_db)):
+def record_unknown_actor_activity(person_id: str, activity_type: str, description: str, occurred_at: str, request: Request, shared_account_id: Optional[str] = None, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id = _assert_person_scope(request, db, person_id)
     service = CaregiverIntelligenceService(db)
     try:
         activity_type_enum = CaregiverActivityType(activity_type)
