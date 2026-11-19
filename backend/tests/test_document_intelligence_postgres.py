@@ -338,6 +338,16 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
         api_assertion = next(row for row in lcr_rows.json() if row["id"] == assertion_id)
         assert api_assertion["assertion_status"] == "accepted"
         assert api_assertion["source_context"]["document_candidate"]["source_attribution"] == "patient_reported"
+        current_projection = api_client.get(
+            "/api/v1/care-continuity/current-care?limit_per_source=50",
+            headers={"Authorization": "Bearer " + token},
+        )
+        assert current_projection.status_code == 200, current_projection.text
+        current_document_assertion = next(
+            item for item in current_projection.json()["items"]
+            if item["source_collection"] == "assertions" and item["id"] == assertion_id
+        )
+        assert current_document_assertion["source_context"]["document_candidate"]["source_attribution"] == "patient_reported"
 
         summary = api_client.get("/api/v1/care-continuity/summary", headers={"Authorization": "Bearer " + token})
         assert summary.status_code == 200, summary.text
