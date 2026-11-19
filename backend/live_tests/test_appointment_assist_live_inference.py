@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
+import uuid
 import os
 
 import pytest
@@ -153,3 +154,128 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
         client.close()
         app.dependency_overrides.clear()
         engine.dispose()
+
+def test_after_appointment_organizes_clinician_note_and_preserves_source_without_lcr_write(monkeypatch):
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    from app.api import collaboration as collaboration_api
+
+    original_qwen_chat = collaboration_api.qwen_chat
+    captured_messages = []
+
+    def capture_real_qwen(messages, **kwargs):
+        captured_messages.append(messages)
+        return original_qwen_chat(messages, **kwargs)
+
+    monkeypatch.setattr(collaboration_api, "qwen_chat", capture_real_qwen)
+    client = TestClient(app)
+    try:
+        created = client.post(
+            "/api/v1/sessions/anonymous",
+            json={
+                "name": "Synthetic after-appointment evaluator",
+                "caregiver_name": "Synthetic after-appointment caregiver",
+            },
+        )
+        assert created.status_code == 201, created.text
+        session = created.json()
+        token = session["access_token"]
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+
+        appointment = Appointment(
+            person_id=person_id,
+            title="Neurology review",
+            scheduled_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            scheduled_at_timezone="UTC",
+            status="completed",
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        note_text = (
+            "Clinician's after-visit note: Keep a sleep diary for two weeks. "
+            "Schedule a follow-up visit in six weeks. Call the clinic if the sleep "
+            "disruption becomes significantly worse. "
+            "Caregiver note: I understand the sleep diary part, but I am unsure "
+            "whether I should call sooner if the night waking happens again."
+        )
+        evidence_id = str(uuid.uuid4())
+        evidence = Evidence(
+            id=evidence_id,
+            person_id=person_id,
+            type="document",
+            evidence_kind="document_extraction",
+            epistemic_status="document_extracted",
+            source_text=note_text,
+            uploaded_by_caregiver_id=caregiver_id,
+            evidence_status="pending_review",
+            source_type="clinician_after_visit_note",
+            original_author="Dr. Asha Patel, Neurologist",
+            reported_by_label="Daughter",
+            reported_by_caregiver_id=caregiver_id,
+            occurred_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        with TestingSessionLocal() as db:
+            db.add_all([appointment, evidence])
+            db.commit()
+            db.refresh(appointment)
+            appointment_id = appointment.id
+            before_event_count = db.query(CareEvent).filter_by(person_id=person_id).count()
+            before_assertion_count = db.query(CareAssertion).filter_by(person_id=person_id).count()
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "after_appointment",
+                "appointment_id": appointment_id,
+                "evidence_ids": [evidence_id],
+                "text": (
+                    "Organize the clinician's after-visit note. Separate what the clinician "
+                    "said, what I understood, what remains unclear, and the reported next steps."
+                ),
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data.get("workflow") == "after_appointment", data
+        assert data.get("ai_generated") is True, data
+        assert data.get("provider_status") == "available", data
+        assert data.get("review_required") is True, data
+        assert data.get("written_to_lcr") is False, data
+        assert data.get("persistence") == "read_only_assistance", data
+        assert appointment_id in data.get("source_appointment_ids", []), data
+        assert evidence_id in data.get("source_evidence_ids", []), data
+        assert captured_messages, "The real Qwen call was not observed."
+        supplied_prompt = "\n".join(str(message.get("content", "")) for message in captured_messages[-1])
+        assert "Dr. Asha Patel, Neurologist" in supplied_prompt
+        assert "clinician_after_visit_note" in supplied_prompt
+        assert "uploader is not necessarily the source author" in supplied_prompt
+        assert "Original source text" in supplied_prompt
+        reply = data.get("reply", "")
+        assert "sleep diary" in reply.casefold(), reply
+        assert "six weeks" in reply.casefold(), reply
+        assert any(term in reply.casefold() for term in ("call the clinic", "contact the clinic", "call clinic")), reply
+        assert not __import__("re").search(
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+            reply,
+            __import__("re").IGNORECASE,
+        ), reply
+
+        with TestingSessionLocal() as db:
+            persisted_appointment = db.query(Appointment).filter_by(
+                id=appointment_id, person_id=person_id
+            ).one()
+            persisted_evidence = db.query(Evidence).filter_by(
+                id=evidence_id, person_id=person_id
+            ).one()
+            assert persisted_appointment.status == "completed"
+            assert persisted_evidence.source_text == note_text
+            assert persisted_evidence.source_text_sha256
+            assert db.query(CareEvent).filter_by(person_id=person_id).count() == before_event_count
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == before_assertion_count
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        engine.dispose()
+
