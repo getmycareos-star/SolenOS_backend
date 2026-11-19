@@ -2348,7 +2348,11 @@ def prepare_handoff_draft(
                     document_candidate = raw_context.get("document_candidate")
                     if isinstance(document_candidate, dict):
                         safe_candidate = {
-                            key: value for key in ("source_attribution", "conditionality", "document_type", "document_date")
+                            key: value for key in (
+                                "source_attribution", "negation_status", "modality",
+                                "conditionality", "temporal_context", "statement_kind",
+                                "field_type", "page_number", "event_date", "recorded_date",
+                            )
                             if (value := _detail_value(document_candidate.get(key))) is not None
                         }
                         if safe_candidate:
