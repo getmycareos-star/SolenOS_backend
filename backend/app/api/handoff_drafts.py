@@ -54,6 +54,7 @@ ALLOWED_HANDOFF_SECTION_LABELS = {
     "Conflicting or uncertain information",
     "Care preferences",
     "Caregiver-reported observations",
+    "Medication information and review status",
     "Care actions and outcomes",
     "Open questions",
     "Appointments",
@@ -949,8 +950,8 @@ def approve_handoff_draft(
     freshness = _draft_source_freshness(db, draft)
     if freshness.get("status") != "current":
         raise HTTPException(status_code=409, detail="The draft source snapshot is stale or cannot be revalidated; prepare a new draft before approval")
-    if draft.generation_status != "generated" or draft.validation_status != "exact_quote_reference_validation_passed":
-        raise HTTPException(status_code=409, detail="A validated Qwen-grounded draft is required before approval")
+    if draft.generation_status not in {"generated", "source_only_fallback"} or draft.validation_status != "exact_quote_reference_validation_passed":
+        raise HTTPException(status_code=409, detail="A source-linked briefing draft is required before approval")
     if not _validate_draft_quotes(draft.structured_content or {}, draft.source_snapshot or {}):
         raise HTTPException(status_code=409, detail="Draft grounding no longer validates; approval was refused")
     generated_sections = (
@@ -1603,6 +1604,87 @@ def _verified_medication_source(db: Session, request: Request) -> tuple[dict, li
         }, []
 
 
+def _source_only_handoff_fallback(records: list[dict], reason: str) -> dict:
+    """Produce a clearly labelled extractive draft when Qwen is unavailable.
+
+    This fallback never paraphrases, interprets, or combines care facts. Every
+    displayed statement is the saved source wording and remains linked to its
+    original record. It is not represented as Qwen-generated content.
+    """
+    eligible = [
+        {
+            "source_ref": f"{item['source_table']}:{item['source_id']}",
+            "source_type": item["source_type"],
+            "source_table": item["source_table"],
+            "epistemic_status": item["epistemic_status"],
+            "record_status": item["record_status"],
+            "event_at": item["event_at"],
+            "recorded_at": item["recorded_at"],
+            "stale_warning": bool(item.get("stale_warning")),
+            "text": str(item.get("text") or "").strip()[:1200],
+        }
+        for item in records if str(item.get("text") or "").strip()
+    ]
+    eligible.sort(
+        key=lambda item: str(item.get("event_at") or item.get("recorded_at") or ""),
+        reverse=True,
+    )
+    selected = eligible[:20]
+    sections = []
+    for item in selected:
+        if item["source_type"] == "medication_assertion":
+            section = "Medication information and review status"
+        elif item["source_table"] == "appointments":
+            section = "Appointments"
+        elif item["source_table"] in {"decision_outcomes", "care_decisions", "care_action_outcomes"}:
+            section = "Previous decisions and recorded outcomes"
+        elif item["source_table"] in {"open_questions", "information_gaps", "uncertainty_assessments"}:
+            section = "Missing information and information gaps"
+        elif item["source_table"] in {"capture_analyses", "evidence_uploads"}:
+            section = "Document-derived information"
+        elif item["source_table"] == "actions":
+            section = "Care actions and outcomes"
+        elif item["source_table"] == "care_events" or item["source_type"] == "daily_care_observation":
+            section = "Recent observations"
+        else:
+            section = "Relevant care history"
+        text = item["text"]
+        sections.append({
+            "section": section,
+            "summary": text,
+            "supporting_quote": text,
+            "text": text,
+            "source_ref": item["source_ref"],
+            "epistemic_status": item["epistemic_status"],
+            "record_status": item["record_status"],
+            "event_at": item["event_at"],
+            "recorded_at": item["recorded_at"],
+            "stale_warning": item["stale_warning"],
+            "semantic_entailment_status": "source_text_only_no_paraphrase",
+        })
+    if not sections:
+        return {
+            "status": "unavailable", "provider": None, "model": None,
+            "reason": reason, "sections": [],
+        }
+    return {
+        "status": "source_only_fallback",
+        "provider": None,
+        "model": None,
+        "sections": sections,
+        "sources_considered": len(selected),
+        "sources_available": len(eligible),
+        "authority": "living_care_record_source_snapshot",
+        "generation_contract": "exact_source_text_only_no_model_paraphrase",
+        "semantic_entailment_status": "not_applicable_no_paraphrase",
+        "interpretation_limit": (
+            "The writing assistant was unavailable. This draft shows saved source wording only; "
+            "it has not been summarized or interpreted. Review each item and its dates before sharing."
+        ),
+        "fallback_reason": reason,
+    }
+
+
 def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str) -> dict:
     """Qwen drafts a concise briefing from retrieved LCR records; the backend binds and validates every source quote.
 
@@ -1611,12 +1693,6 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
     memory or Companion dialogue. The original source text remains attached
     independently of the generated paraphrase.
     """
-    try:
-        _, model, _ = get_ollama_config()
-    except Exception:
-        logger.exception("Qwen handoff configuration unavailable")
-        return {"status": "unavailable", "provider": "ollama", "model": None, "reason": "qwen_configuration_unavailable", "sections": []}
-
     eligible = [
         {
             "source_ref": f"{item['source_table']}:{item['source_id']}",
@@ -1631,7 +1707,13 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         for item in records if item.get("text")
     ]
     if not eligible:
-        return {"status": "not_generated_no_eligible_source_text", "provider": "ollama", "model": model, "sections": []}
+        return {"status": "not_generated_no_eligible_source_text", "provider": None, "model": None, "sections": []}
+
+    try:
+        _, model, _ = get_ollama_config()
+    except Exception:
+        logger.warning("Qwen handoff configuration unavailable; using exact-source fallback")
+        return _source_only_handoff_fallback(records, "qwen_configuration_unavailable")
 
     eligible.sort(
         key=lambda item: str(item.get("event_at") or item.get("recorded_at") or ""),
@@ -1774,8 +1856,8 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             "interpretation_limit": "Exact source-quote matching confirms the quote exists in the snapshot; it does not prove that every paraphrase is semantically entailed. Review the summary against its source before sharing.",
         }
     except Exception:
-        logger.exception("Qwen handoff drafting or validation failed")
-        return {"status": "unavailable", "provider": "ollama", "model": model, "reason": "inference_or_validation_failed", "sections": []}
+        logger.exception("Qwen handoff drafting or validation failed; using exact-source fallback")
+        return _source_only_handoff_fallback(records, "inference_or_validation_failed")
 
 
 @router.post("/prepare")
@@ -2225,7 +2307,11 @@ def prepare_handoff_draft(
     content_canonical = json.dumps(structured_content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     content_sha256 = hashlib.sha256(content_canonical.encode("utf-8")).hexdigest()
     generation_status = generated_document.get("status", "not_generated")
-    validation_status = "exact_quote_reference_validation_passed" if generation_status == "generated" else "not_validated"
+    validation_status = (
+        "exact_quote_reference_validation_passed"
+        if generation_status in {"generated", "source_only_fallback"}
+        else "not_validated"
+    )
     persisted_draft = HandoffDraft(
         id=draft_id,
         person_id=person_id,
