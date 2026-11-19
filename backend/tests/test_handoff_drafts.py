@@ -157,7 +157,7 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
         item["source"] for item in body["limitations"]
         if item["status"] in {"unavailable", "failed", "partial"}
     }
-    assert blocking_limitations == {"decision_outcomes", "care_timeline_entries"}
+    assert blocking_limitations == {"decision_outcomes", "care_timeline_entries", "allergies"}
     assert "community" not in blocking_limitations, "disabled Community is not an authorized care-record source and must not block retrieval"
     assert body["source_statuses"]["documents"]["status"] == "empty"
     with engine.connect() as connection:
