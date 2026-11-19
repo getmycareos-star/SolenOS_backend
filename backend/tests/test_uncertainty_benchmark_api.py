@@ -19,6 +19,7 @@ from app.models.care import Caregiver, Evidence, Person
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
+from app.models.time_location import Appointment
 
 
 @pytest.fixture
@@ -195,6 +196,14 @@ def test_handoff_draft_preserves_active_unknown_assessment_and_excludes_supersed
     client = _client_for(uncertainty_api_db, "a")
     with uncertainty_api_db() as db:
         db.add_all([
+            Appointment(
+                id="benchmark-appointment-briefing",
+                person_id="benchmark-person-a",
+                title="Medication review appointment",
+                scheduled_at=datetime.now(timezone.utc) + timedelta(days=2),
+                status="scheduled",
+                created_by_caregiver_id="benchmark-caregiver-a",
+            ),
             UncertaintyAssessment(
                 id="assessment-current-unknown",
                 person_id="benchmark-person-a",
@@ -227,7 +236,7 @@ def test_handoff_draft_preserves_active_unknown_assessment_and_excludes_supersed
 
     response = client.post(
         "/api/v1/handoff-drafts/prepare",
-        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30, "appointment_id": "benchmark-appointment-briefing"},
     )
     assert response.status_code == 200, response.text
     payload = response.json()
