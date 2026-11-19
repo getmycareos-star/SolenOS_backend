@@ -652,8 +652,8 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         assert accepted_document["source_context"]["document_candidate"]["negation_status"] == "explicitly_negated"
         companion_prompt_context = format_lcr_context_for_prompt(context)
         assert "caregiver_reviewed_report_not_independently_verified" in companion_prompt_context
-        assert '"negation_status": "explicitly_negated"' in companion_prompt_context
-        assert '"page_number": 2' in companion_prompt_context
+        assert '"negation_status":"explicitly_negated"' in companion_prompt_context
+        assert '"page_number":2' in companion_prompt_context
         assert context["retrieval_contract"]["retrieval_strategy"] == "hybrid_lexical_semantic_temporal"
         assert temporal_context["retrieval_contract"]["temporal_window"]["basis"] == "explicit_user_temporal_expression"
         assert "daily-care-event" in {row["id"] for row in temporal_context["sources"]["events"]["items"]}
