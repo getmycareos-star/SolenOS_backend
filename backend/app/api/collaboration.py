@@ -2790,6 +2790,22 @@ def _ordered_context_search_terms(current_text: str, retrieval_query: str, limit
     return ordered[:max(1, min(int(limit), 48))]
 
 
+def _context_line_record_id(line: str, id_key: str) -> str | None:
+    """Resolve IDs from purpose-built recall lines and unified LCR projections."""
+    try:
+        payload = json.loads(line[line.index("{"):])
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    value = payload.get(id_key)
+    expected_source_type = {"event_id": "events", "evidence_id": "evidence"}.get(id_key)
+    if value is None and expected_source_type and payload.get("source_type") == expected_source_type:
+        value = payload.get("source_id")
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+        if value is None:
+            value = record.get(id_key) or record.get("id")
+    return str(value) if value is not None else None
+
+
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
     """Extract only IDs from records actually selected for the model context."""
     identifiers = []
@@ -6706,8 +6722,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 retained: list[str] = []
                 for line in lines:
                     try:
-                        payload = json.loads(line[line.index("{"):])
-                        record_id = str(payload.get(id_key) or "")
+                        record_id = _context_line_record_id(line, id_key)
                     except (ValueError, TypeError, json.JSONDecodeError):
                         retained.append(line)
                         continue
@@ -6742,6 +6757,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 lcr_context_coverage["retrieval_projection_complete"] = False
                 lcr_context_coverage["page_limit_reached"] = True
 
+        care_history_recall_context = None
         if (
             _CARE_HISTORY_INTENT_PATTERN.search(user_text or "")
             and _care_history_requested_topics(user_text)
@@ -6951,6 +6967,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 if row.role in {"user", "assistant"}
             )
 
+        direct_care_history_prompt = bool(
+            isinstance(care_history_recall_context, dict)
+            and care_history_recall_context.get("event_lines")
+            and not care_history_recall_context.get("has_more")
+        )
+        if direct_care_history_prompt:
+            # For a bounded "what was recorded about X?" question, use the
+            # complete person-scoped caregiver reports and their linked evidence.
+            # Broad projections can duplicate those rows and crowd exact source
+            # wording out of the fixed prompt budget.
+            shared_lcr_lines = list(dict.fromkeys([
+                *care_history_recall_context["event_lines"],
+                *care_history_recall_context["evidence_lines"],
+                *care_history_assertion_lines,
+            ]))
+            caregiver_question_queue_lines = []
+
         # The shared LCR projection is the single source set for model context.
         # The purpose-specific lists above remain available to deterministic
         # safety validators, but are not duplicated into the prompt.
@@ -6961,10 +6994,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             *freshness_context[:1],
             *aggregate_context_lines,
         ]
-        if source_evidence_ids or re.search(
+        if (not direct_care_history_prompt) and (source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",
             user_text, re.IGNORECASE,
-        ):
+        )):
             model_context_lines.append(lineage_context_line)
         (
             included_model_context_lines,
