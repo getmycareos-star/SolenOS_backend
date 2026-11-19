@@ -229,10 +229,10 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
         lowered,
         re.I,
     )
-    if historical_marker:
-        temporal_context = "historical"
-    elif change_marker:
+    if change_marker:
         temporal_context = "changed_over_time"
+    elif historical_marker:
+        temporal_context = "historical"
     elif current_marker:
         temporal_context = "current"
     else:
