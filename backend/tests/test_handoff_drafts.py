@@ -750,6 +750,8 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
             "recipient_caregiver_ids": [recipient_id],
             "scope": ["lcr_summary"],
             "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            "reviewed_source_refs": [item["source_ref"] for item in prepared.json()["generation"]["sections"]],
+            "semantic_review_acknowledged": True,
         },
     )
     assert approved.status_code == 200, approved.text
