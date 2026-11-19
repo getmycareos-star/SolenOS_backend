@@ -194,6 +194,16 @@ def test_production_evaluation_can_be_the_first_inference_after_deployment(monke
         "failure_reason": None,
     })
     monkeypatch.setattr(collaboration, "qwen_chat", lambda *args, **kwargs: "Synthetic model response.")
+    from app.api import handoff_drafts
+    monkeypatch.setattr(handoff_drafts, "_generate_grounded_handoff", lambda *args, **kwargs: {
+        "status": "generated",
+        "provider": "ollama",
+        "model": "qwen3.5:4b",
+        "sections": [{
+            "source_ref": "care_assertions:synthetic-caregiver-report",
+            "text": "Caregiver reported that the person prefers a quiet room after lunch.",
+        }],
+    })
 
     request = Request({
         "type": "http",
@@ -205,11 +215,11 @@ def test_production_evaluation_can_be_the_first_inference_after_deployment(monke
 
     assert result["synthetic_only"] is True
     assert result["care_record_accessed"] is False
-    assert result["total"] == 5
-    assert len(result["results"]) == 5
+    assert result["total"] == 6
+    assert len(result["results"]) == 6
 
 
-def test_production_evaluation_has_five_independent_synthetic_acceptance_criteria():
+def test_production_evaluation_has_six_independent_synthetic_acceptance_criteria():
     from app.api.collaboration import _production_qwen_evaluation_cases
 
     cases = _production_qwen_evaluation_cases()
