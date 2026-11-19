@@ -12,7 +12,7 @@ from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, CareAssertion
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, CareAssertion
 from app.models.time_location import Appointment
 from app.models.uncertainty import OpenQuestion
 
@@ -419,7 +419,57 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             rationale="The explicit review boundary has elapsed; re-confirm before relying on currentness.",
             assessed_by_caregiver_id=caregiver_id,
         )
-        db.add_all([evidence, policy, assessment])
+        claim = CareAssertion(
+            id="handoff-review-claim",
+            person_id=person_id,
+            subject_type="care_recipient",
+            subject_id=person_id,
+            field="hydration",
+            assertion_kind="current_state",
+            asserted_value="Caregiver reported reduced fluid intake.",
+            source_label="Daily Care report",
+            source_text="Caregiver reported reduced fluid intake.",
+            evidence_ids=[evidence.id],
+            assertion_status="reported",
+            epistemic_state="reported",
+            created_by_caregiver_id=caregiver_id,
+            recorded_at=datetime.now(timezone.utc),
+        )
+        source_review = EvidenceReviewRecord(
+            id="handoff-source-review",
+            evidence_id=evidence.id,
+            person_id=person_id,
+            review_type="reliability",
+            outcome="unverified",
+            rationale="The original author has not yet been independently confirmed.",
+            criteria=[
+                {"criterion": "source attribution", "result": "incomplete", "rationale": "Author not confirmed."},
+                {"criterion": "independent corroboration", "result": "none_linked", "rationale": "No independent source linked."},
+                {"criterion": "temporal context", "result": "specified", "rationale": "Document date is present."},
+                {"criterion": "evidence freshness", "result": "current", "rationale": "Within the selected review interval."},
+                {"criterion": "record completeness", "result": "partial", "rationale": "Some source details are missing."},
+            ],
+            policy_version="evidence-review-v1",
+            source_attribution_snapshot="{}",
+            reviewed_by_caregiver_id=caregiver_id,
+        )
+        claim_assessment = EvidenceClaimAssessment(
+            id="handoff-claim-assessment",
+            person_id=person_id,
+            claim_id=claim.id,
+            claim_version=1,
+            status="unverified",
+            rationale="The caregiver report is retained but not independently verified.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[{
+                "evidence_id": evidence.id,
+                "relationship": "neutral",
+                "source_passage": "A dated care document",
+                "scope_note": "Source context remains unverified.",
+            }],
+            reviewed_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, policy, assessment, claim, source_review, claim_assessment])
         db.commit()
     finally:
         db.close()
@@ -438,6 +488,14 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     assert refs["handoff-freshness-assessment"]["details"]["policy_version"] == "v1"
     assert refs["handoff-freshness-policy"]["details"]["domain_key"] == "document_history"
     assert refs["handoff-freshness-policy"]["details"]["policy_version"] == "v1"
+    assert "handoff-source-review" in refs
+    assert refs["handoff-source-review"]["source_table"] == "evidence_review_records"
+    assert refs["handoff-source-review"]["details"]["outcome"] == "unverified"
+    assert "handoff-claim-assessment" in refs
+    assert refs["handoff-claim-assessment"]["source_table"] == "evidence_claim_assessments"
+    assert refs["handoff-claim-assessment"]["details"]["status"] == "unverified"
+    assert body["source_statuses"]["evidence_review_records"]["status"] == "available"
+    assert body["source_statuses"]["evidence_claim_assessments"]["status"] == "available"
     assert body["source_statuses"]["evidence_freshness_assessments"]["status"] == "available"
     assert body["source_statuses"]["evidence_freshness_policies"]["status"] == "available"
 
