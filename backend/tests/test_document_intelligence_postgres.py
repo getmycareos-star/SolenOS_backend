@@ -124,7 +124,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
     )
     source = original.decode("utf-8")
     quote_one = "Patient walked 20 metres with a frame on 12 October."
-    quote_two = "The patient ate half of lunch during the observation period."
+    quote_two = "The patient reports eating half of lunch during the observation period."
 
     def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
         # The durable worker processes bounded page/chunk windows. Each call
@@ -318,11 +318,16 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quote_two
             assert assertion.created_by_caregiver_id == caregiver_id
+            assert assertion.source_context["kind"] == "caregiver_reviewed_document_candidate"
+            assert assertion.source_context["authority"] == "caregiver_reviewed_report_not_independently_verified"
+            assert assertion.source_context["document_candidate"]["source_attribution"] == "patient_reported"
+            assert assertion.source_context["document_candidate"]["source_excerpt"] == quote_two
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 1
             lcr_context = build_lcr_context(db, person_id, limit_per_source=50)
             assertion_source = lcr_context["sources"]["assertions"]
             assert assertion_source["status"] == "available"
-            assert any(row["id"] == assertion_id for row in assertion_source["items"])
+            lcr_assertion = next(row for row in assertion_source["items"] if row["id"] == assertion_id)
+            assert lcr_assertion["source_context"]["document_candidate"]["source_attribution"] == "patient_reported"
 
         # The canonical LCR read API must reconstruct the accepted assertion.
         lcr_rows = api_client.get(
@@ -330,7 +335,9 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             headers={"Authorization": "Bearer " + token},
         )
         assert lcr_rows.status_code == 200, lcr_rows.text
-        assert any(row["id"] == assertion_id and row["assertion_status"] == "accepted" for row in lcr_rows.json())
+        api_assertion = next(row for row in lcr_rows.json() if row["id"] == assertion_id)
+        assert api_assertion["assertion_status"] == "accepted"
+        assert api_assertion["source_context"]["document_candidate"]["source_attribution"] == "patient_reported"
 
         summary = api_client.get("/api/v1/care-continuity/summary", headers={"Authorization": "Bearer " + token})
         assert summary.status_code == 200, summary.text
