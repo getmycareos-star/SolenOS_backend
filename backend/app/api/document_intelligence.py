@@ -52,6 +52,27 @@ MAX_DOCUMENT_QWEN_CHUNKS = 60
 MAX_DOCUMENT_CANDIDATE_BATCH = 60
 
 
+def _explicit_document_event_datetime(candidate: dict, source_quote: str) -> datetime | None:
+    """Return a day-precision event time only when an ISO date is explicit in event wording."""
+    raw = candidate.get("event_date")
+    if not isinstance(raw, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw.strip()):
+        return None
+    event_date = raw.strip()
+    position = source_quote.find(event_date)
+    if position < 0:
+        return None
+    prefix = source_quote[:position].casefold()
+    if not re.search(
+        r"\b(?:on|at|during|since|from|admitted on|discharged on|observed on|assessed on|occurred on|reported on)\s*$",
+        prefix,
+    ):
+        return None
+    try:
+        return datetime.fromisoformat(event_date).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 class CandidateReview(BaseModel):
     candidate_index: int = Field(ge=0)
     decision: Literal["accept", "correct", "reject"]
@@ -1398,6 +1419,10 @@ def review_document_candidate(
                 assertion_epistemic_state = "reported"
                 candidate_review_days = candidate.get("matched_lcr_medication_review_after_days")
                 review_after_days = candidate_review_days if isinstance(candidate_review_days, int) and candidate_review_days > 0 else None
+        if candidate.get("field_type") != "medication" and document_observed_at is not None:
+            # Only a source-quoted ISO event date earns a time-bound assertion.
+            # Document dates and model-normalized dates remain historical text only.
+            assertion_kind = "time_bound_observation"
         duplicate_of_evidence_id = _duplicate_of(evidence)
         duplicate_label = " · duplicate copy; not independent corroboration" if duplicate_of_evidence_id else ""
         page_label = str(candidate.get("page_number") or "unresolved")
@@ -1408,6 +1433,7 @@ def review_document_candidate(
         # Keep only structured qualifiers and source coordinates here. The exact
         # quotation remains in CareAssertion.source_text; duplicating it in JSON
         # would complicate privacy erasure and create unnecessary copies of care data.
+        document_observed_at = _explicit_document_event_datetime(candidate, quote)
         source_context_candidate = {
             key: canonical.get(key)
             for key in (
@@ -1418,6 +1444,8 @@ def review_document_candidate(
             )
             if key in canonical
         }
+        if document_observed_at is not None:
+            source_context_candidate["event_date_precision"] = "day"
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
         assertion_row = _existing_assertion_for_exact_document_duplicate(
@@ -1457,6 +1485,7 @@ def review_document_candidate(
                     review_after_days=review_after_days,
                     epistemic_state=assertion_epistemic_state,
                     event_time_text=candidate.get("event_date") or None,
+                    observed_at=document_observed_at,
                     created_by_caregiver_id=caregiver_id,
                     updated_by_caregiver_id=caregiver_id,
                 ),
