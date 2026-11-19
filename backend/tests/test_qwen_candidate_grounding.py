@@ -193,6 +193,6 @@ def test_qwen_quote_expansion_restores_source_attribution_before_review(monkeypa
         result["observations"][0],
         document_id="document-attribution",
         source_text=source,
-        page_number=1,
     )
+    assert canonical["page_number"] == 1
     assert canonical["source_attribution"] == "caregiver_reported"
