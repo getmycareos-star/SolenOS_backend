@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -92,8 +93,18 @@ def main() -> int:
         print(json.dumps({"error_category": type(exc).__name__, "reason": str(getattr(exc, "reason", ""))}), file=sys.stderr)
         return 1
 
-    if payload.get("deployment_commit") != expected_commit:
-        print("Production evaluation response is not from the expected deployed commit.", file=sys.stderr)
+    deployed_commit = str(payload.get("deployment_commit") or "").strip()
+    source_check = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", expected_commit, deployed_commit],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ) if re.fullmatch(r"[0-9a-f]{40}", deployed_commit) else None
+    if source_check is None or source_check.returncode != 0:
+        print(
+            "Production evaluation response is not from a deployment containing the expected source commit.",
+            file=sys.stderr,
+        )
         return 1
     if not payload.get("synthetic_only") or payload.get("care_record_accessed") is not False:
         print("Evaluation did not confirm synthetic-only isolation.", file=sys.stderr)
