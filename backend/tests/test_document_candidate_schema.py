@@ -481,3 +481,24 @@ def test_changed_state_warning_requires_comparison_with_earlier_context():
         source_text=f"[Page 1]\n{excerpt}",
     )
     assert any("change from an earlier state" in warning for warning in candidate["warnings"])
+
+
+def test_temporal_classification_preserves_historical_current_and_transition_meaning():
+    cases = [
+        ("Previously diagnosed with Parkinson's disease.", "historical", "not_explicitly_marked"),
+        ("Medication discontinued after review.", "changed_over_time", "not_explicitly_marked"),
+        ("Medication dosage changed from 5 mg to 10 mg.", "changed_over_time", "not_explicitly_marked"),
+        ("Patient denies experiencing pain.", "not_established", "explicitly_negated"),
+        ("Condition resolved last month.", "historical", "not_explicitly_marked"),
+        ("Current medication differs from discharge medication.", "changed_over_time", "not_explicitly_marked"),
+        ("The patient currently takes medication as prescribed.", "current", "not_explicitly_marked"),
+        ("The patient no longer requires assistance.", "changed_over_time", "explicitly_negated"),
+    ]
+    for index, (excerpt, expected_temporal, expected_negation) in enumerate(cases):
+        candidate = canonical_candidate(
+            {"subject": "care observation", "observation": excerpt, "source_quote": excerpt},
+            document_id=f"doc-temporal-adversarial-{index}",
+            source_text=f"[Page 1]\n{excerpt}",
+        )
+        assert candidate["temporal_context"] == expected_temporal, excerpt
+        assert candidate["negation_status"] == expected_negation, excerpt
