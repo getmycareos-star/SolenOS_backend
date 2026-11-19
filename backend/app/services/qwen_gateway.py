@@ -135,9 +135,29 @@ def qwen_chat(
     started = time.monotonic()
     failure_category = None
     failure_reason = None
+    # Ollama can expose /api/tags before its lazily-started llama-server has
+    # finished loading the model. During that narrow cold-start window, the
+    # local API may reset or refuse the first connection. Retry only those
+    # connection-establishment failures; do not retry model HTTP errors or
+    # inference timeouts, and never mark a failed attempt as a saved care fact.
     try:
-        with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        retry_seconds = max(0.0, min(float(os.getenv("OLLAMA_STARTUP_RETRY_SECONDS", "45")), 60.0))
+    except (TypeError, ValueError):
+        retry_seconds = 45.0
+    retry_deadline = time.monotonic() + retry_seconds
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", exc)
+            retryable_startup_failure = isinstance(reason, (ConnectionRefusedError, ConnectionResetError))
+            remaining = retry_deadline - time.monotonic()
+            if not retryable_startup_failure or remaining <= 0:
+                raise
+            logger.info("Local Qwen runtime is still starting; retrying inference connection")
+            time.sleep(min(1.0, remaining))
     except urllib.error.HTTPError as exc:
         failure_category = "upstream_http_error"
         failure_reason = f"http_{exc.code}"
