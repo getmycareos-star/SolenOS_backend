@@ -249,7 +249,7 @@ SOURCES = {
         "event_time_fields": ("effective_start",),
         "recorded_time_fields": ("created_at", "updated_at"),
         "detail_fields": ("caregiver_id", "responsibility_type", "scope", "effective_end", "status", "acceptance_status", "assignment_source", "is_joint", "joint_with_caregiver_id", "schedule_pattern"),
-        "active_status_values": ("active",),
+        "active_status_values": ("ACTIVE",),
         "include_current_outside_window": True,
     },
     "caregiver_handoffs": {
