@@ -50,6 +50,46 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         ],
         "order": ["uploaded_at", "created_at"],
     },
+    "evidence_reviews": {
+        "table": "evidence_review_records",
+        "required": False,
+        "fields": [
+            "id", "evidence_id", "review_type", "outcome", "rationale", "criteria",
+            "policy_version", "source_attribution_snapshot", "reviewed_by_caregiver_id", "created_at",
+        ],
+        "order": ["created_at"],
+    },
+    "claim_assessments": {
+        "table": "evidence_claim_assessments",
+        "required": False,
+        "fields": [
+            "id", "claim_id", "claim_version", "status", "rationale", "policy_version",
+            "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id",
+            "superseded_by_claim_id", "created_at",
+        ],
+        "order": ["created_at"],
+    },
+    "evidence_freshness_assessments": {
+        "table": "evidence_freshness_assessments",
+        "required": False,
+        "fields": [
+            "id", "evidence_id", "policy_id", "policy_version", "freshness_status",
+            "source_time", "source_time_kind", "assessed_at", "age_days", "rationale",
+            "assessed_by_caregiver_id",
+        ],
+        "order": ["assessed_at"],
+    },
+    "evidence_completeness_assessments": {
+        "table": "evidence_completeness_assessments",
+        "required": False,
+        "fields": [
+            "id", "policy_id", "policy_version", "subject_type", "subject_id",
+            "assessment_status", "required_fields", "satisfied_fields", "missing_fields",
+            "field_evidence_json", "evidence_ids", "rationale", "assessment_basis",
+            "semantic_sufficiency", "assessed_by_caregiver_id", "assessed_at",
+        ],
+        "order": ["assessed_at"],
+    },
     "evidence_observations": {
         "table": "evidence_observations",
         "required": False,
@@ -401,6 +441,32 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 
 
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
+    if source_name == "evidence_reviews":
+        review_type = str(item.get("review_type") or "unknown").casefold()
+        outcome = str(item.get("outcome") or "undetermined").casefold()
+        return (
+            f"evidence_review_{review_type}_{outcome}",
+            "This is a caregiver-authored review of source quality or context. It does not independently verify a care fact or clinical instruction.",
+        )
+    if source_name == "claim_assessments":
+        status = str(item.get("status") or "unassessed").casefold()
+        return (
+            f"claim_assessment_{status}",
+            "This is the latest retrieved human claim-assessment status, not an independent clinical verification. Preserve its rationale, evidence links, and version.",
+        )
+    if source_name == "evidence_freshness_assessments":
+        status = str(item.get("freshness_status") or "undetermined").casefold()
+        return (
+            f"evidence_freshness_{status}",
+            "Freshness is assessed only against the explicitly named policy and source-time basis; it does not establish factual accuracy.",
+        )
+    if source_name == "evidence_completeness_assessments":
+        status = str(item.get("assessment_status") or "undetermined").casefold()
+        sufficiency = str(item.get("semantic_sufficiency") or "not_automatically_verified").casefold()
+        return (
+            f"evidence_completeness_{status}",
+            f"Completeness describes linked-field coverage only; semantic sufficiency is {sufficiency}. Do not treat linked-field coverage as proof that a care decision is adequately supported.",
+        )
     if source_name == "facts" and item.get("superseded_by_fact_id"):
         return (
             "superseded_fact",
@@ -573,6 +639,10 @@ def build_lcr_context(
                 "facts": ("effective_at", "recorded_at"),
                 "assertions": ("observed_at", "recorded_at"),
                 "document_extractions": ("created_at",),
+                "evidence_reviews": ("created_at",),
+                "claim_assessments": ("created_at",),
+                "evidence_freshness_assessments": ("assessed_at",),
+                "evidence_completeness_assessments": ("assessed_at",),
                 "decisions": ("decided_at", "created_at"),
                 "decision_outcomes": ("observed_at", "created_at"),
                 "timeline": ("occurred_at", "created_at"),
