@@ -293,6 +293,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                 _request(person_id, caregiver_id), db,
             )
             assert accepted["written_to_lcr"] is True
+            assert accepted["longitudinal_retrieval_status"] == "verified"
             assertion_id = accepted["source_record_ref"]["record_id"]
 
         # Restart the actual PostgreSQL service after the accepted decision has committed.
@@ -612,6 +613,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+        assert accepted.json()["longitudinal_retrieval_status"] == "verified"
         execution = accepted.json()["care_continuity_execution"]
         assert execution["workflow"] == "document_candidate_review"
         assert execution["source_evidence_id"] == evidence_id
