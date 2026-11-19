@@ -126,11 +126,7 @@ def test_real_qwen_generates_family_and_appointment_briefings_only_from_lcr(live
         for section in sections:
             assert section.get("source_ref") in source_refs, section
             assert section.get("supporting_quote"), section
-            assert section.get("semantic_entailment_status") in {
-                "source_text_only_no_paraphrase",
-                "paraphrase_requires_human_review",
-                "exact_source_quote",
-            }, section
+            assert section.get("semantic_entailment_status") == "caregiver_review_required", section
         return draft
 
     family = prepare(
