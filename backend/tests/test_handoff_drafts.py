@@ -1967,6 +1967,10 @@ def test_handoff_reflected_enum_filters_resolve_case_and_fail_closed():
     assert _database_enum_label(enum_column, "JOINT") == "JOINT"
     assert _database_enum_label(enum_column, "missing") is None
     assert _database_enum_label(string_column, "active") == "active"
+    from app.api.handoff_drafts import _database_enum_values
+    coverage_gap_column = SimpleNamespace(type=SimpleNamespace(enums=["OPEN", "RESOLVED", "TRANSFERRED"]))
+    assert _database_enum_values(coverage_gap_column, ("resolved", "completed", "closed")) == ("RESOLVED",)
+    assert _database_enum_values(coverage_gap_column, ("unknown",)) == ()
 
 
 def test_shared_only_handoff_projection_uses_enum_labels_and_fails_closed_without_schema_proof():
