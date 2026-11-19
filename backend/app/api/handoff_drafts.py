@@ -830,6 +830,12 @@ def _validate_draft_quotes(content: dict, source_snapshot: dict) -> bool:
             or not isinstance(quote, str)
             or not quote.strip()
             or quote not in str(source.get("text") or "")
+            # A source-only fallback is explicitly extractive. Do not let an
+            # edited paraphrase retain the "no paraphrase" provenance label.
+            or (
+                generation.get("status") == "source_only_fallback"
+                and summary.strip() != quote.strip()
+            )
         ):
             return False
     return True
