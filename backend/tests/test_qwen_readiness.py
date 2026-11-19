@@ -82,6 +82,29 @@ def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
 
 
 
+
+def test_installation_status_does_not_report_installed_model_as_available_before_generation(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{"models":[{"name":"qwen3.5:4b"}]}'
+
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    qwen_gateway._INFERENCE_VERIFICATION_CACHE.update({"verified_at": 0.0, "model": None})
+
+    result = qwen_gateway.qwen_runtime_status()
+
+    assert result["available"] is False
+    assert result["runtime_available"] is True
+    assert result["model_installed"] is True
+    assert result["inference_verified"] is False
+    assert result["inference_status"] == "not_verified"
+
+
 def test_readiness_requires_recent_successful_generation_not_model_inventory(monkeypatch):
     class Response:
         def __enter__(self):
@@ -346,7 +369,7 @@ def test_readiness_endpoint_reports_runtime_state_without_forcing_inference(monk
     def readiness(force=False):
         calls.append(force)
         return {
-            "available": True,
+            "available": False,
             "state": "runtime_available",
             "model_installed": True,
             "runtime_available": True,

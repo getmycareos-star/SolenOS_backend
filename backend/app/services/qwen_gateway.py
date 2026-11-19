@@ -535,13 +535,70 @@ def qwen_runtime_status() -> dict:
             payload = json.loads(response.read().decode("utf-8"))
         models = payload.get("models")
         if not isinstance(models, list):
-            return {"available": False, "installation": installation, "error_category": "invalid_model_inventory", "failure_reason": "ollama_tags_missing_models"}
+            return {
+                "available": False,
+                "runtime_available": True,
+                "model_installed": False,
+                "inference_verified": False,
+                "inference_status": "not_verified",
+                "installation": installation,
+                "error_category": "invalid_model_inventory",
+                "failure_reason": "ollama_tags_missing_models",
+            }
         names = [str(item.get("name", "")) for item in models if isinstance(item, dict)]
         if model not in names:
-            return {"available": False, "installation": installation, "model": model, "error_category": "model_not_installed", "failure_reason": "configured_model_missing"}
-        return {"available": True, "installation": installation, "model": model, "provider": "local_ollama", "inference_api": "ollama_native_http", "hosted_inference_api": False, "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service"}
+            return {
+                "available": False,
+                "runtime_available": True,
+                "model_installed": False,
+                "inference_verified": False,
+                "inference_status": "not_verified",
+                "installation": installation,
+                "model": model,
+                "error_category": "model_not_installed",
+                "failure_reason": "configured_model_missing",
+            }
+        verified_at = float(_INFERENCE_VERIFICATION_CACHE.get("verified_at") or 0.0)
+        inference_verified = (
+            _INFERENCE_VERIFICATION_CACHE.get("model") == model
+            and verified_at > 0
+            and time.monotonic() - verified_at <= 120.0
+        )
+        return {
+            "available": inference_verified,
+            "runtime_available": True,
+            "model_installed": True,
+            "inference_verified": inference_verified,
+            "inference_status": "verified" if inference_verified else "not_verified",
+            "installation": installation,
+            "model": model,
+            "provider": "local_ollama",
+            "inference_api": "ollama_native_http",
+            "hosted_inference_api": False,
+            "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service",
+        }
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": detail.get("code", "configuration_unavailable"), "failure_reason": detail.get("reason", "ollama_configuration_invalid")}
+        return {
+            "available": False,
+            "runtime_available": False,
+            "model_installed": False,
+            "inference_verified": False,
+            "inference_status": "not_verified",
+            "installation": installation,
+            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+            "error_category": detail.get("code", "configuration_unavailable"),
+            "failure_reason": detail.get("reason", "ollama_configuration_invalid"),
+        }
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": "runtime_unreachable", "failure_reason": type(exc).__name__}
+        return {
+            "available": False,
+            "runtime_available": False,
+            "model_installed": False,
+            "inference_verified": False,
+            "inference_status": "not_verified",
+            "installation": installation,
+            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+            "error_category": "runtime_unreachable",
+            "failure_reason": type(exc).__name__,
+        }
