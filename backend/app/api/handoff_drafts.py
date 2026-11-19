@@ -2613,7 +2613,11 @@ def prepare_handoff_draft(
         evidence_lineage["scope_truncated"] = bool(lineage_scope["truncated"])
         evidence_lineage["lineage_nodes_examined"] = len(lineage_scope["evidence_rows"])
         evidence_lineage["relationship_records_examined"] = len(lineage_scope["relationships"])
-        evidence_lineage_status = "available" if evidence_lineage.get("groups") else "empty"
+        evidence_lineage_status = (
+            "partial" if lineage_scope["truncated"]
+            else "available" if evidence_lineage.get("groups")
+            else "empty"
+        )
         if lineage_scope["truncated"]:
             evidence_lineage["interpretation_limit"] += (
                 " Provenance retrieval reached a safety bound; unreturned lineage is unknown, not absent."
@@ -2628,7 +2632,11 @@ def prepare_handoff_draft(
         evidence_lineage_status = "failed"
     statuses["evidence_lineage"] = {
         "status": evidence_lineage_status,
-        "reason": "lineage_retrieval_failed" if evidence_lineage_status == "failed" else None,
+        "reason": (
+            "lineage_retrieval_failed" if evidence_lineage_status == "failed"
+            else "lineage_scope_reached_safety_bound" if evidence_lineage_status == "partial"
+            else None
+        ),
         "label": "Evidence provenance and lineage",
         "count": len(evidence_lineage.get("groups", [])),
     }
