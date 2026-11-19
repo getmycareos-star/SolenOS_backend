@@ -2026,14 +2026,14 @@ def _ollama_url() -> tuple[str, str]:
 
 
 def _companion_inference_timeout_seconds() -> float:
-    """Bound caregiver-facing wait time; slower model calls use source-grounded fallback."""
+    """Allow a cold CPU model to load while keeping the request below the UI timeout."""
     try:
-        configured = float(os.getenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "30"))
+        configured = float(os.getenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "120"))
     except (TypeError, ValueError):
-        configured = 30.0
+        configured = 120.0
     if not math.isfinite(configured):
-        configured = 30.0
-    return max(5.0, min(configured, 60.0))
+        configured = 120.0
+    return max(5.0, min(configured, 180.0))
 
 
 def _ollama_chat(
