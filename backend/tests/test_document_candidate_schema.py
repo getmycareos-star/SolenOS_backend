@@ -471,3 +471,13 @@ def test_no_longer_is_a_change_marker_not_historical_only():
         source_text=f"[Page 1]\n{excerpt}",
     )
     assert candidate["temporal_context"] == "changed_over_time"
+
+
+def test_changed_state_warning_requires_comparison_with_earlier_context():
+    excerpt = "The patient no longer requires assistance with walking."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-changed-state-warning",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert any("change from an earlier state" in warning for warning in candidate["warnings"])
