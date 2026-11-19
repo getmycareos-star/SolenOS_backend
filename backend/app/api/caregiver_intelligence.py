@@ -55,6 +55,7 @@ from app.core.caregiver_enums import (
     CaregiverActivityType,
     InformationVisibility,
     IdentityMatchConfidence,
+    ResponsibilityStatus,
 )
 
 router = APIRouter()
@@ -327,6 +328,35 @@ def list_responsibilities(person_id: str, request: Request, caregiver_id: Option
     _assert_person_scope(request, db, person_id)
     service = CaregiverIntelligenceService(db)
     return service.get_active_responsibilities(person_id, caregiver_id)
+
+
+@router.patch("/caregiver-responsibilities/{responsibility_id}/end", response_model=CaregiverResponsibility)
+def end_responsibility(responsibility_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    responsibility = db.query(CaregiverResponsibilityModel).filter(
+        CaregiverResponsibilityModel.id == str(responsibility_id),
+        CaregiverResponsibilityModel.person_id == person_id,
+        CaregiverResponsibilityModel.caregiver_id == current_profile.id,
+    ).with_for_update().first()
+    if responsibility is None:
+        raise HTTPException(status_code=404, detail="Care responsibility not found")
+    if getattr(responsibility.status, "value", responsibility.status) in {"historical", "gap"}:
+        return responsibility
+    responsibility.status = ResponsibilityStatus.HISTORICAL
+    responsibility.effective_end = datetime.now(timezone.utc)
+    db.add(responsibility)
+    _log_and_learn(
+        db,
+        person_id,
+        "responsibility_ended",
+        f"Ended responsibility: {responsibility.responsibility_type}",
+        "responsibility",
+        responsibility.id,
+        current_profile.id,
+    )
+    db.commit()
+    db.refresh(responsibility)
+    return responsibility
 
 
 @router.get("/caregiver-responsibilities/history/{caregiver_id}", response_model=List[CaregiverResponsibility])
