@@ -2484,6 +2484,8 @@ def prepare_handoff_draft(
                 record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
                 if table_name == "evidence_review_records":
                     record_status = row.get("outcome") or record_status
+                if table_name == "care_assertions":
+                    record_status = row.get("assertion_status") or record_status
                 if table_name == "caregiver_profiles":
                     record_status = row.get("involvement_status") or record_status
                 if table_name == "caregiver_handoffs":
