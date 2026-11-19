@@ -193,7 +193,7 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
             break
 
     negation = "explicitly_negated" if re.search(
-        r"\b(?:no evidence of|denies?|denied|without|negative for|not present|not observed|could not|unable to|no longer|never)\b",
+        r"\b(?:no evidence of|denies?|denied|negative for|not present|not observed|does not|do not|did not|is not|are not|was not|were not|has not|have not|had not|not currently|no longer|never)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
