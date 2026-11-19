@@ -405,3 +405,18 @@ def test_model_normalized_date_not_present_in_source_quote_is_not_used_for_delta
         candidate,
         "The patient reports eating half of lunch during the observation period.",
     ) is None
+
+def test_explicit_iso_event_date_is_required_for_time_bound_document_assertion():
+    candidate = {"event_date": "2026-11-10"}
+    result = _explicit_document_event_datetime(candidate, "Observed on 2026-11-10.")
+    assert result == datetime(2026, 11, 10, tzinfo=timezone.utc)
+
+
+def test_document_issue_date_is_not_used_as_event_date():
+    candidate = {"event_date": "2026-11-10"}
+    assert _explicit_document_event_datetime(candidate, "Report dated 2026-11-10.") is None
+
+
+def test_event_date_not_present_in_source_quote_is_not_used():
+    candidate = {"event_date": "2026-11-10"}
+    assert _explicit_document_event_datetime(candidate, "No explicit event date in this passage.") is None
