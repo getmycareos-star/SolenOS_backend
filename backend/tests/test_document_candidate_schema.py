@@ -1,4 +1,6 @@
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.schemas.care_continuity import CareAssertionCreate
 from app.api.document_intelligence import _explicit_document_event_datetime
@@ -502,3 +504,30 @@ def test_temporal_classification_preserves_historical_current_and_transition_mea
         )
         assert candidate["temporal_context"] == expected_temporal, excerpt
         assert candidate["negation_status"] == expected_negation, excerpt
+
+
+def test_synthetic_document_semantic_gold_dataset_preserves_manual_labels():
+    fixture_path = Path(__file__).parent / "fixtures" / "document_intelligence_semantic_eval.json"
+    dataset = json.loads(fixture_path.read_text(encoding="utf-8"))
+    assert dataset["scope"] == "synthetic_only"
+    assert dataset["cases"]
+
+    evaluated = 0
+    for case in dataset["cases"]:
+        quote = case["text"]
+        candidate = canonical_candidate(
+            {
+                "subject": case["subject"],
+                "observation": quote,
+                "source_quote": quote,
+            },
+            document_id=f"semantic-gold-{case['id']}",
+            source_text=f"[Page 1]\\n{quote}",
+        )
+        for field, expected in case["expected"].items():
+            assert candidate[field] == expected, (
+                f"{case['id']} {field}: expected {expected!r}, got {candidate[field]!r}"
+            )
+        evaluated += 1
+
+    assert evaluated == len(dataset["cases"])

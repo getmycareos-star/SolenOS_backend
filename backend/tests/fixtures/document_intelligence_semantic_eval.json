@@ -1,0 +1,97 @@
+{
+  "dataset_id": "document-intelligence-semantic-gold-v1",
+  "scope": "synthetic_only",
+  "annotation_note": "Expected labels are manually authored engineering fixtures for source wording preservation. They are not clinical validation labels.",
+  "cases": [
+    {
+      "id": "no-longer-mobility",
+      "text": "The patient no longer requires assistance with walking.",
+      "subject": "mobility",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "explicitly_negated",
+        "temporal_context": "changed_over_time"
+      }
+    },
+    {
+      "id": "previous-diagnosis",
+      "text": "The patient was previously diagnosed with Parkinson's disease.",
+      "subject": "Parkinson's disease",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "historical"
+      }
+    },
+    {
+      "id": "medication-discontinued",
+      "text": "The medication was discontinued on 2026-10-15.",
+      "subject": "medication",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "changed_over_time"
+      }
+    },
+    {
+      "id": "medication-dose-change",
+      "text": "The medication dosage changed from 500 mg once daily to 1000 mg twice daily on 2026-10-16.",
+      "subject": "medication",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "changed_over_time"
+      }
+    },
+    {
+      "id": "patient-denies-pain",
+      "text": "The patient denies experiencing pain.",
+      "subject": "pain",
+      "expected": {
+        "source_attribution": "patient_reported",
+        "negation_status": "explicitly_negated",
+        "temporal_context": "not_established"
+      }
+    },
+    {
+      "id": "condition-resolved",
+      "text": "The condition resolved last month.",
+      "subject": "condition",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "changed_over_time"
+      }
+    },
+    {
+      "id": "current-differs-from-discharge",
+      "text": "Current medication differs from discharge medication.",
+      "subject": "medication",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "changed_over_time"
+      }
+    },
+    {
+      "id": "explicit-current-medication",
+      "text": "The patient currently takes metformin 1000 mg twice daily.",
+      "subject": "metformin",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "current"
+      }
+    },
+    {
+      "id": "caregiver-reported-sleep",
+      "text": "The caregiver reported that the patient slept for six uninterrupted hours on 14 October.",
+      "subject": "sleep",
+      "expected": {
+        "source_attribution": "caregiver_reported",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "not_established"
+      }
+    }
+  ]
+}

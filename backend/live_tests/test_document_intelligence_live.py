@@ -1,7 +1,9 @@
 """Real Ollama/Qwen document intelligence through upload, extraction, review and LCR."""
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,11 +37,15 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
+    fixture_path = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "document_intelligence_semantic_eval.json"
+    semantic_dataset = json.loads(fixture_path.read_text(encoding="utf-8"))
     source = (
         "[Page 1]\nDischarge summary. Patient walked 20 metres with a frame on 12 October.\n\n"
         "[Page 2]\nThe patient ate half of lunch during the observation period.\n\n"
         "[Page 3]\nThe caregiver reported that the patient slept for six uninterrupted hours on 14 October."
     )
+    for page_number, case in enumerate(semantic_dataset["cases"], start=4):
+        source += f"\n\n[Page {page_number}]\n{case['text']}"
     try:
         created = client.post(
             "/api/v1/sessions/anonymous",
@@ -82,18 +88,33 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert data["review_required"] is True
         assert data["written_to_lcr"] is False
         assert data["intelligence_status"] == "available"
-        assert data["processed_page_numbers"] == [1, 2, 3]
+        assert data["processed_page_numbers"] == list(range(1, 4 + len(semantic_dataset["cases"])))
         assert data["unreadable_page_numbers"] == []
         candidates = data["observations"]
-        assert len(candidates) >= 2, (
+        assert len(candidates) >= 2 + len(semantic_dataset["cases"]), (
             "Live Qwen plus exact-source fallback did not preserve both explicit "
             f"care observations: {candidates!r}"
         )
         assert all(candidate["review_status"] == "pending_review" for candidate in candidates)
         assert all(candidate["source_quote"] in source for candidate in candidates)
-        assert all(candidate["page_number"] in {1, 2, 3} for candidate in candidates)
+        assert all(candidate["page_number"] in set(range(1, 4 + len(semantic_dataset["cases"]))) for candidate in candidates)
         assert all(candidate["observation"] in candidate["source_quote"] for candidate in candidates)
         assert all(candidate["subject"].casefold() in candidate["source_quote"].casefold() for candidate in candidates)
+
+        # Each manually labelled synthetic case must survive actual Qwen inference,
+        # exact-quote validation and deterministic temporal/negation normalization.
+        for case in semantic_dataset["cases"]:
+            matched = next(
+                (candidate for candidate in candidates if case["text"] in candidate["source_quote"]),
+                None,
+            )
+            assert matched is not None, f"Live Qwen omitted gold case {case['id']}: {candidates!r}"
+            canonical = matched["canonical_candidate"]
+            for field, expected in case["expected"].items():
+                assert canonical[field] == expected, (
+                    f"Live Qwen case {case['id']} lost {field}: "
+                    f"expected {expected!r}, got {canonical[field]!r}"
+                )
 
         # A reload must return the same persisted extraction and pending review state.
         listing = client.get("/api/v1/documents/intelligence", headers=headers)
