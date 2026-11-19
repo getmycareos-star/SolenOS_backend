@@ -11,10 +11,10 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver
 from app.models.caregiver_account import CaregiverAccount
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer, CaregiverPrimaryTransfer
-from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility
+from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility, CaregiverHandoff
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
 from app.models.privacy_delivery import AuditLogEvent
-from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus
+from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus, HandoffAcceptanceStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.api.accounts import _hash_password, _validate_email
 
@@ -519,6 +519,23 @@ def accept_responsibility_transfer(transfer_id: str, request: Request, db: Sessi
     transfer.status = "accepted"
     transfer.accepted_at = now
     transfer.accepted_by_caregiver_id = session_caregiver_id
+    # Keep the access-transfer workflow and the longitudinal caregiver handoff
+    # record in one transaction. The handoff is accepted, but not completed:
+    # accepting responsibility does not prove the underlying care task was done.
+    db.add(CaregiverHandoff(
+        from_caregiver_id=str(transfer.from_caregiver_profile_id),
+        to_caregiver_id=str(profile.id),
+        person_id=str(person_id),
+        responsibility_type=str(source.responsibility_type),
+        scope=source.scope,
+        timestamp=now,
+        effective_time=now,
+        context=transfer.reason,
+        acceptance_status=HandoffAcceptanceStatus.ACCEPTED,
+        acceptance_evidence=f"Accepted through caregiver responsibility transfer {transfer.id}.",
+        is_completed=False,
+        provenance=f"caregiver_access.responsibility_transfer:{transfer.id}",
+    ))
     db.add(replacement)
     db.add(_audit_event(session_caregiver_id, person_id, "caregiver.responsibility_transfer.accepted", "caregiver_responsibility_transfer", transfer.id, {"new_responsibility_id": replacement.id, "previous_responsibility_id": source.id}))
     db.commit()
