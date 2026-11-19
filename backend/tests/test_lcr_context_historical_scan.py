@@ -37,6 +37,158 @@ def _care_events_schema(engine):
     return events
 
 
+
+def test_lcr_context_includes_scoped_evidence_reviews_and_assessment_history():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    metadata = MetaData()
+    evidence = Table(
+        "evidence", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("type", String),
+        Column("evidence_kind", String),
+        Column("epistemic_status", String),
+        Column("source_text", String),
+        Column("uploaded_at", DateTime),
+        Column("uploaded_by_caregiver_id", String),
+        Column("evidence_status", String),
+        Column("source_text_sha256", String),
+        Column("created_at", DateTime),
+    )
+    reviews = Table(
+        "evidence_review_records", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("evidence_id", String, nullable=False),
+        Column("review_type", String),
+        Column("outcome", String),
+        Column("rationale", String),
+        Column("criteria", String),
+        Column("policy_version", String),
+        Column("source_attribution_snapshot", String),
+        Column("reviewed_by_caregiver_id", String),
+        Column("created_at", DateTime),
+    )
+    claim_assessments = Table(
+        "evidence_claim_assessments", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("claim_id", String, nullable=False),
+        Column("claim_version", Integer),
+        Column("status", String),
+        Column("rationale", String),
+        Column("policy_version", String),
+        Column("evidence_links", String),
+        Column("reviewed_by_caregiver_id", String),
+        Column("supersedes_assessment_id", String),
+        Column("superseded_by_claim_id", String),
+        Column("created_at", DateTime),
+    )
+    freshness = Table(
+        "evidence_freshness_assessments", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("evidence_id", String, nullable=False),
+        Column("policy_id", String),
+        Column("policy_version", String),
+        Column("freshness_status", String),
+        Column("source_time", DateTime),
+        Column("source_time_kind", String),
+        Column("assessed_at", DateTime),
+        Column("age_days", Integer),
+        Column("rationale", String),
+        Column("assessed_by_caregiver_id", String),
+    )
+    completeness = Table(
+        "evidence_completeness_assessments", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("policy_id", String),
+        Column("policy_version", String),
+        Column("subject_type", String),
+        Column("subject_id", String),
+        Column("assessment_status", String),
+        Column("required_fields", String),
+        Column("satisfied_fields", String),
+        Column("missing_fields", String),
+        Column("field_evidence_json", String),
+        Column("evidence_ids", String),
+        Column("rationale", String),
+        Column("assessment_basis", String),
+        Column("semantic_sufficiency", String),
+        Column("assessed_by_caregiver_id", String),
+        Column("assessed_at", DateTime),
+    )
+    metadata.create_all(engine)
+    now = datetime(2026, 11, 19, tzinfo=timezone.utc)
+    try:
+        with engine.begin() as connection:
+            connection.execute(evidence.insert(), [
+                {"id": "evidence-a", "person_id": "person-a", "type": "document",
+                 "evidence_kind": "document", "epistemic_status": "reported",
+                 "source_text": "Discharge note says follow-up is needed.", "uploaded_at": now,
+                 "uploaded_by_caregiver_id": "caregiver-a", "evidence_status": "active",
+                 "source_text_sha256": "hash-a", "created_at": now},
+            ])
+            connection.execute(reviews.insert(), [
+                {"id": "review-a", "person_id": "person-a", "evidence_id": "evidence-a",
+                 "review_type": "reliability", "outcome": "contested",
+                 "rationale": "The author and source context still need confirmation.",
+                 "criteria": "[]", "policy_version": "evidence-review-v1",
+                 "source_attribution_snapshot": "{}", "reviewed_by_caregiver_id": "caregiver-a",
+                 "created_at": now},
+                {"id": "review-b", "person_id": "person-b", "evidence_id": "evidence-a",
+                 "review_type": "reliability", "outcome": "supported",
+                 "rationale": "Must not cross care-record scope.", "criteria": "[]",
+                 "policy_version": "evidence-review-v1", "source_attribution_snapshot": "{}",
+                 "reviewed_by_caregiver_id": "caregiver-b", "created_at": now},
+            ])
+            connection.execute(claim_assessments.insert(), [{
+                "id": "assessment-a", "person_id": "person-a", "claim_id": "claim-a",
+                "claim_version": 2, "status": "unverified",
+                "rationale": "The linked caregiver report has not been independently verified.",
+                "policy_version": "claim-assessment-v1", "evidence_links": "[]",
+                "reviewed_by_caregiver_id": "caregiver-a",
+                "supersedes_assessment_id": "assessment-old", "created_at": now,
+            }])
+            connection.execute(freshness.insert(), [{
+                "id": "freshness-a", "person_id": "person-a", "evidence_id": "evidence-a",
+                "policy_id": "freshness-policy-a", "policy_version": "freshness-v1",
+                "freshness_status": "stale", "source_time": now, "source_time_kind": "document_date",
+                "assessed_at": now, "age_days": 90, "rationale": "The explicit review interval has elapsed.",
+                "assessed_by_caregiver_id": "caregiver-a",
+            }])
+            connection.execute(completeness.insert(), [{
+                "id": "completeness-a", "person_id": "person-a", "policy_id": "completeness-policy-a",
+                "policy_version": "completeness-v1", "subject_type": "evidence", "subject_id": "evidence-a",
+                "assessment_status": "partial", "required_fields": "[\\"author\\", \\"date\\"]",
+                "satisfied_fields": "[\\"date\\"]", "missing_fields": "[\\"author\\"]",
+                "field_evidence_json": "{}", "evidence_ids": "[\\"evidence-a\\"]",
+                "rationale": "The source author is not identified.",
+                "assessment_basis": "linked_source_coverage_only",
+                "semantic_sufficiency": "not_automatically_verified",
+                "assessed_by_caregiver_id": "caregiver-a", "assessed_at": now,
+            }])
+        with Session(engine) as db:
+            context = build_lcr_context(db, "person-a", limit_per_source=20, include_all_history=True)
+        assert [item["id"] for item in context["sources"]["evidence_reviews"]["items"]] == ["review-a"]
+        assert context["sources"]["evidence_reviews"]["items"][0]["information_status"] == "evidence_review_reliability_contested"
+        assert context["sources"]["claim_assessments"]["items"][0]["information_status"] == "claim_assessment_unverified"
+        assert context["sources"]["evidence_freshness_assessments"]["items"][0]["information_status"] == "evidence_freshness_stale"
+        completeness_item = context["sources"]["evidence_completeness_assessments"]["items"][0]
+        assert completeness_item["information_status"] == "evidence_completeness_partial"
+        assert completeness_item["semantic_sufficiency"] == "not_automatically_verified"
+        prompt = format_lcr_context_for_prompt(context, max_chars=12000)
+        assert "[evidence_reviews;" in prompt
+        assert "contested" in prompt
+        assert "[claim_assessments;" in prompt
+        assert "[evidence_freshness_assessments;" in prompt
+        assert "[evidence_completeness_assessments;" in prompt
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
 def test_query_retrieval_scans_beyond_old_250_candidate_ceiling_and_finds_older_direct_match():
     _load_source_schema.cache_clear()
     engine = create_engine("sqlite:///:memory:")
