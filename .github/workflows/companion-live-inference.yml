@@ -10,6 +10,7 @@ on:
       - ".github/workflows/companion-live-inference.yml"
       - "backend/app/services/qwen*"
       - "backend/app/api/collaboration.py"
+      - "backend/app/api/handoff_drafts.py"
       - "backend/app/main.py"
       - "backend/tests/test_situation.py"
       - "backend/tests/test_companion_response_contract.py"
@@ -19,6 +20,7 @@ on:
       - "backend/tests/test_qwen_background_worker.py"
       - "backend/tests/test_qwen_startup_script.py"
       - "backend/tests/test_qwen_retry_budget.py"
+      - "backend/tests/test_handoff_drafts.py"
       - "start-with-qwen.sh"
 permissions:
   contents: read
