@@ -8,7 +8,7 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
-from app.models.caregiver_intelligence import CaregiverResponsibility
+from app.models.caregiver_intelligence import CaregiverResponsibility, CaregiverHandoff
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_account import CaregiverAccount
 
