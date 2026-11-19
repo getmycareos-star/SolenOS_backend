@@ -247,6 +247,15 @@ def create_caregiver_role(role: CaregiverRoleCreate, request: Request, db: Sessi
     role = CaregiverRoleCreate(**{**role.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id})
     service = CaregiverIntelligenceService(db)
     db_role = service.create_caregiver_role(role)
+    _log_and_learn(
+        db,
+        person_id,
+        "caregiver_role_assigned",
+        f"Care role assigned: {db_role.role_type.value}",
+        "caregiver_role",
+        db_role.id,
+        current_profile.id,
+    )
     return db_role
 
 
@@ -261,6 +270,35 @@ def list_caregiver_roles(person_id: str, request: Request, caregiver_id: Optiona
         .filter(CaregiverRoleModel.person_id == person_id, CaregiverRoleModel.is_current)
         .all()
     )
+
+
+@router.patch("/caregiver-roles/{role_id}/end", response_model=CaregiverRole)
+def end_caregiver_role(role_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    role = db.query(CaregiverRoleModel).filter(
+        CaregiverRoleModel.id == str(role_id),
+        CaregiverRoleModel.person_id == person_id,
+        CaregiverRoleModel.caregiver_id == current_profile.id,
+    ).with_for_update().first()
+    if role is None:
+        raise HTTPException(status_code=404, detail="Care role not found")
+    if not role.is_current:
+        return role
+    role.is_current = False
+    role.effective_end = datetime.now(timezone.utc)
+    db.add(role)
+    _log_and_learn(
+        db,
+        person_id,
+        "caregiver_role_ended",
+        f"Care role ended: {role.role_type.value}",
+        "caregiver_role",
+        role.id,
+        current_profile.id,
+    )
+    db.commit()
+    db.refresh(role)
+    return role
 
 
 @router.post("/caregiver-responsibilities", response_model=CaregiverResponsibility)
