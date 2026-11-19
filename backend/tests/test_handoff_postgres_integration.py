@@ -356,6 +356,8 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
             "recipient_caregiver_ids": [recipient_id],
             "scope": ["lcr_summary", "documents"],
             "expires_at": expiry,
+            "reviewed_source_refs": [item["source_ref"] for item in retrieved.json()["source_references"]],
+            "semantic_review_acknowledged": True,
         },
     )
     assert approval.status_code == 200, approval.text
@@ -367,6 +369,8 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
             "recipient_caregiver_ids": [recipient_id],
             "scope": ["lcr_summary", "documents"],
             "expires_at": expiry,
+            "reviewed_source_refs": [item["source_ref"] for item in retrieved.json()["source_references"]],
+            "semantic_review_acknowledged": True,
         },
     )
     assert approval_retry.status_code == 200, approval_retry.text
