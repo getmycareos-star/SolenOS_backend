@@ -1664,7 +1664,17 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
                 request,
                 db,
             )
-            reviewed.append({"id": row.id, "assertion_status": result.get("assertion_status")})
+            # Read the persisted ORM row back before reporting that the caregiver's
+            # explicit review succeeded. A helper response alone is not proof that
+            # the multi-assertion transaction retained the accepted state.
+            db.flush()
+            db.refresh(row, attribute_names=["assertion_status"])
+            if row.assertion_status != "accepted":
+                raise HTTPException(
+                    status_code=503,
+                    detail="Medication review could not be persisted; the report remains unreviewed",
+                )
+            reviewed.append({"id": row.id, "assertion_status": row.assertion_status})
         execution = execute_care_continuity_reconciliation(
             db,
             person_id,
