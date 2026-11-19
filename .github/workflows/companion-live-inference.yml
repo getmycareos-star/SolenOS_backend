@@ -18,6 +18,7 @@ on:
       - "backend/tests/test_companion_care_update_postgres.py"
       - "backend/tests/test_qwen_background_worker.py"
       - "backend/tests/test_qwen_startup_script.py"
+      - "backend/tests/test_qwen_retry_budget.py"
       - "start-with-qwen.sh"
 permissions:
   contents: read
@@ -71,6 +72,8 @@ jobs:
       - name: Apply complete Alembic migration chain
         working-directory: backend
         run: python -m alembic upgrade head
+      - name: Run bounded Qwen startup retry regression tests
+        run: python -m pytest backend/tests/test_qwen_retry_budget.py -q
       - name: Start isolated Ollama runtime
         run: |
           docker run -d --name solenos-live-ollama -p 11434:11434 ollama/ollama:latest
