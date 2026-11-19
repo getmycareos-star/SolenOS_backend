@@ -1053,3 +1053,42 @@ def test_consent_survives_database_engine_restart_and_is_visible_to_another_inst
         app.dependency_overrides.clear()
         main_module.SessionLocal = original_factory
         engine_a.dispose()
+
+
+
+def test_expired_anonymous_session_cannot_be_refreshed():
+    """An expired bearer capability must never be revived by the refresh endpoint."""
+    from datetime import datetime, timedelta, timezone
+    import hashlib
+    from app.models.anonymous_session import AnonymousSession
+
+    client = TestClient(app)
+    created = create_session(client, "Expired refresh recipient")
+    db = TestSessionLocal()
+    try:
+        token_hash = hashlib.sha256(created["access_token"].encode()).hexdigest()
+        row = db.query(AnonymousSession).filter_by(token_hash=token_hash).one()
+        row.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/api/v1/sessions/refresh",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert response.status_code == 401, response.text
+    assert "invalid" in response.json().get("detail", "").lower()
+
+
+def test_revoked_anonymous_session_cannot_be_refreshed():
+    """Revocation is terminal for the current bearer capability."""
+    client = TestClient(app)
+    created = create_session(client, "Revoked refresh recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+
+    revoked = client.post("/api/v1/sessions/revoke", headers=headers)
+    assert revoked.status_code == 200, revoked.text
+
+    refreshed = client.post("/api/v1/sessions/refresh", headers=headers)
+    assert refreshed.status_code == 401, refreshed.text
