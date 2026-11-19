@@ -267,6 +267,8 @@ class DraftApprovalRequest(BaseModel):
     recipient_caregiver_ids: list[str] = Field(min_length=1, max_length=10)
     scope: list[Literal["lcr_summary", "open_loops", "appointments", "documents"]] = Field(min_length=1)
     expires_at: datetime
+    reviewed_source_refs: list[str] = Field(min_length=1, max_length=100)
+    semantic_review_acknowledged: bool
 
 
 class DraftRequest(BaseModel):
@@ -951,6 +953,26 @@ def approve_handoff_draft(
         raise HTTPException(status_code=409, detail="A validated Qwen-grounded draft is required before approval")
     if not _validate_draft_quotes(draft.structured_content or {}, draft.source_snapshot or {}):
         raise HTTPException(status_code=409, detail="Draft grounding no longer validates; approval was refused")
+    generated_sections = (
+        (draft.structured_content or {}).get("generation", {}).get("sections", [])
+        if isinstance((draft.structured_content or {}).get("generation"), dict) else []
+    )
+    expected_source_refs = {
+        str(item.get("source_ref")).strip()
+        for item in generated_sections
+        if isinstance(item, dict) and isinstance(item.get("source_ref"), str) and item.get("source_ref").strip()
+    }
+    reviewed_source_refs = [str(value).strip() for value in payload.reviewed_source_refs]
+    if (
+        payload.semantic_review_acknowledged is not True
+        or not expected_source_refs
+        or len(reviewed_source_refs) != len(set(reviewed_source_refs))
+        or set(reviewed_source_refs) != expected_source_refs
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Caregiver review must acknowledge the interpretation limit and every generated source item before approval",
+        )
     recipients = [str(value).strip() for value in payload.recipient_caregiver_ids]
     if not recipients or len(recipients) != len(set(recipients)) or caregiver_id in recipients:
         raise HTTPException(status_code=422, detail="Recipient selection must be unique and exclude the initiating caregiver")
@@ -975,6 +997,8 @@ def approve_handoff_draft(
         "recipient_caregiver_ids": sorted(recipients),
         "scope": sorted(scope),
         "expires_at": expires_at.isoformat(),
+        "reviewed_source_refs": sorted(reviewed_source_refs),
+        "semantic_review_acknowledged": True,
     }
     if draft.review_status in {"approved_for_sharing", "shared"}:
         same_approval = (
@@ -1014,6 +1038,8 @@ def approve_handoff_draft(
             "recipient_count": len(recipients),
             "scope": sorted(scope),
             "expires_at": expires_at.isoformat() if expires_at else None,
+            "reviewed_source_count": len(reviewed_source_refs),
+            "semantic_review_acknowledged": True,
         },
     ))
     try:
