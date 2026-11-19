@@ -208,14 +208,33 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
         lowered,
         re.I,
     ) else "not_explicitly_marked"
-    if re.search(r"\bno longer\b", lowered, re.I):
-        temporal_context = "changed_over_time"
-    elif re.search(
-        r"\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week)\b",
+    # Temporal labels describe the source passage, not the current clinical
+    # truth. A past-time qualifier dates the described state; explicit
+    # transition language otherwise identifies a change from an earlier state.
+    historical_marker = re.search(
+        r"\\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week|\\d+ days? ago|\\d+ weeks? ago|\\d+ months? ago|\\d+ years? ago)\\b",
         lowered,
         re.I,
-    ):
+    )
+    change_marker = re.search(
+        r"\\b(?:no longer|discontinued|was stopped|were stopped|has stopped|have stopped|"
+        r"dosage changed|dose changed|dose increased|dose decreased|dosage increased|"
+        r"dosage decreased|changed from|differs from|different from|resolved|"
+        r"worsened|improved|replaced|restarted)\\b",
+        lowered,
+        re.I,
+    )
+    current_marker = re.search(
+        r"\\b(?:currently|current|at present|as of today|now)\\b",
+        lowered,
+        re.I,
+    )
+    if historical_marker:
         temporal_context = "historical"
+    elif change_marker:
+        temporal_context = "changed_over_time"
+    elif current_marker:
+        temporal_context = "current"
     else:
         temporal_context = "not_established"
     statement_kind = "recommendation" if re.search(
