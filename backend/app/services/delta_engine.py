@@ -272,6 +272,32 @@ def _normalise(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _delta_run_matches_current_input(
+    saved_provenance: dict[str, Any],
+    *,
+    source_event_snapshot_sha256: str | None,
+    care_state_revision_snapshot: str,
+    evidence_ids: list[str],
+    input_content_sha256: str,
+    event_date: datetime,
+) -> bool:
+    """Only replay a saved Delta result for the exact input and comparison basis.
+
+    Older runs without an input digest are deliberately not reusable: matching
+    source/evidence identifiers alone cannot prove that the submitted content
+    is the same observation.
+    """
+    return (
+        saved_provenance.get("engine_version") == DELTA_ENGINE_VERSION
+        and saved_provenance.get("source_event_snapshot_sha256") == source_event_snapshot_sha256
+        and saved_provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
+        and [str(value) for value in (saved_provenance.get("evidence_ids") or [])]
+            == [str(value) for value in evidence_ids]
+        and saved_provenance.get("input_content_sha256") == input_content_sha256
+        and saved_provenance.get("event_date") == event_date.isoformat()
+    )
+
+
 
 def evaluate_longitudinal_interpretations(
     computed_changes: list[dict[str, Any]],
@@ -923,12 +949,13 @@ def _reconcile_from_change_intelligence(
             except (TypeError, ValueError):
                 continue
             saved_provenance = saved_result.get("provenance") or {}
-            if (
-                saved_provenance.get("engine_version") == DELTA_ENGINE_VERSION
-                and saved_provenance.get("source_event_snapshot_sha256") == source_event_snapshot_sha256
-                and saved_provenance.get("care_state_revision_snapshot") == care_state_revision_snapshot
-                and [str(value) for value in (saved_provenance.get("evidence_ids") or [])]
-                    == [str(value) for value in evidence_ids]
+            if _delta_run_matches_current_input(
+                saved_provenance,
+                source_event_snapshot_sha256=source_event_snapshot_sha256,
+                care_state_revision_snapshot=care_state_revision_snapshot,
+                evidence_ids=evidence_ids,
+                input_content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                event_date=reference_time,
             ):
                 validate_source_snapshot()
                 db.commit()
@@ -1131,6 +1158,7 @@ def _reconcile_from_change_intelligence(
             "event_date": reference_time.isoformat(),
             "source_event_id": source_event_id,
             "evidence_ids": evidence_ids,
+            "input_content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
             "source_event_snapshot_sha256": source_event_snapshot_sha256,
             "care_state_revision_snapshot": care_state_revision_snapshot,
             "engine_version": DELTA_ENGINE_VERSION,
