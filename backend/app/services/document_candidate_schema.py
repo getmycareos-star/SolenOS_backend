@@ -179,13 +179,12 @@ def medication_details_for_candidate(subject: str, excerpt: str) -> dict[str, st
 
 def statement_context_markers(excerpt: str) -> dict[str, str]:
     """Extract explicit linguistic qualifiers without upgrading absence to affirmation."""
-    value = excerpt or ""
-    lowered = value.casefold()
+    lowered = (excerpt or "").casefold()
 
     attribution_patterns = (
-        ("patient_reported", r"\\b(?:the )?patient\\s+(?:reports?|reported|states?|stated|denies?|denied|describes?|described)\\b|\\bpatient[- ]reported\\b"),
-        ("caregiver_reported", r"\\b(?:the )?(?:caregiver|family member|daughter|son|spouse)\\s+(?:reports?|reported|states?|stated|noticed|observed)\\b|\\bcaregiver[- ]reported\\b"),
-        ("professional_observed", r"\\b(?:nurse|clinician|doctor|physician|therapist|staff)\\s+(?:observed|notes?|documented|reported|recorded)\\b|\\b(?:on examination|observed by)\\b"),
+        ("patient_reported", r"\b(?:the )?patient\s+(?:reports?|reported|states?|stated|denies?|denied|describes?|described)\b|\bpatient[- ]reported\b"),
+        ("caregiver_reported", r"\b(?:the )?(?:caregiver|family member|daughter|son|spouse)\s+(?:reports?|reported|states?|stated|noticed|observed)\b|\bcaregiver[- ]reported\b"),
+        ("professional_observed", r"\b(?:nurse|clinician|doctor|physician|therapist|staff)\s+(?:observed|notes?|documented|reported|recorded)\b|\b(?:on examination|observed by)\b"),
     )
     attribution = "not_stated"
     for label, pattern in attribution_patterns:
@@ -194,31 +193,27 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
             break
 
     negation = "explicitly_negated" if re.search(
-        r"\\b(?:no evidence of|denies?|denied|without|negative for|not present|not observed|no longer|never)\\b",
+        r"\b(?:no evidence of|denies?|denied|without|negative for|not present|not observed|no longer|never)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
-
     modality = "tentative" if re.search(
-        r"\\b(?:may|might|could|possibly|possible|possibly|suspected|suspected to|appears to|suggests?|probable|likely|unlikely)\\b",
+        r"\b(?:may|might|could|possibly|possible|suspected|appears to|suggests?|probable|likely|unlikely)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
-
     conditionality = "conditional" if re.search(
-        r"\\b(?:if|unless|provided that|only if|in the event that|when)\\b",
+        r"\b(?:if|unless|provided that|only if|in the event that|when)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
-
     temporal_context = "historical" if re.search(
-        r"\\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week)\\b",
+        r"\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week)\b",
         lowered,
         re.I,
     ) else "not_established"
-
-    recommendation_status = "recommendation" if re.search(
-        r"\\b(?:recommend(?:ed|s|ation)?|should consider|advised to|plan to|planned to|follow[- ]?up recommended)\\b",
+    statement_kind = "recommendation" if re.search(
+        r"\b(?:recommend(?:ed|s|ation)?|should consider|advised to|plan to|planned to|follow[- ]?up recommended)\b",
         lowered,
         re.I,
     ) else "not_detected"
@@ -229,7 +224,7 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
         "modality": modality,
         "conditionality": conditionality,
         "temporal_context": temporal_context,
-        "statement_kind": recommendation_status,
+        "statement_kind": statement_kind,
     }
 
 
