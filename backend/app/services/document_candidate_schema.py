@@ -193,22 +193,22 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
             break
 
     negation = "explicitly_negated" if re.search(
-        r"\b(?:no evidence of|denies?|denied|without|negative for|not present|not observed|no longer|never)\b",
+        r"\b(?:no evidence of|denies?|denied|without|negative for|not present|not observed|could not|unable to|no longer|never)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
     modality = "tentative" if re.search(
-        r"\b(?:may|might|could|possibly|possible|suspected|appears to|suggests?|probable|likely|unlikely)\b",
+        r"\b(?:may|might|possibly|possible|suspected|appears to|suggests?|probable|likely|unlikely)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
     conditionality = "conditional" if re.search(
-        r"\b(?:if|unless|provided that|only if|in the event that|when)\b",
+        r"\b(?:if|unless|provided that|only if|in the event that)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
     temporal_context = "historical" if re.search(
-        r"\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week)\b",
+        r"\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week|no longer)\b",
         lowered,
         re.I,
     ) else "not_established"
