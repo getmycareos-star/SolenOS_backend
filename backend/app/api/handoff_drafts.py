@@ -4,7 +4,7 @@ This endpoint only reads a fixed allowlist of persisted care-continuity tables.
 It does not create a handoff, attach a summary, or mutate the Living Care Record.
 """
 from datetime import date, datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 import uuid
 import hashlib
 import json
@@ -12,7 +12,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, text as sql_text
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, false, text as sql_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
