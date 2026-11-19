@@ -321,7 +321,8 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert assertion.source_context["kind"] == "caregiver_reviewed_document_candidate"
             assert assertion.source_context["authority"] == "caregiver_reviewed_report_not_independently_verified"
             assert assertion.source_context["document_candidate"]["source_attribution"] == "patient_reported"
-            assert assertion.source_context["document_candidate"]["source_excerpt"] == quote_two
+            assert assertion.source_context["document_candidate"]["page_number"] == 1
+            assert "source_excerpt" not in assertion.source_context["document_candidate"]
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 1
             lcr_context = build_lcr_context(db, person_id, limit_per_source=50)
             assertion_source = lcr_context["sources"]["assertions"]
