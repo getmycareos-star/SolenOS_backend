@@ -28,7 +28,7 @@ jobs:
   production-acceptance:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 70
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_RUN_ID: ${{ github.run_id }}
@@ -76,7 +76,7 @@ jobs:
               ).returncode == 0
 
           url = base + "/api/v1/assistant/installation"
-          for attempt in range(180):
+          for attempt in range(360):
               request = urllib.request.Request(url, headers={"Accept": "application/json"})
               try:
                   with urllib.request.urlopen(request, timeout=12) as response:
@@ -96,7 +96,7 @@ jobs:
                   print(f"Production installation endpoint not ready: {type(exc).__name__}")
               time.sleep(10)
           else:
-              raise SystemExit("Railway did not deploy a commit containing the current Qwen source with the configured model installed within 30 minutes.")
+              raise SystemExit("Railway did not deploy a commit containing the current Qwen source with the configured model installed within 60 minutes.")
 
           readiness_request = urllib.request.Request(base + "/api/v1/assistant/readiness", headers={"Accept": "application/json"})
           with urllib.request.urlopen(readiness_request, timeout=15) as response:
