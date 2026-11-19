@@ -120,11 +120,11 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
     api_client = TestClient(app)
     original = (
         b"Discharge summary: Patient walked 20 metres with a frame on 12 October. "
-        b"The patient ate half of lunch during the observation period."
+        b"The patient reports eating half of lunch on 2026-11-10 during the observation period."
     )
     source = original.decode("utf-8")
     quote_one = "Patient walked 20 metres with a frame on 12 October."
-    quote_two = "The patient reports eating half of lunch during the observation period."
+    quote_two = "The patient reports eating half of lunch on 2026-11-10 during the observation period."
 
     def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
         # The durable worker processes bounded page/chunk windows. Each call
@@ -137,6 +137,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                     "subject": "Patient",
                     "observation": quote,
                     "source_quote": quote,
+                    "event_date": "2026-11-10" if quote == quote_two else None,
                     "extraction_method": "test_verbatim",
                 })
         return {
@@ -314,7 +315,8 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                 id=assertion_id, person_id=person_id
             ).one()
             assert assertion.assertion_status == "accepted"
-            assert assertion.assertion_kind == "document_reviewed_observation"
+            assert assertion.assertion_kind == "time_bound_observation"
+            assert assertion.observed_at == datetime(2026, 11, 10, tzinfo=timezone.utc)
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quote_two
             assert assertion.created_by_caregiver_id == caregiver_id
@@ -322,6 +324,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert assertion.source_context["authority"] == "caregiver_reviewed_report_not_independently_verified"
             assert assertion.source_context["document_candidate"]["source_attribution"] == "patient_reported"
             assert assertion.source_context["document_candidate"]["page_number"] == 1
+            assert assertion.source_context["document_candidate"]["event_date_precision"] == "day"
             assert "source_excerpt" not in assertion.source_context["document_candidate"]
             assertion_revisions = db.query(CareStateRevision).filter_by(
                 person_id=person_id,
