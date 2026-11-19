@@ -1955,3 +1955,15 @@ def test_postgres_enum_filter_uses_the_database_responsibility_status_label():
     from app.api.handoff_drafts import SOURCES
 
     assert SOURCES["caregiver_responsibilities"]["active_status_values"] == ("ACTIVE",)
+
+
+def test_handoff_reflected_enum_filters_resolve_case_and_fail_closed():
+    from types import SimpleNamespace
+    from app.api.handoff_drafts import _database_enum_label
+
+    enum_column = SimpleNamespace(type=SimpleNamespace(enums=["ACTIVE", "JOINT", "TEMPORARY"]))
+    string_column = SimpleNamespace(type=SimpleNamespace())
+    assert _database_enum_label(enum_column, "active") == "ACTIVE"
+    assert _database_enum_label(enum_column, "JOINT") == "JOINT"
+    assert _database_enum_label(enum_column, "missing") is None
+    assert _database_enum_label(string_column, "active") == "active"
