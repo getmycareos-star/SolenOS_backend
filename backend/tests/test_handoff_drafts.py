@@ -1097,6 +1097,8 @@ def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkey
             "sections": [{
                 "section": "Recent observations and changes",
                 "source_ref": "care_facts:handoff-before-new-source",
+                "summary": "The caregiver reports a settled morning.",
+                "supporting_quote": source["text"],
                 "text": source["text"],
             }],
         }
@@ -1168,14 +1170,14 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
 
     assert result["status"] == "generated"
     assert observed["timeout"] == 150
-    assert observed["options"]["num_predict"] == 384
+    assert observed["options"]["num_predict"] == 512
     assert observed["response_format"]["properties"]["items"]["maxItems"] == 6
     assert "summary" in observed["response_format"]["properties"]["items"]["items"]["required"]
     assert "supporting_quote" in observed["response_format"]["properties"]["items"]["items"]["required"]
     assert observed["response_format"]["properties"]["items"]["items"]["properties"]["source_ref"]["enum"] == ["care_events:real-event"]
     prompt_sources = json.loads(observed["messages"][1]["content"])["sources"]
     assert len(prompt_sources) == 1
-    assert len(prompt_sources[0]["excerpt"]) <= 240
+    assert len(prompt_sources[0]["source_text"]) <= 600
 
 def test_qwen_handoff_generation_bounds_context_and_attaches_only_selected_source_text(monkeypatch):
     import json
