@@ -3948,6 +3948,50 @@ def evaluate_deployed_qwen(request: Request):
                 "failure_reason": detail.get("reason", detail.get("code", "inference_failed")),
             })
 
+    # Exercise the separate handoff-draft generation path with a synthetic
+    # source record. This helper is pure: it calls Qwen and validates the exact
+    # source reference without querying or writing a caregiver's database.
+    from app.api.handoff_drafts import _generate_grounded_handoff
+
+    synthetic_handoff_source = {
+        "source_table": "care_assertions",
+        "source_id": "synthetic-caregiver-report",
+        "source_type": "care_assertion",
+        "epistemic_status": "reported",
+        "record_status": "recorded",
+        "event_at": "2026-11-18T12:00:00+00:00",
+        "recorded_at": "2026-11-19T09:00:00+00:00",
+        "text": "Caregiver reported that the person prefers a quiet room after lunch.",
+        "evidence_ids": [],
+        "evidence_sources": [],
+        "stale_warning": False,
+    }
+    handoff_generation = _generate_grounded_handoff(
+        [synthetic_handoff_source],
+        "family_transition",
+        "family",
+    )
+    handoff_sections = handoff_generation.get("sections") or []
+    expected_source_ref = "care_assertions:synthetic-caregiver-report"
+    handoff_checks = {
+        "real_model_generation": handoff_generation.get("status") == "generated",
+        "ollama_provider": handoff_generation.get("provider") == "ollama",
+        "exact_source_reference": bool(handoff_sections) and all(
+            item.get("source_ref") == expected_source_ref for item in handoff_sections
+        ),
+        "saved_source_wording_preserved": bool(handoff_sections) and all(
+            item.get("text") == synthetic_handoff_source["text"] for item in handoff_sections
+        ),
+    }
+    results.append({
+        "criterion": "handoff_draft_source_reference_validation",
+        "passed": all(handoff_checks.values()),
+        "checks": handoff_checks,
+        "failure_reason": handoff_generation.get("reason") if not all(handoff_checks.values()) else None,
+        "model": handoff_generation.get("model"),
+        "sections_generated": len(handoff_sections),
+    })
+
     return {
         "model": readiness.get("model"),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
