@@ -339,6 +339,16 @@ def test_responsibility_transfer_waits_for_recipient_acceptance_and_preserves_so
         original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
         replacement = db.query(CaregiverResponsibility).filter_by(id=accepted.json()["new_responsibility_id"]).one()
         persisted_transfer = db.query(CaregiverResponsibilityTransfer).filter_by(id=transfer_id).one()
+        persisted_handoff = db.query(CaregiverHandoff).filter(
+            CaregiverHandoff.person_id == primary["person"]["id"],
+            CaregiverHandoff.from_caregiver_id == primary["caregiver"]["profile_id"],
+            CaregiverHandoff.to_caregiver_id == james["caregiver_profile_id"],
+            CaregiverHandoff.provenance == "caregiver_access.responsibility_transfer:" + transfer_id,
+        ).one()
+        assert persisted_handoff.responsibility_type == "clinic_follow_up"
+        assert persisted_handoff.acceptance_status.value == "accepted"
+        assert persisted_handoff.is_completed is False
+        assert persisted_handoff.acceptance_evidence
         assert original.status.value == "historical"
         assert original.effective_end is not None
         assert replacement.status.value == "active"
