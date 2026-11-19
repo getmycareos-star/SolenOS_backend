@@ -965,6 +965,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     assert prepared.json()["source_of_truth"] == "living_care_record"
     assert prepared.json()["source_snapshot_id"]
     assert len(prepared.json()["source_snapshot_sha256"]) == 64
+    assert prepared.json()["source_freshness"]["status"] == "current"
     listed = test_client.get(
         "/api/v1/handoff-drafts?limit=10",
         headers={"Authorization": f"Bearer {session['access_token']}"},
