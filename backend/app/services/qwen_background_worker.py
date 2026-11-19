@@ -918,6 +918,10 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         projected_sources.get("evidence", {}).get("items", [])
         if isinstance(projected_sources, dict) else []
     )
+    projected_observation_rows = (
+        projected_sources.get("evidence_observations", {}).get("items", [])
+        if isinstance(projected_sources, dict) else []
+    )
     projected_event = next(
         (row for row in projected_event_rows if str(row.get("id")) == str(event_id)),
         None,
@@ -934,9 +938,30 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         projected_evidence
         and str(projected_evidence.get("uploaded_by_caregiver_id")) == str(caregiver_id)
     )
+    # Free-form Daily Care reports are projected as source-grounded observation
+    # rows, not accepted clinical assertions. Verify those exact persisted
+    # observation IDs through the same LCR retrieval source used by the UI and
+    # Companion; event/evidence visibility alone is not enough.
+    persisted_observation_ids = {
+        str(row[0])
+        for row in db.query(EvidenceObservation.id).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+            EvidenceObservation.extraction_run_id == event_id,
+        ).all()
+    } if natural_language_update else set()
+    projected_observation_ids = {
+        str(row.get("id"))
+        for row in projected_observation_rows
+        if isinstance(row, dict) and row.get("id") is not None
+    }
+    observations_retrieved = persisted_observation_ids.issubset(projected_observation_ids)
     projection_status = (
         "verified"
-        if projected_event and projected_evidence and event_links_evidence and evidence_has_correct_author
+        if (
+            projected_event and projected_evidence and event_links_evidence
+            and evidence_has_correct_author and observations_retrieved
+        )
         else "not_verified"
     )
     if projection_status != "verified":
@@ -968,6 +993,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "reconciliation": "completed",
         "longitudinal_retrieval": "verified" if projection_status == "verified" else "unavailable",
         "projection": projection_status,
+        "source_observations_expected": len(persisted_observation_ids),
+        "source_observations_retrieved": len(persisted_observation_ids & projected_observation_ids),
         "reconciliation_run_id": reconciliation.get("run_id"),
         "delta_reconciliation": delta_status,
         "delta_run_id": delta_reconciliation.get("run_id"),
@@ -987,6 +1014,8 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "assessment_status": assessment_status,
         "reconciliation_status": "completed",
         "projection_status": projection_status,
+        "source_observations_expected": len(persisted_observation_ids),
+        "source_observations_retrieved": len(persisted_observation_ids & projected_observation_ids),
         "delta_reconciliation_status": delta_status,
         "delta_run_id": delta_reconciliation.get("run_id"),
         "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
