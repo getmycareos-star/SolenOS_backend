@@ -3847,10 +3847,13 @@ def evaluate_deployed_qwen(request: Request):
     """Run synthetic-only acceptance probes against the currently deployed local model."""
     _verify_production_evaluation_run(request)
     readiness = qwen_readiness_status(force=True)
-    if not readiness.get("available"):
+    # This endpoint is the first real inference probe after a fresh deployment.
+    # Require the private runtime and model inventory, not prior inference proof;
+    # the probe itself establishes inference_verified only after generation works.
+    if not readiness.get("runtime_available") or not readiness.get("model_installed"):
         raise HTTPException(status_code=503, detail={
             "code": "model_not_ready",
-            "message": "Production evaluation did not run because the deployed model is not ready.",
+            "message": "Production evaluation did not run because the deployed model is not installed or its runtime is unavailable.",
             "reason": readiness.get("failure_reason"),
         })
 

@@ -156,6 +156,36 @@ def test_assistant_status_uses_one_cached_readiness_check_and_never_claims_infer
     assert len(readiness_calls) == 1
 
 
+
+def test_production_evaluation_can_be_the_first_inference_after_deployment(monkeypatch):
+    from starlette.requests import Request
+    from app.api import collaboration
+
+    monkeypatch.setattr(collaboration, "_verify_production_evaluation_run", lambda _request: None)
+    monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda force=False: {
+        "available": False,
+        "runtime_available": True,
+        "model_installed": True,
+        "inference_verified": False,
+        "model": "qwen3.5:4b",
+        "failure_reason": None,
+    })
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *args, **kwargs: "Synthetic model response.")
+
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/assistant/evaluate-production",
+        "headers": [],
+    })
+    result = collaboration.evaluate_deployed_qwen(request)
+
+    assert result["synthetic_only"] is True
+    assert result["care_record_accessed"] is False
+    assert result["total"] == 5
+    assert result["deployment_commit"] is not None
+
+
 def test_production_evaluation_has_five_independent_synthetic_acceptance_criteria():
     from app.api.collaboration import _production_qwen_evaluation_cases
 
