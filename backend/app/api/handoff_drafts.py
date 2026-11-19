@@ -218,6 +218,142 @@ SOURCES = {
         "text_fields": ("transition_type", "from_location", "to_location", "notes", "time_provenance", "location_provenance"),
         "time_fields": ("occurred_at", "created_at"),
     },
+    "caregiver_profiles": {
+        "label": "Care team members",
+        "kind": "caregiver_profile",
+        "fields": ("id", "name", "relationship", "participation_category", "involvement_status", "proximity_category", "availability_status", "timezone", "is_primary_designated", "primary_designation_source", "identity_match_confidence", "created_at", "updated_at"),
+        "text_fields": ("name", "relationship", "participation_category", "involvement_status", "proximity_category", "availability_status", "primary_designation_source"),
+        "time_fields": ("created_at", "updated_at"),
+        "recorded_time_fields": ("created_at", "updated_at"),
+        "detail_fields": ("relationship", "participation_category", "involvement_status", "proximity_category", "availability_status", "timezone", "is_primary_designated", "identity_match_confidence"),
+        "include_current_outside_window": True,
+    },
+    "caregiver_roles": {
+        "label": "Caregiver roles",
+        "kind": "caregiver_role",
+        "fields": ("id", "caregiver_id", "role_type", "custom_role_name", "scope", "effective_start", "effective_end", "is_current", "assignment_source", "created_at"),
+        "text_fields": ("role_type", "custom_role_name", "scope", "assignment_source"),
+        "time_fields": ("effective_start", "created_at"),
+        "event_time_fields": ("effective_start",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("caregiver_id", "role_type", "custom_role_name", "scope", "effective_end", "is_current", "assignment_source"),
+        "current_only_column": "is_current",
+        "include_current_outside_window": True,
+    },
+    "caregiver_responsibilities": {
+        "label": "Caregiver responsibilities",
+        "kind": "caregiver_responsibility",
+        "fields": ("id", "caregiver_id", "responsibility_type", "scope", "effective_start", "effective_end", "status", "acceptance_status", "assignment_source", "is_joint", "joint_with_caregiver_id", "schedule_pattern", "provenance", "created_at", "updated_at"),
+        "text_fields": ("responsibility_type", "scope", "acceptance_status", "assignment_source", "schedule_pattern", "provenance"),
+        "time_fields": ("effective_start", "created_at", "updated_at"),
+        "event_time_fields": ("effective_start",),
+        "recorded_time_fields": ("created_at", "updated_at"),
+        "detail_fields": ("caregiver_id", "responsibility_type", "scope", "effective_end", "status", "acceptance_status", "assignment_source", "is_joint", "joint_with_caregiver_id", "schedule_pattern"),
+        "active_status_values": ("active",),
+        "include_current_outside_window": True,
+    },
+    "caregiver_handoffs": {
+        "label": "Caregiver handoff history",
+        "kind": "caregiver_handoff",
+        "fields": ("id", "from_caregiver_id", "to_caregiver_id", "responsibility_type", "scope", "timestamp", "effective_time", "context", "acceptance_status", "acceptance_evidence", "completion_evidence", "is_completed", "provenance", "created_at"),
+        "text_fields": ("responsibility_type", "scope", "context", "acceptance_status", "acceptance_evidence", "completion_evidence"),
+        "time_fields": ("effective_time", "timestamp", "created_at"),
+        "event_time_fields": ("effective_time", "timestamp"),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("from_caregiver_id", "to_caregiver_id", "responsibility_type", "acceptance_status", "is_completed", "acceptance_evidence", "completion_evidence", "provenance"),
+        "include_latest_outside_window": True,
+        "latest_timestamp_column": "timestamp",
+        "latest_group_columns": ("responsibility_type", "from_caregiver_id", "to_caregiver_id"),
+    },
+    "caregiver_contexts": {
+        "label": "Caregiver availability and context",
+        "kind": "caregiver_context",
+        "fields": ("id", "caregiver_id", "proximity_category", "observation_window_start", "observation_window_end", "availability_notes", "effective_start", "effective_end", "created_at"),
+        "text_fields": ("proximity_category", "observation_window_start", "observation_window_end", "availability_notes"),
+        "time_fields": ("effective_start", "created_at"),
+        "event_time_fields": ("effective_start",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("caregiver_id", "proximity_category", "observation_window_start", "observation_window_end", "effective_end"),
+        "open_end_column": "effective_end",
+        "include_current_outside_window": True,
+    },
+    "caregiver_activities": {
+        "label": "Recent caregiver activity",
+        "kind": "caregiver_activity",
+        "fields": ("id", "caregiver_id", "activity_type", "description", "related_entity_type", "related_entity_id", "occurred_at", "recorded_at", "is_anonymous"),
+        "text_fields": ("activity_type", "description", "related_entity_type"),
+        "time_fields": ("occurred_at", "recorded_at"),
+        "event_time_fields": ("occurred_at",),
+        "recorded_time_fields": ("recorded_at",),
+        "detail_fields": ("caregiver_id", "activity_type", "related_entity_type", "related_entity_id", "is_anonymous"),
+    },
+    "caregiver_observations": {
+        "label": "Shared caregiver observations",
+        "kind": "caregiver_observation",
+        "fields": ("id", "caregiver_id", "observation_content", "observation_type", "event_time", "event_time_precision", "report_time", "observation_context", "location_context", "duration_context", "evidence_ref", "information_visibility", "is_promoted_to_shared", "promoted_at"),
+        "text_fields": ("observation_content", "observation_type", "observation_context", "location_context", "duration_context"),
+        "time_fields": ("event_time", "report_time", "created_at"),
+        "event_time_fields": ("event_time",),
+        "recorded_time_fields": ("report_time", "created_at"),
+        "detail_fields": ("caregiver_id", "observation_type", "event_time_precision", "evidence_ref", "information_visibility", "is_promoted_to_shared", "promoted_at"),
+        "shared_only": True,
+    },
+    "caregiver_perspectives": {
+        "label": "Shared caregiver perspectives",
+        "kind": "caregiver_perspective",
+        "fields": ("id", "caregiver_id", "claim_type", "claim_content", "context", "timestamp", "evidence_ref", "information_visibility", "is_promoted_to_shared", "promoted_at"),
+        "text_fields": ("claim_type", "claim_content", "context"),
+        "time_fields": ("timestamp", "created_at"),
+        "event_time_fields": ("timestamp",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("caregiver_id", "claim_type", "evidence_ref", "information_visibility", "is_promoted_to_shared", "promoted_at"),
+        "shared_only": True,
+    },
+    "care_network_relationships": {
+        "label": "Care team relationships",
+        "kind": "care_network_relationship",
+        "fields": ("id", "from_caregiver_id", "to_caregiver_id", "relationship_type", "description", "effective_start", "effective_end", "is_active", "provenance", "created_at"),
+        "text_fields": ("relationship_type", "description", "provenance"),
+        "time_fields": ("effective_start", "created_at"),
+        "event_time_fields": ("effective_start",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("from_caregiver_id", "to_caregiver_id", "relationship_type", "effective_end", "is_active"),
+        "current_only_column": "is_active",
+        "include_current_outside_window": True,
+    },
+    "responsibility_gaps": {
+        "label": "Responsibility gaps",
+        "kind": "responsibility_gap",
+        "fields": ("id", "responsibility_type", "scope", "detected_at", "gap_start", "last_known_caregiver_id", "status", "resolution", "resolved_at", "provenance", "created_at"),
+        "text_fields": ("responsibility_type", "scope", "status", "resolution", "provenance"),
+        "time_fields": ("detected_at", "created_at"),
+        "event_time_fields": ("gap_start", "detected_at"),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("last_known_caregiver_id", "status", "resolved_at"),
+        "include_unresolved_outside_window": True,
+    },
+    "perspective_conflicts": {
+        "label": "Different caregiver perspectives to review",
+        "kind": "perspective_conflict",
+        "fields": ("id", "caregiver_a_id", "caregiver_b_id", "conflict_type", "claim_a", "claim_b", "context_a", "context_b", "status", "resolution", "resolved_at", "evidence_ref", "created_at"),
+        "text_fields": ("conflict_type", "claim_a", "claim_b", "context_a", "context_b", "status", "resolution"),
+        "time_fields": ("created_at",),
+        "event_time_fields": ("created_at",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("caregiver_a_id", "caregiver_b_id", "status", "resolved_at", "evidence_ref"),
+        "include_unresolved_outside_window": True,
+    },
+    "duplicate_actions": {
+        "label": "Possible duplicate care actions",
+        "kind": "duplicate_action",
+        "fields": ("id", "caregiver_a_id", "caregiver_b_id", "action_type", "action_description_a", "action_description_b", "time_a", "time_b", "status", "resolution", "created_at"),
+        "text_fields": ("action_type", "action_description_a", "action_description_b", "status", "resolution"),
+        "time_fields": ("time_a", "time_b", "created_at"),
+        "event_time_fields": ("time_a", "time_b"),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("caregiver_a_id", "caregiver_b_id", "status", "resolution"),
+        "include_unresolved_outside_window": True,
+    },
     "appointments": {
         "label": "Appointments",
         "kind": "appointment",
@@ -2066,6 +2202,19 @@ def prepare_handoff_draft(
                     query = query.where(table.c.is_active.is_(True))
                 if "superseded_by_assessment_id" in table.c:
                     query = query.where(table.c.superseded_by_assessment_id.is_(None))
+            if spec.get("current_only_column") in table.c:
+                query = query.where(table.c[spec["current_only_column"]].is_(True))
+            if spec.get("open_end_column") in table.c:
+                query = query.where(table.c[spec["open_end_column"]].is_(None))
+            if spec.get("active_status_values"):
+                status_column = spec.get("active_status_column", "status")
+                if status_column in table.c:
+                    query = query.where(table.c[status_column].in_(tuple(spec["active_status_values"])))
+            if spec.get("shared_only"):
+                if "is_promoted_to_shared" in table.c:
+                    query = query.where(table.c.is_promoted_to_shared.is_(True))
+                if "information_visibility" in table.c:
+                    query = query.where(table.c.information_visibility == "shared")
             if spec.get("require_caregiver_owned_evidence"):
                 evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
                 query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
@@ -2110,6 +2259,11 @@ def prepare_handoff_draft(
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_upcoming_outside_window") and "scheduled_at" in table.c:
                     query = query.where(or_(in_window, table.c.scheduled_at >= now))
+                elif spec.get("include_current_outside_window"):
+                    # These rows describe current care-team state, not recent
+                    # events. Current roles, responsibilities and availability
+                    # remain relevant even when they were last updated earlier.
+                    query = query
                 elif spec.get("include_latest_outside_window"):
                     # Append-only assessment/policy history remains relevant when
                     # its latest decision predates the briefing's recent-event window.
@@ -2195,6 +2349,12 @@ def prepare_handoff_draft(
                 record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
                 if table_name == "evidence_review_records":
                     record_status = row.get("outcome") or record_status
+                if table_name == "caregiver_profiles":
+                    record_status = row.get("involvement_status") or record_status
+                if table_name == "caregiver_handoffs":
+                    record_status = row.get("acceptance_status") or record_status
+                if table_name == "caregiver_roles":
+                    record_status = "current" if row.get("is_current") else "historical"
                 if table_name == "uncertainty_assessments":
                     record_status = "active" if row.get("is_active") else "superseded"
                 source_fingerprint = _fingerprint(_normalize_reflected_fingerprint_row(row))
