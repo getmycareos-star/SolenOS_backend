@@ -22,6 +22,7 @@ EXPECTED = {
     "event_chronology",
     "uncertainty",
     "medication_safety",
+    "handoff_draft_source_reference_validation",
 }
 
 
@@ -123,7 +124,7 @@ def main() -> int:
 
     results = payload.get("results") or []
     by_criterion = {item.get("criterion"): item for item in results}
-    if len(results) != 5 or set(by_criterion) != EXPECTED:
+    if len(results) != 6 or set(by_criterion) != EXPECTED:
         print(json.dumps({"error": "missing_or_duplicate_criteria", "criteria": list(by_criterion)}, indent=2), file=sys.stderr)
         return 1
 
@@ -155,7 +156,7 @@ def main() -> int:
     if semantic_passed != len(EXPECTED):
         print("Production Qwen semantic acceptance gate FAILED.", file=sys.stderr)
         return 1
-    print("Production Qwen semantic acceptance gate PASSED: all five criteria.")
+    print("Production Qwen semantic acceptance gate PASSED: all six criteria.")
     return 0
 
 
