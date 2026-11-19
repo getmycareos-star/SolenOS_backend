@@ -1,3 +1,4 @@
+import json
 import pytest
 from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
@@ -1332,7 +1333,7 @@ def test_failed_daily_care_adapter_is_not_reported_as_empty(client, monkeypatch)
     assert status["count"] == 0
 
 
-@pytest.mark.parametrize("failure", ["timeout", "authentication", "malformed"])
+@pytest.mark.parametrize("failure", ["timeout", "authentication", "malformed", "invalid_claim"])
 def test_qwen_handoff_generation_reports_real_inference_failures(monkeypatch, failure):
     import app.api.handoff_drafts as handoff_drafts
 
@@ -1343,6 +1344,13 @@ def test_qwen_handoff_generation_reports_real_inference_failures(monkeypatch, fa
             raise TimeoutError("simulated inference timeout")
         if failure == "authentication":
             raise PermissionError("simulated model authentication failure")
+        if failure == "invalid_claim":
+            return json.dumps({"items": [{
+                "section": "Recent observations",
+                "source_ref": "care_events:real-event",
+                "summary": "The person refused breakfast.",
+                "supporting_quote": "This sentence is not in the saved source.",
+            }]})
         return "not-json"
 
     monkeypatch.setattr(handoff_drafts, "qwen_chat", fail_inference)
