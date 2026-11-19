@@ -189,6 +189,8 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+        assert accepted.json()["longitudinal_retrieval_status"] == "verified"
+        assert accepted.json()["candidate"]["longitudinal_retrieval_status"] == "verified"
         assert len(execution_calls) == 1
         assert execution_calls[0]["source_caregiver_id"] == first["caregiver"]["id"]
         assert execution_calls[0]["source_evidence_id"] == evidence_id
@@ -202,6 +204,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         )
         assert accepted_again.status_code == 200
         assert accepted_again.json()["source_record_ref"] == accepted.json()["source_record_ref"]
+        assert accepted_again.json()["longitudinal_retrieval_status"] == "verified"
 
         history_response = client.get(
             f"/api/v1/documents/intelligence/{analysis_id}/review-history",
