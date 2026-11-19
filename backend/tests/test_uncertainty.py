@@ -10,7 +10,7 @@ from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.action import Action
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, EvidenceReviewRecord
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationSession, ConversationMessage
 from app.models.uncertainty import OpenQuestion, InformationGap, Contradiction
@@ -3793,7 +3793,42 @@ def test_qwen_cross_workflow_claim_sources_keep_events_documents_and_appointment
             evidence_ids=[evidence.id],
             created_by_caregiver_id=caregiver.id,
         )
-        db.add_all([person, caregiver, evidence, event, analysis, appointment])
+        other_person = Person(id="qwen-provenance-other-person", name="Other Care Recipient")
+        other_caregiver = Caregiver(
+            id="qwen-provenance-other-caregiver",
+            name="Other Caregiver",
+            email="qwen-provenance-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        own_source_review = EvidenceReviewRecord(
+            id="qwen-provenance-own-review",
+            person_id=person.id,
+            evidence_id=evidence.id,
+            review_type="reliability",
+            outcome="unverified",
+            rationale="The original author has not been independently confirmed.",
+            criteria=[{"criterion": "source attribution", "result": "incomplete"}],
+            policy_version="evidence-review-v1",
+            source_attribution_snapshot="{}",
+            reviewed_by_caregiver_id=caregiver.id,
+        )
+        foreign_source_review = EvidenceReviewRecord(
+            id="qwen-provenance-foreign-review",
+            person_id=other_person.id,
+            evidence_id=evidence.id,
+            review_type="reliability",
+            outcome="supported",
+            rationale="This review belongs to another care recipient.",
+            criteria=[],
+            policy_version="evidence-review-v1",
+            source_attribution_snapshot="{}",
+            reviewed_by_caregiver_id=other_caregiver.id,
+        )
+        db.add_all([
+            person, caregiver, evidence, event, analysis, appointment,
+            other_person, other_caregiver, own_source_review, foreign_source_review,
+        ])
         db.commit()
 
         records = context_lines_to_source_records([
@@ -3809,6 +3844,11 @@ def test_qwen_cross_workflow_claim_sources_keep_events_documents_and_appointment
         assert event_source["entered_by"] == caregiver.name
         assert event_source["related_evidence"][0]["label"] == "family-note.pdf"
         assert event_source["related_evidence"][0]["reported_by"] == "Daughter"
+        related_source = event_source["related_evidence"][0]
+        assert related_source["evidence_reviews_status"] == "available"
+        assert related_source["evidence_reviews"][0]["outcome"] == "unverified"
+        assert "not independent confirmation" in related_source["evidence_reviews"][0]["interpretation_limit"]
+        assert all(item["outcome"] != "supported" for item in related_source["evidence_reviews"])
 
         document_source = by_type["document_extraction"]
         assert document_source["record_id"] == analysis.id
