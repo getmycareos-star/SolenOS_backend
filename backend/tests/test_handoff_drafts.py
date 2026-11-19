@@ -1628,3 +1628,29 @@ def test_draft_includes_caregiver_reviewable_medication_assertions_with_source_l
     assert all(item["record_status"] in {"reported", "review_required"} for item in medication_refs)
     assert body["retrieval_complete"] is False, "unavailable allergy evidence must remain an explicit completeness gap"
     assert any(item["source"] == "allergies" for item in body["limitations"])
+
+def test_qwen_unavailable_uses_exact_source_only_briefing_fallback(monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+
+    def unavailable():
+        raise RuntimeError("Qwen is not configured in this test environment")
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", unavailable)
+    source_text = "Caregiver reported that breakfast was mostly uneaten."
+    result = handoff_drafts._generate_grounded_handoff([{
+        "source_table": "care_facts",
+        "source_id": "fallback-fact-001",
+        "source_type": "lcr_fact",
+        "epistemic_status": "reported",
+        "record_status": "current",
+        "event_at": "2026-11-19T08:00:00+00:00",
+        "recorded_at": "2026-11-19T08:10:00+00:00",
+        "text": source_text,
+    }], "period_summary", "family")
+
+    assert result["status"] == "source_only_fallback"
+    assert result["provider"] is None
+    assert result["generation_contract"] == "exact_source_text_only_no_model_paraphrase"
+    assert result["sections"][0]["summary"] == source_text
+    assert result["sections"][0]["supporting_quote"] == source_text
+    assert result["sections"][0]["source_ref"] == "care_facts:fallback-fact-001"
