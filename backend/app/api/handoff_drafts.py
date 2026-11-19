@@ -267,8 +267,8 @@ class DraftApprovalRequest(BaseModel):
     recipient_caregiver_ids: list[str] = Field(min_length=1, max_length=10)
     scope: list[Literal["lcr_summary", "open_loops", "appointments", "documents"]] = Field(min_length=1)
     expires_at: datetime
-    reviewed_source_refs: list[str] = Field(min_length=1, max_length=100)
-    semantic_review_acknowledged: bool
+    reviewed_source_refs: list[str] = Field(default_factory=list, max_length=100)
+    semantic_review_acknowledged: bool = False
 
 
 class DraftRequest(BaseModel):
