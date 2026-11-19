@@ -25,7 +25,7 @@ permissions:
 
 concurrency:
   group: solenos-backup-recovery-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   restore-and-verify:
