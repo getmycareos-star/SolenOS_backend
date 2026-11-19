@@ -429,6 +429,11 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             asserted_value="Caregiver reported reduced fluid intake.",
             source_label="Daily Care report",
             source_text="Caregiver reported reduced fluid intake.",
+            source_context={
+                "kind": "caregiver_reviewed_document_candidate",
+                "authority": "caregiver_reviewed_report_not_independently_verified",
+                "document_candidate": {"source_attribution": "caregiver_reported", "conditionality": "conditional"},
+            },
             evidence_ids=[evidence.id],
             assertion_status="reported",
             epistemic_state="reported",
@@ -491,6 +496,8 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     assert "handoff-source-review" in refs
     assert refs["handoff-source-review"]["source_table"] == "evidence_review_records"
     assert refs["handoff-source-review"]["details"]["outcome"] == "unverified"
+    assert refs["handoff-review-claim"]["details"]["source_context"]["document_candidate"]["source_attribution"] == "caregiver_reported"
+    assert refs["handoff-review-claim"]["details"]["source_context"]["document_candidate"]["conditionality"] == "conditional"
     assert "handoff-claim-assessment" in refs
     assert refs["handoff-claim-assessment"]["source_table"] == "evidence_claim_assessments"
     assert refs["handoff-claim-assessment"]["details"]["status"] == "unverified"
