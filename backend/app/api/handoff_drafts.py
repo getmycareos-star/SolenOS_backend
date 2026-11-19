@@ -1712,9 +1712,13 @@ def _source_only_handoff_fallback(records: list[dict], reason: str) -> dict:
     displayed statement is the saved source wording and remains linked to its
     original record. It is not represented as Qwen-generated content.
     """
-    eligible = [
-        {
-            "source_ref": f"{item['source_table']}:{item['source_id']}",
+    eligible_by_ref = {}
+    for item in records:
+        source_ref = f"{item['source_table']}:{item['source_id']}"
+        if source_ref in eligible_by_ref or not str(item.get("text") or "").strip():
+            continue
+        eligible_by_ref[source_ref] = {
+            "source_ref": source_ref,
             "source_type": item["source_type"],
             "source_table": item["source_table"],
             "epistemic_status": item["epistemic_status"],
@@ -1724,8 +1728,7 @@ def _source_only_handoff_fallback(records: list[dict], reason: str) -> dict:
             "stale_warning": bool(item.get("stale_warning")),
             "text": str(item.get("text") or "").strip()[:1200],
         }
-        for item in records if str(item.get("text") or "").strip()
-    ]
+    eligible = list(eligible_by_ref.values())
     eligible.sort(
         key=lambda item: str(item.get("event_at") or item.get("recorded_at") or ""),
         reverse=True,
@@ -1807,6 +1810,10 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         }
         for item in records if item.get("text")
     ]
+    # A medication assertion can also appear in the general assertion adapter.
+    # Deduplicate by immutable source reference so one saved claim cannot create
+    # duplicate briefing sections or duplicate review acknowledgements.
+    eligible = list({item["source_ref"]: item for item in eligible}.values())
     if not eligible:
         return {"status": "not_generated_no_eligible_source_text", "provider": None, "model": None, "sections": []}
 
