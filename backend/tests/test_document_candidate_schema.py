@@ -515,6 +515,7 @@ def test_synthetic_document_semantic_gold_dataset_preserves_manual_labels():
     evaluated = 0
     for case in dataset["cases"]:
         quote = case["text"]
+        assert case["subject"].casefold() in quote.casefold(), case["id"]
         candidate = canonical_candidate(
             {
                 "subject": case["subject"],

@@ -6,7 +6,7 @@
     {
       "id": "no-longer-mobility",
       "text": "The patient no longer requires assistance with walking.",
-      "subject": "mobility",
+      "subject": "walking",
       "expected": {
         "source_attribution": "not_stated",
         "negation_status": "explicitly_negated",
@@ -86,7 +86,7 @@
     {
       "id": "caregiver-reported-sleep",
       "text": "The caregiver reported that the patient slept for six uninterrupted hours on 14 October.",
-      "subject": "sleep",
+      "subject": "slept",
       "expected": {
         "source_attribution": "caregiver_reported",
         "negation_status": "not_explicitly_marked",
