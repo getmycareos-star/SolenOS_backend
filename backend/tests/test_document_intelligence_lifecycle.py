@@ -350,7 +350,7 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
     def fake_extract(text_value, *, source_event_id, source_evidence_id=None):
         return {"observations": [{
             "subject": "Patient",
-            "observation": "Metformin 500 mg once daily.",
+            "observation": "Patient walked 20 metres with a frame.",
             "source_quote": quote,
             "extraction_method": "test_verbatim",
         }], "open_questions": []}
