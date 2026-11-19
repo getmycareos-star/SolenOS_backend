@@ -251,6 +251,9 @@ SOURCES = {
         "recorded_time_fields": ("assessed_at",),
         "detail_fields": ("evidence_id", "policy_id", "policy_version", "freshness_status", "source_time_kind", "age_days", "assessed_by_caregiver_id"),
         "evidence_link_column": "evidence_id",
+        "include_latest_outside_window": True,
+        "latest_timestamp_column": "assessed_at",
+        "latest_group_columns": ("evidence_id", "policy_id"),
     },
     "evidence_review_records": {
         "label": "Evidence source review history",
@@ -283,7 +286,8 @@ SOURCES = {
         "time_fields": ("created_at",),
         "recorded_time_fields": ("created_at",),
         "detail_fields": ("domain_key", "purpose_key", "policy_version", "required_fields", "created_by_caregiver_id"),
-        "include_active_outside_window": True,
+        "include_latest_outside_window": True,
+        "latest_group_columns": ("domain_key", "purpose_key"),
     },
     "evidence_completeness_assessments": {
         "label": "Evidence completeness assessments",
@@ -294,6 +298,7 @@ SOURCES = {
         "recorded_time_fields": ("assessed_at",),
         "detail_fields": ("policy_id", "policy_version", "assessment_status", "required_fields", "satisfied_fields", "missing_fields", "assessment_basis", "semantic_sufficiency", "assessed_by_caregiver_id"),
         "include_latest_outside_window": True,
+        "latest_timestamp_column": "assessed_at",
         "latest_group_columns": ("subject_type", "subject_id", "policy_id"),
     },
     "evidence_freshness_policies": {
@@ -304,6 +309,8 @@ SOURCES = {
         "time_fields": ("created_at",),
         "recorded_time_fields": ("created_at",),
         "detail_fields": ("domain_key", "policy_version", "max_age_days", "historical_after_days", "created_by_caregiver_id"),
+        "include_latest_outside_window": True,
+        "latest_group_columns": ("domain_key",),
     },
 }
 
@@ -2084,16 +2091,17 @@ def prepare_handoff_draft(
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_upcoming_outside_window") and "scheduled_at" in table.c:
                     query = query.where(or_(in_window, table.c.scheduled_at >= now))
-                elif spec.get("include_latest_outside_window") and "created_at" in table.c:
-                    # Append-only assessment history is still current context when
+                elif spec.get("include_latest_outside_window"):
+                    # Append-only assessment/policy history remains relevant when
                     # its latest decision predates the briefing's recent-event window.
-                    # Include recent history plus the latest row for each evidence
-                    # review type / claim, without treating old versions as current.
+                    # Include recent history plus the latest row for each explicit
+                    # subject/policy group, without treating old versions as current.
+                    latest_timestamp_name = spec.get("latest_timestamp_column", "created_at")
                     latest_table = table.alias(f"{table_name}_latest")
                     group_columns = tuple(spec.get("latest_group_columns") or ())
-                    if group_columns and all(name in latest_table.c for name in group_columns):
-                        latest_created_at = (
-                            select(func.max(latest_table.c.created_at))
+                    if latest_timestamp_name in table.c and group_columns and all(name in latest_table.c for name in group_columns):
+                        latest_timestamp = (
+                            select(func.max(latest_table.c[latest_timestamp_name]))
                             .where(
                                 latest_table.c.person_id == table.c.person_id,
                                 *[latest_table.c[name] == table.c[name] for name in group_columns],
@@ -2101,7 +2109,7 @@ def prepare_handoff_draft(
                             .correlate(table)
                             .scalar_subquery()
                         )
-                        query = query.where(or_(in_window, table.c.created_at == latest_created_at))
+                        query = query.where(or_(in_window, table.c[latest_timestamp_name] == latest_timestamp))
                     else:
                         query = query.where(in_window)
                 else:
