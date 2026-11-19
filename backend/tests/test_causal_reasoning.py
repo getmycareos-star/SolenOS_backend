@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -8,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
+from app.models.anonymous_session import AnonymousSession
 from app.core.causal_enums import (
     EvidenceStrength,
     CausalConfidence,
@@ -62,6 +64,21 @@ def seed_person(db, person_id="person-1", name="Test Person"):
     db.add_all([person, caregiver])
     db.commit()
     db.close()
+
+
+def authenticated_client(person_id: str):
+    token = f"causal-test-token-{person_id}"
+    db = TestingSessionLocal()
+    db.add(AnonymousSession(
+        id=f"causal-test-session-{person_id}",
+        person_id=person_id,
+        caregiver_id="caregiver-1",
+        token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    ))
+    db.commit()
+    db.close()
+    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
 
 
 # ======================================================================
@@ -616,7 +633,10 @@ def test_identify_temporal_associations():
 def test_api_assess_does_not_assert_causation():
     setup_db()
     try:
-        client = TestClient(app)
+        db = TestingSessionLocal()
+        seed_person(db, person_id="person-20")
+        db.close()
+        client = authenticated_client("person-20")
         response = client.post(
             "/api/v1/causal/assess",
             params={
@@ -634,9 +654,6 @@ def test_api_assess_does_not_assert_causation():
         assert data["evidence_strength"] == "weak"
         assert data["causal_confidence"] == "insufficient"
         assert "does not establish" in data["what_is_uncertain"]
-        db = TestingSessionLocal()
-        seed_person(db, person_id="person-20")
-        db.close()
     finally:
         teardown_db()
 
@@ -644,10 +661,10 @@ def test_api_assess_does_not_assert_causation():
 def test_api_create_and_trace_hypothesis():
     setup_db()
     try:
-        client = TestClient(app)
         db = TestingSessionLocal()
         seed_person(db, person_id="person-21")
         db.close()
+        client = authenticated_client("person-21")
 
         response = client.post(
             "/api/v1/causal/hypotheses",
@@ -689,10 +706,10 @@ def test_api_create_and_trace_hypothesis():
 def test_api_repeated_relationship_strengthens():
     setup_db()
     try:
-        client = TestClient(app)
         db = TestingSessionLocal()
         seed_person(db, person_id="person-22")
         db.close()
+        client = authenticated_client("person-22")
 
         response = client.post(
             "/api/v1/causal/hypotheses",
