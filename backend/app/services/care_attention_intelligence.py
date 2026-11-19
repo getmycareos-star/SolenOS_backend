@@ -37,11 +37,21 @@ def _evidence_ids(item: dict[str, Any]) -> list[str]:
     return sorted({str(value) for value in raw if value}) if isinstance(raw, list) else []
 
 
+def _pattern_source_ids(item: dict[str, Any]) -> list[str]:
+    """Use linked evidence where present; otherwise identify a caregiver observation by its own record ID."""
+    linked = _evidence_ids(item)
+    if linked:
+        return linked
+    if item.get("source") == "caregiver_observations" and item.get("id"):
+        return [str(item["id"])]
+    return []
+
+
 def _record_ref(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "source": str(item.get("source") or "unknown"),
         "record_id": str(item.get("id") or ""),
-        "title": str(item.get("title") or item.get("attribute") or item.get("source") or "Care record")[:240],
+        "title": str(item.get("title") or item.get("observation_category") or item.get("attribute") or item.get("source") or "Care record")[:240],
         "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
         "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
         "evidence_ids": _evidence_ids(item),
@@ -124,7 +134,7 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
 
 def _observation_value(item: dict[str, Any]) -> str:
     value = ""
-    for key in ("observed_value", "normalized_value", "value_text", "fact_value", "asserted_value", "current_state", "title"):
+    for key in ("observed_value", "normalized_value", "value_text", "fact_value", "asserted_value", "current_state", "description", "observation_content", "title"):
         value = _text(item.get(key))
         if value:
             break
@@ -135,7 +145,7 @@ def _observation_value(item: dict[str, Any]) -> str:
 
 
 def _subject_key(item: dict[str, Any]) -> str:
-    return _text(item.get("subject_id")) or _text(item.get("subject_label") or item.get("subject_type"))
+    return _text(item.get("subject_id") or item.get("person_id")) or _text(item.get("subject_label") or item.get("subject_type"))
 
 
 def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
@@ -153,7 +163,7 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
     eligible = []
     for item in records:
         source = item.get("source")
-        if source not in {"evidence_observations", "facts"}:
+        if source not in {"evidence_observations", "facts", "caregiver_observations"}:
             continue
         if item.get("negated") is True:
             continue
@@ -171,10 +181,12 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
             continue
         if _text(item.get("status") or item.get("lifecycle_status")) in CLOSED_STATUSES:
             continue
-        attribute = _text(item.get("attribute") or item.get("event_type") or item.get("fact_type"))
+        attribute = _text(item.get("attribute") or item.get("observation_category") or item.get("event_type") or item.get("fact_type"))
         subject = _subject_key(item)
+        # Do not substitute record time for event time: an observation without
+        # an explicit observed_at cannot be placed in a temporal pattern.
         occurred = _datetime(item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"))
-        if not attribute or not subject or not occurred or occurred > now or occurred < now - timedelta(days=MAX_PATTERN_WINDOW_DAYS) or not _evidence_ids(item):
+        if not attribute or not subject or not occurred or occurred > now or occurred < now - timedelta(days=MAX_PATTERN_WINDOW_DAYS) or not _pattern_source_ids(item):
             continue
         eligible.append((subject, attribute, occurred, item))
 
@@ -237,17 +249,26 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
 
     for (subject, attribute), entries in by_subject_attribute.items():
         distinct = {str(item.get("id")): item for _, item in entries if item.get("id")}
-        distinct_evidence_ids = {evidence_id for _, item in entries for evidence_id in _evidence_ids(item)}
+        distinct_evidence_ids = {source_id for _, item in entries for source_id in _pattern_source_ids(item)}
         values = {_observation_value(item) for _, item in entries if _observation_value(item)}
-        if (subject, attribute) in emitted or len(distinct) < 2 or len(distinct_evidence_ids) < 2 or len(values) < 2:
+        if (subject, attribute) in emitted or len(distinct) < 2 or len(distinct_evidence_ids) < 2:
+            continue
+        if not values or (len(values) < 2 and not all(item.get("source") == "caregiver_observations" for _, item in entries)):
             continue
         entries.sort(key=lambda pair: pair[0])
         refs = [_record_ref(item) for _, item in entries]
+        caregiver_topic_only = all(item.get("source") == "caregiver_observations" for _, item in entries)
+        pattern_type = "repeated_caregiver_observation_topic" if caregiver_topic_only and len(values) == 1 else "repeated_attribute_with_changed_values"
+        reason = (
+            "More than one caregiver observation was recorded for this topic on separate occasions within 14 days. Review the notes together; repetition alone does not establish a change, cause, or clinical significance."
+            if pattern_type == "repeated_caregiver_observation_topic"
+            else "Different values for the same recorded observation appear in distinct linked source records within 14 days. Review the sequence against the person's documented baseline; this does not establish independent corroboration, cause, or clinical severity."
+        )
         reviews.append({
             "id": f"repeated:{subject}:{attribute}", "category": "important_to_address",
             "title": str(entries[-1][1].get("subject_label") or attribute)[:240],
-            "reason": "Different values for the same recorded observation appear in distinct linked source records within 14 days. Review the sequence against the person's documented baseline; this does not establish independent corroboration, cause, or clinical severity.",
-            "pattern_type": "repeated_attribute_with_changed_values", "record_count": len(distinct),
+            "reason": reason,
+            "pattern_type": pattern_type, "record_count": len(distinct),
             "records": refs, "evidence_ids": sorted({e for ref in refs for e in ref["evidence_ids"]}),
             "first_observed_at": refs[0]["occurred_at"], "last_observed_at": refs[-1]["occurred_at"],
         })
