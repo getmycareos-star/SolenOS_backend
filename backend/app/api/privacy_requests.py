@@ -994,7 +994,12 @@ def fulfil_approved_deletion(
     # silently erase other caregivers' accounts or private material.
     from app.models.care import Caregiver, Person
     linked_caregivers = db.query(Caregiver.id).filter(Caregiver.person_id == person_id).all()
-    if {str(item[0]) for item in linked_caregivers} != {caregiver_id}:
+    linked_caregiver_ids = {str(item[0]) for item in linked_caregivers}
+    # A prior attempt may have committed deletion of the caregiver/person roots
+    # before the final receipt was persisted. An empty current set is therefore
+    # a valid resumable state; any remaining foreign caregiver still blocks
+    # deletion so a retry cannot expand the approved single-caregiver scope.
+    if linked_caregiver_ids and linked_caregiver_ids != {caregiver_id}:
         raise HTTPException(
             status_code=409,
             detail="This care record has multiple linked caregivers; mixed-caregiver deletion requires a separate scope assessment.",
