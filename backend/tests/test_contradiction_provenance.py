@@ -374,3 +374,133 @@ def test_one_observation_timestamp_does_not_qualify_a_conflict():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_qualified_document_statements_do_not_create_hard_current_state_conflicts():
+    from app.models.uncertainty import Contradiction
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+    try:
+        person = Person(id="qualified-document-context-person", name="Qualified document context test")
+        db.add(person)
+        db.commit()
+
+        qualifiers = [
+            {"statement_kind": "recommendation"},
+            {"temporal_context": "historical"},
+            {"modality": "tentative"},
+            {"conditionality": "conditional"},
+        ]
+        for index, qualifier in enumerate(qualifiers):
+            field = f"document_context_{index}"
+            create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person.id,
+                    subject_type="care_recipient",
+                    subject_id=person.id,
+                    field=field,
+                    assertion_kind="current_state",
+                    asserted_value="Previously recorded current state",
+                    source_label="Existing caregiver report",
+                    source_text="Existing source statement.",
+                ),
+            )
+            create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person.id,
+                    subject_type="care_recipient",
+                    subject_id=person.id,
+                    field=field,
+                    assertion_kind="document_reviewed_observation",
+                    asserted_value="Different statement from a document",
+                    source_label="Caregiver-reviewed document",
+                    source_text="Exact document source statement.",
+                ),
+                source_context={
+                    "kind": "caregiver_reviewed_document_candidate",
+                    "authority": "caregiver_reviewed_report_not_independently_verified",
+                    "document_candidate": qualifier,
+                },
+                assertion_status="accepted",
+            )
+
+        db.flush()
+        assert db.query(Contradiction).filter(
+            Contradiction.person_id == person.id,
+        ).count() == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_unqualified_document_observation_still_creates_a_reviewable_conflict():
+    from app.models.uncertainty import Contradiction
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+    try:
+        person = Person(id="plain-document-context-person", name="Plain document context test")
+        db.add(person)
+        db.commit()
+        create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="current_location",
+                assertion_kind="current_state",
+                asserted_value="At home",
+                source_label="Existing caregiver report",
+                source_text="The person is at home.",
+            ),
+        )
+        create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="current_location",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="At hospital",
+                source_label="Caregiver-reviewed document",
+                source_text="The person is at hospital.",
+            ),
+            source_context={
+                "kind": "caregiver_reviewed_document_candidate",
+                "authority": "caregiver_reviewed_report_not_independently_verified",
+                "document_candidate": {
+                    "source_attribution": "professional_documented",
+                    "negation_status": "not_explicitly_marked",
+                    "modality": "not_explicitly_marked",
+                    "conditionality": "not_explicitly_marked",
+                    "temporal_context": "not_established",
+                    "statement_kind": "not_detected",
+                },
+            },
+            assertion_status="accepted",
+        )
+        contradiction = db.query(Contradiction).filter(
+            Contradiction.person_id == person.id,
+            Contradiction.field == "current_location",
+        ).one()
+        assert contradiction.resolution_status == "unresolved"
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
