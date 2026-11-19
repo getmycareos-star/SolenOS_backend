@@ -575,7 +575,9 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert provenance["model_digest_status"] == "not_exposed_by_ollama_chat_response"
         assert understood.json()["processing_history"][-1] == provenance
 
-        # Rejecting a candidate and correcting another do not create LCR assertions.
+        # Rejecting a candidate and attempting to change it beyond the source quote
+        # must not create an LCR assertion. New caregiver information belongs in
+        # a separate caregiver-authored update, not a document-derived correction.
         rejected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
@@ -584,7 +586,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["written_to_lcr"] is False
 
-        corrected_observation = "Caregiver correction: approximately half of lunch was eaten."
+        unsupported_correction = "Caregiver correction: approximately half of lunch was eaten."
         corrected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
@@ -592,32 +594,16 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "candidate_index": 1,
                 "decision": "correct",
                 "corrected_subject": "Person",
-                "corrected_observation": corrected_observation,
+                "corrected_observation": unsupported_correction,
                 "rationale": "Clarified the wording for the care record.",
             },
         )
-        assert corrected.status_code == 200, corrected.text
-        assert corrected.json()["candidate"]["review_status"] == "corrected_pending_approval"
-        assert corrected.json()["written_to_lcr"] is False
-
-        correction_retry = client.post(
-            f"/api/v1/documents/intelligence/{analysis_id}/review",
-            headers=auth,
-            json={
-                "candidate_index": 1,
-                "decision": "correct",
-                "corrected_subject": "Person",
-                "corrected_observation": corrected_observation,
-                "rationale": "Clarified the wording for the care record.",
-            },
-        )
-        assert correction_retry.status_code == 200, correction_retry.text
-        assert correction_retry.json()["idempotent_replay"] is True
-
+        assert corrected.status_code == 409, corrected.text
+        assert "directly supported by its preserved source quotation" in corrected.json()["detail"]
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
-        # Explicit acceptance of the corrected version creates the sole assertion.
+        # Accepting the exact extracted statement creates the sole source-linked assertion.
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
@@ -666,16 +652,35 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
 
         with Session() as db:
             assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=person_id).one()
+            assertion.assertion_status = "superseded"
+            db.commit()
+        superseded_retry = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={"candidate_index": 1, "decision": "accept"},
+        )
+        assert superseded_retry.status_code == 200, superseded_retry.text
+        assert superseded_retry.json()["idempotent_replay"] is True
+        assert superseded_retry.json()["written_to_lcr"] is False
+        assert superseded_retry.json()["source_record_ref"] is None
+        with Session() as db:
+            assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=person_id).one()
+            assertion.assertion_status = "accepted"
+            db.commit()
+
+        with Session() as db:
+            assertion = db.query(CareAssertion).filter_by(id=assertion_id, person_id=person_id).one()
             assert assertion.assertion_status == "accepted"
             assert assertion.assertion_kind == "document_reviewed_observation"
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quote_correct
-            assert assertion.asserted_value == (
-                f"Subject: Person\nStatement: {corrected_observation}\n"
+            assert assertion.asserted_value.startswith(
+                f"Subject: Person\nStatement: {quote_correct}\n"
                 "Event date: Not stated or unresolved\n"
-                "Source-recorded date: Not stated in document\n"
-                "Review warnings: Caregiver-corrected wording requires review against the original source passage."
+                "Source-recorded date: Not stated in document"
             )
+            assert "Caregiver correction:" not in assertion.asserted_value
+            assert "Caregiver-corrected wording" not in assertion.asserted_value
             assert assertion.created_by_caregiver_id == caregiver_id
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 1
 
