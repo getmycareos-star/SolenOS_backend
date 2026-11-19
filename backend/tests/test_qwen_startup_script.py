@@ -69,7 +69,7 @@ raise SystemExit(0 if Path(os.environ["OLLAMA_READY_FILE"]).exists() else 7)
 import time
 from pathlib import Path
 Path(os.environ["UVICORN_STARTED_FILE"]).touch()
-time.sleep(30)
+time.sleep(75)
 """,
         encoding="utf-8",
     )
@@ -86,7 +86,7 @@ time.sleep(30)
             "OLLAMA_MODELS": str(tmp_path / "models"),
             "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
             "OLLAMA_SIDECAR_ENABLED": "true",
-            "OLLAMA_READINESS_TIMEOUT_SECONDS": "30",
+            "OLLAMA_READINESS_TIMEOUT_SECONDS": "20",
             "OLLAMA_PULL_TIMEOUT_SECONDS": "30",
             "OLLAMA_MODEL": "qwen3.5:4b",
         }
@@ -103,8 +103,8 @@ time.sleep(30)
     try:
         assert _wait_for(api_started_file, 5), "FastAPI did not start independently of Ollama warm-up"
         assert not ready_file.exists(), "the test must exercise a cold start longer than the old 10-second probe"
-        assert _wait_for(state_file, 25), "Qwen startup state was not written"
-        deadline = time.monotonic() + 25
+        assert _wait_for(state_file, 5), "Qwen startup state was not written"
+        deadline = time.monotonic() + 55
         state = {}
         while time.monotonic() < deadline:
             try:
