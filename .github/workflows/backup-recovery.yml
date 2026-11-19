@@ -9,6 +9,7 @@ on:
       - "backend/scripts/verify_backup_restore.py"
       - "backend/scripts/postgres_anonymous_e2e.py"
       - "backend/tests/**"
+      - ".github/workflows/backend-validation.yml"
       - "backend/pyproject.toml"
       - "backend/alembic.ini"
       - "backend/docs/BACKUP_RESTORE_VERIFICATION.md"
