@@ -1793,6 +1793,18 @@ def test_qwen_unavailable_uses_exact_source_only_briefing_fallback(monkeypatch):
     assert result["sections"][0]["summary"] == source_text
     assert result["sections"][0]["supporting_quote"] == source_text
     assert result["sections"][0]["source_ref"] == "care_facts:fallback-fact-001"
+    provenance = handoff_drafts._handoff_claim_provenance(
+        {"generation": result},
+        {"source_records": [{
+            "source_table": "care_facts",
+            "source_id": "fallback-fact-001",
+            "text": source_text,
+            "event_at": "2026-11-19T08:00:00+00:00",
+            "recorded_at": "2026-11-19T08:10:00+00:00",
+        }]},
+    )
+    assert provenance["claims"][0]["claim_type"] == "source_only_lcr_excerpt"
+    assert provenance["claims"][0]["semantic_entailment_status"] == "not_applicable_no_paraphrase"
 
 def test_appointment_briefing_requires_and_retrieves_one_person_scoped_appointment(client):
     test_client, session = client
