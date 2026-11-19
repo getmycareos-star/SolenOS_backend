@@ -338,6 +338,8 @@ jobs:
 
       - name: Verify Daily Care to LCR retrieval on PostgreSQL
         run: python -m pytest backend/tests/test_unified_care_spine_capture.py -q
+      - name: Verify caregiver candidate review, approval, provenance and isolation on PostgreSQL
+        run: python -m pytest backend/tests/test_daily_care_review_postgres.py -q -vv
       - name: Verify unified LCR retrieval and caregiver handoffs on PostgreSQL
         run: python -m pytest backend/tests/test_unified_lcr_retrieval.py -q
       - name: Run the 100-scenario longitudinal messy-care benchmark on PostgreSQL
