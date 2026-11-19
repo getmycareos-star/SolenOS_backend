@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
 from app.schemas.care_continuity import CareAssertionCreate
+from app.api.document_intelligence import _explicit_document_event_datetime
+from datetime import datetime, timezone
 from app.services.document_candidate_schema import (
     apply_medication_conflict_warnings,
     canonical_candidate,
@@ -377,3 +379,29 @@ def test_temporal_when_clause_is_not_automatically_treated_as_conditional_instru
         source_text=f"[Page 1]\n{excerpt}",
     )
     assert candidate["conditionality"] == "not_explicitly_marked"
+
+
+
+def test_only_source_quoted_iso_event_dates_become_time_bound_observation_times():
+    candidate = {"event_date": "2026-11-10"}
+    observed_at = _explicit_document_event_datetime(
+        candidate,
+        "The patient was admitted on 2026-11-10.",
+    )
+    assert observed_at == datetime(2026, 11, 10, tzinfo=timezone.utc)
+
+
+def test_document_issue_date_is_not_mistaken_for_a_care_event_date():
+    candidate = {"event_date": "2026-11-10"}
+    assert _explicit_document_event_datetime(
+        candidate,
+        "Discharge summary dated 2026-11-10.",
+    ) is None
+
+
+def test_model_normalized_date_not_present_in_source_quote_is_not_used_for_delta():
+    candidate = {"event_date": "2026-11-10"}
+    assert _explicit_document_event_datetime(
+        candidate,
+        "The patient reports eating half of lunch during the observation period.",
+    ) is None
