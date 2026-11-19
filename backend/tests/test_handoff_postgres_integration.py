@@ -235,6 +235,8 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                 {
                     "section": "Daily Care information",
                     "source_ref": f"{daily['source_table']}:{daily['source_id']}",
+                    "summary": "A caregiver observation was recorded in Daily Care.",
+                    "supporting_quote": daily["text"][: min(120, len(daily["text"]))],
                     "text": daily["text"],
                     "epistemic_status": daily["epistemic_status"],
                     "record_status": daily["record_status"],
@@ -245,6 +247,8 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                 {
                     "section": "Document-derived information",
                     "source_ref": f"{document['source_table']}:{document['source_id']}",
+                    "summary": "The uploaded document contains care information.",
+                    "supporting_quote": document["text"][: min(120, len(document["text"]))],
                     "text": document["text"],
                     "epistemic_status": document["epistemic_status"],
                     "record_status": document["record_status"],
