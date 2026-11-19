@@ -1260,7 +1260,7 @@ def test_pdf_page_text_layer_exception_falls_back_to_ocr_for_that_page(client, m
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
 
     assert response.status_code == 201, response.text
-    assert response.json()["extraction_status"] == "complete"
+    assert response.json()["extraction_status"] == "available"
     retrieved = test_client.get(
         f"/api/v1/documents/analyses/{response.json()['analysis_id']}",
         headers=auth,
