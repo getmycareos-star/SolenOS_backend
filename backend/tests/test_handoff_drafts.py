@@ -1894,6 +1894,18 @@ def test_qwen_unavailable_uses_exact_source_only_briefing_fallback(monkeypatch):
     )
     assert provenance["claims"][0]["claim_type"] == "source_only_lcr_excerpt"
     assert provenance["claims"][0]["semantic_entailment_status"] == "not_applicable_no_paraphrase"
+    snapshot = {"source_records": [{
+        "source_table": "care_facts",
+        "source_id": "fallback-fact-001",
+        "text": source_text,
+    }]}
+    content = {"generation": result}
+    assert handoff_drafts._validate_draft_quotes(content, snapshot) is True
+    edited = {"generation": {**result, "sections": [{
+        **result["sections"][0],
+        "summary": "The person refused breakfast.",
+    }]}}
+    assert handoff_drafts._validate_draft_quotes(edited, snapshot) is False
 
 def test_appointment_briefing_requires_and_retrieves_one_person_scoped_appointment(client):
     test_client, session = client
