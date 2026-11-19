@@ -1405,6 +1405,19 @@ def review_document_candidate(
         source_suffix = f" · page {page_label}{duplicate_label}"
         filename = str(metadata.get("filename") or "Uploaded document")
         source_label = source_prefix + filename[:max(0, 160 - len(source_prefix) - len(source_suffix))] + source_suffix
+        # Keep only structured qualifiers and source coordinates here. The exact
+        # quotation remains in CareAssertion.source_text; duplicating it in JSON
+        # would complicate privacy erasure and create unnecessary copies of care data.
+        source_context_candidate = {
+            key: canonical.get(key)
+            for key in (
+                "candidate_id", "page_number", "source_span_start", "source_span_end",
+                "source_span_unit", "field_type", "event_date", "recorded_date",
+                "extracted_at", "source_attribution", "negation_status", "modality",
+                "conditionality", "temporal_context", "statement_kind", "warnings",
+            )
+            if key in canonical
+        }
         # Recover an assertion if a prior request committed the assertion but
         # failed before the candidate review state was committed.
         assertion_row = _existing_assertion_for_exact_document_duplicate(
@@ -1453,7 +1466,7 @@ def review_document_candidate(
                 "kind": "caregiver_reviewed_document_candidate",
                 "authority": "caregiver_reviewed_report_not_independently_verified",
                 "review_status": "accepted_by_caregiver",
-                "document_candidate": canonical,
+                "document_candidate": source_context_candidate,
             }
             assertion_row.assertion_status = "reported" if assertion_subject_type == "medication" and document_field == "medication_status" else "accepted"
             db.flush()
