@@ -1483,6 +1483,7 @@ def _verified_medication_source(db: Session, request: Request) -> tuple[dict, li
                 "retrieval_complete": True,
             }, []
 
+        person_id, _ = _scoped_identity(request, db)
         bind = db.get_bind()
         inspector = inspect(bind)
         if not inspector.has_table("care_assertions"):
@@ -1501,7 +1502,7 @@ def _verified_medication_source(db: Session, request: Request) -> tuple[dict, li
                     continue
                 query = select(*selected).where(
                     table.c.id == str(assertion_id),
-                    table.c.person_id == medication.get("person_id", projection.get("person_id")) if "person_id" in medication else table.c.person_id == _scoped_identity_from_request(request, db),
+                    table.c.person_id == person_id,
                 )
                 row = db.execute(query).mappings().first()
                 if row is None:
@@ -1551,11 +1552,6 @@ def _verified_medication_source(db: Session, request: Request) -> tuple[dict, li
             "label": "Caregiver-reviewed medication reports", "count": 0,
             "returned_count": 0, "has_more": False, "retrieval_complete": False,
         }, []
-
-
-def _scoped_identity_from_request(request: Request, db: Session) -> str:
-    person_id, _ = _scoped_identity(request, db)
-    return person_id
 
 
 def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str) -> dict:
