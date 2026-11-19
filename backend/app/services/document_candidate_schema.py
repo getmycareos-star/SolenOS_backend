@@ -177,6 +177,62 @@ def medication_details_for_candidate(subject: str, excerpt: str) -> dict[str, st
     }
 
 
+def statement_context_markers(excerpt: str) -> dict[str, str]:
+    """Extract explicit linguistic qualifiers without upgrading absence to affirmation."""
+    value = excerpt or ""
+    lowered = value.casefold()
+
+    attribution_patterns = (
+        ("patient_reported", r"\\b(?:the )?patient\\s+(?:reports?|reported|states?|stated|denies?|denied|describes?|described)\\b|\\bpatient[- ]reported\\b"),
+        ("caregiver_reported", r"\\b(?:the )?(?:caregiver|family member|daughter|son|spouse)\\s+(?:reports?|reported|states?|stated|noticed|observed)\\b|\\bcaregiver[- ]reported\\b"),
+        ("professional_observed", r"\\b(?:nurse|clinician|doctor|physician|therapist|staff)\\s+(?:observed|notes?|documented|reported|recorded)\\b|\\b(?:on examination|observed by)\\b"),
+    )
+    attribution = "not_stated"
+    for label, pattern in attribution_patterns:
+        if re.search(pattern, lowered, re.I):
+            attribution = label
+            break
+
+    negation = "explicitly_negated" if re.search(
+        r"\\b(?:no evidence of|denies?|denied|without|negative for|not present|not observed|no longer|never)\\b",
+        lowered,
+        re.I,
+    ) else "not_explicitly_marked"
+
+    modality = "tentative" if re.search(
+        r"\\b(?:may|might|could|possibly|possible|possibly|suspected|suspected to|appears to|suggests?|probable|likely|unlikely)\\b",
+        lowered,
+        re.I,
+    ) else "not_explicitly_marked"
+
+    conditionality = "conditional" if re.search(
+        r"\\b(?:if|unless|provided that|only if|in the event that|when)\\b",
+        lowered,
+        re.I,
+    ) else "not_explicitly_marked"
+
+    temporal_context = "historical" if re.search(
+        r"\\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week)\\b",
+        lowered,
+        re.I,
+    ) else "not_established"
+
+    recommendation_status = "recommendation" if re.search(
+        r"\\b(?:recommend(?:ed|s|ation)?|should consider|advised to|plan to|planned to|follow[- ]?up recommended)\\b",
+        lowered,
+        re.I,
+    ) else "not_detected"
+
+    return {
+        "source_attribution": attribution,
+        "negation_status": negation,
+        "modality": modality,
+        "conditionality": conditionality,
+        "temporal_context": temporal_context,
+        "statement_kind": recommendation_status,
+    }
+
+
 def candidate_warnings(field_type: str, observation: str, excerpt: str, subject: str | None = None) -> list[str]:
     warnings: list[str] = []
     if field_type == "medication":
@@ -202,6 +258,17 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str, subject:
         warnings.append("Multiple dates appear in this passage; event_date remains unresolved until the relevant event date is confirmed.")
     if re.search(r"\b(previous|previously|prior|old|superseded|discontinued|replaced|no longer|do not use)\b", excerpt, re.I):
         warnings.append("This may be an outdated or superseded instruction; reconcile it before treating it as current.")
+    markers = statement_context_markers(excerpt)
+    if markers["negation_status"] == "explicitly_negated":
+        warnings.append("The source passage contains explicit negative wording; preserve it as a negative statement, not a positive care finding.")
+    if markers["modality"] == "tentative":
+        warnings.append("The source wording is tentative; do not present this statement as established.")
+    if markers["conditionality"] == "conditional":
+        warnings.append("The source wording is conditional; retain the condition and do not present it as a universal instruction.")
+    if markers["temporal_context"] == "historical":
+        warnings.append("The source wording is historical; do not present it as the current care state without reconciliation.")
+    if markers["statement_kind"] == "recommendation":
+        warnings.append("This passage contains a recommendation; the document does not establish that the recommendation was completed or followed.")
     if not excerpt.strip():
         warnings.append("No readable source excerpt is available.")
     return warnings
@@ -259,6 +326,7 @@ def canonical_candidate(
         "confidence": None,
         "review_status": "Pending",
         "warnings": warnings,
+        **statement_context_markers(excerpt),
         "medication_details": medication_details,
     }
 
