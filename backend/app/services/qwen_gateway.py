@@ -103,9 +103,9 @@ def qwen_chat(
     # Companion answers to fail even when retrieval succeeded. Deployments
     # with tighter memory limits can explicitly lower OLLAMA_NUM_CTX.
     try:
-        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "8192")), 8192))
+        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "4096")), 8192))
     except (TypeError, ValueError):
-        num_ctx = 1024
+        num_ctx = 4096
     try:
         num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "96")), 1024))
     except (TypeError, ValueError):
