@@ -9,7 +9,7 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Caregiver, Person
-from app.models.caregiver_intelligence import CaregiverProfile, CaregiverObservation, CaregiverHandoff, CaregiverRole
+from app.models.caregiver_intelligence import CaregiverProfile, CaregiverObservation, CaregiverHandoff, CaregiverRole, CaregiverResponsibility
 from app.core.caregiver_enums import InformationVisibility, CaregiverRoleType
 
 pytestmark = pytest.mark.session_security
@@ -221,6 +221,66 @@ def test_caregiver_role_lifecycle_is_scoped_and_persisted():
     remaining = client.get(f"/api/v1/caregiver-roles/{person_id}", headers=headers)
     assert remaining.status_code == 200, remaining.text
     assert all(item["id"] != role_id for item in remaining.json())
+
+
+def test_caregiver_responsibility_lifecycle_is_scoped_and_persisted():
+    client = TestClient(app)
+    session = create_session(client)
+    person_id = session["person"]["id"]
+    own_profile_id = session["caregiver"]["profile_id"]
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+
+    created = client.post(
+        "/api/v1/caregiver-responsibilities",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "caregiver_id": own_profile_id,
+            "responsibility_type": "appointment_follow_up",
+            "scope": "Confirm appointment time and arrange transport.",
+            "effective_start": "2026-11-19T00:00:00+00:00",
+            "status": "active",
+            "acceptance_status": "explicit",
+            "assignment_source": "caregiver_self_reported",
+        },
+    )
+    assert created.status_code == 200, created.text
+    responsibility_id = created.json()["id"]
+    active = client.get(f"/api/v1/caregiver-responsibilities/{person_id}", headers=headers)
+    assert active.status_code == 200, active.text
+    assert any(item["id"] == responsibility_id for item in active.json())
+
+    other_profile_id, _ = create_second_profile(person_id)
+    db = TestSessionLocal()
+    try:
+        other_responsibility = CaregiverResponsibility(
+            person_id=person_id,
+            caregiver_id=other_profile_id,
+            responsibility_type="medication_support",
+            effective_start=datetime.now(timezone.utc),
+        )
+        db.add(other_responsibility)
+        db.commit()
+        other_responsibility_id = other_responsibility.id
+    finally:
+        db.close()
+
+    denied = client.patch(
+        f"/api/v1/caregiver-responsibilities/{other_responsibility_id}/end",
+        headers=headers,
+    )
+    assert denied.status_code == 404, denied.text
+
+    ended = client.patch(
+        f"/api/v1/caregiver-responsibilities/{responsibility_id}/end",
+        headers=headers,
+    )
+    assert ended.status_code == 200, ended.text
+    assert ended.json()["status"] == "historical"
+    assert ended.json()["effective_end"] is not None
+    remaining = client.get(f"/api/v1/caregiver-responsibilities/{person_id}", headers=headers)
+    assert remaining.status_code == 200, remaining.text
+    assert all(item["id"] != responsibility_id for item in remaining.json())
 
 
 def test_caregiver_profile_writes_cannot_change_another_profiles_involvement():
