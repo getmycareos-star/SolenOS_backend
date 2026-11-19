@@ -1690,7 +1690,8 @@ def review_document_candidate(
         execution["delta_run_id"] = delta_run_id
         candidate["delta_reconciliation_status"] = delta_reconciliation_status
         candidate["delta_run_id"] = delta_run_id
-        # Verify the accepted assertion through the same bounded retrieval
+        try:
+            # Verify the accepted assertion through the same bounded retrieval
             # service consumed by the caregiver's Care Record and Companion.
             # A committed ORM row alone is not proof that it is retrievable.
             projection = build_lcr_context(
