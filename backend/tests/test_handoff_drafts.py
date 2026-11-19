@@ -1967,3 +1967,42 @@ def test_handoff_reflected_enum_filters_resolve_case_and_fail_closed():
     assert _database_enum_label(enum_column, "JOINT") == "JOINT"
     assert _database_enum_label(enum_column, "missing") is None
     assert _database_enum_label(string_column, "active") == "active"
+
+
+def test_shared_only_handoff_projection_uses_enum_labels_and_fails_closed_without_schema_proof():
+    from sqlalchemy import Boolean, Column, Enum, MetaData, String, Table, select
+    from sqlalchemy.dialects import postgresql
+    from app.api.handoff_drafts import _shared_only_source_query
+
+    metadata = MetaData()
+    enum_table = Table(
+        "shared_observations",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("information_visibility", Enum("PRIVATE", "SHARED", name="informationvisibility")),
+    )
+    compiled_enum = str(_shared_only_source_query(select(enum_table), enum_table).compile(
+        dialect=postgresql.dialect()
+    ))
+    assert "information_visibility = 'SHARED'" in compiled_enum
+
+    promoted_table = Table(
+        "promoted_observations",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("is_promoted_to_shared", Boolean, nullable=False),
+    )
+    compiled_promoted = str(_shared_only_source_query(select(promoted_table), promoted_table).compile(
+        dialect=postgresql.dialect()
+    ))
+    assert "is_promoted_to_shared IS true" in compiled_promoted
+
+    unscoped_table = Table(
+        "unscoped_observations",
+        metadata,
+        Column("id", String, primary_key=True),
+    )
+    compiled_unscoped = str(_shared_only_source_query(select(unscoped_table), unscoped_table).compile(
+        dialect=postgresql.dialect()
+    ))
+    assert "WHERE false" in compiled_unscoped
