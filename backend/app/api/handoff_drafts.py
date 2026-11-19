@@ -2023,7 +2023,9 @@ def prepare_handoff_draft(
                     evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
                 )
             timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
-            if timestamp_columns:
+            if timestamp_columns and not (
+                table_name == "appointments" and payload.purpose == "professional_appointment"
+            ):
                 # Include a row if any applicable time is within the window, or all
                 # its time fields are unknown. COALESCE would hide a recent update
                 # behind an older non-null creation timestamp.
@@ -2370,6 +2372,8 @@ def prepare_handoff_draft(
         "retrieval_complete": source_snapshot["retrieval_complete"],
         "partial_sources": source_snapshot["partial_sources"],
         "window": source_snapshot["window"],
+        "appointment_id": source_snapshot["appointment_id"],
+        "selected_appointment": source_snapshot["selected_appointment"],
     })
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
@@ -2512,6 +2516,8 @@ def prepare_handoff_draft(
         "revision_number": 1,
         "purpose": payload.purpose,
         "audience": payload.audience,
+        "appointment_id": payload.appointment_id,
+        "selected_appointment": source_snapshot["selected_appointment"],
         "source_of_truth": "living_care_record",
         "source_snapshot_id": source_snapshot["snapshot_id"],
         "source_snapshot_sha256": source_snapshot["snapshot_sha256"],
