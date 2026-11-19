@@ -236,16 +236,18 @@ def test_medication_dose_recall_never_overrides_higher_priority_safety_guards():
     ) is False
 
 
-def test_companion_inference_timeout_is_bounded_and_passed_to_qwen(monkeypatch):
+def test_companion_inference_timeout_allows_cold_start_and_is_bounded_by_ui_budget(monkeypatch):
     monkeypatch.delenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", raising=False)
-    assert collaboration._companion_inference_timeout_seconds() == 30.0
-    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "180")
-    assert collaboration._companion_inference_timeout_seconds() == 60.0
+    assert collaboration._companion_inference_timeout_seconds() == 120.0
+    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "240")
+    assert collaboration._companion_inference_timeout_seconds() == 180.0
     monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "1")
     assert collaboration._companion_inference_timeout_seconds() == 5.0
+    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "not-a-number")
+    assert collaboration._companion_inference_timeout_seconds() == 120.0
 
     captured = {}
-    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "17")
+    monkeypatch.setenv("SOLENOS_COMPANION_TIMEOUT_SECONDS", "77")
     monkeypatch.setattr(
         collaboration,
         "qwen_chat",
@@ -259,7 +261,7 @@ def test_companion_inference_timeout_is_bounded_and_passed_to_qwen(monkeypatch):
         [{"role": "user", "content": "What changed?"}],
     )
     assert reply == "bounded reply"
-    assert captured["timeout"] == 17.0
+    assert captured["timeout"] == 77.0
 
 
 def test_medication_dose_recall_directly_retrieves_person_scoped_report_and_evidence(monkeypatch):
