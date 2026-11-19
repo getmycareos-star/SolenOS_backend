@@ -1461,13 +1461,13 @@ def review_document_candidate(
                     updated_by_caregiver_id=caregiver_id,
                 ),
                 commit=False,
+                source_context={
+                    "kind": "caregiver_reviewed_document_candidate",
+                    "authority": "caregiver_reviewed_report_not_independently_verified",
+                    "review_status": "accepted_by_caregiver",
+                    "document_candidate": source_context_candidate,
+                },
             )
-            assertion_row.source_context = {
-                "kind": "caregiver_reviewed_document_candidate",
-                "authority": "caregiver_reviewed_report_not_independently_verified",
-                "review_status": "accepted_by_caregiver",
-                "document_candidate": source_context_candidate,
-            }
             assertion_row.assertion_status = "reported" if assertion_subject_type == "medication" and document_field == "medication_status" else "accepted"
             db.flush()
         else:
