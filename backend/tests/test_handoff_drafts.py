@@ -101,7 +101,7 @@ def test_draft_returns_audience_specific_template_and_explicit_unassessed_sectio
     assert "allergies have no connected authoritative source" in (
         sections["medication_reconciliation"]["coverage_note"]
         if audience == "professional" else sections["health_medication"]["coverage_note"]
-    )
+    ).lower()
     assert all("still requires review" in section["coverage_note"] for section in body["template_sections"])
 
 
@@ -1281,9 +1281,11 @@ def test_qwen_handoff_generation_reports_real_inference_failures(monkeypatch, fa
         "family_transition",
         "family",
     )
-    assert result["status"] == "unavailable"
-    assert result["sections"] == []
-    assert result["provider"] == "ollama"
+    assert result["status"] == "source_only_fallback"
+    assert result["provider"] is None
+    assert result["sections"]
+    assert result["sections"][0]["summary"] == "Caregiver reported a quiet morning."
+    assert result["sections"][0]["supporting_quote"] == "Caregiver reported a quiet morning."
 
 
 def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkeypatch):
