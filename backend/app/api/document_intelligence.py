@@ -40,6 +40,7 @@ from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
+from app.services.lcr_context import build_lcr_context
 from app.models.collaboration import EvidenceUpload
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config
 from app.services.uncertainty import persist_source_clarification_questions
@@ -1644,8 +1645,48 @@ def review_document_candidate(
                 detail="The accepted document assertion was not retained by reconciliation. Retry the review.",
             )
     db.commit()
-    if execution is not None:
+    longitudinal_retrieval_status = "not_applicable"
+    if execution is not None and assertion_id:
         execution["stages"]["reconciliation"] = "committed"
+        try:
+            # Verify the accepted assertion through the same bounded retrieval
+            # service consumed by the caregiver's Care Record and Companion.
+            # A committed ORM row alone is not proof that it is retrievable.
+            projection = build_lcr_context(
+                db,
+                person_id,
+                caregiver_id=caregiver_id,
+                limit_per_source=50,
+            )
+            assertion_items = (
+                projection.get("sources", {}).get("assertions", {}).get("items", [])
+                if isinstance(projection.get("sources"), dict)
+                else []
+            )
+            assertion_retrieved = any(
+                isinstance(item, dict) and str(item.get("id")) == str(assertion_id)
+                for item in assertion_items
+            )
+            longitudinal_retrieval_status = (
+                "verified"
+                if assertion_retrieved and not projection.get("missing_required_sources")
+                else "unavailable"
+            )
+        except Exception:
+            logger.exception(
+                "Accepted document assertion could not be verified through LCR retrieval: %s",
+                assertion_id,
+            )
+            longitudinal_retrieval_status = "unavailable"
+        execution["stages"]["longitudinal_retrieval"] = longitudinal_retrieval_status
+        candidate["longitudinal_retrieval_status"] = longitudinal_retrieval_status
+        analysis.candidates = updated
+        analysis.execution_status = {
+            **(analysis.execution_status or {}),
+            **execution["stages"],
+        }
+        db.add(analysis)
+        db.commit()
     db.refresh(analysis)
     return {
         "analysis_id": analysis_id,
@@ -1654,6 +1695,7 @@ def review_document_candidate(
         "source_evidence_id": evidence_id,
         "source_record_ref": {"record_type": "care_assertion", "record_id": assertion_id} if assertion_id else None,
         "written_to_lcr": bool(assertion_id),
+        "longitudinal_retrieval_status": longitudinal_retrieval_status,
         "assertion_status": assertion_row.assertion_status if assertion_id and assertion_row else None,
         "follow_up_record_ref": {"record_type": "open_loop", "record_id": follow_up_id} if follow_up_id else None,
         "review_required": payload.decision == "correct",
