@@ -414,6 +414,22 @@ def _record_open_question_revision(
     db.flush()
 
 
+def _assertion_is_qualified_document_context(assertion: CareAssertion) -> bool:
+    """Keep historical, conditional, tentative and recommendation text out of hard conflicts."""
+    context = getattr(assertion, "source_context", None)
+    if not isinstance(context, dict) or context.get("kind") != "caregiver_reviewed_document_candidate":
+        return False
+    candidate = context.get("document_candidate")
+    if not isinstance(candidate, dict):
+        return False
+    return (
+        candidate.get("statement_kind") == "recommendation"
+        or candidate.get("temporal_context") == "historical"
+        or candidate.get("modality") == "tentative"
+        or candidate.get("conditionality") == "conditional"
+    )
+
+
 def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True, source_context: dict | None = None, assertion_status: str = "reported") -> CareAssertion:
     """Store every report; create/update unresolved conflict metadata without selecting a winner."""
     if payload.epistemic_state == "verified":
@@ -463,7 +479,11 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
         .order_by(CareAssertion.recorded_at.asc())
         .all()
     )
-    conflicts = [peer for peer in peers if _value_key(peer.asserted_value) != _value_key(assertion.asserted_value)]
+    conflicts = [] if _assertion_is_qualified_document_context(assertion) else [
+        peer for peer in peers
+        if not _assertion_is_qualified_document_context(peer)
+        and _value_key(peer.asserted_value) != _value_key(assertion.asserted_value)
+    ]
     if conflicts:
         evidence_ids = list(dict.fromkeys(
             [item for peer in conflicts for item in (peer.evidence_ids or [])]
