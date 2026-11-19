@@ -27,7 +27,7 @@ from app.services.lcr_context import build_lcr_context
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.care_attention_intelligence import build_care_attention_assessment
 from app.services.care_continuity import get_freshness
-from app.models.care import Evidence, Caregiver, CareEvent, Person
+from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.change import Situation as SituationModel, Change, Baseline
@@ -1303,9 +1303,15 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
     if not target_id:
         raise HTTPException(status_code=422, detail="A revision target ID is required")
 
-    # Serialize Core-based revision writers for this person, and lock the
-    # target row so these writes cannot race the ORM revision listener.
-    db.query(Person.id).filter(Person.id == person_id).with_for_update().one()
+    # Share the exact target-scoped advisory lock used by the ORM revision
+    # listener. Acquire it before the target row lock so Core and ORM writers
+    # cannot allocate the same revision number or invert their lock order.
+    if db.get_bind().dialect.name == "postgresql":
+        lock_key = f"care-state-revision:{state_target_type}:{person_id}:{target_id}"
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": lock_key},
+        )
     target_table = _table(db, state_target_type)
     target_row = db.execute(
         select(target_table).where(
