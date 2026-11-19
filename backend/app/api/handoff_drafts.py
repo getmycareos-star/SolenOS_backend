@@ -20,6 +20,7 @@ from app.api.care_delta import _scoped_identity
 from app.core.database import get_db
 from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraftRevision
 from app.models.care import Evidence, CareEvent, Caregiver
+from app.models.time_location import Appointment
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion, EvidenceObservation
