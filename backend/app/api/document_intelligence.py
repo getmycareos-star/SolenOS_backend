@@ -1436,12 +1436,6 @@ def review_document_candidate(
                     asserted_value=asserted_value,
                     source_label=source_label,
                     source_text=quote,
-                    source_context={
-                        "kind": "caregiver_reviewed_document_candidate",
-                        "authority": "caregiver_reviewed_report_not_independently_verified",
-                        "review_status": "accepted_by_caregiver",
-                        "document_candidate": canonical,
-                    },
                     evidence_ids=[evidence_id],
                     # A document candidate accepted by the caregiver remains
                     # a reported source, not a clinically verified instruction.
@@ -1455,6 +1449,12 @@ def review_document_candidate(
                 ),
                 commit=False,
             )
+            assertion_row.source_context = {
+                "kind": "caregiver_reviewed_document_candidate",
+                "authority": "caregiver_reviewed_report_not_independently_verified",
+                "review_status": "accepted_by_caregiver",
+                "document_candidate": canonical,
+            }
             assertion_row.assertion_status = "reported" if assertion_subject_type == "medication" and document_field == "medication_status" else "accepted"
             db.flush()
         else:
