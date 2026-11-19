@@ -14,7 +14,6 @@ class CareAssertionCreate(BaseModel):
     source_event_id: Optional[str] = None
     source_label: str = Field(min_length=1, max_length=160)
     source_text: Optional[str] = Field(default=None, max_length=12000)
-    source_context: Dict[str, Any] = Field(default_factory=dict)
     evidence_ids: List[str] = Field(default_factory=list, max_length=100)
     observed_at: Optional[datetime] = None
     review_after_days: Optional[int] = Field(default=None, ge=1, le=3650)
