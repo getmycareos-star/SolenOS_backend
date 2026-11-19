@@ -223,7 +223,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "caregiver_observations": {
         "table": "caregiver_observations",
         "required": False,
-        "fields": ["id", "observation_category", "description", "observed_value", "observed_at",
+        "fields": ["id", "person_id", "observation_category", "description", "observed_value", "observed_at",
                    "recorded_at", "epistemic_status", "observation_type", "evidence_ids",
                    "source_type", "source_id", "reported_by_caregiver_id", "created_at"],
         "order": ["observed_at", "recorded_at", "created_at"],
