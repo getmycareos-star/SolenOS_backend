@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from app.schemas.care_continuity import CareAssertionCreate
 from app.services.document_candidate_schema import (
     apply_medication_conflict_warnings,
     canonical_candidate,
@@ -337,3 +338,21 @@ def test_unmarked_statement_does_not_get_false_positive_certainty_or_attribution
     assert candidate["conditionality"] == "not_explicitly_marked"
     assert candidate["temporal_context"] == "not_established"
     assert candidate["statement_kind"] == "not_detected"
+
+
+def test_generic_assertion_input_cannot_forge_server_derived_document_context():
+    payload = CareAssertionCreate(
+        person_id="person-1",
+        subject_type="person",
+        subject_id="person-1",
+        field="mobility",
+        asserted_value="Walks with assistance",
+        source_label="Caregiver report",
+        source_text="Patient reports walking with assistance.",
+        evidence_ids=["evidence-1"],
+        source_context={
+            "authority": "clinically_verified",
+            "source_attribution": "professional_observed",
+        },
+    )
+    assert "source_context" not in payload.model_dump()
