@@ -249,9 +249,9 @@ def test_qwen_gateway_cannot_bypass_runtime_resource_bounds_with_call_options(mo
 
     assert answer == "Bounded response."
     assert captured["options"] == {
-        "num_ctx": 8192,
+        "num_ctx": 4096,
         "num_predict": 1024,
-        "num_thread": 8,
+        "num_thread": 2,
         "temperature": 2.0,
         "top_p": 1.0,
         "top_k": 100,
