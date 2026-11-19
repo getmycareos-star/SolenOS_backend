@@ -1897,6 +1897,79 @@ def test_natural_language_daily_entry_preserves_exact_report_and_exposes_extract
         teardown_db()
 
 
+def test_legacy_situation_capture_uses_durable_extraction_worker_for_raw_source(monkeypatch):
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        original_report = "Mum slept poorly last night and seemed more unsettled this morning."
+
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+            assert source_text == original_report
+            return {
+                "observations": [
+                    {
+                        "subject": "Mum",
+                        "observation": "slept poorly last night",
+                        "source_quote": original_report,
+                        "source_event_id": source_event_id,
+                    },
+                    {
+                        "subject": "Mum",
+                        "observation": "seemed more unsettled this morning",
+                        "source_quote": original_report,
+                        "source_event_id": source_event_id,
+                    },
+                ],
+                "open_questions": [],
+            }
+
+        response = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "raw_input": original_report,
+                "care_session_id": "legacy-capture-worker-test",
+            },
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert receipt["qwen_extraction_status"] == "queued"
+        assert receipt["qwen_job_id"]
+        assert receipt["qwen_review_required"] is False
+        assert receipt["qwen_written_to_lcr"] is False
+
+        process_daily_capture_job(receipt["qwen_job_id"], monkeypatch, exact_source_candidates)
+
+        db = TestingSessionLocal()
+        try:
+            evidence = db.query(Evidence).filter_by(id=receipt["evidence_id"]).one()
+            analysis = db.query(CaptureAnalysis).filter_by(id=receipt["qwen_analysis_id"]).one()
+            job = db.query(QwenBackgroundJob).filter_by(id=receipt["qwen_job_id"]).one()
+            observations = db.query(EvidenceObservation).filter_by(
+                person_id="person-daily-test",
+                evidence_id=evidence.id,
+            ).order_by(EvidenceObservation.source_span_start).all()
+
+            assert evidence.source_text == original_report
+            assert analysis.source_text == original_report
+            assert analysis.extraction_status == "available"
+            assert job.status == "completed"
+            assert json.loads(job.result_text)["capture_mode"] == "natural_language_update"
+            assert len(observations) == 2
+            assert {item.source_passage for item in observations} == {original_report}
+            assert all(item.epistemic_status.value == "reported" for item in observations)
+            assert all(item.observation_kind == "reported_observation" for item in observations)
+            assert all(item.created_by_caregiver_id == "caregiver-daily-test" for item in observations)
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
 def test_natural_language_daily_entry_projects_only_source_grounded_observations_into_lcr(monkeypatch):
 
     setup_db()
