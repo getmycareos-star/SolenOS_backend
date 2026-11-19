@@ -625,6 +625,12 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             else "independent" if any(value in {"independent", "independent_source"} for value in statuses)
             else "not_assessed"
         )
+        source_reviews = evidence_reviews_by_evidence.get(str(item.id), [])
+        source_review_status = (
+            "available" if source_reviews
+            else "partial" if evidence_review_has_more
+            else evidence_review_source_status
+        )
         return {
             "label": filename or "Original note or document",
             "record_id": str(item.id),
@@ -636,8 +642,8 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             "record_status": item.epistemic_status or item.evidence_status,
             "source_independence_status": independence,
             "exact_wording_duplicate_count": max(0, duplicate_counts.get(item.source_text_sha256, 1) - 1) if item.source_text_sha256 else 0,
-            "evidence_reviews": evidence_reviews_by_evidence.get(str(item.id), []),
-            "evidence_reviews_status": evidence_review_source_status,
+            "evidence_reviews": source_reviews,
+            "evidence_reviews_status": source_review_status,
             "evidence_reviews_has_more": evidence_review_has_more,
         }
 
