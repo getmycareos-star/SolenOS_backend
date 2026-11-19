@@ -414,13 +414,15 @@ def _record_open_question_revision(
     db.flush()
 
 
-def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True) -> CareAssertion:
+def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True, source_context: dict | None = None) -> CareAssertion:
     """Store every report; create/update unresolved conflict metadata without selecting a winner."""
     if payload.epistemic_state == "verified":
         raise HTTPException(status_code=422, detail="Verified assertions require a persisted verification review; direct assertion creation cannot self-certify")
     if payload.epistemic_state in {"conflicting", "missing"}:
         raise HTTPException(status_code=422, detail="Conflicting and missing are derived record states and cannot be assigned to an individual assertion")
     assertion = CareAssertion(**payload.model_dump())
+    if source_context is not None:
+        assertion.source_context = source_context
     # AI proposal lineage is an interpretation, never a caregiver report or verified fact.
     if payload.source_proposal_id:
         assertion.epistemic_state = "inferred"
