@@ -82,7 +82,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "table": "care_assertions",
         "required": True,
         "fields": ["id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value",
-                   "source_event_id", "source_label", "source_text", "source_conversation_id",
+                   "source_event_id", "source_label", "source_text", "source_context", "source_conversation_id",
                    "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids",
                    "epistemic_state", "assertion_status", "observed_at", "review_after_days", "created_by_caregiver_id",
                    "recorded_at"],
