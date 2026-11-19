@@ -30,7 +30,8 @@ router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
 logger = logging.getLogger(__name__)
 POLICY_VERSION = "handoff-draft-v1"
 MAX_DAYS = 90
-MAX_ROWS_PER_SOURCE = 40
+MAX_ROWS_PER_SOURCE = 500
+SOURCE_PAGE_SIZE = 100
 ALLOWED_HANDOFF_SECTION_LABELS = {
     "Care recipient and handoff context",
     "Current care situation",
@@ -1157,13 +1158,24 @@ def _is_stale(value, now: datetime, days: int = 30) -> bool:
 def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, now: datetime) -> tuple[dict, list[dict]]:
     """Read persisted Daily Care events and same-person evidence; never promote them to LCR facts."""
     try:
-        fetched_events = db.query(CareEvent).filter(
+        event_query = db.query(CareEvent).filter(
             CareEvent.person_id == person_id,
             CareEvent.event_type.in_(DAILY_CARE_EVENT_TYPES),
             or_(CareEvent.occurred_at >= cutoff, CareEvent.recorded_at >= cutoff, CareEvent.updated_at >= cutoff),
-        ).order_by(CareEvent.recorded_at.desc().nullslast()).limit(MAX_ROWS_PER_SOURCE + 1).all()
-        daily_has_more = len(fetched_events) > MAX_ROWS_PER_SOURCE
-        events = fetched_events[:MAX_ROWS_PER_SOURCE]
+        ).order_by(CareEvent.recorded_at.desc().nullslast(), CareEvent.id.asc())
+        events = []
+        event_offset = 0
+        while len(events) < MAX_ROWS_PER_SOURCE:
+            page_limit = min(SOURCE_PAGE_SIZE, MAX_ROWS_PER_SOURCE - len(events))
+            page = event_query.offset(event_offset).limit(page_limit).all()
+            events.extend(page)
+            if len(page) < page_limit:
+                break
+            event_offset += len(page)
+        daily_has_more = (
+            len(events) >= MAX_ROWS_PER_SOURCE
+            and event_query.offset(event_offset).limit(1).first() is not None
+        )
         if not events:
             return {"status": "empty", "label": "Daily Care observations", "count": 0,
                     "returned_count": 0, "has_more": False, "retrieval_complete": True}, []
@@ -1286,12 +1298,23 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
 def _verified_document_source(db: Session, person_id: str, caregiver_id: str) -> tuple[dict, list[dict]]:
     """Read verified original uploads and persisted extraction text as separate provenance nodes."""
     try:
-        fetched_documents = db.query(Evidence).filter(
+        document_query = db.query(Evidence).filter(
             Evidence.person_id == person_id,
             Evidence.type == "document",
-        ).order_by(Evidence.uploaded_at.desc()).limit(MAX_ROWS_PER_SOURCE + 1).all()
-        documents_has_more = len(fetched_documents) > MAX_ROWS_PER_SOURCE
-        documents = fetched_documents[:MAX_ROWS_PER_SOURCE]
+        ).order_by(Evidence.uploaded_at.desc().nullslast(), Evidence.id.asc())
+        documents = []
+        document_offset = 0
+        while len(documents) < MAX_ROWS_PER_SOURCE:
+            page_limit = min(SOURCE_PAGE_SIZE, MAX_ROWS_PER_SOURCE - len(documents))
+            page = document_query.offset(document_offset).limit(page_limit).all()
+            documents.extend(page)
+            if len(page) < page_limit:
+                break
+            document_offset += len(page)
+        documents_has_more = (
+            len(documents) >= MAX_ROWS_PER_SOURCE
+            and document_query.offset(document_offset).limit(1).first() is not None
+        )
         if not documents:
             return {"status": "empty", "label": "Uploaded documents and extracted text", "count": 0,
                     "returned_count": 0, "has_more": False, "retrieval_complete": True}, []
@@ -1856,13 +1879,23 @@ def prepare_handoff_draft(
                 else:
                     query = query.where(in_window)
                 query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
-            # Fetch one extra row so a capped source projection is never
-            # represented as a complete history.
-            fetched_rows = [dict(row) for row in db.execute(
-                query.limit(MAX_ROWS_PER_SOURCE + 1)
-            ).mappings().all()]
-            source_has_more = len(fetched_rows) > MAX_ROWS_PER_SOURCE
-            rows = fetched_rows[:MAX_ROWS_PER_SOURCE]
+            # Read every source page up to the explicit safety ceiling. A further
+            # probe distinguishes a complete projection from a safety-capped one.
+            rows = []
+            source_offset = 0
+            while len(rows) < MAX_ROWS_PER_SOURCE:
+                page_limit = min(SOURCE_PAGE_SIZE, MAX_ROWS_PER_SOURCE - len(rows))
+                page = [dict(row) for row in db.execute(
+                    query.limit(page_limit).offset(source_offset)
+                ).mappings().all()]
+                rows.extend(page)
+                if len(page) < page_limit:
+                    break
+                source_offset += len(page)
+            source_has_more = (
+                len(rows) >= MAX_ROWS_PER_SOURCE
+                and db.execute(query.limit(1).offset(source_offset)).first() is not None
+            )
             if rows and spec.get("validate_necessity"):
                 # Handoffs are caregiver-facing work products. Do not copy
                 # an unassessed or malformed question into the handoff merely
@@ -2084,7 +2117,7 @@ def prepare_handoff_draft(
     gaps.extend({
         "source": item["source"],
         "status": "partial",
-        "reason": "source_projection_reached_40_record_limit",
+        "reason": "source_projection_reached_500_record_safety_limit",
         "returned_count": item["returned_count"],
     } for item in partial_sources)
     # "Not authorized" sources (for example, Community) are intentionally
