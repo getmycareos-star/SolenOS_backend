@@ -27,12 +27,12 @@ permissions:
 
 concurrency:
   group: companion-live-qwen-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   live-qwen-evaluation:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:17
