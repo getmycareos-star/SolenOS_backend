@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import json
 
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine
 from sqlalchemy.orm import Session
@@ -162,9 +163,9 @@ def test_lcr_context_includes_scoped_evidence_reviews_and_assessment_history():
             connection.execute(completeness.insert(), [{
                 "id": "completeness-a", "person_id": "person-a", "policy_id": "completeness-policy-a",
                 "policy_version": "completeness-v1", "subject_type": "evidence", "subject_id": "evidence-a",
-                "assessment_status": "partial", "required_fields": "[\\"author\\", \\"date\\"]",
-                "satisfied_fields": "[\\"date\\"]", "missing_fields": "[\\"author\\"]",
-                "field_evidence_json": "{}", "evidence_ids": "[\\"evidence-a\\"]",
+                "assessment_status": "partial", "required_fields": json.dumps(["author", "date"]),
+                "satisfied_fields": json.dumps(["date"]), "missing_fields": json.dumps(["author"]),
+                "field_evidence_json": "{}", "evidence_ids": json.dumps(["evidence-a"]),
                 "rationale": "The source author is not identified.",
                 "assessment_basis": "linked_source_coverage_only",
                 "semantic_sufficiency": "not_automatically_verified",
