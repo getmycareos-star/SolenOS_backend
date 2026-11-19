@@ -626,6 +626,12 @@ def get_multi_caregiver_summary(person_id: str, request: Request, db: Session = 
     service = CaregiverIntelligenceService(db)
     return service.get_multi_caregiver_summary(person_id)
 
+@router.get("/multi-caregiver-summary", response_model=MultiCaregiverSummary)
+def get_scoped_multi_caregiver_summary(request: Request, db: Session = Depends(get_db)):
+    person_id, _caregiver_id = _resolve_scoped_session(request, db)
+    service = CaregiverIntelligenceService(db)
+    return service.get_multi_caregiver_summary(person_id)
+
 
 @router.get("/care-network-state/{person_id}")
 def get_care_network_state(person_id: str, request: Request, db: Session = Depends(get_db)):
