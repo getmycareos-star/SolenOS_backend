@@ -413,6 +413,10 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "draft_id": draft.id,
         "purpose": draft.purpose,
         "audience": draft.audience,
+        "source_of_truth": "living_care_record",
+        "source_snapshot_id": snapshot.get("snapshot_id"),
+        "source_snapshot_sha256": snapshot.get("snapshot_sha256"),
+        "snapshot_at": snapshot.get("snapshot_at"),
         "window": snapshot.get("window"),
         "prepared_at": _iso(draft.created_at),
         "read_only": True,
@@ -1990,6 +1994,11 @@ def prepare_handoff_draft(
     if len(request_id) > 255:
         raise HTTPException(status_code=422, detail="Draft request ID must be 255 characters or fewer")
     source_snapshot = {
+        "snapshot_id": str(uuid.uuid4()),
+        "snapshot_at": now.isoformat(),
+        "authority": "living_care_record",
+        "person_scope": person_id,
+        "caregiver_scope": caregiver_id,
         "source_statuses": statuses,
         "source_records": records,
         "evidence_lineage": evidence_lineage,
@@ -1998,6 +2007,13 @@ def prepare_handoff_draft(
         "partial_sources": partial_sources,
         "window": {"days": payload.window_days, "from": cutoff.isoformat(), "to": now.isoformat()},
     }
+    source_snapshot["snapshot_sha256"] = _fingerprint({
+        "authority": source_snapshot["authority"],
+        "person_scope": source_snapshot["person_scope"],
+        "source_statuses": source_snapshot["source_statuses"],
+        "source_records": source_snapshot["source_records"],
+        "window": source_snapshot["window"],
+    })
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
         "sections": sections,
@@ -2134,6 +2150,10 @@ def prepare_handoff_draft(
         "revision_number": 1,
         "purpose": payload.purpose,
         "audience": payload.audience,
+        "source_of_truth": "living_care_record",
+        "source_snapshot_id": source_snapshot["snapshot_id"],
+        "source_snapshot_sha256": source_snapshot["snapshot_sha256"],
+        "snapshot_at": source_snapshot["snapshot_at"],
         "template_sections": _template_coverage(payload.audience, statuses),
         "prepared_at": now.isoformat(),
         "window": {"days": payload.window_days, "from": cutoff.isoformat(), "to": now.isoformat()},
