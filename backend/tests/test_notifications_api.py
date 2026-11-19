@@ -213,6 +213,7 @@ def test_web_push_provider_failure_is_never_recorded_as_accepted(monkeypatch):
     from datetime import timedelta
     from types import SimpleNamespace
 
+    from cryptography.hazmat.primitives import serialization
     from cryptography.fernet import Fernet
     from app.services import reminder_delivery
 
@@ -232,7 +233,13 @@ def test_web_push_provider_failure_is_never_recorded_as_accepted(monkeypatch):
         class ProviderRejected(Exception):
             response = None
 
-        def reject_delivery(**_kwargs):
+        def reject_delivery(**kwargs):
+            encoded_key = kwargs.get("vapid_private_key")
+            assert isinstance(encoded_key, str), "py_vapid requires a base64url-encoded DER private key"
+            padded_key = encoded_key + ("=" * (-len(encoded_key) % 4))
+            decoded_key = base64.urlsafe_b64decode(padded_key)
+            parsed_key = serialization.load_der_private_key(decoded_key, password=None)
+            assert parsed_key.curve.name == "secp256r1"
             raise ProviderRejected("simulated provider outage")
 
         monkeypatch.setitem(
