@@ -88,10 +88,18 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
     def fake_extract(text, *, source_event_id, source_evidence_id=None):
         assert text == source
         return {"observations": [
-            *[
-                {"subject": "Patient", "observation": quote, "source_quote": quote,
-                 "extraction_method": "test_verbatim"} for quote in quotes
-            ],
+            {
+                "subject": "Patient",
+                "observation": quotes[0],
+                "source_quote": quotes[0],
+                "extraction_method": "test_verbatim",
+            },
+            {
+                "subject": "The patient",
+                "observation": "The patient ate half of lunch",
+                "source_quote": quotes[1],
+                "extraction_method": "test_verbatim",
+            },
             {"subject": "Patient", "observation": "Invented diagnosis", "source_quote": "Patient has a confirmed diagnosis that is not in this document."},
             {"subject": "Patient", "observation": "Patient recovered completely", "source_quote": "Patient walked 20 metres with a frame on 12 October."},
         ], "open_questions": ["Was this typical for the person?"]}
@@ -109,6 +117,17 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         "execute_care_continuity_reconciliation",
         capture_execution_scope,
     )
+    original_delta = intelligence_module.reconcile_document_delta
+    delta_attempts = 0
+
+    def fail_first_delta(*args, **kwargs):
+        nonlocal delta_attempts
+        delta_attempts += 1
+        if delta_attempts == 1:
+            raise RuntimeError("temporary Delta persistence failure")
+        return original_delta(*args, **kwargs)
+
+    monkeypatch.setattr(intelligence_module, "reconcile_document_delta", fail_first_delta)
     try:
         first = create_record(client, "Caregiver A")
         auth = {"Authorization": "Bearer " + first["access_token"]}
@@ -158,8 +177,8 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
             json={
                 "candidate_index": 1,
                 "decision": "correct",
-                "corrected_subject": "Person",
-                "corrected_observation": "Caregiver-reviewed correction: ate approximately half of lunch.",
+                "corrected_subject": "The patient",
+                "corrected_observation": quotes[1],
             },
         )
         assert corrected.status_code == 200, corrected.text
@@ -191,9 +210,8 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert accepted.json()["written_to_lcr"] is True
         assert accepted.json()["longitudinal_retrieval_status"] == "verified"
         assert accepted.json()["candidate"]["longitudinal_retrieval_status"] == "verified"
-        assert accepted.json()["delta_reconciliation_status"] == "completed"
-        delta_run_id = accepted.json()["delta_run_id"]
-        assert delta_run_id
+        assert accepted.json()["delta_reconciliation_status"] == "failed"
+        assert accepted.json()["delta_run_id"] is None
         assert len(execution_calls) == 1
         assert execution_calls[0]["source_caregiver_id"] == first["caregiver"]["id"]
         assert execution_calls[0]["source_evidence_id"] == evidence_id
@@ -209,10 +227,23 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert accepted_again.json()["source_record_ref"] == accepted.json()["source_record_ref"]
         assert accepted_again.json()["longitudinal_retrieval_status"] == "verified"
         assert accepted_again.json()["delta_reconciliation_status"] == "completed"
-        assert accepted_again.json()["delta_run_id"] == delta_run_id
+        assert accepted_again.json()["idempotent_replay"] is True
+        delta_run_id = accepted_again.json()["delta_run_id"]
+        assert delta_run_id
+        assert delta_attempts == 2
+
+        third_replay = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={"candidate_index": 1, "decision": "accept"},
+        )
+        assert third_replay.status_code == 200, third_replay.text
+        assert third_replay.json()["delta_run_id"] == delta_run_id
+        assert delta_attempts == 2
 
         db = Session()
         try:
+            assert db.query(CareDeltaRun).filter_by(person_id=first["person"]["id"]).count() == 1
             persisted_delta = db.query(CareDeltaRun).filter_by(
                 id=delta_run_id, person_id=first["person"]["id"]
             ).one()

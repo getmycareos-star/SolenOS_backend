@@ -1214,6 +1214,35 @@ def list_document_review_history(
     }
 
 
+def _persist_document_delta_run(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    evidence_id: str,
+    source_text: str,
+    candidate: dict,
+) -> str:
+    quote = candidate.get("source_quote")
+    if not isinstance(quote, str) or not quote or quote not in source_text:
+        raise ValueError("accepted_document_candidate_source_quote_missing")
+    result = reconcile_document_delta(
+        db,
+        person_id=person_id,
+        event_date=_explicit_document_event_datetime(candidate, quote),
+        source="SolenOS Document Intelligence",
+        content=source_text or quote,
+        evidence_ids=[evidence_id],
+        persist=True,
+        created_by_caregiver_id=caregiver_id,
+        model_enrichment=False,
+    )
+    run_id = (result.get("provenance") or {}).get("delta_run_id")
+    if not run_id:
+        raise RuntimeError("document_delta_run_not_persisted")
+    return str(run_id)
+
+
 @router.post("/intelligence/{analysis_id}/review")
 def review_document_candidate(
     analysis_id: str,
@@ -1279,6 +1308,73 @@ def review_document_candidate(
                 accepted_assertion is not None
                 and accepted_assertion.assertion_status not in {"rejected", "superseded"}
             )
+            replay_changed = False
+            if active_assertion:
+                if (
+                    candidate.get("delta_reconciliation_status") != "completed"
+                    or not candidate.get("delta_run_id")
+                ):
+                    try:
+                        candidate["delta_run_id"] = _persist_document_delta_run(
+                            db,
+                            person_id=person_id,
+                            caregiver_id=caregiver_id,
+                            evidence_id=evidence_id,
+                            source_text=analysis.source_text or "",
+                            candidate=candidate,
+                        )
+                        candidate["delta_reconciliation_status"] = "completed"
+                    except Exception:
+                        db.rollback()
+                        logger.exception(
+                            "Retry of document Delta reconciliation failed for assertion %s",
+                            accepted_assertion.id,
+                        )
+                        candidate["delta_reconciliation_status"] = "failed"
+                        candidate.pop("delta_run_id", None)
+                    replay_changed = True
+                if candidate.get("longitudinal_retrieval_status") != "verified":
+                    try:
+                        projection = build_lcr_context(
+                            db,
+                            person_id,
+                            caregiver_id=caregiver_id,
+                            limit_per_source=50,
+                        )
+                        assertion_items = (
+                            projection.get("sources", {}).get("assertions", {}).get("items", [])
+                            if isinstance(projection.get("sources"), dict)
+                            else []
+                        )
+                        assertion_retrieved = any(
+                            isinstance(item, dict) and str(item.get("id")) == str(accepted_assertion.id)
+                            for item in assertion_items
+                        )
+                        candidate["longitudinal_retrieval_status"] = (
+                            "verified"
+                            if assertion_retrieved and not projection.get("missing_required_sources")
+                            else "unavailable"
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Retry of document LCR retrieval verification failed for assertion %s",
+                            accepted_assertion.id,
+                        )
+                        candidate["longitudinal_retrieval_status"] = "unavailable"
+                    replay_changed = True
+            if replay_changed:
+                replay_metadata = copy.deepcopy(metadata)
+                replay_metadata["document_intelligence"]["observations"][payload.candidate_index] = candidate
+                analysis.candidates = replay_metadata
+                analysis.execution_status = {
+                    **(analysis.execution_status or {}),
+                    "delta_reconciliation": candidate.get("delta_reconciliation_status", "not_verified"),
+                    "delta_run_id": candidate.get("delta_run_id"),
+                    "longitudinal_retrieval": candidate.get("longitudinal_retrieval_status", "not_verified"),
+                }
+                db.add(analysis)
+                db.commit()
+                db.refresh(analysis)
             return {
                 "analysis_id": analysis_id,
                 "candidate": candidate,
@@ -1681,19 +1777,15 @@ def review_document_candidate(
             # document change is available in the same longitudinal history used
             # by Daily Care. This is deterministic reconciliation, not another
             # model extraction pass.
-            delta_result = reconcile_document_delta(
+            delta_run_id = _persist_document_delta_run(
                 db,
                 person_id=person_id,
-                event_date=document_observed_at,
-                source="SolenOS Document Intelligence",
-                content=analysis.source_text or quote,
-                evidence_ids=[evidence_id],
-                persist=True,
-                created_by_caregiver_id=caregiver_id,
-                model_enrichment=False,
+                caregiver_id=caregiver_id,
+                evidence_id=evidence_id,
+                source_text=analysis.source_text or quote,
+                candidate=candidate,
             )
-            delta_run_id = (delta_result.get("provenance") or {}).get("delta_run_id")
-            delta_reconciliation_status = "completed" if delta_run_id else "not_verified"
+            delta_reconciliation_status = "completed"
         except Exception:
             db.rollback()
             logger.exception(
