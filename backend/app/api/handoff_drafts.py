@@ -166,6 +166,12 @@ SOURCES = {
         "event_time_fields": ("observed_at",),
         "recorded_time_fields": ("recorded_at",),
         "detail_fields": ("subject_type", "subject_id", "field", "assertion_kind", "source_label", "event_time_text", "source_event_id", "source_conversation_id", "source_message_id", "source_proposal_id", "epistemic_state", "assertion_status", "source_context", "created_by_caregiver_id", "updated_by_caregiver_id"),
+        # Medication changes can predate the selected briefing window. Keep the
+        # latest assertion for each subject/field so discontinued or historical
+        # medication evidence is not silently dropped from professional context.
+        "include_latest_outside_window": True,
+        "latest_timestamp_column": "recorded_at",
+        "latest_group_columns": ("subject_type", "subject_id", "field"),
     },
     "uncertainty_assessments": {
         "label": "Recorded uncertainty and information gaps",
