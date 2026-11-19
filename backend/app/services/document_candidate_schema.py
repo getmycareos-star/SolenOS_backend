@@ -184,7 +184,8 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
     attribution_patterns = (
         ("patient_reported", r"\b(?:the )?patient\s+(?:reports?|reported|states?|stated|denies?|denied|describes?|described)\b|\bpatient[- ]reported\b"),
         ("caregiver_reported", r"\b(?:the )?(?:caregiver|family member|daughter|son|spouse)\s+(?:reports?|reported|states?|stated|noticed|observed)\b|\bcaregiver[- ]reported\b"),
-        ("professional_observed", r"\b(?:nurse|clinician|doctor|physician|therapist|staff)\s+(?:observed|notes?|documented|reported|recorded)\b|\b(?:on examination|observed by)\b"),
+        ("professional_observed", r"\b(?:nurse|clinician|doctor|physician|therapist|staff)\s+(?:observed|measured|examined)\b|\b(?:on examination|observed by|measured by)\b"),
+        ("professional_documented", r"\b(?:nurse|clinician|doctor|physician|therapist|staff)\s+(?:notes?|documented|reported|recorded|states?|stated)\b|\b(?:documented by|recorded by)\b"),
     )
     attribution = "not_stated"
     for label, pattern in attribution_patterns:
@@ -207,11 +208,16 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
         lowered,
         re.I,
     ) else "not_explicitly_marked"
-    temporal_context = "historical" if re.search(
-        r"\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week|no longer)\b",
+    if re.search(r"\bno longer\b", lowered, re.I):
+        temporal_context = "changed_over_time"
+    elif re.search(
+        r"\b(?:previously|previous|historical|history of|formerly|in the past|prior to|last year|last month|last week)\b",
         lowered,
         re.I,
-    ) else "not_established"
+    ):
+        temporal_context = "historical"
+    else:
+        temporal_context = "not_established"
     statement_kind = "recommendation" if re.search(
         r"\b(?:recommend(?:ed|s|ation)?|should consider|advised to|plan to|planned to|follow[- ]?up recommended)\b",
         lowered,
