@@ -669,8 +669,11 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "reported_by": summary.get("reported_by"),
                 "entered_by": summary.get("entered_by"),
                 "record_status": item.epistemic_status or item.evidence_status,
-                "source_independence_status": evidence_summary(record_id).get("source_independence_status") if evidence_summary(record_id) else "not_assessed",
-                "exact_wording_duplicate_count": evidence_summary(record_id).get("exact_wording_duplicate_count", 0) if evidence_summary(record_id) else 0,
+                "source_independence_status": summary.get("source_independence_status", "not_assessed"),
+                "exact_wording_duplicate_count": summary.get("exact_wording_duplicate_count", 0),
+                "evidence_reviews": summary.get("evidence_reviews", []),
+                "evidence_reviews_status": summary.get("evidence_reviews_status", "unavailable"),
+                "evidence_reviews_has_more": summary.get("evidence_reviews_has_more", False),
             })
         elif record.get("record_type") == "document_extraction" and record_id in documents:
             item = documents[record_id]
