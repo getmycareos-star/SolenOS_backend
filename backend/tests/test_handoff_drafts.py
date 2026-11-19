@@ -457,6 +457,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             policy_version="evidence-review-v1",
             source_attribution_snapshot="{}",
             reviewed_by_caregiver_id=caregiver_id,
+            created_at=source_time,
         )
         claim_assessment = EvidenceClaimAssessment(
             id="handoff-claim-assessment",
@@ -473,6 +474,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
                 "scope_note": "Source context remains unverified.",
             }],
             reviewed_by_caregiver_id=caregiver_id,
+            created_at=source_time,
         )
         db.add_all([evidence, policy, assessment, claim, source_review, claim_assessment])
         db.commit()
