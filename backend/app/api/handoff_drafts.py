@@ -384,9 +384,23 @@ def _explicit_evidence_ids(row: dict) -> list[str]:
     if not isinstance(values, (list, tuple, set)):
         values = [values] if isinstance(values, str) and values.strip() else []
     result = [str(value).strip() for value in values if isinstance(value, str) and value.strip()]
-    singular = row.get("source_evidence_id")
-    if isinstance(singular, str) and singular.strip():
-        result.append(singular.strip())
+    for key in ("source_evidence_id", "evidence_id"):
+        singular = row.get(key)
+        if isinstance(singular, str) and singular.strip():
+            result.append(singular.strip())
+    links = row.get("evidence_links")
+    if isinstance(links, str):
+        try:
+            import json
+            links = json.loads(links)
+        except (TypeError, ValueError):
+            links = []
+    if isinstance(links, (list, tuple)):
+        for link in links:
+            if isinstance(link, dict):
+                evidence_id = link.get("evidence_id")
+                if isinstance(evidence_id, str) and evidence_id.strip():
+                    result.append(evidence_id.strip())
     return list(dict.fromkeys(result))
 
 
