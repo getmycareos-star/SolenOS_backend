@@ -394,6 +394,7 @@ def test_qualified_document_statements_do_not_create_hard_current_state_conflict
         qualifiers = [
             {"statement_kind": "recommendation"},
             {"temporal_context": "historical"},
+            {"temporal_context": "changed_over_time"},
             {"modality": "tentative"},
             {"conditionality": "conditional"},
         ]
