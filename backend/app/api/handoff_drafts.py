@@ -57,6 +57,7 @@ ALLOWED_HANDOFF_SECTION_LABELS = {
     "Medication information and review status",
     "Evidence review and claim status",
     "Source quality and review history",
+    "Evidence completeness and missing fields",
     "Care actions and outcomes",
     "Open questions",
     "Appointments",
@@ -274,6 +275,27 @@ SOURCES = {
         "include_latest_outside_window": True,
         "latest_group_columns": ("claim_id",),
     },
+    "evidence_completeness_policies": {
+        "label": "Evidence completeness policies",
+        "kind": "completeness_policy",
+        "fields": ("id", "person_id", "domain_key", "purpose_key", "policy_version", "required_fields", "rationale", "created_by_caregiver_id", "created_at"),
+        "text_fields": ("domain_key", "purpose_key", "policy_version", "rationale"),
+        "time_fields": ("created_at",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("domain_key", "purpose_key", "policy_version", "required_fields", "created_by_caregiver_id"),
+        "include_active_outside_window": True,
+    },
+    "evidence_completeness_assessments": {
+        "label": "Evidence completeness assessments",
+        "kind": "completeness_assessment",
+        "fields": ("id", "person_id", "policy_id", "policy_version", "subject_type", "subject_id", "assessment_status", "required_fields", "satisfied_fields", "missing_fields", "field_evidence_json", "evidence_ids", "rationale", "assessment_basis", "semantic_sufficiency", "assessed_by_caregiver_id", "assessed_at"),
+        "text_fields": ("subject_type", "subject_id", "assessment_status", "missing_fields", "rationale", "assessment_basis", "semantic_sufficiency"),
+        "time_fields": ("assessed_at",),
+        "recorded_time_fields": ("assessed_at",),
+        "detail_fields": ("policy_id", "policy_version", "assessment_status", "required_fields", "satisfied_fields", "missing_fields", "assessment_basis", "semantic_sufficiency", "assessed_by_caregiver_id"),
+        "include_latest_outside_window": True,
+        "latest_group_columns": ("subject_type", "subject_id", "policy_id"),
+    },
     "evidence_freshness_policies": {
         "label": "Domain-specific freshness policies",
         "kind": "freshness_policy",
@@ -312,7 +334,7 @@ class DraftRequest(BaseModel):
 TEMPLATES = {
     "family": [
         ("start_here", "What matters most right now", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Current situation", "Immediate care needs", "What the next caregiver must know")),
-        ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries", "care_events", "uncertainty_assessments", "evidence_freshness_assessments", "evidence_freshness_policies", "evidence_review_records", "evidence_claim_assessments"), ("Today", "Change from baseline", "Uncertainty", "Freshness policy status and review rationale")),
+        ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries", "care_events", "uncertainty_assessments", "evidence_freshness_assessments", "evidence_freshness_policies", "evidence_review_records", "evidence_claim_assessments", "evidence_completeness_policies", "evidence_completeness_assessments"), ("Today", "Change from baseline", "Uncertainty", "Freshness policy status and review rationale")),
         ("daily_routine", "How to care for them", (), ("Daily routine", "Communication preferences", "Comfort and preferences", "Known distress triggers and helpful responses")),
         ("health_medication", "Health and medication information", ("appointments", "medications"), ("Documented health concerns", "Verified medication list", "Allergies and reactions", "Appointments and clinician instructions")),
         ("next_actions", "What needs to happen next", ("actions", "care_decisions", "open_questions", "information_gaps"), ("Action", "Named owner", "Due time/date", "Status", "Outcome")),
@@ -323,7 +345,7 @@ TEMPLATES = {
     "professional": [
         ("transition_summary", "Executive summary and current situation", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Reason for handoff", "Current situation", "Immediate priorities", "Clinician-assessed acuity if documented")),
         ("baseline", "Relevant history and baseline", ("care_facts", "care_timeline_entries", "care_events"), ("Documented diagnoses and source", "Relevant history", "Cognitive and functional baseline", "Changes from baseline", "Person's goals and preferences")),
-        ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps", "evidence_freshness_assessments", "evidence_freshness_policies", "evidence_review_records", "evidence_claim_assessments"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Freshness policy and assessment status", "Conflicts", "Corrections")),
+        ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps", "evidence_freshness_assessments", "evidence_freshness_policies", "evidence_review_records", "evidence_claim_assessments", "evidence_completeness_policies", "evidence_completeness_assessments"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Freshness policy and assessment status", "Conflicts", "Corrections")),
         ("medication_reconciliation", "Medication reconciliation", ("medications",), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
         ("clinical_functional", "Current clinical and functional assessment", (), ("Observations and measurements", "Symptoms and events", "Cognition/communication", "Mobility/ADLs", "Nutrition/hydration", "Sleep/mood/behaviour", "Equipment/environment")),
         ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "uncertainty_assessments", "care_facts", "care_events", "actions", "evidence_freshness_assessments", "evidence_freshness_policies"), ("Issue", "Evidence/status", "Freshness review status", "Required response", "Owner", "Deadline")),
@@ -332,7 +354,7 @@ TEMPLATES = {
         ("person_family_context", "Person-centred and family context", (), ("Communication preferences", "Relevant routines", "Authorised contacts", "Caregiver support needs", "Documented information-sharing basis")),
         ("transition_details", "Transition-specific information", ("care_transitions", "appointments", "care_events"), ("Sending/receiving setting", "Reason for transfer", "Course/interventions", "Discharge instructions", "Follow-ups", "Pending results", "Equipment/supplies")),
         ("contingency", "Contingency planning", (), ("Documented trigger/concern", "Existing authorised response", "Escalation contact", "Emergency pathway", "Limitations")),
-        ("integrity", "Document and record integrity", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps", "evidence_freshness_assessments", "evidence_freshness_policies", "evidence_review_records", "evidence_claim_assessments"), ("Source record IDs/versions", "Generated timestamp/timezone", "Last freshness assessment", "Explicit policy version", "Known gaps/stale information")),
+        ("integrity", "Document and record integrity", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps", "evidence_freshness_assessments", "evidence_freshness_policies", "evidence_review_records", "evidence_claim_assessments", "evidence_completeness_policies", "evidence_completeness_assessments"), ("Source record IDs/versions", "Generated timestamp/timezone", "Last freshness assessment", "Explicit policy version", "Known gaps/stale information")),
         ("receipt", "Handoff receipt and acceptance", (), ("Sender/receiver identity and role", "Receipt timestamp", "Responsibility transfer time", "Critical items confirmed", "Questions/clarifications", "Unaccepted actions", "Acceptance status")),
     ],
 }
