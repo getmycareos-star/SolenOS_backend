@@ -890,7 +890,8 @@ def test_document_source_without_extraction_is_reported_as_partial_retrieval(cli
     )
 
 
-def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch):
+@pytest.mark.parametrize("generation_status", ["generated", "source_only_fallback"])
+def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch, generation_status):
     import app.api.handoff_drafts as handoff_drafts
     from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
 
@@ -934,13 +935,13 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         calls["count"] += 1
         source = next(row for row in records if row["source_id"] == "persisted-handoff-fact")
         return {
-            "status": "generated",
+            "status": generation_status,
             "provider": "ollama",
             "model": "qwen-test-fixture",
             "sections": [{
                 "section": "Care preferences",
                 "source_ref": "care_facts:persisted-handoff-fact",
-                "summary": "The caregiver reports a preference for tea.",
+                "summary": source["text"] if generation_status == "source_only_fallback" else "The caregiver reports a preference for tea.",
                 "supporting_quote": source["text"],
                 "text": source["text"],
                 "epistemic_status": source["epistemic_status"],
@@ -959,7 +960,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     prepared = test_client.post("/api/v1/handoff-drafts/prepare", headers=headers, json=payload)
     assert prepared.status_code == 200, prepared.text
     draft_id = prepared.json()["draft_id"]
-    assert prepared.json()["generation_status"] == "generated"
+    assert prepared.json()["generation_status"] == generation_status
     assert prepared.json()["validation_status"] == "exact_quote_reference_validation_passed"
     assert prepared.json()["source_of_truth"] == "living_care_record"
     assert prepared.json()["source_snapshot_id"]
@@ -1010,13 +1011,14 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     )
     assert unreviewed_approval.status_code == 422, unreviewed_approval.text
 
+    expiry = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     approved = test_client.post(
         f"/api/v1/handoff-drafts/{draft_id}/approve",
         headers={"Authorization": f"Bearer {session['access_token']}"},
         json={
             "recipient_caregiver_ids": [recipient_id],
             "scope": ["lcr_summary"],
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            "expires_at": expiry,
             "reviewed_source_refs": [item["source_ref"] for item in prepared.json()["generation"]["sections"]],
             "semantic_review_acknowledged": True,
         },
@@ -1041,6 +1043,23 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         assert audit.target_id == draft_id
     finally:
         db.close()
+
+    # Cover the final approval-to-share hop for both Qwen output and the exact-source fallback.
+    import app.api.handoffs as handoffs
+    monkeypatch.setattr(handoffs, "_has_required_consent", lambda db, scoped_person_id, scoped_caregiver_id: True)
+    shared = test_client.post(
+        "/api/v1/handoffs",
+        headers={"Authorization": "Bearer " + session["access_token"], "x-request-id": "handoff-draft-share-" + generation_status},
+        json={
+            "person_id": person_id,
+            "draft_id": draft_id,
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary"],
+            "expires_at": expiry,
+        },
+    )
+    assert shared.status_code == 201, shared.text
+    assert shared.json()["draft_id"] == draft_id
 
 
 def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(client, monkeypatch):
