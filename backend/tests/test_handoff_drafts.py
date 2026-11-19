@@ -699,6 +699,9 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     draft_id = prepared.json()["draft_id"]
     assert prepared.json()["generation_status"] == "generated"
     assert prepared.json()["validation_status"] == "exact_quote_reference_validation_passed"
+    assert prepared.json()["source_of_truth"] == "living_care_record"
+    assert prepared.json()["source_snapshot_id"]
+    assert len(prepared.json()["source_snapshot_sha256"]) == 64
     listed = test_client.get(
         "/api/v1/handoff-drafts?limit=10",
         headers={"Authorization": f"Bearer {session['access_token']}"},
@@ -919,6 +922,37 @@ def test_qwen_handoff_generation_attaches_exact_source_text_to_selected_referenc
     assert result["provider"] == "ollama"
     assert result["model"] == "qwen2.5:1.5b"
     assert result["sections"][0]["text"] == "Caregiver reported a quiet morning."
+    assert result["sections"][0]["summary"] == "The caregiver reported a quiet morning."
+    assert result["sections"][0]["supporting_quote"] == "Caregiver reported a quiet morning."
+    assert result["authority"] == "living_care_record_source_snapshot"
+    assert result["semantic_entailment_status"] == "caregiver_review_required"
+
+
+def test_qwen_handoff_generation_rejects_quote_not_present_in_lcr_source(monkeypatch):
+    import json
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:1.5b", 30))
+    monkeypatch.setattr(handoff_drafts, "qwen_chat", lambda *args, **kwargs: json.dumps({
+        "items": [{
+            "section": "Recent observations",
+            "source_ref": "care_events:real-event",
+            "summary": "The person fell twice.",
+            "supporting_quote": "The person fell twice.",
+        }]
+    }))
+    result = handoff_drafts._generate_grounded_handoff([{
+        "source_table": "care_events",
+        "source_id": "real-event",
+        "source_type": "care_event",
+        "epistemic_status": "caregiver_reported",
+        "record_status": "recorded",
+        "event_at": None,
+        "recorded_at": None,
+        "text": "Caregiver reported a quiet morning.",
+    }], "family_transition", "family")
+    assert result["status"] == "validation_failed"
+    assert result["sections"] == []
 
 
 def test_qwen_handoff_generation_rejects_unsupported_section_label(monkeypatch):
