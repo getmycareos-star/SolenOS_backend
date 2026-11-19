@@ -743,6 +743,17 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     assert saved.json()["revision_number"] == 2
     assert saved.json()["review_status"] == "pending_review"
 
+    unreviewed_approval = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        },
+    )
+    assert unreviewed_approval.status_code == 422, unreviewed_approval.text
+
     approved = test_client.post(
         f"/api/v1/handoff-drafts/{draft_id}/approve",
         headers={"Authorization": f"Bearer {session['access_token']}"},
@@ -758,6 +769,8 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
     assert approved.json()["review_status"] == "approved_for_sharing"
     assert approved.json()["approval"]["approval_revision"] == 2
     assert approved.json()["approval"]["approval_parameters"]["recipient_caregiver_ids"] == [recipient_id]
+    assert approved.json()["approval"]["approval_parameters"]["reviewed_source_refs"]
+    assert approved.json()["approval"]["approval_parameters"]["semantic_review_acknowledged"] is True
 
     db = TestSessionLocal()
     try:
