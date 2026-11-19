@@ -2881,6 +2881,7 @@ def prepare_handoff_draft(
         "source_of_truth": "living_care_record",
         "source_snapshot_id": source_snapshot["snapshot_id"],
         "source_snapshot_sha256": source_snapshot["snapshot_sha256"],
+        "source_freshness": _draft_source_freshness(db, persisted_draft),
         "snapshot_at": source_snapshot["snapshot_at"],
         "template_sections": _template_coverage(payload.audience, statuses),
         "prepared_at": now.isoformat(),
