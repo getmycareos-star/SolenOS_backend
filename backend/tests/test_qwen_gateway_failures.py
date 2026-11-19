@@ -204,17 +204,20 @@ def test_production_qwen_gateway_accepts_only_private_railway_runtime(monkeypatc
     assert base == "http://solenos-ollama.railway.internal:11434"
     assert model == "qwen-test"
 
-def test_qwen_gateway_defaults_to_context_large_enough_for_care_history(monkeypatch):
-    captured = {}
+def test_qwen_gateway_defaults_to_production_safe_context_and_allows_explicit_upgrade(monkeypatch):
+    captured = []
     configure_gateway(monkeypatch)
     monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
 
     def capture_request(request, **kwargs):
-        captured.update(json.loads(request.data.decode("utf-8")))
+        captured.append(json.loads(request.data.decode("utf-8")))
         return FakeResponse(json.dumps({"message": {"content": "Grounded response."}}).encode())
 
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
     qwen_gateway.qwen_chat([{"role": "user", "content": "Use the authorized care history."}])
+    assert captured[-1]["options"]["num_ctx"] == 4096
 
-    assert captured["options"]["num_ctx"] == 8192
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
+    qwen_gateway.qwen_chat([{"role": "user", "content": "Use the authorized care history."}])
+    assert captured[-1]["options"]["num_ctx"] == 8192
 
