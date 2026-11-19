@@ -124,50 +124,48 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
     medication_evidence_ids = live_qwen_context["medication_evidence_ids"]
     headers = {"Authorization": f"Bearer {session['access_token']}"}
     response = client.post(
-            "/api/v1/assistant/assist",
-            headers=headers,
-            json={
-                "workflow": workflow,
-                "text": WORKFLOW_REQUESTS[workflow],
-            },
+        "/api/v1/assistant/assist",
+        headers=headers,
+        json={
+            "workflow": workflow,
+            "text": WORKFLOW_REQUESTS[workflow],
+        },
+    )
+    assert response.status_code == 200, (
+        f"Real Qwen inference failed for {workflow}: "
+        f"HTTP {response.status_code} {response.text}; "
+        f"synthetic Qwen drafts/repair outputs={generated_drafts!r}"
+    )
+    data = response.json()
+    assert data.get("workflow") == workflow, data
+    assert data.get("ai_generated") is True, data
+    assert data.get("provider_status") == "available", data
+    assert isinstance(data.get("reply"), str) and data["reply"].strip(), data
+    assert data.get("review_required") is True, data
+    assert data.get("written_to_lcr") is False, data
+    assert data.get("persistence") == "read_only_assistance", data
+    assert data.get("authority") == "solenos_care_record_and_caregiver", data
+    assert not re.search(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+        data["reply"],
+        re.IGNORECASE,
+    ), f"{workflow} exposed an internal record identifier: {data['reply']!r}"
+    assert isinstance(data.get("source_event_ids"), list), data
+    assert isinstance(data.get("source_evidence_ids"), list), data
+    if workflow == "medication_day":
+        assert medication_evidence_ids and set(medication_evidence_ids).intersection(data["source_evidence_ids"]), (
+            f"{workflow} did not retrieve the authorized medication source evidence: {data}"
         )
-        assert response.status_code == 200, (
-            f"Real Qwen inference failed for {workflow}: "
-            f"HTTP {response.status_code} {response.text}; "
-            f"synthetic Qwen drafts/repair outputs={generated_drafts!r}"
+        assert medication_event_id in data["source_event_ids"], (
+            f"{workflow} did not retrieve the medication-related care event: {data}"
         )
-        data = response.json()
-        assert data.get("workflow") == workflow, data
-        assert data.get("ai_generated") is True, data
-        assert data.get("provider_status") == "available", data
-        assert isinstance(data.get("reply"), str) and data["reply"].strip(), data
-        assert data.get("review_required") is True, data
-        assert data.get("written_to_lcr") is False, data
-        assert data.get("persistence") == "read_only_assistance", data
-        assert data.get("authority") == "solenos_care_record_and_caregiver", data
-        assert not re.search(
-            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
-            data["reply"],
-            re.IGNORECASE,
-        ), f"{workflow} exposed an internal record identifier: {data['reply']!r}"
-        assert isinstance(data.get("source_event_ids"), list), data
-        assert isinstance(data.get("source_evidence_ids"), list), data
-        if workflow == "medication_day":
-            assert medication_evidence_ids and set(medication_evidence_ids).intersection(data["source_evidence_ids"]), (
-                f"{workflow} did not retrieve the authorized medication source evidence: {data}"
-            )
-            assert medication_event_id in data["source_event_ids"], (
-                f"{workflow} did not retrieve the medication-related care event: {data}"
-            )
-            assert event_id not in data["source_event_ids"], (
-                f"{workflow} included an unrelated sleep observation: {data}"
-            )
-        elif workflow in EVENT_WORKFLOWS:
-            assert event_id in data["source_event_ids"], (
-                f"{workflow} did not retrieve the authorized fixture event: {data}"
-            )
-
-
+        assert event_id not in data["source_event_ids"], (
+            f"{workflow} included an unrelated sleep observation: {data}"
+        )
+    elif workflow in EVENT_WORKFLOWS:
+        assert event_id in data["source_event_ids"], (
+            f"{workflow} did not retrieve the authorized fixture event: {data}"
+        )
 def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qwen_context):
     """Exercise the separate handoff-draft generator, not only the handoff assist workflow."""
     client = live_qwen_context["client"]
@@ -178,45 +176,45 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
         "X-Request-ID": str(uuid.uuid4()),
     }
     response = client.post(
-            "/api/v1/handoff-drafts/prepare",
-            headers=headers,
-            json={
-                "purpose": "family_transition",
-                "audience": "family",
-                "window_days": 30,
-            },
-        )
-        assert response.status_code == 200, response.text
-        data = response.json()
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={
+            "purpose": "family_transition",
+            "audience": "family",
+            "window_days": 30,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
 
-        assert data.get("draft_persisted") is True, data
-        assert data.get("generation_status") == "generated", data
-        assert data.get("validation_status") == "exact_quote_reference_validation_passed", data
-        assert data.get("review_status") == "pending_review", data
-        assert data.get("read_only") is True, data
-        assert data.get("requires_caregiver_review") is True, data
-        assert data.get("creates_handoff") is False, data
-        assert data.get("updates_lcr") is False, data
+    assert data.get("draft_persisted") is True, data
+    assert data.get("generation_status") == "generated", data
+    assert data.get("validation_status") == "exact_quote_reference_validation_passed", data
+    assert data.get("review_status") == "pending_review", data
+    assert data.get("read_only") is True, data
+    assert data.get("requires_caregiver_review") is True, data
+    assert data.get("creates_handoff") is False, data
+    assert data.get("updates_lcr") is False, data
 
-        generation = data.get("generation") or {}
-        assert generation.get("provider") == "ollama", generation
-        assert "qwen" in str(generation.get("model", "")).lower(), generation
-        sections = generation.get("sections") or []
-        assert sections, generation
+    generation = data.get("generation") or {}
+    assert generation.get("provider") == "ollama", generation
+    assert "qwen" in str(generation.get("model", "")).lower(), generation
+    sections = generation.get("sections") or []
+    assert sections, generation
 
-        source_refs = {
-            f"{item.get('source_table')}:{item.get('source_id')}"
-            for item in data.get("source_references", [])
-            if item.get("source_table") and item.get("source_id")
-        }
-        assert all(item.get("source_ref") in source_refs for item in sections), data
+    source_refs = {
+        f"{item.get('source_table')}:{item.get('source_id')}"
+        for item in data.get("source_references", [])
+        if item.get("source_table") and item.get("source_id")
+    }
+    assert all(item.get("source_ref") in source_refs for item in sections), data
 
-        provenance = data.get("claim_provenance") or {}
-        assert provenance.get("coverage") == "all_sections_linked", provenance
-        assert provenance.get("unmatched_statement_count") == 0, provenance
-        referenced_evidence = {
-            str(evidence_id)
-            for item in data.get("source_references", [])
-            for evidence_id in (item.get("evidence_ids") or [])
-        }
-        assert set(evidence_ids).intersection(referenced_evidence), data
+    provenance = data.get("claim_provenance") or {}
+    assert provenance.get("coverage") == "all_sections_linked", provenance
+    assert provenance.get("unmatched_statement_count") == 0, provenance
+    referenced_evidence = {
+        str(evidence_id)
+        for item in data.get("source_references", [])
+        for evidence_id in (item.get("evidence_ids") or [])
+    }
+    assert set(evidence_ids).intersection(referenced_evidence), data
