@@ -440,6 +440,25 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
             rationale="Required source fields for appointment preparation.",
             created_by_caregiver_id=caregiver_id,
         )
+        prior_completeness_assessment = EvidenceCompletenessAssessment(
+            id="appointment-completeness-assessment-old",
+            person_id=person_id,
+            policy_id=completeness_policy.id,
+            policy_version="completeness-v1",
+            subject_type="evidence",
+            subject_id=evidence.id,
+            assessment_status="complete",
+            required_fields=["author", "date"],
+            satisfied_fields=["author", "date"],
+            missing_fields=[],
+            field_evidence_json="{}",
+            evidence_ids=[evidence.id],
+            rationale="An earlier review found both fields recorded.",
+            assessment_basis="linked_source_coverage_only",
+            semantic_sufficiency="not_automatically_verified",
+            assessed_by_caregiver_id=caregiver_id,
+            assessed_at=source_time,
+        )
         completeness_assessment = EvidenceCompletenessAssessment(
             id="appointment-completeness-assessment",
             person_id=person_id,
@@ -460,7 +479,7 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
         )
         db.add_all([
             evidence, policy, assessment, event, claim, review, claim_assessment,
-            completeness_policy, completeness_assessment,
+            completeness_policy, prior_completeness_assessment, completeness_assessment,
         ])
         db.commit()
     finally:
@@ -485,7 +504,8 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     assert any(item["assessment_id"] == "appointment-freshness-assessment" for item in body["freshness_assessments"])
     assert any(item["review_id"] == "appointment-evidence-review" for item in body["evidence_review_records"])
     assert any(item["assessment_id"] == "appointment-claim-assessment" for item in body["claim_assessments"])
-    assert any(item["assessment_id"] == "appointment-completeness-assessment" for item in body["completeness_assessments"])
+    assert [item["assessment_id"] for item in body["completeness_assessments"]] == ["appointment-completeness-assessment"]
+    assert body["completeness_assessments"][0]["assessment_status"] == "partial"
     evidence_source = body["events"][0]["evidence_sources"][0]
     assert evidence_source["evidence_reviews"][0]["outcome"] == "unverified"
     assert evidence_source["completeness_assessments"][0]["semantic_sufficiency"] == "not_automatically_verified"
