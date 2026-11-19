@@ -1784,12 +1784,25 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 "text": "",
                 "stale_warning": bool(document.occurred_at and document.occurred_at < datetime.now(timezone.utc) - timedelta(days=30)),
             })
-        status = "available" if output else "unavailable" if missing_originals else "empty"
-        reason = "original_upload_bytes_unavailable" if missing_originals and not output else "some_original_uploads_unavailable" if missing_originals else "some_documents_not_extracted_or_extraction_failed" if unavailable_extractions else None
+        status = (
+            "unavailable" if missing_originals and not output
+            else "empty" if not output
+            else "partial" if missing_originals or unavailable_extractions
+            else "available"
+        )
+        reason = (
+            "original_upload_bytes_unavailable" if missing_originals and not output
+            else "some_original_uploads_unavailable" if missing_originals
+            else "some_documents_not_extracted_or_extraction_failed" if unavailable_extractions
+            else None
+        )
         result = {
             "status": status, "label": "Uploaded documents and extracted text",
             "count": len(output), "returned_count": len(documents),
-            "has_more": documents_has_more, "retrieval_complete": not documents_has_more,
+            "missing_original_count": missing_originals,
+            "unavailable_extraction_count": unavailable_extractions,
+            "has_more": documents_has_more,
+            "retrieval_complete": not documents_has_more and not missing_originals and not unavailable_extractions,
         }
         if reason:
             result["reason"] = reason
@@ -2636,17 +2649,21 @@ def prepare_handoff_draft(
     gaps = [
         {"source": name, "status": info["status"], "reason": info.get("reason")}
         for name, info in statuses.items()
-        if info["status"] in {"unavailable", "not_authorized", "failed"}
+        if info["status"] in {"unavailable", "not_authorized", "failed", "partial"}
     ]
     partial_sources = [
-        {"source": name, "returned_count": info.get("returned_count", info.get("count", 0))}
+        {
+            "source": name,
+            "returned_count": info.get("returned_count", info.get("count", 0)),
+            "reason": info.get("reason"),
+        }
         for name, info in statuses.items()
-        if info.get("has_more") is True
+        if info.get("has_more") is True or info.get("status") == "partial"
     ]
     gaps.extend({
         "source": item["source"],
         "status": "partial",
-        "reason": "source_projection_reached_500_record_safety_limit",
+        "reason": item.get("reason") or "source_projection_reached_500_record_safety_limit",
         "returned_count": item["returned_count"],
     } for item in partial_sources)
     # "Not authorized" sources (for example, Community) are intentionally
