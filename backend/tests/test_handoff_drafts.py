@@ -12,7 +12,7 @@ from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, CareAssertion
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion
 from app.models.time_location import Appointment
 from app.models.uncertainty import OpenQuestion
 
@@ -480,6 +480,36 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             reviewed_by_caregiver_id=caregiver_id,
             created_at=source_time,
         )
+        completeness_policy = EvidenceCompletenessPolicy(
+            id="handoff-completeness-policy",
+            person_id=person_id,
+            domain_key="document_history",
+            purpose_key="professional_handoff",
+            policy_version="completeness-v1",
+            required_fields=["author", "date"],
+            rationale="Required source fields for this briefing purpose.",
+            created_by_caregiver_id=caregiver_id,
+            created_at=source_time,
+        )
+        completeness_assessment = EvidenceCompletenessAssessment(
+            id="handoff-completeness-assessment",
+            person_id=person_id,
+            policy_id=completeness_policy.id,
+            policy_version=completeness_policy.policy_version,
+            subject_type="evidence",
+            subject_id=evidence.id,
+            assessment_status="partial",
+            required_fields=["author", "date"],
+            satisfied_fields=["date"],
+            missing_fields=["author"],
+            field_evidence_json="{}",
+            evidence_ids=[evidence.id],
+            rationale="The source author is not identified.",
+            assessment_basis="linked_source_coverage_only",
+            semantic_sufficiency="not_automatically_verified",
+            assessed_by_caregiver_id=caregiver_id,
+            assessed_at=source_time,
+        )
         appointment = Appointment(
             id="handoff-freshness-appointment",
             person_id=person_id,
@@ -488,7 +518,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             status="scheduled",
             created_by_caregiver_id=caregiver_id,
         )
-        db.add_all([evidence, policy, assessment, claim, source_review, claim_assessment, appointment])
+        db.add_all([evidence, policy, assessment, claim, source_review, claim_assessment, completeness_policy, completeness_assessment, appointment])
         db.commit()
     finally:
         db.close()
@@ -507,6 +537,13 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     assert refs["handoff-freshness-assessment"]["details"]["policy_version"] == "v1"
     assert refs["handoff-freshness-policy"]["details"]["domain_key"] == "document_history"
     assert refs["handoff-freshness-policy"]["details"]["policy_version"] == "v1"
+    assert "handoff-completeness-policy" in refs
+    assert refs["handoff-completeness-policy"]["details"]["purpose_key"] == "professional_handoff"
+    assert "handoff-completeness-assessment" in refs
+    assert refs["handoff-completeness-assessment"]["details"]["assessment_status"] == "partial"
+    assert refs["handoff-completeness-assessment"]["details"]["semantic_sufficiency"] == "not_automatically_verified"
+    assert body["source_statuses"]["evidence_completeness_policies"]["status"] == "available"
+    assert body["source_statuses"]["evidence_completeness_assessments"]["status"] == "available"
     assert "handoff-source-review" in refs
     assert refs["handoff-source-review"]["source_table"] == "evidence_review_records"
     assert refs["handoff-source-review"]["details"]["outcome"] == "unverified"
