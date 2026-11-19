@@ -1323,6 +1323,7 @@ def review_document_candidate(
     original = dict(candidate)
     assertion_id = None
     follow_up_id = None
+    document_observed_at = None
     if payload.decision == "reject":
         candidate["review_status"] = "rejected_by_caregiver"
     elif payload.decision == "correct":
