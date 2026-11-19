@@ -36,7 +36,7 @@ finally:
     if os.path.exists(temporary):
         os.unlink(temporary)
 PY
-  printf 'QWEN_INSTALL_STATE state=%s model=%s reason=%s\\n' "$state" "$OLLAMA_MODEL" "${reason:-none}" >&2
+  printf 'QWEN_INSTALL_STATE state=%s model=%s reason=%s\n' "$state" "$OLLAMA_MODEL" "${reason:-none}" >&2
 }
 
 write_qwen_state "not_started"
