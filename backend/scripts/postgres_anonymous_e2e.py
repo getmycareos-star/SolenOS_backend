@@ -75,6 +75,11 @@ def request(method: str, path: str, *, body=None, token: str | None = None):
             decoded = json.loads(payload) if payload else None
         except json.JSONDecodeError:
             decoded = payload.decode("utf-8", "replace")
+        if exc.code >= 500:
+            log_path = Path("/tmp/solenos-postgres-e2e-uvicorn.log")
+            if log_path.exists():
+                tail = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-160:])
+                print(f"HTTP_5XX_SERVER_LOG_TAIL {method} {path}\n{tail}", flush=True)
         return exc.code, decoded
     except TimeoutError:
         print(f"HTTP_REQUEST_TIMEOUT {method} {path}", flush=True)
