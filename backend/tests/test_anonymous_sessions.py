@@ -201,6 +201,57 @@ def test_situation_capture_uses_server_bound_person_and_caregiver():
         db.close()
 
 
+def test_legacy_situation_capture_queues_analysis_after_saving_original_source():
+    client = TestClient(app)
+    created = create_session(client, "Queued situation capture")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    original_note = "Mum was awake several times overnight and seemed tired this morning."
+
+    response = client.post(
+        "/api/situation",
+        headers=headers,
+        json={
+            "raw_input": original_note,
+            "caregiver_id": "client-care-key",
+            "care_session_id": "queued-situation-capture",
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["qwen_extraction_status"] == "queued"
+    assert payload["qwen_job_id"]
+    assert payload["qwen_analysis_id"]
+    assert payload["qwen_written_to_lcr"] is False
+    assert payload["care_continuity_execution"]["stages"]["extraction"] == "queued"
+    assert payload["care_continuity_execution"]["stages"]["reconciliation"] == "pending"
+
+    from app.models.care import CareEvent, Evidence
+    from app.models.capture_analysis import CaptureAnalysis
+    from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent
+
+    db = TestSessionLocal()
+    try:
+        event = db.query(CareEvent).filter_by(id=payload["care_event_id"]).one()
+        evidence = db.query(Evidence).filter_by(id=payload["evidence_id"]).one()
+        analysis = db.query(CaptureAnalysis).filter_by(id=payload["qwen_analysis_id"]).one()
+        job = db.query(QwenBackgroundJob).filter_by(id=payload["qwen_job_id"]).one()
+        queued_event = db.query(QwenJobEvent).filter_by(job_id=job.id).one()
+
+        assert event.person_id == created["person"]["id"]
+        assert evidence.person_id == created["person"]["id"]
+        assert evidence.source_text == original_note
+        assert analysis.source_text == original_note
+        assert analysis.extraction_status == "queued"
+        assert job.status == "queued"
+        assert job.workflow == "daily_capture_extraction"
+        assert job.source_event_ids_json == f'["{event.id}"]'
+        assert job.source_evidence_ids_json == f'["{evidence.id}"]'
+        assert queued_event.event_type == "job_queued"
+        assert queued_event.metadata_json["source_preserved"] is True
+    finally:
+        db.close()
+
+
 def test_refresh_rotates_token_without_changing_record_scope():
     client = TestClient(app)
     created = create_session(client, "Care recipient")
