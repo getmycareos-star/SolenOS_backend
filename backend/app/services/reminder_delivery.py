@@ -45,9 +45,9 @@ def _vapid_private_key_der(value):
             password=None,
         )
     else:
-        raw = base64.urlsafe_b64decode(normalized + ("=" * (-len(normalized) % 4)))
+        raw = base64.b64decode(normalized + ("=" * (-len(normalized) % 4)), altchars=b"-_", validate=True)
         if len(raw) != 32:
-            raise ValueError("VAPID private key must be PEM or a 32-byte base64url scalar")
+            raise ValueError(f"VAPID private key decoded to {len(raw)} bytes; expected a 32-byte base64url scalar or PEM")
         private_key = ec.derive_private_key(int.from_bytes(raw, "big"), ec.SECP256R1())
     if not isinstance(private_key, ec.EllipticCurvePrivateKey) or not isinstance(private_key.curve, ec.SECP256R1):
         raise ValueError("VAPID private key must use the P-256 curve")
@@ -513,7 +513,7 @@ def deliver_pending_web_pushes(db=None, now=None):
                 diagnostic = str(exc)
                 for sensitive in (
                     settings.vapid_private_key,
-                    settings.vapid_public_key,
+                    getattr(settings, "vapid_public_key", ""),
                     settings.secret_key,
                 ):
                     if sensitive:
