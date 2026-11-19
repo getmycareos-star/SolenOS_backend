@@ -6986,13 +6986,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # The shared LCR projection is the single source set for model context.
         # The purpose-specific lists above remain available to deterministic
         # safety validators, but are not duplicated into the prompt.
-        model_context_lines = [
-            *caregiver_question_queue_lines,
-            *shared_lcr_lines,
-            *conversation_context_lines,
-            *freshness_context[:1],
-            *aggregate_context_lines,
-        ]
+        if direct_care_history_prompt:
+            # A bounded "what was recorded about X?" answer must be built only
+            # from the complete matching caregiver reports and their linked
+            # evidence/assertions. Appending broad projections, freshness,
+            # aggregate summaries, or prior dialogue can crowd those source
+            # records out of the prompt and falsely mark this scoped package
+            # as truncated. Broader LCR completeness remains disclosed in the
+            # separate retrieval coverage receipt.
+            model_context_lines = list(shared_lcr_lines)
+        else:
+            model_context_lines = [
+                *caregiver_question_queue_lines,
+                *shared_lcr_lines,
+                *conversation_context_lines,
+                *freshness_context[:1],
+                *aggregate_context_lines,
+            ]
         if (not direct_care_history_prompt) and (source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",
             user_text, re.IGNORECASE,
