@@ -1496,8 +1496,8 @@ def review_document_candidate(
                     "review_status": "accepted_by_caregiver",
                     "document_candidate": source_context_candidate,
                 },
+                assertion_status="reported" if assertion_subject_type == "medication" and document_field == "medication_status" else "accepted",
             )
-            assertion_row.assertion_status = "reported" if assertion_subject_type == "medication" and document_field == "medication_status" else "accepted"
             db.flush()
         else:
             assertion_row = db.query(CareAssertion).filter(
