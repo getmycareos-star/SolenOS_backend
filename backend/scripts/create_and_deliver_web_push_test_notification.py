@@ -55,7 +55,9 @@ def main() -> None:
         if delivery is None or delivery.status != "accepted" or delivery.provider_accepted_at is None:
             raise SystemExit(
                 "real push provider did not accept the due-reminder notification "
-                f"(accepted_now={accepted}, delivery_status={getattr(delivery, 'status', None)!r})"
+                f"(accepted_now={accepted}, delivery_status={getattr(delivery, 'status', None)!r}, "
+                f"provider_error_code={getattr(delivery, 'last_error_code', None)!r}, "
+                f"attempt_count={getattr(delivery, 'attempt_count', None)!r})"
             )
 
     print(json.dumps({
