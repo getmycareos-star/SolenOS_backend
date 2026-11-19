@@ -85,6 +85,10 @@ from app.services.care_continuity import (
 
 router = APIRouter(tags=["community and companion"])
 
+# Railway's observed 4,096-token model window must leave room for system rules and output.
+COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 7000
+COMPANION_MAX_OUTPUT_TOKENS = 384
+
 
 def _build_unified_lcr_context_or_422(*args, **kwargs):
     try:
@@ -6911,7 +6915,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             bounded_context,
             context_chars,
             context_truncated,
-        ) = _fit_model_context_lines_across_sources(model_context_lines, 16000)
+        ) = _fit_model_context_lines_across_sources(model_context_lines, COMPANION_PROMPT_CONTEXT_BUDGET_CHARS)
         trend_assessment = _apply_trend_retrieval_guard(
             trend_assessment,
             lcr_context_coverage,
@@ -6996,7 +7000,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     source_evidence_ids = list(dict.fromkeys([*source_evidence_ids, record_id]))
         lcr_context_coverage["prompt_context_complete"] = not context_truncated
         lcr_context_coverage["prompt_context_chars"] = context_chars
-        lcr_context_coverage["prompt_context_budget_chars"] = 16000
+        lcr_context_coverage["prompt_context_budget_chars"] = COMPANION_PROMPT_CONTEXT_BUDGET_CHARS
         retrieval_receipt = _build_retrieval_receipt(
             lcr_context_coverage,
             included_model_context_lines,
@@ -7004,7 +7008,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             request_sha256=request_sha256,
             context_truncated=context_truncated,
             prompt_context_chars=context_chars,
-            prompt_context_budget_chars=16000,
+            prompt_context_budget_chars=COMPANION_PROMPT_CONTEXT_BUDGET_CHARS,
         )
         lcr_context_coverage["retrieval_receipt"] = retrieval_receipt
         missing_context_instruction = _lcr_missing_context_instruction(lcr_context_coverage, context_truncated)
@@ -7122,7 +7126,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     companion_request_id,
                     model,
                     model_messages,
-                    {"temperature": 0.25, "num_predict": 32 if greeting_only else 512},
+                    {"temperature": 0.25, "num_predict": 32 if greeting_only else COMPANION_MAX_OUTPUT_TOKENS},
                     retrieval_duration_ms,
                 )
                 logger.info(
