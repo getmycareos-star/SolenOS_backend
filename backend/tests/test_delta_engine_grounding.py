@@ -1,5 +1,7 @@
 from types import SimpleNamespace
+import hashlib
 import json
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -248,3 +250,47 @@ def test_care_state_revision_snapshot_detects_new_rows_with_identical_timestamps
     assert before == "4:2026-11-15T12:00:00+00:00"
     assert after == "5:2026-11-15T12:00:00+00:00"
     assert before != after
+
+
+
+def test_delta_run_replay_requires_exact_content_and_event_time():
+    event_date = datetime(2026, 11, 19, 14, 0, tzinfo=timezone.utc)
+    content = "Caregiver reported two interrupted nights."
+    content_digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    provenance = {
+        "engine_version": delta_engine.DELTA_ENGINE_VERSION,
+        "source_event_snapshot_sha256": None,
+        "care_state_revision_snapshot": "7:2026-11-19T13:00:00+00:00",
+        "evidence_ids": [],
+        "input_content_sha256": content_digest,
+        "event_date": event_date.isoformat(),
+    }
+    current = {
+        "source_event_snapshot_sha256": None,
+        "care_state_revision_snapshot": "7:2026-11-19T13:00:00+00:00",
+        "evidence_ids": [],
+        "input_content_sha256": content_digest,
+        "event_date": event_date,
+    }
+
+    assert delta_engine._delta_run_matches_current_input(
+        provenance, **current
+    )
+    assert not delta_engine._delta_run_matches_current_input(
+        provenance,
+        **{**current, "input_content_sha256": hashlib.sha256(
+            b"A different caregiver observation."
+        ).hexdigest()},
+    )
+    assert not delta_engine._delta_run_matches_current_input(
+        provenance,
+        **{**current, "event_date": datetime(2026, 11, 18, 14, 0, tzinfo=timezone.utc)},
+    )
+
+    # Results written before the content digest existed must be recomputed,
+    # never treated as proof that the current content was already reconciled.
+    legacy_provenance = {key: value for key, value in provenance.items()
+                         if key != "input_content_sha256"}
+    assert not delta_engine._delta_run_matches_current_input(
+        legacy_provenance, **current
+    )
