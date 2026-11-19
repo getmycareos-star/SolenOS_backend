@@ -708,19 +708,19 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             headers=auth,
         )
         assert history.status_code == 200, history.text
-        assert history.json()["count"] == 3
-        assert [item["decision"] for item in history.json()["items"]] == ["reject", "correct", "accept"]
-        correction_event = history.json()["items"][1]
-        assert correction_event["before"]["observation"] == quote_correct
-        assert correction_event["after"]["observation"] == corrected_observation
-        assert correction_event["after"]["review_status"] == "corrected_pending_approval"
+        assert history.json()["count"] == 2
+        assert [item["decision"] for item in history.json()["items"]] == ["reject", "accept"]
+        accepted_event = history.json()["items"][1]
+        assert accepted_event["before"]["observation"] == quote_correct
+        assert accepted_event["after"]["observation"] == quote_correct
+        assert accepted_event["after"]["review_status"] == "accepted_by_caregiver"
 
         # The review event is protected by the PostgreSQL trigger, not just ORM hooks.
         with Session() as db:
             event_id = db.execute(
                 text(
                     "SELECT id FROM document_review_events "
-                    "WHERE analysis_id = :analysis_id AND candidate_index = 1 AND decision_version = 2"
+                    "WHERE analysis_id = :analysis_id AND candidate_index = 1 AND decision_version = 1"
                 ),
                 {"analysis_id": analysis_id},
             ).scalar_one()
