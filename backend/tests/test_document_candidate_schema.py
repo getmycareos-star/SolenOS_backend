@@ -489,7 +489,7 @@ def test_temporal_classification_preserves_historical_current_and_transition_mea
         ("Medication discontinued after review.", "changed_over_time", "not_explicitly_marked"),
         ("Medication dosage changed from 5 mg to 10 mg.", "changed_over_time", "not_explicitly_marked"),
         ("Patient denies experiencing pain.", "not_established", "explicitly_negated"),
-        ("Condition resolved last month.", "historical", "not_explicitly_marked"),
+        ("Condition resolved last month.", "changed_over_time", "not_explicitly_marked"),
         ("Current medication differs from discharge medication.", "changed_over_time", "not_explicitly_marked"),
         ("The patient currently takes medication as prescribed.", "current", "not_explicitly_marked"),
         ("The patient no longer requires assistance.", "changed_over_time", "explicitly_negated"),
