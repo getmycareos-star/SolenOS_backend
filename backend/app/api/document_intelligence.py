@@ -30,6 +30,7 @@ from app.api.document_lifecycle import (
     _unreadable_page_numbers,
 )
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.delta_engine import reconcile_event as reconcile_document_delta
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
@@ -1291,6 +1292,11 @@ def review_document_candidate(
                     candidate.get("longitudinal_retrieval_status", "not_verified")
                     if active_assertion else "not_applicable"
                 ),
+                "delta_reconciliation_status": (
+                    candidate.get("delta_reconciliation_status", "not_verified")
+                    if active_assertion else "not_applicable"
+                ),
+                "delta_run_id": candidate.get("delta_run_id") if active_assertion else None,
                 "review_required": False,
                 "idempotent_replay": True,
             }
@@ -1650,10 +1656,41 @@ def review_document_candidate(
             )
     db.commit()
     longitudinal_retrieval_status = "not_applicable"
+    delta_reconciliation_status = "not_applicable"
+    delta_run_id = None
     if execution is not None and assertion_id:
         execution["stages"]["reconciliation"] = "committed"
         try:
-            # Verify the accepted assertion through the same bounded retrieval
+            # The shared reconciliation above updates the source-backed Change
+            # records. Persist the corresponding Delta Engine run as well so the
+            # document change is available in the same longitudinal history used
+            # by Daily Care. This is deterministic reconciliation, not another
+            # model extraction pass.
+            delta_result = reconcile_document_delta(
+                db,
+                person_id=person_id,
+                event_date=document_observed_at,
+                source="SolenOS Document Intelligence",
+                content=analysis.source_text or quote,
+                evidence_ids=[evidence_id],
+                persist=True,
+                created_by_caregiver_id=caregiver_id,
+                model_enrichment=False,
+            )
+            delta_run_id = (delta_result.get("provenance") or {}).get("delta_run_id")
+            delta_reconciliation_status = "completed" if delta_run_id else "not_verified"
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Accepted document assertion could not be persisted in the Delta Engine: %s",
+                assertion_id,
+            )
+            delta_reconciliation_status = "failed"
+        execution["stages"]["delta_reconciliation"] = delta_reconciliation_status
+        execution["delta_run_id"] = delta_run_id
+        candidate["delta_reconciliation_status"] = delta_reconciliation_status
+        candidate["delta_run_id"] = delta_run_id
+        # Verify the accepted assertion through the same bounded retrieval
             # service consumed by the caregiver's Care Record and Companion.
             # A committed ORM row alone is not proof that it is retrievable.
             projection = build_lcr_context(
@@ -1688,6 +1725,7 @@ def review_document_candidate(
         analysis.execution_status = {
             **(analysis.execution_status or {}),
             **execution["stages"],
+            "delta_run_id": delta_run_id,
         }
         db.add(analysis)
         db.commit()
@@ -1700,6 +1738,8 @@ def review_document_candidate(
         "source_record_ref": {"record_type": "care_assertion", "record_id": assertion_id} if assertion_id else None,
         "written_to_lcr": bool(assertion_id),
         "longitudinal_retrieval_status": longitudinal_retrieval_status,
+        "delta_reconciliation_status": delta_reconciliation_status,
+        "delta_run_id": delta_run_id,
         "assertion_status": assertion_row.assertion_status if assertion_id and assertion_row else None,
         "follow_up_record_ref": {"record_type": "open_loop", "record_id": follow_up_id} if follow_up_id else None,
         "review_required": payload.decision == "correct",
