@@ -221,3 +221,59 @@ def test_qwen_gateway_defaults_to_production_safe_context_and_allows_explicit_up
     qwen_gateway.qwen_chat([{"role": "user", "content": "Use the authorized care history."}])
     assert captured[-1]["options"]["num_ctx"] == 8192
 
+
+
+def test_qwen_gateway_cannot_bypass_runtime_resource_bounds_with_call_options(monkeypatch):
+    configure_gateway(monkeypatch)
+    captured = {}
+
+    def capture_request(request, **kwargs):
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(json.dumps({"message": {"content": "Bounded response."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
+    answer = qwen_gateway.qwen_chat(
+        [{"role": "user", "content": "Use the authorized care history."}],
+        options={
+            "num_ctx": 65536,
+            "num_predict": 100000,
+            "num_thread": 64,
+            "temperature": 9,
+            "top_p": 4,
+            "top_k": 1000,
+            "repeat_penalty": 9,
+            "num_gpu": 999,
+            "use_mmap": False,
+        },
+    )
+
+    assert answer == "Bounded response."
+    assert captured["options"] == {
+        "num_ctx": 8192,
+        "num_predict": 1024,
+        "num_thread": 8,
+        "temperature": 2.0,
+        "top_p": 1.0,
+        "top_k": 100,
+        "repeat_penalty": 2.0,
+    }
+
+
+def test_qwen_gateway_ignores_invalid_quality_overrides(monkeypatch):
+    configure_gateway(monkeypatch)
+    captured = {}
+
+    def capture_request(request, **kwargs):
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(json.dumps({"message": {"content": "Safe defaults."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
+    qwen_gateway.qwen_chat(
+        [{"role": "user", "content": "Continue."}],
+        options={"temperature": "not-a-number", "num_ctx": "invalid"},
+    )
+
+    assert captured["options"]["num_ctx"] == 4096
+    assert captured["options"]["num_predict"] == 96
+    assert captured["options"]["num_thread"] == 2
+    assert captured["options"]["temperature"] == 0.2
