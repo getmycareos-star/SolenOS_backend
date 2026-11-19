@@ -763,6 +763,16 @@ def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
                 "epistemic_status": source.get("epistemic_status"),
                 "assertion_status": source.get("assertion_status"),
                 "record_status": source.get("record_status"),
+                "reporter_label": (
+                    next((
+                        str(evidence.get("reported_by_label") or evidence.get("original_author")).strip()
+                        for evidence in (source.get("evidence_sources") or [])
+                        if isinstance(evidence, dict)
+                        and (evidence.get("reported_by_label") or evidence.get("original_author"))
+                    ), None)
+                    or str((source.get("details") or {}).get("source_label") or "").strip()
+                    or None
+                ),
                 "source_state_label": "This source may have changed since it was saved." if stale else None,
                 "supporting_quote": quote,
                 "related_evidence": list(source.get("evidence_sources") or []),
