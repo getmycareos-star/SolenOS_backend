@@ -260,6 +260,8 @@ SOURCES = {
         "recorded_time_fields": ("created_at",),
         "detail_fields": ("evidence_id", "review_type", "outcome", "policy_version", "reviewed_by_caregiver_id", "criteria", "source_attribution_snapshot"),
         "evidence_link_column": "evidence_id",
+        "include_latest_outside_window": True,
+        "latest_group_columns": ("evidence_id", "review_type"),
     },
     "evidence_claim_assessments": {
         "label": "Care claim assessment history",
@@ -269,6 +271,8 @@ SOURCES = {
         "time_fields": ("created_at",),
         "recorded_time_fields": ("created_at",),
         "detail_fields": ("claim_id", "claim_version", "status", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "superseded_by_claim_id"),
+        "include_latest_outside_window": True,
+        "latest_group_columns": ("claim_id",),
     },
     "evidence_freshness_policies": {
         "label": "Domain-specific freshness policies",
@@ -2005,6 +2009,26 @@ def prepare_handoff_draft(
                     query = query.where(or_(unresolved, in_window))
                 elif spec.get("include_upcoming_outside_window") and "scheduled_at" in table.c:
                     query = query.where(or_(in_window, table.c.scheduled_at >= now))
+                elif spec.get("include_latest_outside_window") and "created_at" in table.c:
+                    # Append-only assessment history is still current context when
+                    # its latest decision predates the briefing's recent-event window.
+                    # Include recent history plus the latest row for each evidence
+                    # review type / claim, without treating old versions as current.
+                    latest_table = table.alias(f"{table_name}_latest")
+                    group_columns = tuple(spec.get("latest_group_columns") or ())
+                    if group_columns and all(name in latest_table.c for name in group_columns):
+                        latest_created_at = (
+                            select(func.max(latest_table.c.created_at))
+                            .where(
+                                latest_table.c.person_id == table.c.person_id,
+                                *[latest_table.c[name] == table.c[name] for name in group_columns],
+                            )
+                            .correlate(table)
+                            .scalar_subquery()
+                        )
+                        query = query.where(or_(in_window, table.c.created_at == latest_created_at))
+                    else:
+                        query = query.where(in_window)
                 else:
                     query = query.where(in_window)
                 query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
@@ -2067,6 +2091,8 @@ def prepare_handoff_draft(
                     continue
                 epistemic_value = next((row.get(k) for k in ("epistemic_status", "epistemic_state", "assertion_status") if row.get(k) is not None), None)
                 record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
+                if table_name == "evidence_review_records":
+                    record_status = row.get("outcome") or record_status
                 if table_name == "uncertainty_assessments":
                     record_status = "active" if row.get("is_active") else "superseded"
                 source_fingerprint = _fingerprint(_normalize_reflected_fingerprint_row(row))
