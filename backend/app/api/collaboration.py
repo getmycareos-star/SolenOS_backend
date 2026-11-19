@@ -2438,6 +2438,17 @@ def _is_broad_temporal_history_request(text: str | None) -> bool:
 
 
 MAX_TEMPORAL_LCR_HISTORY_PAGES = 20
+LCR_HISTORY_PAGE_SIZE = 50
+
+
+def _lcr_context_page_config(context: dict, care_journey_request: bool) -> dict[str, int | bool]:
+    """Use the same bounded page contract for broad histories and explicit time windows."""
+    should_page = _should_fetch_full_lcr_context_pages(context, care_journey_request)
+    return {
+        "limit_per_source": LCR_HISTORY_PAGE_SIZE,
+        "max_pages": MAX_TEMPORAL_LCR_HISTORY_PAGES if should_page else 1,
+        "include_all_history": bool(care_journey_request),
+    }
 
 
 def _collect_full_lcr_context_pages(
@@ -2449,6 +2460,7 @@ def _collect_full_lcr_context_pages(
     *,
     limit_per_source: int = 50,
     max_pages: int = 4,
+    include_all_history: bool = True,
 ) -> dict[str, Any]:
     """Collect deterministic per-source pages for a broad care-journey request.
 
@@ -2488,7 +2500,7 @@ def _collect_full_lcr_context_pages(
             limit_per_source=limit_per_source,
             query=query,
             conversation_limit=1,
-            include_all_history=True,
+            include_all_history=include_all_history,
             source_offsets=offsets,
         )
         page_contexts.append(page_context)
@@ -6371,20 +6383,22 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 trend_retrieval_query = re.sub(r"\s+", " ", trend_retrieval_query).strip()
             shared_lcr_context = _build_unified_lcr_context_or_422(
                 db, person_id, caregiver_id,
-                limit_per_source=200 if care_journey_request else 50,
+                limit_per_source=LCR_HISTORY_PAGE_SIZE,
                 query=trend_retrieval_query,
                 include_all_history=care_journey_request,
             )
-            # An explicit date window is a complete scan of that requested
-            # period, not a request for only the first ranked page. Fetch
-            # subsequent pages so older events in the same year/month are not
-            # silently omitted when the person has more than 50 matching rows.
+            # Broad care-journey requests and topic-specific temporal requests
+            # must both page beyond the first ranked slice. The prior broad-history
+            # path stopped after one 200-record page, silently limiting the
+            # usable history even though the collector already supported paging.
             temporal_window_scan_requested = bool(shared_lcr_context.get("temporal_window"))
-            if _should_fetch_full_lcr_context_pages(shared_lcr_context, care_journey_request):
+            page_config = _lcr_context_page_config(shared_lcr_context, care_journey_request)
+            if page_config["max_pages"] > 1:
                 shared_lcr_context = _collect_full_lcr_context_pages(
                     db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
-                    limit_per_source=200 if care_journey_request else 50,
-                    max_pages=1 if care_journey_request else MAX_TEMPORAL_LCR_HISTORY_PAGES,
+                    limit_per_source=page_config["limit_per_source"],
+                    max_pages=page_config["max_pages"],
+                    include_all_history=page_config["include_all_history"],
                 )
             shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
