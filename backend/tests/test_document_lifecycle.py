@@ -1225,3 +1225,51 @@ def test_image_ocr_resource_limit_is_blocked_not_marked_unreadable(monkeypatch):
     assert document_lifecycle._retryable_page_numbers(extracted) == []
     assert document_lifecycle._blocked_page_numbers(extracted) == [1]
     assert document_lifecycle._unreadable_page_numbers(extracted) == []
+
+
+def test_pdf_page_text_layer_exception_falls_back_to_ocr_for_that_page(client, monkeypatch):
+    from pypdf import PdfWriter
+    from app.api import document_lifecycle
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+    original = output.getvalue()
+    test_client, session = client
+    evidence_id = persist_document(session, original, "page-text-layer-failure.pdf", "application/pdf")
+
+    class Page:
+        def __init__(self, page_number):
+            self.page_number = page_number
+
+        def extract_text(self, extraction_mode=None):
+            if self.page_number == 2:
+                raise RuntimeError("synthetic damaged PDF text layer")
+            return "A readable native text layer with more than forty characters."
+
+    class Reader:
+        def __init__(self, *_args, **_kwargs):
+            self.pages = [Page(1), Page(2)]
+
+    monkeypatch.setattr(document_lifecycle, "PdfReader", Reader)
+    monkeypatch.setattr(document_lifecycle, "_ocr_image", lambda _image: "Recovered content from page two.")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["extraction_status"] == "complete"
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{response.json()['analysis_id']}",
+        headers=auth,
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    extracted = retrieved.json()["extracted_text"]
+    assert "[Page 1]" in extracted
+    assert "A readable native text layer" in extracted
+    assert "[Page 2 OCR]" in extracted
+    assert "Recovered content from page two." in extracted
+    assert response.json()["unreadable_page_numbers"] == []
+    assert response.json()["unprocessed_page_numbers"] == []
