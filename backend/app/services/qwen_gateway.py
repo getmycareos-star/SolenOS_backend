@@ -145,9 +145,11 @@ def qwen_chat(
             elif key == "repeat_penalty":
                 bounded_options[key] = max(0.5, min(value, 2.0))
         for key, lower, upper in (
-            ("num_ctx", 1024, 8192),
+            # Per-call overrides may reduce resource use, never raise the
+            # deployment's configured context or CPU-thread ceiling.
+            ("num_ctx", 1024, num_ctx),
             ("num_predict", 64, 1024),
-            ("num_thread", 1, 8),
+            ("num_thread", 1, num_thread),
         ):
             if key not in options:
                 continue
