@@ -70,8 +70,10 @@ def semantic_pass(item: dict) -> tuple[bool, dict]:
 
 def deployment_contains_expected_source(expected_commit: str, deployed_commit: str) -> bool:
     """Verify the deployed revision contains the Qwen source revision under test."""
-    if not expected_commit or not re.fullmatch(r"[0-9a-f]{40}", deployed_commit):
+    if not re.fullmatch(r"[0-9a-f]{40}", expected_commit) or not re.fullmatch(r"[0-9a-f]{40}", deployed_commit):
         return False
+    if expected_commit == deployed_commit:
+        return True
     try:
         return subprocess.run(
             ["git", "merge-base", "--is-ancestor", expected_commit, deployed_commit],
