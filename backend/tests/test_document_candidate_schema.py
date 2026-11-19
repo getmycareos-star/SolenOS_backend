@@ -252,3 +252,88 @@ def test_repeated_source_quote_has_no_false_unique_span():
     assert candidate["source_span_start"] is None
     assert candidate["source_span_end"] is None
     assert any("unique source span is unavailable" in warning for warning in candidate["warnings"])
+
+
+
+def test_explicit_negation_and_reporter_attribution_survive_candidate_normalization():
+    excerpt = "The patient denies pain."
+    candidate = canonical_candidate(
+        {"subject": "pain", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-negation-attribution",
+        source_text=f"[Page 2]\n{excerpt}",
+    )
+    assert candidate["source_attribution"] == "patient_reported"
+    assert candidate["negation_status"] == "explicitly_negated"
+    assert candidate["source_excerpt"] == excerpt
+    assert any("explicit negative wording" in warning for warning in candidate["warnings"])
+
+
+def test_tentative_statement_is_not_normalized_as_an_established_finding():
+    excerpt = "Possible pneumonia; the clinician suspects an infection."
+    candidate = canonical_candidate(
+        {"subject": "respiratory condition", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-tentative",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["modality"] == "tentative"
+    assert any("tentative" in warning for warning in candidate["warnings"])
+
+
+def test_conditional_instruction_retains_its_condition():
+    excerpt = "If fever develops, contact the care team."
+    candidate = canonical_candidate(
+        {"subject": "follow-up instruction", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-conditional",
+        source_text=f"[Page 3]\n{excerpt}",
+    )
+    assert candidate["conditionality"] == "conditional"
+    assert any("conditional" in warning for warning in candidate["warnings"])
+
+
+def test_historical_statement_is_not_mislabeled_as_current():
+    excerpt = "History of stroke documented in the prior assessment."
+    candidate = canonical_candidate(
+        {"subject": "stroke", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-historical",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["temporal_context"] == "historical"
+    assert any("historical" in warning for warning in candidate["warnings"])
+
+
+def test_recommendation_does_not_imply_completion_or_outcome():
+    excerpt = "Follow-up with cardiology is recommended in four weeks."
+    candidate = canonical_candidate(
+        {"subject": "cardiology follow-up", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-recommendation",
+        source_text=f"[Page 5]\n{excerpt}",
+    )
+    assert candidate["statement_kind"] == "recommendation"
+    assert any("does not establish" in warning for warning in candidate["warnings"])
+
+
+def test_professional_attribution_is_preserved_without_claiming_independent_verification():
+    excerpt = "The nurse observed difficulty walking."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-professional-attribution",
+        source_text=f"[Page 4]\n{excerpt}",
+    )
+    assert candidate["source_attribution"] == "professional_observed"
+    assert candidate["review_status"] == "Pending"
+    assert candidate["confidence"] is None
+
+
+def test_unmarked_statement_does_not_get_false_positive_certainty_or_attribution():
+    excerpt = "The person walked to the kitchen."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-unmarked",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["source_attribution"] == "not_stated"
+    assert candidate["negation_status"] == "not_explicitly_marked"
+    assert candidate["modality"] == "not_explicitly_marked"
+    assert candidate["conditionality"] == "not_explicitly_marked"
+    assert candidate["temporal_context"] == "not_established"
+    assert candidate["statement_kind"] == "not_detected"
