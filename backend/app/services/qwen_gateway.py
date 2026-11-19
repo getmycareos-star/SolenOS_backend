@@ -356,7 +356,10 @@ def extract_review_candidates(
             continue
         if observation.strip() not in quote or subject.strip().casefold() not in quote.casefold():
             continue
-        if any(term in observation.casefold() for term in ("diagnosed with", "caused by", "should increase dose", "should stop medication")):
+        # Preserve explicit source statements (including diagnoses and stated causes)
+        # as review-only candidates. The exact-quote and substring checks above are
+        # the authority boundary; lexical suppression would erase documented history.
+        if any(term in observation.casefold() for term in ("should increase dose", "should stop medication")):
             continue
         candidate = {
             "subject": subject.strip()[:120],
