@@ -2030,6 +2030,9 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             worker_result = json.loads(completed_job.result_text or "{}")
             assert worker_result.get("capture_mode") == "natural_language_update", worker_result
             assert worker_result.get("observation_count") == 2, worker_result
+            assert worker_result.get("source_observations_expected") == 2, worker_result
+            assert worker_result.get("source_observations_retrieved") == 2, worker_result
+            assert analysis.execution_status["longitudinal_retrieval"] == "verified"
             assert worker_result.get("delta_reconciliation_status") == "completed", worker_result
             delta_run = db.query(CareDeltaRun).filter_by(
                 person_id="person-daily-test",
