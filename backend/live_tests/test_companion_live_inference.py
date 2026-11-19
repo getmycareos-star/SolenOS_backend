@@ -5,6 +5,7 @@ created exclusively by the repository's Alembic migration chain.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -1013,3 +1014,49 @@ def test_live_qwen_surfaces_only_the_source_validated_professional_question():
             assert event_count_after == event_count_before
         finally:
             db.close()
+
+def test_live_qwen_concurrent_authenticated_companion_requests_remain_person_scoped():
+    """Concurrent real inference must not mix two caregivers' saved evidence."""
+    with TestClient(app) as client:
+        caregiver_a = _create_session(client, "Concurrent Qwen caregiver A")
+        caregiver_b = _create_session(client, "Concurrent Qwen caregiver B")
+        event_a = _record_daily_care(
+            client,
+            caregiver_a,
+            "Caregiver reported that Mum's blue cardigan was placed in the hallway basket before lunch.",
+        )
+        event_b = _record_daily_care(
+            client,
+            caregiver_b,
+            "Caregiver reported that Dad's green scarf was left on the kitchen chair after breakfast.",
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_a = executor.submit(
+                _ask, client, caregiver_a, "What did we record about the blue cardigan?"
+            )
+            future_b = executor.submit(
+                _ask, client, caregiver_b, "What did we record about the green scarf?"
+            )
+            response_a = future_a.result(timeout=210)
+            response_b = future_b.result(timeout=210)
+
+        assert response_a.status_code == 200, response_a.text
+        assert response_b.status_code == 200, response_b.text
+        answer_a = response_a.json()
+        answer_b = response_b.json()
+
+        for answer in (answer_a, answer_b):
+            assert answer.get("ai_generated") is True, answer
+            assert answer.get("written_to_lcr") is False, answer
+            assert answer.get("persistence") == "conversation_only", answer
+
+        assert event_a in answer_a.get("source_event_ids", []), answer_a
+        assert event_b not in answer_a.get("source_event_ids", []), answer_a
+        assert event_b in answer_b.get("source_event_ids", []), answer_b
+        assert event_a not in answer_b.get("source_event_ids", []), answer_b
+        assert answer_a.get("session_id") != answer_b.get("session_id"), (
+            answer_a,
+            answer_b,
+        )
+
