@@ -16,7 +16,7 @@ from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import build_lcr_context
+from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -486,6 +486,19 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 subject_id="person-a", field="sleep_pattern", assertion_kind="reported_state",
                 asserted_value="Wakes repeatedly overnight", source_label="Caregiver review",
                 source_text="Sleep is interrupted", evidence_ids=[], assertion_status="accepted",
+                source_context={
+                    "kind": "caregiver_reviewed_document_candidate",
+                    "authority": "caregiver_reviewed_report_not_independently_verified",
+                    "document_candidate": {
+                        "source_attribution": "professional_documented",
+                        "negation_status": "explicitly_negated",
+                        "modality": "tentative",
+                        "conditionality": "conditional",
+                        "temporal_context": "historical",
+                        "statement_kind": "recommendation",
+                        "page_number": 2,
+                    },
+                },
                 observed_at=now - timedelta(days=1), created_by_caregiver_id="caregiver-a",
             )
             rejected = CareAssertion(
@@ -634,6 +647,13 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
             and item["epistemic_state"] == "reported"
             for item in active_reviewed_assertions
         ), "caregiver acceptance/review must not upgrade a reported assertion to verified"
+        accepted_document = next(row for row in active_reviewed_assertions if row["id"] == "accepted-assertion")
+        assert accepted_document["source_context"]["authority"] == "caregiver_reviewed_report_not_independently_verified"
+        assert accepted_document["source_context"]["document_candidate"]["negation_status"] == "explicitly_negated"
+        companion_prompt_context = format_lcr_context_for_prompt(context["sources"])
+        assert "caregiver_reviewed_report_not_independently_verified" in companion_prompt_context
+        assert '"negation_status": "explicitly_negated"' in companion_prompt_context
+        assert '"page_number": 2' in companion_prompt_context
         assert context["retrieval_contract"]["retrieval_strategy"] == "hybrid_lexical_semantic_temporal"
         assert temporal_context["retrieval_contract"]["temporal_window"]["basis"] == "explicit_user_temporal_expression"
         assert "daily-care-event" in {row["id"] for row in temporal_context["sources"]["events"]["items"]}
