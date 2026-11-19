@@ -277,7 +277,7 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
     for subject, entries in by_subject.items():
         attributes = {attribute for attribute, _, _ in entries}
         days = {occurred.date() for _, occurred, _ in entries}
-        distinct_evidence_ids = {evidence_id for _, _, item in entries for evidence_id in _evidence_ids(item)}
+        distinct_evidence_ids = {source_id for _, _, item in entries for source_id in _pattern_source_ids(item)}
         if len(entries) < 3 or len(attributes) < 3 or len(days) < 2 or len(distinct_evidence_ids) < 2 or any((subject, a) in emitted for a in attributes):
             continue
         refs = [_record_ref(item) for _, _, item in sorted(entries, key=lambda row: row[1])]
@@ -406,7 +406,7 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
     # Keep ambiguous or explicitly uncertain observations visible, but do not
     # let them contribute to a change pattern or escalation.
     for item in records:
-        if item.get("source") != "evidence_observations":
+        if item.get("source") not in {"evidence_observations", "caregiver_observations"}:
             continue
         epistemic = _text(item.get("epistemic_status") or item.get("epistemic_state"))
         if epistemic not in {"uncertain", "conflicting", "missing", "inferred"} and not item.get("hedge_marker") and not item.get("ambiguity_note"):
