@@ -155,7 +155,7 @@ def qwen_chat(
     # connection-establishment failures; do not retry model HTTP errors or
     # inference timeouts, and never mark a failed attempt as a saved care fact.
     try:
-        retry_seconds = max(0.0, min(float(os.getenv("OLLAMA_STARTUP_RETRY_SECONDS", "45")), 60.0))
+        retry_seconds = max(0.0, min(float(os.getenv("OLLAMA_STARTUP_RETRY_SECONDS", str(timeout or configured_timeout))), 180.0))
     except (TypeError, ValueError):
         retry_seconds = 45.0
     retry_deadline = time.monotonic() + retry_seconds
