@@ -567,6 +567,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             acceptance_evidence="The backup caregiver accepted the transfer.",
             is_completed=False,
             provenance="test:caregiver-responsibility-transfer",
+            created_at=source_time,
         )
         db.add_all([role, responsibility, handoff])
         appointment = Appointment(
