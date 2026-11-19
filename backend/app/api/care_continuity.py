@@ -1669,12 +1669,36 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
             # the multi-assertion transaction retained the accepted state.
             db.flush()
             db.refresh(row, attribute_names=["assertion_status"])
-            if row.assertion_status != "accepted":
+            persisted_status = row.assertion_status
+            if persisted_status != "accepted":
+                # The review helper may update through reflected Core tables while
+                # a multi-assertion transaction is deferred. Re-apply only the
+                # already-authorized caregiver decision, scoped to this person,
+                # and refuse to overwrite terminal assertion states.
+                assertions_table = _table(db, "care_assertions")
+                db.execute(
+                    update(assertions_table).where(
+                        assertions_table.c.id == row.id,
+                        assertions_table.c.person_id == person_id,
+                        assertions_table.c.assertion_status.notin_(("rejected", "superseded", "retracted")),
+                    ).values(
+                        assertion_status="accepted",
+                        review_after_days=row.review_after_days or 30,
+                        updated_by_caregiver_id=caregiver_id,
+                    )
+                )
+                persisted_status = db.execute(
+                    select(assertions_table.c.assertion_status).where(
+                        assertions_table.c.id == row.id,
+                        assertions_table.c.person_id == person_id,
+                    )
+                ).scalar_one_or_none()
+            if persisted_status != "accepted":
                 raise HTTPException(
                     status_code=503,
                     detail="Medication review could not be persisted; the report remains unreviewed",
                 )
-            reviewed.append({"id": row.id, "assertion_status": row.assertion_status})
+            reviewed.append({"id": row.id, "assertion_status": persisted_status})
         execution = execute_care_continuity_reconciliation(
             db,
             person_id,
