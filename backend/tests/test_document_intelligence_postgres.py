@@ -39,7 +39,7 @@ from app.api.document_intelligence import (
     review_document_candidate,
 )
 from app.models.care import Caregiver, Person
-from app.models.care_continuity import CareAssertion, CareStateRevision
+from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.uncertainty import OpenQuestion
 from app.models.collaboration import EvidenceUpload
@@ -294,6 +294,9 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             )
             assert accepted["written_to_lcr"] is True
             assert accepted["longitudinal_retrieval_status"] == "verified"
+            assert accepted["delta_reconciliation_status"] == "completed"
+            delta_run_id = accepted["delta_run_id"]
+            assert delta_run_id
             assertion_id = accepted["source_record_ref"]["record_id"]
 
         # Restart the actual PostgreSQL service after the accepted decision has committed.
@@ -315,6 +318,15 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assertion = db.query(CareAssertion).filter_by(
                 id=assertion_id, person_id=person_id
             ).one()
+            delta_run = db.query(CareDeltaRun).filter_by(
+                id=delta_run_id, person_id=person_id
+            ).one()
+            delta_payload = json.loads(delta_run.delta_json)
+            assert delta_run.source == "SolenOS Document Intelligence"
+            assert delta_run.source_event_id is None
+            assert delta_run.evidence_ids == [evidence_id]
+            assert delta_payload["provenance"]["evidence_ids"] == [evidence_id]
+            assert delta_payload["provenance"]["persisted"] is True
             assert assertion.assertion_status == "accepted"
             assert assertion.assertion_kind == "time_bound_observation"
             assert assertion.observed_at == datetime(2026, 11, 10, tzinfo=timezone.utc)
