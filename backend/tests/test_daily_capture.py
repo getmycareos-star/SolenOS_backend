@@ -1961,7 +1961,11 @@ def test_legacy_situation_capture_uses_durable_extraction_worker_for_raw_source(
             assert json.loads(job.result_text)["capture_mode"] == "natural_language_update"
             assert len(observations) == 2
             assert {item.source_passage for item in observations} == {original_report}
-            assert all(item.epistemic_status == "reported" for item in observations)
+            status_by_observation = {item.value_text: item.epistemic_status for item in observations}
+            assert status_by_observation == {
+                "slept poorly last night": "reported",
+                "seemed more unsettled this morning": "uncertain",
+            }
             assert all(item.observation_kind == "caregiver_report" for item in observations)
             assert all(item.created_by_caregiver_id == "caregiver-daily-test" for item in observations)
         finally:
