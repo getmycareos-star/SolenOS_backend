@@ -101,7 +101,7 @@ def test_draft_returns_audience_specific_template_and_explicit_unassessed_sectio
         assert sections["medication_reconciliation"]["coverage_status"] == "no_records_returned"
     else:
         assert sections["health_medication"]["coverage_status"] == "no_records_returned"
-    assert "allergies have no connected authoritative source" in (
+    assert "allergy information is not available from a connected source" in (
         sections["medication_reconciliation"]["coverage_note"]
         if audience == "professional" else sections["health_medication"]["coverage_note"]
     ).lower()
