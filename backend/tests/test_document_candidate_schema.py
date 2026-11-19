@@ -441,3 +441,33 @@ def test_explicit_no_longer_statement_retains_negation_and_temporal_context():
     )
     assert candidate["negation_status"] == "explicitly_negated"
     assert candidate["temporal_context"] == "historical"
+
+
+def test_professional_reported_is_not_promoted_to_direct_observation():
+    excerpt = "The nurse reported that the patient had reduced appetite."
+    candidate = canonical_candidate(
+        {"subject": "nutrition", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-professional-reported",
+        source_text=f"[Page 2]\n{excerpt}",
+    )
+    assert candidate["source_attribution"] == "professional_documented"
+
+
+def test_direct_professional_observation_is_distinguished_from_documentation():
+    excerpt = "The nurse observed unsteady gait during examination."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-professional-observed",
+        source_text=f"[Page 2]\n{excerpt}",
+    )
+    assert candidate["source_attribution"] == "professional_observed"
+
+
+def test_no_longer_is_a_change_marker_not_historical_only():
+    excerpt = "The patient no longer requires assistance with walking."
+    candidate = canonical_candidate(
+        {"subject": "mobility", "observation": excerpt, "source_quote": excerpt},
+        document_id="doc-changed-state",
+        source_text=f"[Page 1]\n{excerpt}",
+    )
+    assert candidate["temporal_context"] == "changed_over_time"
