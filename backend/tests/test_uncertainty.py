@@ -5108,6 +5108,15 @@ def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim(
                 created_by_caregiver_id=caregiver.id,
             ),
             commit=False,
+            source_context={
+                "kind": "caregiver_reviewed_document_candidate",
+                "document_candidate": {
+                    "temporal_context": "not_established",
+                    "statement_kind": "not_detected",
+                    "modality": "not_explicitly_marked",
+                    "conditionality": "not_explicitly_marked",
+                },
+            },
         )
         document.assertion_status = "accepted"
         db.flush()
@@ -5129,6 +5138,15 @@ def test_document_reviewed_assertion_preserves_conflict_with_existing_lcr_claim(
                 created_by_caregiver_id=caregiver.id,
             ),
             commit=False,
+            source_context={
+                "kind": "caregiver_reviewed_document_candidate",
+                "document_candidate": {
+                    "temporal_context": "not_established",
+                    "statement_kind": "not_detected",
+                    "modality": "not_explicitly_marked",
+                    "conditionality": "not_explicitly_marked",
+                },
+            },
         )
         third_document.assertion_status = "accepted"
         db.commit()
