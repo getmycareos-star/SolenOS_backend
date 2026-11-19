@@ -295,3 +295,43 @@ def test_delta_run_replay_requires_exact_content_and_event_time():
     assert not delta_engine._delta_run_matches_current_input(
         legacy_provenance, **current
     )
+
+
+def test_delta_context_preserves_document_qualifiers_without_copying_raw_source_text():
+    context = delta_engine._safe_assertion_source_context({
+        "kind": "caregiver_reviewed_document_candidate",
+        "authority": "caregiver_reviewed_report_not_independently_verified",
+        "review_status": "accepted_by_caregiver",
+        "private_raw_quote": "This exact medical quotation must not be copied into JSON context.",
+        "document_candidate": {
+            "source_attribution": "professional_documented",
+            "negation_status": "explicitly_negated",
+            "modality": "tentative",
+            "conditionality": "conditional",
+            "temporal_context": "historical",
+            "statement_kind": "recommendation",
+            "field_type": "symptom",
+            "page_number": 4,
+            "event_date": "2026-11-10",
+            "source_excerpt": "Raw page quotation must not be copied.",
+            "source_span_start": 40,
+        },
+    })
+    assert context["authority"] == "caregiver_reviewed_report_not_independently_verified"
+    assert context["document_candidate"]["negation_status"] == "explicitly_negated"
+    assert context["document_candidate"]["modality"] == "tentative"
+    assert context["document_candidate"]["conditionality"] == "conditional"
+    assert context["document_candidate"]["temporal_context"] == "historical"
+    assert context["document_candidate"]["statement_kind"] == "recommendation"
+    assert context["document_candidate"]["page_number"] == 4
+    assert "private_raw_quote" not in context
+    assert "source_excerpt" not in context["document_candidate"]
+    assert "source_span_start" not in context["document_candidate"]
+
+
+def test_delta_context_ignores_untrusted_or_malformed_document_context():
+    assert delta_engine._safe_assertion_source_context("clinically_verified") == {}
+    assert delta_engine._safe_assertion_source_context({
+        "authority": {"untrusted": "value"},
+        "document_candidate": ["not", "a", "mapping"],
+    }) == {}
