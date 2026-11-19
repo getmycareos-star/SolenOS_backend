@@ -6780,8 +6780,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 retained: list[str] = []
                 for line in lines:
                     try:
-                        payload = json.loads(line[line.index("{"):])
-                        record_id = str(payload.get(id_key) or "")
+                        record_id = _context_line_record_id(line, id_key)
                     except (ValueError, TypeError, json.JSONDecodeError):
                         retained.append(line)
                         continue
