@@ -17,6 +17,18 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 _READINESS_CACHE: dict[str, object] = {"checked_at": 0.0, "result": None}
+_INFERENCE_VERIFICATION_CACHE: dict[str, object] = {"verified_at": 0.0, "model": None}
+
+
+def _mark_inference_verified(model: str) -> None:
+    _INFERENCE_VERIFICATION_CACHE.update({"verified_at": time.monotonic(), "model": model})
+    _READINESS_CACHE.update({"checked_at": 0.0, "result": None})
+
+
+def _mark_inference_unverified(model: str) -> None:
+    if _INFERENCE_VERIFICATION_CACHE.get("model") == model:
+        _INFERENCE_VERIFICATION_CACHE.update({"verified_at": 0.0, "model": None})
+    _READINESS_CACHE.update({"checked_at": 0.0, "result": None})
 
 
 def get_ollama_config() -> tuple[str, str, float]:
@@ -79,8 +91,10 @@ def qwen_chat(
     try:
         base, model, configured_timeout = get_ollama_config()
     except HTTPException as exc:
+        model = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+        _mark_inference_unverified(model)
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        _log_inference_result(os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"))
+        _log_inference_result(model, started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"))
         raise
     # Keep the model context bounded, but large enough for the authorized
     # source-grounded care context. A 1,024-token window silently truncates
@@ -159,6 +173,7 @@ def qwen_chat(
             logger.info("Local Qwen runtime is still starting; retrying inference connection")
             time.sleep(min(1.0, remaining))
     except urllib.error.HTTPError as exc:
+        _mark_inference_unverified(model)
         failure_category = "upstream_http_error"
         failure_reason = f"http_{exc.code}"
         # Ollama uses HTTP 404 for an absent model. Preserve this actionable
@@ -185,14 +200,17 @@ def qwen_chat(
             detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."},
         ) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        _mark_inference_unverified(model)
         failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except TimeoutError as exc:
+        _mark_inference_unverified(model)
         failure_category, failure_reason = "inference_timeout", "socket_timeout"
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(status_code=504, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except urllib.error.URLError as exc:
+        _mark_inference_unverified(model)
         if isinstance(getattr(exc, "reason", None), TimeoutError):
             failure_category, failure_reason = "inference_timeout", "url_timeout"
             _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
@@ -201,14 +219,17 @@ def qwen_chat(
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except (ValueError, OSError) as exc:
+        _mark_inference_unverified(model)
         failure_category, failure_reason = "runtime_error", type(exc).__name__
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     content = result.get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
+        _mark_inference_unverified(model)
         failure_category, failure_reason = "empty_model_response", "missing_message_content"
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
+    _mark_inference_verified(model)
     _log_inference_result(model, started, timeout or configured_timeout, None, None)
     return content.strip()
 
@@ -444,15 +465,22 @@ def qwen_readiness_status(force: bool = False) -> dict:
                     "failure_reason": "configured_model_missing",
                 }
             else:
+                verified_at = float(_INFERENCE_VERIFICATION_CACHE.get("verified_at") or 0.0)
+                inference_verified = (
+                    _INFERENCE_VERIFICATION_CACHE.get("model") == model
+                    and verified_at > 0
+                    and now - verified_at <= 120.0
+                )
                 result = {
-                    "available": True,
-                    "state": "runtime_available",
+                    # Model inventory is not proof that the model can generate.
+                    "available": inference_verified,
+                    "state": "operational" if inference_verified else "runtime_available",
                     "model": model,
                     "installation": installation,
                     "model_installed": True,
                     "runtime_available": True,
-                    "inference_verified": False,
-                    "inference_status": "not_verified",
+                    "inference_verified": inference_verified,
+                    "inference_status": "verified" if inference_verified else "not_verified",
                     "failure_reason": None,
                 }
     except HTTPException as exc:

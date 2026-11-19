@@ -31,6 +31,7 @@ def test_missing_installation_state_defaults_to_not_started(tmp_path, monkeypatc
 
 
 def test_readiness_checks_runtime_inventory_without_running_inference(monkeypatch):
+    qwen_gateway._INFERENCE_VERIFICATION_CACHE.update({"verified_at": 0.0, "model": None})
     class Response:
         def __enter__(self):
             return self
@@ -58,6 +59,7 @@ def test_readiness_checks_runtime_inventory_without_running_inference(monkeypatc
 
 
 def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
+    qwen_gateway._INFERENCE_VERIFICATION_CACHE.update({"verified_at": 0.0, "model": None})
     class Response:
         def __enter__(self):
             return self
@@ -79,6 +81,48 @@ def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
 
 
 
+
+def test_readiness_requires_recent_successful_generation_not_model_inventory(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{"models":[{"name":"qwen3.5:4b"}]}'
+
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 90.0))
+    monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "installed"})
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    qwen_gateway._INFERENCE_VERIFICATION_CACHE.update({"verified_at": qwen_gateway.time.monotonic(), "model": "qwen3.5:4b"})
+    qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
+
+    result = qwen_gateway.qwen_readiness_status(force=True)
+
+    assert result["available"] is True
+    assert result["inference_verified"] is True
+    assert result["inference_status"] == "verified"
+    assert result["model_installed"] is True
+
+
+def test_successful_qwen_chat_marks_inference_as_verified(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{"message":{"content":"synthetic successful inference"}}'
+
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    qwen_gateway._INFERENCE_VERIFICATION_CACHE.update({"verified_at": 0.0, "model": None})
+
+    assert qwen_gateway.qwen_chat([{"role": "user", "content": "synthetic probe"}]) == "synthetic successful inference"
+    assert qwen_gateway._INFERENCE_VERIFICATION_CACHE["model"] == "qwen3.5:4b"
+    assert qwen_gateway._INFERENCE_VERIFICATION_CACHE["verified_at"] > 0
+
+
 def test_assistant_status_uses_one_cached_readiness_check_and_never_claims_inference(monkeypatch):
     from app.api import collaboration
 
@@ -86,7 +130,7 @@ def test_assistant_status_uses_one_cached_readiness_check_and_never_claims_infer
     def readiness():
         readiness_calls.append(True)
         return {
-            "available": True,
+            "available": False,
             "state": "runtime_available",
             "runtime_available": True,
             "model_installed": True,
@@ -104,7 +148,7 @@ def test_assistant_status_uses_one_cached_readiness_check_and_never_claims_infer
     monkeypatch.setattr(collaboration, "qwen_readiness_status", readiness)
 
     status = collaboration.qwen_assistant_status()
-    assert status["available"] is True
+    assert status["available"] is False
     assert status["operational"] is False
     assert status["installation"]["state"] == "installed"
     assert status["inference_verified"] is False

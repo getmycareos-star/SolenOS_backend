@@ -3731,7 +3731,8 @@ def qwen_assistant_status():
     inference_verified = bool(readiness.get("inference_verified"))
     installation = readiness.get("installation") or {"state": "unknown"}
     return {
-        "available": runtime_available and model_installed,
+        # Inventory alone must not be presented as working AI assistance.
+        "available": inference_verified,
         "operational": inference_verified,
         "runtime_available": runtime_available,
         "model_installed": model_installed,
