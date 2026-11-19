@@ -223,7 +223,7 @@ def test_web_push_provider_failure_is_never_recorded_as_accepted(monkeypatch):
         secret = "test-secret-for-web-push-delivery"
         settings = SimpleNamespace(
             secret_key=secret,
-            vapid_private_key="test-vapid-private-key",
+            vapid_private_key=base64.urlsafe_b64encode((1).to_bytes(32, "big")).decode("ascii").rstrip("="),
             vapid_subject="mailto:tests@example.invalid",
         )
         monkeypatch.setattr(reminder_delivery, "get_settings", lambda: settings)
