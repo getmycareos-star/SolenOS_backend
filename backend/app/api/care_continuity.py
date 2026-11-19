@@ -1628,6 +1628,11 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
                     "source_label": pending_name.source_label,
                     "source_text": pending_name.source_text,
                     "recorded_at": pending_name.recorded_at,
+                    "assertion_refs": {
+                        "name": str(pending_name.id),
+                        "status": str(pending_status.id),
+                        "dose": str(pending_dose.id) if pending_dose else None,
+                    },
                 })
             continue
         dose_claim = accepted_current(("dose", "strength"))
@@ -1643,6 +1648,11 @@ def current_medication_records(request: Request, db: Session = Depends(get_db)):
             "evidence_ids": name_claim.evidence_ids or [],
             "recorded_at": name_claim.recorded_at,
             "review_after_days": name_claim.review_after_days,
+            "assertion_refs": {
+                "name": str(name_claim.id),
+                "status": str(status_claim.id),
+                "dose": str(dose_claim.id) if dose_claim else None,
+            },
             "interpretation_limit": (
                 "Caregiver-reviewed report within its review window; this is not independent "
                 "clinical verification or proof that the medicine was administered."
