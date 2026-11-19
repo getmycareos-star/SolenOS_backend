@@ -189,8 +189,8 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
             json={
                 "candidate_index": 1,
                 "decision": "correct",
-                "corrected_subject": "Person",
-                "corrected_observation": "Caregiver-reviewed correction: ate approximately half of lunch.",
+                "corrected_subject": "The patient",
+                "corrected_observation": quotes[1],
             },
         )
         assert corrected_again.status_code == 200, corrected_again.text
