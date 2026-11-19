@@ -588,6 +588,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     # a single "verified" flag.
     evidence_review_records = []
     evidence_reviews_by_evidence: dict[str, list[dict]] = {}
+    review_has_more = False
     evidence_review_schema_available = inspect(db.get_bind()).has_table("evidence_review_records")
     evidence_review_status = "empty" if evidence_review_schema_available else "unavailable"
     if referenced_evidence_ids and evidence_review_schema_available:
@@ -632,6 +633,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
 
     claim_assessments = []
     claim_assessments_by_claim: dict[str, dict] = {}
+    claim_has_more = False
     claim_assessment_schema_available = inspect(db.get_bind()).has_table("evidence_claim_assessments")
     claim_assessment_status = "empty" if claim_assessment_schema_available else "unavailable"
     assertion_ids = [str(row["source_id"]) for row in assertion_items]
@@ -677,6 +679,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
 
     completeness_assessments = []
     completeness_by_evidence: dict[str, list[dict]] = {}
+    completeness_has_more = False
     completeness_schema_available = inspect(db.get_bind()).has_table("evidence_completeness_assessments")
     completeness_status = "empty" if completeness_schema_available else "unavailable"
     if referenced_evidence_ids and completeness_schema_available:
@@ -819,20 +822,22 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         },
         "evidence_review_records": {
             "returned_count": len(evidence_review_records),
-            "retrieval_complete": evidence_review_status in {"available", "empty"},
+            "has_more": review_has_more,
+            "retrieval_complete": evidence_review_status in {"available", "empty"} and not review_has_more,
             "status": evidence_review_status,
             "record_limit": 100,
         },
         "evidence_claim_assessments": {
             "returned_count": len(claim_assessments),
-            "retrieval_complete": claim_assessment_status in {"available", "empty"},
+            "has_more": claim_has_more,
+            "retrieval_complete": claim_assessment_status in {"available", "empty"} and not claim_has_more,
             "status": claim_assessment_status,
             "record_limit": 100,
         },
         "evidence_completeness_assessments": {
             "returned_count": len(completeness_assessments),
-            "has_more": completeness_has_more if "completeness_has_more" in locals() else False,
-            "retrieval_complete": completeness_status in {"available", "empty"} and not (completeness_has_more if "completeness_has_more" in locals() else False),
+            "has_more": completeness_has_more,
+            "retrieval_complete": completeness_status in {"available", "empty"} and not completeness_has_more,
             "status": completeness_status,
             "record_limit": 500,
         },
