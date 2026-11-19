@@ -388,7 +388,8 @@ def _template_coverage(audience: str, statuses: dict) -> list[dict]:
             "source_tables": list(source_tables),
             "coverage_status": coverage,
             "coverage_note": (
-                "Medication coverage includes only caregiver-reviewed current reports; allergies have no connected authoritative source and must be confirmed separately. "
+                "Medication coverage includes current and pending caregiver-reported assertions; these are not independently verified. "
+                "No medication record does not mean none are being taken. Allergies have no connected authoritative source and must be confirmed separately. "
                 "Each field still requires review and may be missing or unverified."
                 if key in {"health_medication", "medication_reconciliation"}
                 else "Source coverage only; each field still requires review and may be missing or unverified."
