@@ -558,6 +558,44 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
         for relationship in relationships:
             for evidence_id in (str(relationship.source_evidence_id), str(relationship.related_evidence_id)):
                 evidence_relationship_status.setdefault(evidence_id, []).append(relationship.source_independence_status)
+    evidence_reviews_by_evidence: dict[str, list[dict]] = {}
+    evidence_review_source_status = (
+        "empty" if inspect(db.get_bind()).has_table("evidence_review_records")
+        else "unavailable"
+    )
+    evidence_review_has_more = False
+    if evidence_ids and evidence_review_source_status != "unavailable":
+        try:
+            review_rows = (
+                db.query(EvidenceReviewRecord)
+                .filter(
+                    EvidenceReviewRecord.person_id == person_id,
+                    EvidenceReviewRecord.evidence_id.in_(sorted(evidence_ids)),
+                )
+                .order_by(EvidenceReviewRecord.created_at.desc())
+                .limit(501)
+                .all()
+            )
+            evidence_review_has_more = len(review_rows) > 500
+            seen_review_scopes = set()
+            for review in review_rows[:500]:
+                review_scope = (str(review.evidence_id), str(review.review_type))
+                if review_scope in seen_review_scopes:
+                    continue
+                seen_review_scopes.add(review_scope)
+                evidence_reviews_by_evidence.setdefault(str(review.evidence_id), []).append({
+                    "review_type": review.review_type,
+                    "outcome": review.outcome,
+                    "rationale": review.rationale,
+                    "created_at": review.created_at.isoformat() if review.created_at else None,
+                    "interpretation_limit": "This is a recorded source review, not independent confirmation that a care fact or clinical instruction is correct.",
+                })
+            evidence_review_source_status = "available" if evidence_reviews_by_evidence else "empty"
+        except Exception:
+            db.rollback()
+            evidence_reviews_by_evidence = {}
+            evidence_review_source_status = "failed"
+
     source_hashes = list(dict.fromkeys(
         item.source_text_sha256 for item in evidence.values() if item.source_text_sha256
     ))
@@ -598,6 +636,9 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             "record_status": item.epistemic_status or item.evidence_status,
             "source_independence_status": independence,
             "exact_wording_duplicate_count": max(0, duplicate_counts.get(item.source_text_sha256, 1) - 1) if item.source_text_sha256 else 0,
+            "evidence_reviews": evidence_reviews_by_evidence.get(str(item.id), []),
+            "evidence_reviews_status": evidence_review_source_status,
+            "evidence_reviews_has_more": evidence_review_has_more,
         }
 
     for record in records:
