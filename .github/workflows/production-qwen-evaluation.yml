@@ -7,6 +7,11 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/production-qwen-evaluation.yml"
+      - "backend/app/services/qwen*"
+      - "backend/app/api/collaboration.py"
+      - "backend/scripts/run_production_qwen_evaluation.py"
+      - "backend/tests/test_qwen_readiness.py"
+      - "start-with-qwen.sh"
   workflow_dispatch:
 
 permissions:
@@ -19,7 +24,7 @@ concurrency:
 
 jobs:
   production-acceptance:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
