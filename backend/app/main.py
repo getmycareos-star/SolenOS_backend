@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import text, or_
+from sqlalchemy import text, or_, inspect
 import asyncio
 import hashlib
 import os
@@ -71,9 +71,8 @@ from app.api.security_incidents import router as security_incidents_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
-from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
-from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
+from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent  # register durable job tables
 from app.services.qwen_background_worker import qwen_worker_loop
 from app.services.reminder_delivery import reminder_delivery_loop
 from app.services.privacy_export_expiry import expire_privacy_exports_once
@@ -1722,73 +1721,137 @@ async def post_situation(
     source_parts = [payload.raw_input.strip()] if payload.raw_input and payload.raw_input.strip() else []
     source_parts.extend(doc.extracted_text.strip() for doc in (payload.documents or []) if doc.extracted_text and doc.extracted_text.strip())
     source_text = "\n".join(source_parts).strip()
+    queued_job_ids = []
+    analysis_ids = []
+    extraction_status = "not_applicable"
+    review_required = False
+    queue_available = False
     if source_text:
-        candidates = None
         try:
-            candidates = await asyncio.to_thread(
-                extract_review_candidates,
-                source_text,
-                source_event_id=result.care_event_id,
-                source_evidence_id=result.evidence_id,
+            queue_available = (
+                inspect(db.get_bind()).has_table("qwen_background_jobs")
+                and inspect(db.get_bind()).has_table("qwen_job_events")
             )
-            extraction_status = "available"
         except Exception:
-            extraction_status = "unavailable"
-        analysis = persist_capture_analysis(
-            db,
-            person_id=scoped_person_id,
-            caregiver_id=scoped_caregiver_id,
-            source_event_id=result.care_event_id,
-            source_evidence_id=result.evidence_id,
-            source_text=source_text,
-            extraction_status=extraction_status,
-            candidates=candidates if extraction_status == "available" else None,
-        )
-        response_payload["qwen_extraction_status"] = extraction_status
-        response_payload["qwen_candidates"] = candidates
-        response_payload["qwen_analysis_id"] = analysis.id
-        response_payload["qwen_review_required"] = True
-        response_payload["qwen_written_to_lcr"] = False
-    else:
-        response_payload["qwen_extraction_status"] = "not_applicable"
-        response_payload["qwen_candidates"] = None
-        response_payload["qwen_analysis_id"] = None
-        response_payload["qwen_review_required"] = False
-        response_payload["qwen_written_to_lcr"] = False
+            logger.exception("Could not verify the Qwen queue for saved situation capture %s", result.care_event_id)
+            queue_available = False
 
-    # The legacy Add Record composer and structured Daily Care now share the
-    # same source-lineage validation and reconciliation transaction boundary.
-    execution = None
-    try:
-        execution = execute_care_continuity_reconciliation(
-            db,
-            scoped_person_id,
-            workflow="situation_capture",
-            source_caregiver_id=scoped_caregiver_id,
-            source_event_id=result.care_event_id,
-            source_evidence_id=result.evidence_id,
-        )
-        db.commit()
-        execution["stages"]["reconciliation"] = "committed"
-    except Exception:
-        db.rollback()
-        execution = {
-            "contract_version": "1.0",
-            "workflow": "situation_capture",
-            "person_id": scoped_person_id,
-            "source_event_id": result.care_event_id,
-            "source_evidence_id": result.evidence_id,
-            "stages": {
-                "source_preservation": "verified",
-                "evidence": "unavailable",
-                "reconciliation": "unavailable",
-            },
-            "transaction_owner": "caller",
-        }
-        logger.exception(
-            "Shared care-continuity execution failed after durable Add Record capture %s",
-            result.care_event_id,
-        )
+        saved_event = db.query(CareEvent).filter(
+            CareEvent.id == result.care_event_id,
+            CareEvent.person_id == scoped_person_id,
+            CareEvent.created_by_caregiver_id == scoped_caregiver_id,
+        ).first()
+        evidence_ids = list(saved_event.evidence_ids or []) if saved_event is not None else [result.evidence_id]
+        if queue_available and evidence_ids:
+            try:
+                for evidence_id in dict.fromkeys(str(value) for value in evidence_ids if value):
+                    evidence = db.query(Evidence).filter(
+                        Evidence.id == evidence_id,
+                        Evidence.person_id == scoped_person_id,
+                        Evidence.uploaded_by_caregiver_id == scoped_caregiver_id,
+                    ).first()
+                    if evidence is None or not (evidence.source_text or "").strip():
+                        continue
+                    evidence_text = evidence.source_text.strip()[:12_000]
+                    natural_language_update = evidence.type == "note" and bool(payload.raw_input and payload.raw_input.strip())
+                    capture_mode = "natural_language_update" if natural_language_update else "structured_capture"
+                    execution_status = {
+                        "source_preservation": "verified",
+                        "evidence": "verified",
+                        "extraction": "queued",
+                        "assessment": "pending",
+                        "review": "not_required" if natural_language_update else "required",
+                        "reconciliation": "pending",
+                        "longitudinal_retrieval": "not_verified",
+                    }
+                    analysis = persist_capture_analysis(
+                        db,
+                        person_id=scoped_person_id,
+                        caregiver_id=scoped_caregiver_id,
+                        source_event_id=result.care_event_id,
+                        source_evidence_id=evidence.id,
+                        source_text=evidence_text,
+                        extraction_status="queued",
+                        candidates={"observations": [], "open_questions": []},
+                        execution_status=execution_status,
+                        commit=False,
+                    )
+                    job = QwenBackgroundJob(
+                        person_id=scoped_person_id,
+                        caregiver_id=scoped_caregiver_id,
+                        task_text="Extract source-grounded observations from the saved caregiver report.",
+                        context_text=json.dumps({
+                            "capture_mode": capture_mode,
+                            "event_type": "situation_capture",
+                        }),
+                        evidence_ids_json=json.dumps([evidence.id]),
+                        workflow="daily_capture_extraction",
+                        status="queued",
+                        source_event_ids_json=json.dumps([result.care_event_id]),
+                        source_evidence_ids_json=json.dumps([evidence.id]),
+                    )
+                    db.add(job)
+                    db.flush()
+                    db.add(QwenJobEvent(
+                        job_id=job.id,
+                        person_id=scoped_person_id,
+                        caregiver_id=scoped_caregiver_id,
+                        event_type="job_queued",
+                        from_status=None,
+                        to_status="queued",
+                        metadata_json={
+                            "workflow": "daily_capture_extraction",
+                            "source_event_id": result.care_event_id,
+                            "source_evidence_id": evidence.id,
+                            "source_preserved": True,
+                            "capture_mode": capture_mode,
+                            "written_to_lcr": False,
+                        },
+                    ))
+                    analysis_ids.append(analysis.id)
+                    queued_job_ids.append(job.id)
+                    review_required = review_required or not natural_language_update
+                if queued_job_ids:
+                    db.commit()
+                    extraction_status = "queued"
+                else:
+                    db.rollback()
+                    extraction_status = "unavailable"
+            except Exception:
+                db.rollback()
+                extraction_status = "unavailable"
+                logger.exception(
+                    "Could not queue source-grounded analysis after durable situation capture %s",
+                    result.care_event_id,
+                )
+        else:
+            extraction_status = "unavailable"
+
+    response_payload["qwen_extraction_status"] = extraction_status
+    response_payload["qwen_candidates"] = None
+    response_payload["qwen_analysis_id"] = analysis_ids[0] if analysis_ids else None
+    response_payload["qwen_job_id"] = queued_job_ids[0] if queued_job_ids else None
+    response_payload["qwen_job_ids"] = queued_job_ids
+    response_payload["qwen_review_required"] = review_required
+    response_payload["qwen_written_to_lcr"] = False
+
+    execution = {
+        "contract_version": "1.0",
+        "workflow": "situation_capture",
+        "person_id": scoped_person_id,
+        "source_event_id": result.care_event_id,
+        "source_evidence_id": result.evidence_id,
+        "stages": {
+            "source_preservation": "verified",
+            "evidence": "verified",
+            "extraction": extraction_status,
+            "assessment": "pending" if extraction_status == "queued" else "not_run",
+            "review": "required" if review_required else "not_required",
+            "reconciliation": "pending" if extraction_status == "queued" else "not_run",
+            "longitudinal_retrieval": "not_verified",
+        },
+        "transaction_owner": "background_worker" if extraction_status == "queued" else "not_started",
+    }
     response_payload["care_continuity_execution"] = execution
     return response_payload
 
