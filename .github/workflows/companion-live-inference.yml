@@ -115,36 +115,36 @@ jobs:
       - name: Run real Qwen document extraction and review against PostgreSQL
         id: qwen_document
         continue-on-error: true
-        if: \${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
+        if: ${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
         run: python -m pytest backend/live_tests/test_document_intelligence_live.py -q -s
       - name: Run real Qwen inference across every enabled workflow against PostgreSQL
         id: qwen_workflows
         continue-on-error: true
-        if: \${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
+        if: ${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
         run: python -m pytest backend/live_tests/test_all_qwen_workflows_live.py -q -s
       - name: Run real Qwen Companion inference against PostgreSQL
         id: qwen_companion
         continue-on-error: true
-        if: \${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
+        if: ${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
         run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
       - name: Run real Qwen Daily Capture extraction and persistence against PostgreSQL
         id: qwen_daily_capture
         continue-on-error: true
-        if: \${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
+        if: ${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
         run: python -m pytest backend/live_tests/test_daily_capture_live_inference.py -q -s
       - name: Run real Qwen appointment assistance against PostgreSQL
         id: qwen_appointment
         continue-on-error: true
-        if: \${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
+        if: ${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
         run: python -m pytest backend/live_tests/test_appointment_assist_live_inference.py -q -s
       - name: Enforce every real-Qwen acceptance suite
         if: always()
         env:
-          DOCUMENT_OUTCOME: \${{ steps.qwen_document.outcome || 'not_run' }}
-          WORKFLOWS_OUTCOME: \${{ steps.qwen_workflows.outcome || 'not_run' }}
-          COMPANION_OUTCOME: \${{ steps.qwen_companion.outcome || 'not_run' }}
-          DAILY_CAPTURE_OUTCOME: \${{ steps.qwen_daily_capture.outcome || 'not_run' }}
-          APPOINTMENT_OUTCOME: \${{ steps.qwen_appointment.outcome || 'not_run' }}
+          DOCUMENT_OUTCOME: ${{ steps.qwen_document.outcome || 'not_run' }}
+          WORKFLOWS_OUTCOME: ${{ steps.qwen_workflows.outcome || 'not_run' }}
+          COMPANION_OUTCOME: ${{ steps.qwen_companion.outcome || 'not_run' }}
+          DAILY_CAPTURE_OUTCOME: ${{ steps.qwen_daily_capture.outcome || 'not_run' }}
+          APPOINTMENT_OUTCOME: ${{ steps.qwen_appointment.outcome || 'not_run' }}
         run: |
           failed=0
           for suite in DOCUMENT WORKFLOWS COMPANION DAILY_CAPTURE APPOINTMENT; do
