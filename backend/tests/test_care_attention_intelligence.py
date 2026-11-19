@@ -499,3 +499,59 @@ def test_persisted_change_with_one_unresolved_source_record_is_clarification():
     assert important == []
     assert len(clarification) == 1
     assert clarification[0]["category"] == "needs_clarification"
+
+
+def test_repeated_dementia_caregiver_observations_are_reviewed_without_claiming_change():
+    result = build_care_attention_assessment(
+        records=[
+            {
+                "id": "care-observation-1", "source": "caregiver_observations",
+                "person_id": "person-dementia-1", "observation_category": "dementia.sleep",
+                "description": "Woke several times overnight", "epistemic_status": "observed",
+                "observed_at": NOW - timedelta(days=3), "recorded_at": NOW - timedelta(days=3),
+            },
+            {
+                "id": "care-observation-2", "source": "caregiver_observations",
+                "person_id": "person-dementia-1", "observation_category": "dementia.sleep",
+                "description": "Woke several times overnight", "epistemic_status": "reported",
+                "observed_at": NOW - timedelta(days=1), "recorded_at": NOW - timedelta(days=1),
+            },
+        ],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    item = next(
+        item for item in result["important_to_address"]
+        if item["pattern_type"] == "repeated_caregiver_observation_topic"
+    )
+    assert item["record_count"] == 2
+    assert [record["record_id"] for record in item["records"]] == [
+        "care-observation-1", "care-observation-2"
+    ]
+    assert item["evidence_ids"] == []
+    assert "does not establish a change" in item["reason"]
+
+
+def test_dementia_observation_without_event_time_or_with_uncertainty_is_not_patterned():
+    result = build_care_attention_assessment(
+        records=[
+            {
+                "id": "no-event-time", "source": "caregiver_observations",
+                "person_id": "person-dementia-2", "observation_category": "dementia.wandering",
+                "description": "Went outside", "epistemic_status": "observed",
+                "recorded_at": NOW - timedelta(days=1),
+            },
+            {
+                "id": "uncertain-observation", "source": "caregiver_observations",
+                "person_id": "person-dementia-2", "observation_category": "dementia.wandering",
+                "description": "May have gone outside", "epistemic_status": "uncertain",
+                "observed_at": NOW - timedelta(days=2), "recorded_at": NOW - timedelta(days=2),
+            },
+        ],
+        open_loops=[], uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    assert not any(
+        item.get("pattern_type", "").startswith(("repeated_", "multi_attribute_", "explicit_baseline_"))
+        for item in result["important_to_address"]
+    )
+    clarification_ids = {item["record_id"] for item in result["needs_clarification"]}
+    assert "uncertain-observation" in clarification_ids
