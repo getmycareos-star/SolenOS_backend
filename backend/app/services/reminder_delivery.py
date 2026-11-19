@@ -37,7 +37,7 @@ BATCH_SIZE = 100
 
 
 def _vapid_private_key_der(value):
-    """Convert supported VAPID key configuration to the DER form py_vapid expects."""
+    """Convert supported VAPID key configuration to py_vapid base64url-DER form."""
     normalized = (value or "").replace("\\n", "\n").strip()
     if normalized.startswith("-----BEGIN"):
         private_key = serialization.load_pem_private_key(
@@ -51,7 +51,8 @@ def _vapid_private_key_der(value):
         private_key = ec.derive_private_key(int.from_bytes(raw, "big"), ec.SECP256R1())
     if not isinstance(private_key, ec.EllipticCurvePrivateKey) or not isinstance(private_key.curve, ec.SECP256R1):
         raise ValueError("VAPID private key must use the P-256 curve")
-    return private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+    der_key = private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+    return base64.urlsafe_b64encode(der_key).decode("ascii").rstrip("=")
 
 
 def _notification_id(reminder):
