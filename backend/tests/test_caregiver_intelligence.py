@@ -688,6 +688,23 @@ def test_multi_caregiver_summary():
         assert scoped_response.status_code == 200, scoped_response.text
         assert scoped_response.json()["person_id"] == "person-1"
         assert len(scoped_response.json()["caregivers"]) == 2
+
+        state_response = client.get("/api/v1/care-network-state")
+        assert state_response.status_code == 200, state_response.text
+        assert state_response.json()["person_id"] == "person-1"
+        assert client.get("/api/v1/caregiver-communications").status_code == 200
+        assert client.get("/api/v1/caregiver-contexts").status_code == 200
+        assert client.get("/api/v1/caregiver-roles/other-person").status_code == 403
+        assert client.get("/api/v1/caregiver-responsibilities/other-person").status_code == 403
+        assert client.post(
+            "/api/v1/unknown-actor-activity",
+            params={
+                "person_id": "other-person",
+                "activity_type": "performed_task",
+                "description": "Should not be recorded outside this care record",
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+            },
+        ).status_code == 403
     finally:
         teardown_db()
 
