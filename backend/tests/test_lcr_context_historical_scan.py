@@ -121,6 +121,30 @@ def test_lcr_context_includes_scoped_evidence_reviews_and_assessment_history():
         Column("assessed_by_caregiver_id", String),
         Column("assessed_at", DateTime),
     )
+    freshness_policies = Table(
+        "evidence_freshness_policies", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("domain_key", String),
+        Column("policy_version", String),
+        Column("max_age_days", Integer),
+        Column("historical_after_days", Integer),
+        Column("rationale", String),
+        Column("created_by_caregiver_id", String),
+        Column("created_at", DateTime),
+    )
+    completeness_policies = Table(
+        "evidence_completeness_policies", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("domain_key", String),
+        Column("purpose_key", String),
+        Column("policy_version", String),
+        Column("required_fields", String),
+        Column("rationale", String),
+        Column("created_by_caregiver_id", String),
+        Column("created_at", DateTime),
+    )
     metadata.create_all(engine)
     now = datetime(2026, 11, 19, tzinfo=timezone.utc)
     try:
@@ -160,6 +184,19 @@ def test_lcr_context_includes_scoped_evidence_reviews_and_assessment_history():
                 "assessed_at": now, "age_days": 90, "rationale": "The explicit review interval has elapsed.",
                 "assessed_by_caregiver_id": "caregiver-a",
             }])
+            connection.execute(freshness_policies.insert(), [{
+                "id": "freshness-policy-a", "person_id": "person-a", "domain_key": "document_history",
+                "policy_version": "freshness-v1", "max_age_days": 30, "historical_after_days": 180,
+                "rationale": "Caregiver-selected source review boundary.",
+                "created_by_caregiver_id": "caregiver-a", "created_at": now,
+            }])
+            connection.execute(completeness_policies.insert(), [{
+                "id": "completeness-policy-a", "person_id": "person-a", "domain_key": "document_history",
+                "purpose_key": "professional_handoff", "policy_version": "completeness-v1",
+                "required_fields": json.dumps(["author", "date"]),
+                "rationale": "Required source fields for this briefing purpose.",
+                "created_by_caregiver_id": "caregiver-a", "created_at": now,
+            }])
             connection.execute(completeness.insert(), [{
                 "id": "completeness-a", "person_id": "person-a", "policy_id": "completeness-policy-a",
                 "policy_version": "completeness-v1", "subject_type": "evidence", "subject_id": "evidence-a",
@@ -180,12 +217,16 @@ def test_lcr_context_includes_scoped_evidence_reviews_and_assessment_history():
         completeness_item = context["sources"]["evidence_completeness_assessments"]["items"][0]
         assert completeness_item["information_status"] == "evidence_completeness_partial"
         assert completeness_item["semantic_sufficiency"] == "not_automatically_verified"
+        assert context["sources"]["evidence_freshness_policies"]["items"][0]["information_status"] == "evidence_freshness_policy_defined"
+        assert context["sources"]["evidence_completeness_policies"]["items"][0]["information_status"] == "evidence_completeness_policy_defined"
         prompt = format_lcr_context_for_prompt(context, max_chars=12000)
         assert "[evidence_reviews;" in prompt
         assert "contested" in prompt
         assert "[claim_assessments;" in prompt
         assert "[evidence_freshness_assessments;" in prompt
         assert "[evidence_completeness_assessments;" in prompt
+        assert "[evidence_freshness_policies;" in prompt
+        assert "[evidence_completeness_policies;" in prompt
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
