@@ -45,8 +45,18 @@ from app.services.safety import SafetyEngine
 from app.services.risk_escalation import EscalationEngine
 from app.services.safety_evaluation import SafetyEvaluationSuite
 import uuid
+import os
+import hmac
 
 router = APIRouter()
+
+
+def _require_internal_access(request: Request) -> None:
+    expected = os.getenv("SOLENOS_INTERNAL_API_KEY")
+    supplied = request.headers.get("x-solenos-internal-key", "")
+    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+        # Do not reveal internal operational endpoints to public clients.
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 def _sanitize_client_review_flags(
@@ -273,6 +283,7 @@ def update_escalation(
 @router.post("/events", response_model=SafetyEvent)
 def create_safety_event(
     event_type: SafetyEventType,
+    request: Request,
     person_id: str,
     subject_type: str,
     subject_id: str,
@@ -289,6 +300,15 @@ def create_safety_event(
     created_by_caregiver_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    authorized_person_id, caregiver_id = _scoped_identity(request, db)
+    if person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Safety events are scoped to the authenticated care record")
+    if evidence_ids:
+        found = db.query(Evidence.id).filter(Evidence.person_id == authorized_person_id, Evidence.id.in_(evidence_ids)).count()
+        if found != len(set(evidence_ids)) or len(evidence_ids) != len(set(evidence_ids)):
+            raise HTTPException(status_code=404, detail="One or more evidence records were not found in this care record")
+    if escalation_id and not db.query(EscalationModel.id).filter(EscalationModel.id == escalation_id, EscalationModel.person_id == authorized_person_id).first():
+        raise HTTPException(status_code=404, detail="Escalation not found in this care record")
     db_event = SafetyEventModel(
         id=str(uuid.uuid4()),
         event_type=event_type,
@@ -303,10 +323,10 @@ def create_safety_event(
         input_claims=input_claims or [],
         evidence_ids=evidence_ids or [],
         final_output=final_output,
-        reviewer_id=reviewer_id,
+        reviewer_id=caregiver_id if reviewer_id else None,
         override_reason=override_reason,
         timestamp=datetime.now(timezone.utc),
-        created_by_caregiver_id=created_by_caregiver_id,
+        created_by_caregiver_id=caregiver_id,
     )
     db.add(db_event)
     db.commit()
@@ -315,10 +335,13 @@ def create_safety_event(
 
 
 @router.get("/events/{person_id}", response_model=List[SafetyEvent])
-def list_safety_events(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
+def list_safety_events(person_id: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    authorized_person_id, _ = _scoped_identity(request, db)
+    if person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Safety event history is scoped to the authenticated care record")
     return (
         db.query(SafetyEventModel)
-        .filter(SafetyEventModel.person_id == person_id)
+        .filter(SafetyEventModel.person_id == authorized_person_id)
         .order_by(SafetyEventModel.timestamp.desc())
         .limit(limit)
         .all()
@@ -328,6 +351,7 @@ def list_safety_events(person_id: str, limit: int = 50, db: Session = Depends(ge
 @router.post("/policy-rules", response_model=SafetyPolicyRule)
 def create_policy_rule(
     rule_id: str,
+    request: Request,
     rule_name: str,
     description: str,
     action: SafetyDecision,
@@ -339,6 +363,7 @@ def create_policy_rule(
     created_by_caregiver_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    _require_internal_access(request)
     db_rule = SafetyPolicyRuleModel(
         id=str(uuid.uuid4()),
         rule_id=rule_id,
@@ -362,13 +387,15 @@ def create_policy_rule(
 
 
 @router.get("/policy-rules", response_model=List[SafetyPolicyRule])
-def list_policy_rules(is_active: bool = True, db: Session = Depends(get_db)):
+def list_policy_rules(request: Request, is_active: bool = True, db: Session = Depends(get_db)):
+    _require_internal_access(request)
     return db.query(SafetyPolicyRuleModel).filter(SafetyPolicyRuleModel.is_active == is_active).all()
 
 
 @router.post("/benchmark-cases", response_model=SafetyBenchmarkCase)
 def create_benchmark_case(
     benchmark_category: str,
+    request: Request,
     name: str,
     input_text: str,
     expected_decision: SafetyDecision,
@@ -380,6 +407,7 @@ def create_benchmark_case(
     is_adversarial: bool = False,
     db: Session = Depends(get_db),
 ):
+    _require_internal_access(request)
     db_case = SafetyBenchmarkCaseModel(
         id=str(uuid.uuid4()),
         benchmark_category=benchmark_category,
@@ -401,7 +429,8 @@ def create_benchmark_case(
 
 
 @router.get("/benchmark-cases", response_model=List[SafetyBenchmarkCase])
-def list_benchmark_cases(benchmark_category: Optional[str] = None, is_adversarial: Optional[bool] = None, db: Session = Depends(get_db)):
+def list_benchmark_cases(request: Request, benchmark_category: Optional[str] = None, is_adversarial: Optional[bool] = None, db: Session = Depends(get_db)):
+    _require_internal_access(request)
     query = db.query(SafetyBenchmarkCaseModel)
     if benchmark_category:
         query = query.filter(SafetyBenchmarkCaseModel.benchmark_category == benchmark_category)
@@ -411,7 +440,8 @@ def list_benchmark_cases(benchmark_category: Optional[str] = None, is_adversaria
 
 
 @router.post("/evaluate-benchmark", response_model=SafetyEvaluationResult)
-def evaluate_benchmark(benchmark_category: Optional[str] = None, db: Session = Depends(get_db)):
+def evaluate_benchmark(request: Request, benchmark_category: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_internal_access(request)
     suite = SafetyEvaluationSuite()
     query = db.query(SafetyBenchmarkCaseModel)
     if benchmark_category:
@@ -439,13 +469,15 @@ def evaluate_benchmark(benchmark_category: Optional[str] = None, db: Session = D
 
 
 @router.post("/adversarial-tests")
-def run_adversarial_tests(db: Session = Depends(get_db)):
+def run_adversarial_tests(request: Request, db: Session = Depends(get_db)):
+    _require_internal_access(request)
     suite = SafetyEvaluationSuite()
     return suite.run_adversarial_tests()
 
 
 @router.get("/blind-spots", response_model=List[SafetyBlindSpot])
-def list_blind_spots(is_mitigated: Optional[bool] = None, db: Session = Depends(get_db)):
+def list_blind_spots(request: Request, is_mitigated: Optional[bool] = None, db: Session = Depends(get_db)):
+    _require_internal_access(request)
     query = db.query(SafetyBlindSpotModel)
     if is_mitigated is not None:
         query = query.filter(SafetyBlindSpotModel.is_mitigated == is_mitigated)
@@ -455,6 +487,7 @@ def list_blind_spots(is_mitigated: Optional[bool] = None, db: Session = Depends(
 @router.post("/feedback", response_model=SafetyFeedback)
 def create_safety_feedback(
     person_id: str,
+    request: Request,
     safety_event_id: str,
     feedback_type: str,
     feedback_text: str,
@@ -465,13 +498,19 @@ def create_safety_feedback(
     lesson_learned: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    authorized_person_id, caregiver_id = _scoped_identity(request, db)
+    if person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Safety feedback is scoped to the authenticated care record")
+    safety_event = db.query(SafetyEventModel).filter(SafetyEventModel.id == safety_event_id, SafetyEventModel.person_id == authorized_person_id).first()
+    if safety_event is None:
+        raise HTTPException(status_code=404, detail="Safety event not found in this care record")
     db_feedback = SafetyFeedbackModel(
         id=str(uuid.uuid4()),
-        person_id=person_id,
+        person_id=authorized_person_id,
         safety_event_id=safety_event_id,
         feedback_type=feedback_type,
         feedback_text=feedback_text,
-        reviewer_id=reviewer_id,
+        reviewer_id=caregiver_id,
         original_decision=original_decision,
         override_decision=override_decision,
         is_correct=is_correct,
@@ -485,10 +524,13 @@ def create_safety_feedback(
 
 
 @router.get("/feedback/{person_id}", response_model=List[SafetyFeedback])
-def list_safety_feedback(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
+def list_safety_feedback(person_id: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    authorized_person_id, _ = _scoped_identity(request, db)
+    if person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Safety feedback is scoped to the authenticated care record")
     return (
         db.query(SafetyFeedbackModel)
-        .filter(SafetyFeedbackModel.person_id == person_id)
+        .filter(SafetyFeedbackModel.person_id == authorized_person_id)
         .order_by(SafetyFeedbackModel.timestamp.desc())
         .limit(limit)
         .all()
@@ -496,14 +538,18 @@ def list_safety_feedback(person_id: str, limit: int = 50, db: Session = Depends(
 
 
 @router.post("/regression-check", response_model=List[SafetyRegressionCheck])
-def run_regression_check(previous_results: List[Dict[str, Any]], current_results: List[Dict[str, Any]], threshold: float = 0.95):
+def run_regression_check(request: Request, previous_results: List[Dict[str, Any]], current_results: List[Dict[str, Any]], threshold: float = 0.95):
+    _require_internal_access(request)
     suite = SafetyEvaluationSuite()
     return suite.run_regression_check(current_results, previous_results, threshold)
 
 
 @router.get("/metrics/{person_id}")
-def get_safety_metrics(person_id: str, db: Session = Depends(get_db)):
-    events = db.query(SafetyEventModel).filter(SafetyEventModel.person_id == person_id).all()
+def get_safety_metrics(person_id: str, request: Request, db: Session = Depends(get_db)):
+    authorized_person_id, _ = _scoped_identity(request, db)
+    if person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Safety metrics are scoped to the authenticated care record")
+    events = db.query(SafetyEventModel).filter(SafetyEventModel.person_id == authorized_person_id).all()
     total = len(events)
     violations_count = sum(1 for e in events if e.violations)
     escalation_count = sum(1 for e in events if e.escalation_id)
