@@ -2124,6 +2124,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
                 "event_at": source["event_at"],
                 "recorded_at": source["recorded_at"],
                 "stale_warning": bool(source.get("stale_warning")),
+                "semantic_entailment_status": "caregiver_review_required",
             })
         if not validated:
             return {"status": "validation_failed", "provider": "ollama", "model": model, "reason": "no_verifiable_source_references_or_quotes", "sections": []}
