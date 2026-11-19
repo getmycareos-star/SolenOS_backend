@@ -13,6 +13,9 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion
+from app.models.caregiver_intelligence import CaregiverProfile, CaregiverRole, CaregiverResponsibility, CaregiverHandoff
+from app.core.caregiver_enums import CaregiverRoleType, ResponsibilityStatus, ResponsibilityAcceptanceStatus, HandoffAcceptanceStatus
+from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.time_location import Appointment
 from app.models.uncertainty import OpenQuestion
 
@@ -511,6 +514,61 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             assessed_by_caregiver_id=caregiver_id,
             assessed_at=source_time,
         )
+        primary_profile = ensure_caregiver_profile_for_session(
+            db,
+            person_id=person_id,
+            session_caregiver_id=caregiver_id,
+            name="Family caregiver",
+            relationship="Family",
+        )
+        backup_caregiver = Caregiver(
+            person_id=person_id,
+            name="Backup caregiver",
+            relationship="Family",
+        )
+        db.add(backup_caregiver)
+        db.flush()
+        backup_profile = ensure_caregiver_profile_for_session(
+            db,
+            person_id=person_id,
+            session_caregiver_id=backup_caregiver.id,
+            name="Backup caregiver",
+            relationship="Family",
+        )
+        role = CaregiverRole(
+            person_id=person_id,
+            caregiver_id=primary_profile.id,
+            role_type=CaregiverRoleType.APPOINTMENT_COORDINATOR,
+            scope="Coordinate appointments and transport.",
+            effective_start=datetime.now(timezone.utc),
+            is_current=True,
+            assignment_source="caregiver_self_reported",
+        )
+        responsibility = CaregiverResponsibility(
+            person_id=person_id,
+            caregiver_id=primary_profile.id,
+            responsibility_type="appointment_follow_up",
+            scope="Confirm the next clinic appointment.",
+            effective_start=datetime.now(timezone.utc),
+            status=ResponsibilityStatus.ACTIVE,
+            acceptance_status=ResponsibilityAcceptanceStatus.EXPLICIT,
+            assignment_source="caregiver_self_reported",
+        )
+        handoff = CaregiverHandoff(
+            person_id=person_id,
+            from_caregiver_id=primary_profile.id,
+            to_caregiver_id=backup_profile.id,
+            responsibility_type="appointment_follow_up",
+            scope="Confirm the next clinic appointment.",
+            timestamp=source_time,
+            effective_time=source_time,
+            context="The primary caregiver transferred appointment follow-up.",
+            acceptance_status=HandoffAcceptanceStatus.ACCEPTED,
+            acceptance_evidence="The backup caregiver accepted the transfer.",
+            is_completed=False,
+            provenance="test:caregiver-responsibility-transfer",
+        )
+        db.add_all([role, responsibility, handoff])
         appointment = Appointment(
             id="handoff-freshness-appointment",
             person_id=person_id,
@@ -557,6 +615,15 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     assert body["source_statuses"]["evidence_claim_assessments"]["status"] == "available"
     assert body["source_statuses"]["evidence_freshness_assessments"]["status"] == "available"
     assert body["source_statuses"]["evidence_freshness_policies"]["status"] == "available"
+    assert body["source_statuses"]["caregiver_profiles"]["status"] == "available"
+    assert body["source_statuses"]["caregiver_roles"]["status"] == "available"
+    assert body["source_statuses"]["caregiver_responsibilities"]["status"] == "available"
+    assert body["source_statuses"]["caregiver_handoffs"]["status"] == "available"
+    assert any(item["source_table"] == "caregiver_roles" for item in refs.values())
+    assert any(item["source_table"] == "caregiver_responsibilities" for item in refs.values())
+    accepted_handoff = next(item for item in refs.values() if item["source_table"] == "caregiver_handoffs")
+    assert accepted_handoff["details"]["acceptance_status"] == "accepted"
+    assert accepted_handoff["details"]["is_completed"] is False
 
 
 def test_preparation_response_and_audit_event_share_the_same_draft_id(client):
