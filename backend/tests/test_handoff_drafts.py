@@ -267,7 +267,7 @@ def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_
     response = test_client.post(
         "/api/v1/handoff-drafts/prepare",
         headers={"Authorization": f"Bearer {token}"},
-        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30, "appointment_id": "next-appointment"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -480,7 +480,15 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
             reviewed_by_caregiver_id=caregiver_id,
             created_at=source_time,
         )
-        db.add_all([evidence, policy, assessment, claim, source_review, claim_assessment])
+        appointment = Appointment(
+            id="handoff-freshness-appointment",
+            person_id=person_id,
+            title="Medication review appointment",
+            scheduled_at=datetime.now(timezone.utc) + timedelta(days=4),
+            status="scheduled",
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, policy, assessment, claim, source_review, claim_assessment, appointment])
         db.commit()
     finally:
         db.close()
@@ -488,7 +496,7 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     response = test_client.post(
         "/api/v1/handoff-drafts/prepare",
         headers={"Authorization": f"Bearer {token}"},
-        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30, "appointment_id": "handoff-freshness-appointment"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -658,6 +666,14 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
             size_bytes=len(original),
             sha256=digest,
         ))
+        db.add(Appointment(
+            id="handoff-document-appointment",
+            person_id=person_id,
+            title="Document follow-up visit",
+            scheduled_at=datetime.now(timezone.utc) + timedelta(days=5),
+            status="scheduled",
+            created_by_caregiver_id=caregiver_id,
+        ))
         db.add(CaptureAnalysis(
             id="handoff-document-extraction",
             person_id=person_id,
@@ -681,7 +697,7 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
     response = test_client.post(
         "/api/v1/handoff-drafts/prepare",
         headers={"Authorization": f"Bearer {session['access_token']}"},
-        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30, "appointment_id": "handoff-document-appointment"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -1681,10 +1697,24 @@ def test_draft_includes_caregiver_reviewable_medication_assertions_with_source_l
     created_body = created.json()
     assert created_body["record_status"] == "awaiting_caregiver_review"
 
+    appointment = Appointment(
+        id="handoff-medication-appointment",
+        person_id=session["person"]["id"],
+        title="Medication review",
+        scheduled_at=datetime.now(timezone.utc) + timedelta(days=2),
+        status="scheduled",
+        created_by_caregiver_id=session["caregiver"]["id"],
+    )
+    db = TestSessionLocal()
+    try:
+        db.add(appointment)
+        db.commit()
+    finally:
+        db.close()
     response = test_client.post(
         "/api/v1/handoff-drafts/prepare",
         headers={"Authorization": f"Bearer {token}"},
-        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30, "appointment_id": "handoff-medication-appointment"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
