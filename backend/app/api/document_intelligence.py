@@ -1400,6 +1400,7 @@ def review_document_candidate(
         assertion_kind = "document_reviewed_observation"
         assertion_epistemic_state = "reported"
         review_after_days = 30
+        document_observed_at = _explicit_document_event_datetime(candidate, quote)
         matched_medication_id = candidate.get("matched_lcr_medication_id")
         if candidate.get("field_type") == "medication" and matched_medication_id:
             source_instruction = quote.casefold()
@@ -1433,7 +1434,6 @@ def review_document_candidate(
         # Keep only structured qualifiers and source coordinates here. The exact
         # quotation remains in CareAssertion.source_text; duplicating it in JSON
         # would complicate privacy erasure and create unnecessary copies of care data.
-        document_observed_at = _explicit_document_event_datetime(candidate, quote)
         source_context_candidate = {
             key: canonical.get(key)
             for key in (
