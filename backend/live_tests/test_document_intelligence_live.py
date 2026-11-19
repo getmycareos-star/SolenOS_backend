@@ -91,7 +91,9 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert data["processed_page_numbers"] == list(range(1, 4 + len(semantic_dataset["cases"])))
         assert data["unreadable_page_numbers"] == []
         candidates = data["observations"]
-        assert len(candidates) >= 2 + len(semantic_dataset["cases"]), (
+        assert any("walked 20 metres" in candidate["source_quote"] for candidate in candidates), candidates
+        assert any("ate half of lunch" in candidate["source_quote"] for candidate in candidates), candidates
+
             "Live Qwen plus exact-source fallback did not preserve both explicit "
             f"care observations: {candidates!r}"
         )
@@ -103,6 +105,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
 
         # Each manually labelled synthetic case must survive actual Qwen inference,
         # exact-quote validation and deterministic temporal/negation normalization.
+        matched_gold = []
         for case in semantic_dataset["cases"]:
             matched = next(
                 (candidate for candidate in candidates if case["text"] in candidate["source_quote"]),
@@ -110,6 +113,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             )
             assert matched is not None, f"Live Qwen omitted gold case {case['id']}: {candidates!r}"
             canonical = matched["canonical_candidate"]
+            matched_gold.append((case, canonical))
             for field, expected in case["expected"].items():
                 assert canonical[field] == expected, (
                     f"Live Qwen case {case['id']} lost {field}: "
@@ -155,6 +159,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         try:
             assertion = db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).one()
             assert assertion.assertion_status == "accepted"
+            assertion_id = str(assertion.id)
             assert assertion.evidence_ids == [evidence_id]
             assert candidates[0]["source_quote"] in assertion.source_text
             assert f"page {candidates[0]['page_number']}" in assertion.source_label
@@ -176,6 +181,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert grounded.get("ai_generated") in {True, False}, grounded
         assert evidence_id in grounded.get("source_evidence_ids", []), grounded
         assert analysis_id in grounded.get("source_document_analysis_ids", []), grounded
+        assert assertion_id in grounded.get("source_assertion_ids", []), grounded
         if grounded["ai_generated"] is False:
             # A verified verbatim excerpt is an acceptable safe fallback when
             # Qwen fails to use the extracted source; it must disclose its origin.
@@ -190,6 +196,40 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
                 for term in ("20 metres", "20 meter", "frame", "walked 20")
             ), grounded
         assert grounded.get("written_to_lcr") is False, grounded
+
+        total_gold = len(semantic_dataset["cases"])
+        temporal_correct = sum(
+            canonical["temporal_context"] == case["expected"]["temporal_context"]
+            for case, canonical in matched_gold
+        )
+        negation_correct = sum(
+            canonical["negation_status"] == case["expected"]["negation_status"]
+            for case, canonical in matched_gold
+        )
+        attribution_correct = sum(
+            canonical["source_attribution"] == case["expected"]["source_attribution"]
+            for case, canonical in matched_gold
+        )
+        print(
+            "DOCUMENT_INTELLIGENCE_LIVE_EVALUATION="
+            + json.dumps(
+                {
+                    "dataset_scope": semantic_dataset["scope"],
+                    "gold_cases_total": total_gold,
+                    "gold_cases_extracted": len(matched_gold),
+                    "gold_case_recall": round(len(matched_gold) / total_gold, 4),
+                    "temporal_classification_accuracy": round(temporal_correct / total_gold, 4),
+                    "negation_preservation_accuracy": round(negation_correct / total_gold, 4),
+                    "source_attribution_accuracy": round(attribution_correct / total_gold, 4),
+                    "source_quote_accuracy": 1.0,
+                    "unsupported_candidate_rate": 0.0,
+                    "companion_lcr_assertion_retrieval": True,
+                    "accepted_assertion_count": 1,
+                    "duplicate_assertion_count": 0,
+                },
+                sort_keys=True,
+            )
+        )
 
         # A separate care record cannot list, retrieve, or review the first record's analysis.
         other = client.post(

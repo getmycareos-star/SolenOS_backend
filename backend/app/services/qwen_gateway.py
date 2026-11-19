@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import logging
 import os
 import time
@@ -294,6 +295,21 @@ def qwen_chat(
 
 
 
+def _expand_quote_to_source_sentence(source: str, quote: str) -> str:
+    """Expand a model-selected substring to its exact containing source sentence."""
+    if not quote or source.count(quote) != 1:
+        return quote
+    for match in re.finditer(r"[^.!?]+(?:[.!?]|$)", source, flags=re.DOTALL):
+        sentence = match.group(0).strip()
+        if quote not in sentence:
+            continue
+        sentence = re.sub(r"^\[Page\s+\d+\]\s*", "", sentence).strip()
+        if quote in sentence and len(sentence) <= 1000:
+            return sentence
+        break
+    return quote
+
+
 def extract_review_candidates(
     source_text: str,
     *,
@@ -324,8 +340,9 @@ def extract_review_candidates(
                 "Every source_quote must be copied exactly from the source, and the observation and subject must themselves "
                 "be verbatim substrings of that source_quote. Do not paraphrase, summarize, normalize, or add details. "
                 "For each source_quote, retain the complete local clause or sentence needed to preserve the observation's "
-                "meaning, including nearby time wording, negation, and uncertainty or hedge words. Do not clip away "
-                "qualifiers such as 'previously', 'discontinued', 'currently', 'seemed', 'I think', 'yesterday', or "
+                "meaning, including who reported or observed it, nearby time wording, negation, and uncertainty or hedge words. "
+                "Never remove attribution phrases such as 'the caregiver reported', 'the patient denies', or 'the nurse observed'. "
+                "Do not clip away qualifiers such as 'previously', 'discontinued', 'currently', 'seemed', 'I think', 'yesterday', or "
                 "'last night', and do not join separate clauses when they describe distinct observations. "
                 "Never merge statements from different people. If the source clearly contains multiple patient identities, "
                 "return no observations and ask the caregiver to separate the records before review. "
@@ -362,6 +379,7 @@ def extract_review_candidates(
             continue
         if quote not in bounded_source:
             continue
+        quote = _expand_quote_to_source_sentence(bounded_source, quote)
         if observation.strip() not in quote or subject.strip().casefold() not in quote.casefold():
             continue
         # Preserve explicit source statements (including diagnoses and stated causes)

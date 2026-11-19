@@ -162,3 +162,37 @@ def test_explicit_diagnosis_cause_and_medication_transitions_remain_reviewable(m
     prompt = captured["messages"][0]["content"]
     assert "do extract a diagnosis, medication discontinuation, dosage transition" in prompt
     assert "Never turn these statements into a clinical conclusion" in prompt
+
+
+def test_qwen_quote_expansion_restores_source_attribution_before_review(monkeypatch):
+    from app.services.document_candidate_schema import canonical_candidate
+
+    source = "The caregiver reported that the patient slept for six uninterrupted hours on 14 October."
+    model_output = {
+        "observations": [
+            {
+                "subject": "the patient",
+                "observation": "slept for six uninterrupted hours",
+                "source_quote": "the patient slept for six uninterrupted hours",
+            }
+        ],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *args, **kwargs: json.dumps(model_output),
+    )
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-attribution",
+        source_evidence_id="evidence-attribution",
+    )
+    assert result["observations"][0]["source_quote"] == source
+    canonical = canonical_candidate(
+        result["observations"][0],
+        document_id="document-attribution",
+        source_text=source,
+        page_number=1,
+    )
+    assert canonical["source_attribution"] == "caregiver_reported"
