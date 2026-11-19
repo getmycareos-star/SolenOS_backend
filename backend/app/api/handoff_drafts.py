@@ -304,6 +304,7 @@ class DraftRequest(BaseModel):
     ] = "family_transition"
     audience: Literal["family", "professional"] = "family"
     window_days: int = Field(default=30, ge=1, le=MAX_DAYS)
+    appointment_id: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 # Templates define what a handoff should cover; they do not manufacture missing
@@ -849,6 +850,26 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
     except Exception:
         logger.exception("Handoff draft source revision check failed")
         return {"status": "unknown", "reason": "source_revision_check_failed", "stale_source_count": len(stale), "unknown_source_count": len(unknown) + 1}
+
+@router.get("/appointments")
+def list_briefing_appointments(request: Request, db: Session = Depends(get_db)):
+    """Return only this caregiver session's person's appointments for explicit briefing selection."""
+    person_id, _ = _scoped_identity(request, db)
+    rows = db.query(Appointment).filter(
+        Appointment.person_id == person_id,
+    ).order_by(Appointment.scheduled_at.asc().nullslast(), Appointment.id.asc()).limit(100).all()
+    return {
+        "items": [{
+            "id": str(row.id),
+            "title": row.title or "Appointment",
+            "scheduled_at": _iso(row.scheduled_at),
+            "provider": row.provider,
+            "healthcare_org": row.healthcare_org,
+            "status": row.status,
+        } for row in rows],
+        "count": len(rows),
+    }
+
 
 @router.get("")
 def list_handoff_drafts(
@@ -1908,6 +1929,18 @@ def prepare_handoff_draft(
     person_id, caregiver_id = _scoped_identity(request, db)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=payload.window_days)
+    selected_appointment = None
+    if payload.purpose == "professional_appointment":
+        if not payload.appointment_id:
+            raise HTTPException(status_code=422, detail="Select a saved appointment before preparing an appointment briefing")
+        selected_appointment = db.query(Appointment).filter(
+            Appointment.id == payload.appointment_id,
+            Appointment.person_id == person_id,
+        ).first()
+        if selected_appointment is None:
+            raise HTTPException(status_code=404, detail="The selected appointment was not found in this Care Record")
+    elif payload.appointment_id:
+        raise HTTPException(status_code=422, detail="An appointment can only be selected for an appointment briefing")
     bind = db.get_bind()
     inspector = inspect(bind)
     metadata = MetaData()
@@ -1970,6 +2003,8 @@ def prepare_handoff_draft(
                 continue
 
             query = select(*selected).where(table.c.person_id == person_id)
+            if table_name == "appointments" and payload.purpose == "professional_appointment":
+                query = query.where(table.c.id == payload.appointment_id)
             if table_name == "care_events" and "event_type" in table.c:
                 query = query.where(table.c.event_type.notin_(DAILY_CARE_EVENT_TYPES))
             if spec.get("active_open_questions_only") and "status" in table.c:
@@ -2315,6 +2350,15 @@ def prepare_handoff_draft(
         "retrieval_complete": retrieval_complete,
         "partial_sources": partial_sources,
         "window": {"days": payload.window_days, "from": cutoff.isoformat(), "to": now.isoformat()},
+        "appointment_id": payload.appointment_id,
+        "selected_appointment": ({
+            "id": str(selected_appointment.id),
+            "title": selected_appointment.title,
+            "scheduled_at": _iso(selected_appointment.scheduled_at),
+            "provider": selected_appointment.provider,
+            "healthcare_org": selected_appointment.healthcare_org,
+            "status": selected_appointment.status,
+        } if selected_appointment is not None else None),
     }
     source_snapshot["snapshot_sha256"] = _fingerprint({
         "authority": source_snapshot["authority"],
@@ -2340,6 +2384,7 @@ def prepare_handoff_draft(
         "purpose": payload.purpose,
         "audience": payload.audience,
         "window_days": payload.window_days,
+        "appointment_id": payload.appointment_id,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if db.get_bind().dialect.name == "postgresql":
         lock_key = int.from_bytes(
