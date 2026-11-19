@@ -1216,6 +1216,13 @@ def test_legacy_observation_and_reasoning_routes_require_scoped_sessions():
                 else getattr(client, method)(path, headers=foreign_headers)
             )
             assert response.status_code == 403, (method, path, response.status_code, response.text)
+
+        own_headers = session_headers("person-daily-test", "caregiver-daily-test")
+        learning_events = client.get(
+            "/api/v1/learning-events/person-daily-test",
+            headers=own_headers,
+        )
+        assert learning_events.status_code == 200, learning_events.text
     finally:
         teardown_db()
 
