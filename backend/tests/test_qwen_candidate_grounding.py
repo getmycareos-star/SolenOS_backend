@@ -106,10 +106,12 @@ def test_capture_candidates_return_empty_for_blank_source_without_calling_model(
     }
 
 
-def test_explicit_diagnosis_and_causal_source_statements_remain_reviewable(monkeypatch):
+def test_explicit_diagnosis_cause_and_medication_transitions_remain_reviewable(monkeypatch):
     source = (
         "The discharge summary states the patient was previously diagnosed with Parkinson's disease. "
-        "It records that reduced intake was caused by nausea."
+        "It records that reduced intake was caused by nausea. "
+        "The medication dosage changed from 500 mg once daily to 1000 mg twice daily on 2026-10-16. "
+        "Current medication differs from discharge medication."
     )
     model_output = {
         "observations": [
@@ -123,14 +125,26 @@ def test_explicit_diagnosis_and_causal_source_statements_remain_reviewable(monke
                 "observation": "reduced intake was caused by nausea",
                 "source_quote": "It records that reduced intake was caused by nausea.",
             },
+            {
+                "subject": "medication",
+                "observation": "dosage changed from 500 mg once daily to 1000 mg twice daily",
+                "source_quote": "The medication dosage changed from 500 mg once daily to 1000 mg twice daily on 2026-10-16.",
+            },
+            {
+                "subject": "medication",
+                "observation": "Current medication differs from discharge medication.",
+                "source_quote": "Current medication differs from discharge medication.",
+            },
         ],
         "open_questions": [],
     }
-    monkeypatch.setattr(
-        qwen_gateway,
-        "qwen_chat",
-        lambda *args, **kwargs: json.dumps(model_output),
-    )
+    captured = {}
+
+    def fake_qwen_chat(messages, **kwargs):
+        captured["messages"] = messages
+        return json.dumps(model_output)
+
+    monkeypatch.setattr(qwen_gateway, "qwen_chat", fake_qwen_chat)
 
     result = qwen_gateway.extract_review_candidates(
         source,
@@ -138,8 +152,13 @@ def test_explicit_diagnosis_and_causal_source_statements_remain_reviewable(monke
         source_evidence_id="document-evidence-456",
     )
 
-    assert len(result["observations"]) == 2
+    assert len(result["observations"]) == 4
     assert all(item["review_status"] == "pending_review" for item in result["observations"])
     assert all(item["source_quote"] in source for item in result["observations"])
     assert result["observations"][0]["observation"] == "previously diagnosed with Parkinson's disease"
     assert result["observations"][1]["observation"] == "reduced intake was caused by nausea"
+    assert result["observations"][2]["observation"] == "dosage changed from 500 mg once daily to 1000 mg twice daily"
+    assert result["observations"][3]["observation"] == "Current medication differs from discharge medication."
+    prompt = captured["messages"][0]["content"]
+    assert "do extract a diagnosis, medication discontinuation, dosage transition" in prompt
+    assert "Never turn these statements into a clinical conclusion" in prompt

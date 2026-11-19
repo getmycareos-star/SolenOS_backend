@@ -309,18 +309,26 @@ def extract_review_candidates(
         {
             "role": "system",
             "content": (
-                "You extract possible caregiver-observed facts from a source, but you are not the authority. "
+                "You extract explicitly stated care-relevant statements from source documents, which may be clinician-authored, "
+                "caregiver-authored, or patient-reported. You are not the authority: every output is only a source claim "
+                "pending caregiver review. "
                 "Return valid JSON only with exactly this shape: "
                 '{"observations":[{"subject":"string","observation":"string","source_quote":"exact verbatim substring from source"}],'
                 '"open_questions":["string"]}. '
-                "Only include observations explicitly supported by the source. Do not infer diagnosis, cause, risk, "
-                "medication changes, or facts not stated. Every source_quote must be copied exactly from the source, " +
-                "and the observation and subject must themselves be verbatim substrings of that source_quote. " +
-                "Do not paraphrase, summarize, normalize, or add details. "
+                "Only include statements explicitly supported by the source. Do not infer a diagnosis, cause, risk, or "
+                "medication change. However, do extract a diagnosis, medication discontinuation, dosage transition, or "
+                "current-versus-discharge discrepancy when the source explicitly states it. Preserve the exact wording, "
+                "dose values, and historical/current qualifiers as source claims requiring caregiver review. Never turn "
+                "these statements into a clinical conclusion, recommendation, prescription, or active medication instruction. "
+                "Do not omit an explicit source statement solely because it mentions a diagnosis or medication. "
+                "Every source_quote must be copied exactly from the source, and the observation and subject must themselves "
+                "be verbatim substrings of that source_quote. Do not paraphrase, summarize, normalize, or add details. "
                 "For each source_quote, retain the complete local clause or sentence needed to preserve the observation's "
                 "meaning, including nearby time wording, negation, and uncertainty or hedge words. Do not clip away "
-                "qualifiers such as 'seemed', 'I think', 'yesterday', or 'last night', and do not join separate clauses "
-                "when they describe distinct observations. "
+                "qualifiers such as 'previously', 'discontinued', 'currently', 'seemed', 'I think', 'yesterday', or "
+                "'last night', and do not join separate clauses when they describe distinct observations. "
+                "Never merge statements from different people. If the source clearly contains multiple patient identities, "
+                "return no observations and ask the caregiver to separate the records before review. "
                 "If there are no supported observations, return an empty observations array. Ask at most three short "
                 "clarifying questions. Never treat greetings or small talk as care observations."
             ),
