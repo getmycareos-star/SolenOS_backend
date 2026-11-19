@@ -417,6 +417,13 @@ def _record_open_question_revision(
 def _assertion_is_qualified_document_context(assertion: CareAssertion) -> bool:
     """Keep historical, conditional, tentative and recommendation text out of hard conflicts."""
     context = getattr(assertion, "source_context", None)
+    if assertion.assertion_kind == "document_reviewed_observation" and (
+        not isinstance(context, dict)
+        or context.get("kind") != "caregiver_reviewed_document_candidate"
+    ):
+        # Legacy document observations lack enough preserved linguistic context
+        # to establish that they are comparable current-state claims.
+        return True
     if not isinstance(context, dict) or context.get("kind") != "caregiver_reviewed_document_candidate":
         return False
     candidate = context.get("document_candidate")
