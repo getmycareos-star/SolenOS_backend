@@ -2101,6 +2101,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
 
         source_by_ref = {item["source_ref"]: item for item in considered}
         validated = []
+        rejected_item_count = 0
         seen_refs = set()
         for item in items[:6]:
             if not isinstance(item, dict):
@@ -2122,6 +2123,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
                 or not supporting_quote.strip()
                 or supporting_quote not in source["text"]
             ):
+                rejected_item_count += 1
                 continue
             exact_source_text = source["text"][:1200]
             seen_refs.add(source_ref)
@@ -2139,7 +2141,8 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
                 "semantic_entailment_status": "caregiver_review_required",
             })
         if not validated:
-            return {"status": "validation_failed", "provider": "ollama", "model": model, "reason": "no_verifiable_source_references_or_quotes", "sections": []}
+            logger.warning("Qwen returned no source-verifiable briefing claims; using exact-source fallback")
+            return _source_only_handoff_fallback(records, "no_verifiable_source_references_or_quotes")
         return {
             "status": "generated",
             "provider": "ollama",
@@ -2147,10 +2150,15 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             "sections": validated,
             "sources_considered": len(considered),
             "sources_available": len(eligible),
+            "rejected_item_count": rejected_item_count,
             "authority": "living_care_record_source_snapshot",
             "generation_contract": "qwen_paraphrase_with_exact_source_quote",
             "semantic_entailment_status": "caregiver_review_required",
-            "interpretation_limit": "Exact source-quote matching confirms the quote exists in the snapshot; it does not prove that every paraphrase is semantically entailed. Review the summary against its source before sharing.",
+            "interpretation_limit": (
+                "Exact source-quote matching confirms the quote exists in the snapshot; it does not prove "
+                "that every paraphrase is semantically entailed. Review the summary against its source before sharing. "
+                + (f"{rejected_item_count} unsupported or invalid model item(s) were excluded." if rejected_item_count else "")
+            ),
         }
     except Exception:
         logger.exception("Qwen handoff drafting or validation failed; using exact-source fallback")
