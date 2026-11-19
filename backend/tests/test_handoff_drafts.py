@@ -91,11 +91,17 @@ def test_draft_returns_audience_specific_template_and_explicit_unassessed_sectio
     sections = {section["key"]: section for section in body["template_sections"]}
     assert expected_sections.issubset(sections)
     assert all(section["required_fields"] for section in body["template_sections"])
-    # Appointment records can support appointment details, but no medication adapter exists.
+    # The canonical medication projection is connected; allergy coverage remains unavailable.
+    assert body["source_statuses"]["medications"]["status"] == "empty"
+    assert body["source_statuses"]["allergies"]["status"] == "unavailable"
     if audience == "professional":
-        assert sections["medication_reconciliation"]["coverage_status"] == "not_assessed"
+        assert sections["medication_reconciliation"]["coverage_status"] == "no_records_returned"
     else:
         assert sections["health_medication"]["coverage_status"] == "no_records_returned"
+    assert "allergies have no connected authoritative source" in (
+        sections["medication_reconciliation"]["coverage_note"]
+        if audience == "professional" else sections["health_medication"]["coverage_note"]
+    )
     assert all("still requires review" in section["coverage_note"] for section in body["template_sections"])
 
 
@@ -1576,3 +1582,34 @@ def test_handoff_discloses_source_history_truncated_at_per_source_limit(client):
             "reason": "source_projection_reached_40_record_limit",
             "returned_count": 40} in body["limitations"]
     assert body["partial_sources"] == [{"source": "care_facts", "returned_count": 40}]
+
+def test_draft_includes_caregiver_reviewable_medication_assertions_with_source_lineage(client):
+    test_client, session = client
+    token = session["access_token"]
+    created = test_client.post(
+        "/api/v1/care-continuity/medications",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": "Example prescribed medicine", "dose": "5 mg", "note": "Caregiver-reported medication"},
+    )
+    assert created.status_code == 201, created.text
+    created_body = created.json()
+    assert created_body["record_status"] == "awaiting_caregiver_review"
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_statuses"]["medications"]["status"] == "available"
+    medication_refs = [
+        item for item in body["source_references"]
+        if item["source_type"] == "medication_assertion"
+    ]
+    assert len(medication_refs) >= 2, "name and explicit status assertions must both be retained"
+    assert all(item["source_table"] == "care_assertions" for item in medication_refs)
+    assert all(item["epistemic_status"] == "reported" for item in medication_refs)
+    assert all(item["record_status"] in {"reported", "review_required"} for item in medication_refs)
+    assert body["retrieval_complete"] is False, "unavailable allergy evidence must remain an explicit completeness gap"
+    assert any(item["source"] == "allergies" for item in body["limitations"])
