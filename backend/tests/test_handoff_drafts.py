@@ -1543,11 +1543,11 @@ def test_handoff_includes_only_valid_necessary_open_questions(client):
     assert "handoff-unassessed-question" not in question_refs
 
 
-def test_handoff_discloses_source_history_truncated_at_per_source_limit(client):
+def test_handoff_paginates_source_history_and_discloses_the_safety_ceiling(client):
     test_client, session = client
     person_id = session["person"]["id"]
     with engine.begin() as connection:
-        for index in range(41):
+        for index in range(501):
             timestamp = datetime.now(timezone.utc) - timedelta(minutes=index)
             connection.execute(text("""
                 INSERT INTO care_facts
@@ -1574,14 +1574,14 @@ def test_handoff_discloses_source_history_truncated_at_per_source_limit(client):
     assert response.status_code == 200, response.text
     body = response.json()
     facts = body["source_statuses"]["care_facts"]
-    assert facts["returned_count"] == 40
+    assert facts["returned_count"] == 500
     assert facts["has_more"] is True
     assert facts["retrieval_complete"] is False
     assert body["retrieval_complete"] is False
     assert {"source": "care_facts", "status": "partial",
-            "reason": "source_projection_reached_40_record_limit",
-            "returned_count": 40} in body["limitations"]
-    assert body["partial_sources"] == [{"source": "care_facts", "returned_count": 40}]
+            "reason": "source_projection_reached_500_record_safety_limit",
+            "returned_count": 500} in body["limitations"]
+    assert body["partial_sources"] == [{"source": "care_facts", "returned_count": 500}]
 
 def test_draft_includes_caregiver_reviewable_medication_assertions_with_source_lineage(client):
     test_client, session = client
