@@ -6,6 +6,7 @@ Provider acceptance is recorded separately from device presentation.
 import asyncio
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -486,7 +487,23 @@ def deliver_pending_web_pushes(db=None, now=None):
                 session.commit()
             except Exception as exc:
                 delivery.last_error_code = type(exc).__name__[:64]
-                delivery.last_error_message = "Push delivery could not be completed"
+                # Keep a bounded diagnostic for operators while removing URLs and
+                # credential-like values that provider exceptions may echo.
+                diagnostic = str(exc)
+                for sensitive in (
+                    subscription.endpoint,
+                    settings.vapid_private_key,
+                    settings.vapid_public_key,
+                    settings.secret_key,
+                ):
+                    if sensitive:
+                        diagnostic = diagnostic.replace(sensitive, "[redacted]")
+                diagnostic = re.sub(r"https?://\\S+", "[provider-url]", diagnostic)
+                diagnostic = re.sub(r"(?i)(authorization|token|secret|private[_ -]?key)\\s*[:=]\\s*[^ ,;]+", r"\\1=[redacted]", diagnostic)
+                delivery.last_error_message = (
+                    f"Push provider error ({delivery.last_error_code}): {diagnostic[:240]}"
+                    if diagnostic else "Push delivery could not be completed"
+                )
                 if delivery.attempt_count >= 5:
                     delivery.status = "failed"
                 else:
