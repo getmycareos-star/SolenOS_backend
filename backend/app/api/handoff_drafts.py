@@ -2012,6 +2012,10 @@ def prepare_handoff_draft(
         "person_scope": source_snapshot["person_scope"],
         "source_statuses": source_snapshot["source_statuses"],
         "source_records": source_snapshot["source_records"],
+        "evidence_lineage": source_snapshot["evidence_lineage"],
+        "limitations": source_snapshot["limitations"],
+        "retrieval_complete": source_snapshot["retrieval_complete"],
+        "partial_sources": source_snapshot["partial_sources"],
         "window": source_snapshot["window"],
     })
     structured_content = {
