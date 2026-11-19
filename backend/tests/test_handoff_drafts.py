@@ -838,6 +838,58 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
     assert original_ref["details"]["extraction_status"] == "available"
 
 
+def test_document_source_without_extraction_is_reported_as_partial_retrieval(client):
+    import hashlib
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    original = b"Uploaded clinical letter without a verified text extraction."
+    digest = hashlib.sha256(original).hexdigest()
+    db = TestSessionLocal()
+    try:
+        document = Evidence(
+            id="handoff-document-no-extraction",
+            person_id=person_id,
+            type="document",
+            source_text="Uploaded document record",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="clinic/unparsed-letter",
+        )
+        db.add(document)
+        db.flush()
+        db.add(EvidenceUpload(
+            evidence_id=document.id,
+            filename="unparsed-letter.txt",
+            mime_type="text/plain",
+            content=original,
+            size_bytes=len(original),
+            sha256=digest,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    documents = body["source_statuses"]["documents"]
+    assert documents["status"] == "partial"
+    assert documents["unavailable_extraction_count"] == 1
+    assert documents["retrieval_complete"] is False
+    assert body["retrieval_complete"] is False
+    assert any(
+        item["source"] == "documents"
+        and item["status"] == "partial"
+        and item["reason"] == "some_documents_not_extracted_or_extraction_failed"
+        for item in body["limitations"]
+    )
+
+
 def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
     from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
