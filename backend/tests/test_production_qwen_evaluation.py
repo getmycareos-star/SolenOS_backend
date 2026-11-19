@@ -15,10 +15,10 @@ def _completed(returncode: int) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=returncode)
 
 
-def test_production_evaluation_accepts_exact_deployment_commit():
+def test_production_evaluation_accepts_exact_deployment_commit_without_git_lookup():
     with patch.object(MODULE.subprocess, "run") as run:
         assert MODULE.deployment_contains_expected_source("a" * 40, "a" * 40) is True
-        run.assert_called_once()
+        run.assert_not_called()
 
 
 def test_production_evaluation_accepts_deployed_descendant_containing_expected_source():
