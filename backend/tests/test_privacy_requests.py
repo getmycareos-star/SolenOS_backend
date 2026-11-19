@@ -1556,3 +1556,104 @@ def test_duplicate_open_deletion_request_is_rejected_and_does_not_create_second_
     ]
     assert len(deletion_requests) == 1
 
+
+
+def test_deletion_retry_completes_after_interruption_following_destructive_commit(monkeypatch):
+    from app.api.privacy_requests import (
+        PrivacyDeletionFulfilment,
+        fulfil_approved_deletion,
+    )
+    from app.models.care import Caregiver, Person
+    from app.models.privacy_request import DataSubjectRequest
+
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_TOKEN", "j" * 40)
+    monkeypatch.setenv("SOLENOS_PRIVACY_REVIEWER_ID", "privacy-reviewer")
+    client = TestClient(app)
+    session = create_session(client, "Interrupted deletion recipient")
+    caregiver_headers = {"Authorization": f"Bearer {session['access_token']}"}
+    reviewer_headers = {"X-SolenOS-Privacy-Reviewer-Token": "j" * 40}
+
+    submitted = client.post(
+        "/api/v1/privacy/requests",
+        headers=caregiver_headers,
+        json={
+            "request_type": "deletion",
+            "authority_basis": "self",
+            "authority_attested": True,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request_id = submitted.json()["id"]
+
+    approved = client.post(
+        f"/api/v1/privacy/requests/{request_id}/review",
+        headers=reviewer_headers,
+        json={
+            "decision": "approve",
+            "review_basis": "Reviewed identity and authority evidence for deletion.",
+            "authority_evidence_checked": "Identity and authority evidence checked.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+
+    deletion_payload = PrivacyDeletionFulfilment(
+        backup_erasure_verified=True,
+        backup_retention_evidence=(
+            "Verified the synthetic test record is absent from retained backups."
+        ),
+    )
+    deletion_reviewer_id = "independent-erasure-reviewer"
+
+    # Simulate a process stopping immediately after the destructive transaction
+    # commits, before the final redacted receipt can be written.
+    interrupted_db = TestSessionLocal()
+    real_commit = interrupted_db.commit
+
+    def commit_then_interrupt():
+        real_commit()
+        raise RuntimeError("simulated process interruption after destructive commit")
+
+    monkeypatch.setattr(interrupted_db, "commit", commit_then_interrupt)
+    with pytest.raises(RuntimeError, match="simulated process interruption"):
+        fulfil_approved_deletion(
+            request_id,
+            deletion_payload,
+            deletion_reviewer_id,
+            interrupted_db,
+        )
+    interrupted_db.close()
+
+    verification_db = TestSessionLocal()
+    try:
+        assert verification_db.query(Person).filter(
+            Person.id == session["person"]["id"]
+        ).count() == 0
+        assert verification_db.query(Caregiver).filter(
+            Caregiver.id == session["caregiver"]["id"]
+        ).count() == 0
+        pending_receipt = verification_db.query(DataSubjectRequest).filter(
+            DataSubjectRequest.id == request_id
+        ).one()
+        assert pending_receipt.request_status == "approved_pending_fulfilment_assessment"
+    finally:
+        verification_db.close()
+
+    # The second reviewer can safely resume the same approved request even
+    # though the first attempt already removed both identity root rows.
+    retry_db = TestSessionLocal()
+    try:
+        result = fulfil_approved_deletion(
+            request_id,
+            deletion_payload,
+            deletion_reviewer_id,
+            retry_db,
+        )
+        assert result["status"] == "fulfilled"
+        assert result["fulfilment"]["operation"] == "deletion"
+        assert result["idempotent_replay"] is not True
+        receipt = retry_db.query(DataSubjectRequest).filter(
+            DataSubjectRequest.id == request_id
+        ).one()
+        assert receipt.request_status == "fulfilled"
+    finally:
+        retry_db.close()
