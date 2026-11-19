@@ -2202,9 +2202,9 @@ def prepare_handoff_draft(
                     query = query.where(table.c.is_active.is_(True))
                 if "superseded_by_assessment_id" in table.c:
                     query = query.where(table.c.superseded_by_assessment_id.is_(None))
-            if spec.get("current_only_column") in table.c:
+            if spec.get("current_only_column") and spec["current_only_column"] in table.c:
                 query = query.where(table.c[spec["current_only_column"]].is_(True))
-            if spec.get("open_end_column") in table.c:
+            if spec.get("open_end_column") and spec["open_end_column"] in table.c:
                 query = query.where(table.c[spec["open_end_column"]].is_(None))
             if spec.get("active_status_values"):
                 status_column = spec.get("active_status_column", "status")
