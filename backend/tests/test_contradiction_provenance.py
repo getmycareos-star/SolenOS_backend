@@ -433,6 +433,34 @@ def test_qualified_document_statements_do_not_create_hard_current_state_conflict
                 assertion_status="accepted",
             )
 
+        create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="legacy_document_field",
+                assertion_kind="current_state",
+                asserted_value="Earlier caregiver statement",
+                source_label="Existing caregiver report",
+                source_text="Existing source statement.",
+            ),
+        )
+        create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person.id,
+                subject_type="care_recipient",
+                subject_id=person.id,
+                field="legacy_document_field",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="Legacy document statement",
+                source_label="Older caregiver-reviewed document",
+                source_text="No structured statement qualifiers were stored.",
+            ),
+            assertion_status="accepted",
+        )
+
         db.flush()
         assert db.query(Contradiction).filter(
             Contradiction.person_id == person.id,
