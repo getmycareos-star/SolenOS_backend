@@ -3367,3 +3367,77 @@ def test_correction_recovery_worker_respects_live_lease_and_recovers_expired_rec
         assert calls["count"] == 2
     finally:
         teardown_db()
+
+
+def test_medication_review_repairs_nonpersisted_helper_status_before_commit(monkeypatch):
+    from sqlalchemy import text
+    from app.api import care_continuity as care_continuity_module
+    from app.models.care_continuity import CareAssertion
+
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        created = client.post(
+            "/api/v1/care-continuity/medications",
+            headers=headers,
+            json={
+                "name": "Metformin",
+                "dose": "500 mg",
+                "note": "Listed on the discharge papers",
+                "review_after_days": 30,
+            },
+        )
+        assert created.status_code == 201, created.text
+        medication_id = created.json()["medication_id"]
+
+        original_review = care_continuity_module.review_assertion_status
+
+        def simulate_stale_core_write(assertion_id, payload, request, db):
+            result = original_review(assertion_id, payload, request, db)
+            # Reproduce the multi-assertion ORM/Core synchronization failure:
+            # the helper's revision work runs, but its status write is lost.
+            db.execute(
+                text(
+                    "UPDATE care_assertions SET assertion_status = 'reported' "
+                    "WHERE id = :assertion_id AND person_id = :person_id"
+                ),
+                {
+                    "assertion_id": assertion_id,
+                    "person_id": "person-daily-test",
+                },
+            )
+            return result
+
+        monkeypatch.setattr(
+            care_continuity_module,
+            "review_assertion_status",
+            simulate_stale_core_write,
+        )
+        reviewed = client.post(
+            f"/api/v1/care-continuity/medications/{medication_id}/review",
+            headers=headers,
+            json={},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["record_status"] == "caregiver_reviewed_current_report"
+        assert {item["assertion_status"] for item in reviewed.json()["assertions"]} == {"accepted"}
+
+        db = TestingSessionLocal()
+        try:
+            stored = db.query(CareAssertion).filter_by(
+                person_id="person-daily-test",
+                subject_type="medication",
+                subject_id=medication_id,
+            ).all()
+            assert len(stored) == 3
+            assert all(row.assertion_status == "accepted" for row in stored)
+            assert all(
+                row.updated_by_caregiver_id == "caregiver-daily-test"
+                for row in stored
+            )
+        finally:
+            db.close()
+    finally:
+        teardown_db()
