@@ -2339,6 +2339,22 @@ def prepare_handoff_draft(
                 due_time = next((row.get(k) for k in spec.get("due_time_fields", ()) if row.get(k) is not None), None)
                 text = _display_text(row, spec["text_fields"])
                 details = {key: value for key in spec.get("detail_fields", ()) if (value := _detail_value(row.get(key))) is not None}
+                if table_name == "care_assertions" and isinstance(row.get("source_context"), dict):
+                    raw_context = row["source_context"]
+                    safe_context = {
+                        key: value for key in ("kind", "authority", "source_attribution", "conditionality")
+                        if (value := _detail_value(raw_context.get(key))) is not None
+                    }
+                    document_candidate = raw_context.get("document_candidate")
+                    if isinstance(document_candidate, dict):
+                        safe_candidate = {
+                            key: value for key in ("source_attribution", "conditionality", "document_type", "document_date")
+                            if (value := _detail_value(document_candidate.get(key))) is not None
+                        }
+                        if safe_candidate:
+                            safe_context["document_candidate"] = safe_candidate
+                    if safe_context:
+                        details["source_context"] = safe_context
                 if row.get("superseded_by_fact_id"):
                     details["fact_lifecycle"] = "superseded"
                 elif table_name == "care_facts":
