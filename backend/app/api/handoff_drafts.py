@@ -484,6 +484,8 @@ def _draft_response(draft: HandoffDraft) -> dict:
         "draft_id": draft.id,
         "purpose": draft.purpose,
         "audience": draft.audience,
+        "appointment_id": snapshot.get("appointment_id"),
+        "selected_appointment": snapshot.get("selected_appointment"),
         "source_of_truth": "living_care_record",
         "source_snapshot_id": snapshot.get("snapshot_id"),
         "source_snapshot_sha256": snapshot.get("snapshot_sha256"),
@@ -534,7 +536,7 @@ def _draft_content_hash(content: dict) -> str:
 
 
 def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
-    """Bind each Qwen paraphrase and its verbatim supporting quote to an LCR source."""
+    """Bind each generated or source-only briefing claim to its LCR source."""
     generation = content.get("generation") if isinstance(content, dict) else None
     sections = generation.get("sections") if isinstance(generation, dict) else []
     source_records = source_snapshot.get("source_records", []) if isinstance(source_snapshot, dict) else []
