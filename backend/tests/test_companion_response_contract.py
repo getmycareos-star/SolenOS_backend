@@ -60,6 +60,36 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_history_projection_ids_match_direct_recall_ids():
+    event_id = "event-sleep-1"
+    evidence_id = "evidence-sleep-1"
+    shared_event = "Shared LCR context: " + json.dumps({
+        "source_type": "events",
+        "source_id": event_id,
+        "record": {"id": event_id, "description": "Caregiver reported poor sleep."},
+    })
+    direct_event = "Person-scoped caregiver care-history report: " + json.dumps({
+        "source_type": "events",
+        "event_id": event_id,
+        "record": {"id": event_id, "description": "Caregiver reported poor sleep."},
+    })
+    shared_evidence = "Shared LCR context: " + json.dumps({
+        "source_type": "evidence",
+        "source_id": evidence_id,
+        "record": {"id": evidence_id, "source_text": "Poor sleep was reported."},
+    })
+    direct_evidence = "Original evidence: " + json.dumps({
+        "source_type": "evidence",
+        "evidence_id": evidence_id,
+        "record": {"id": evidence_id, "source_text": "Poor sleep was reported."},
+    })
+
+    assert collaboration._context_line_record_id(shared_event, "event_id") == event_id
+    assert collaboration._context_line_record_id(direct_event, "event_id") == event_id
+    assert collaboration._context_line_record_id(shared_evidence, "evidence_id") == evidence_id
+    assert collaboration._context_line_record_id(direct_evidence, "evidence_id") == evidence_id
+
+
 @pytest.mark.parametrize("query", [
     "What happened in 2025?",
     "Show me what happened during 2025",
