@@ -27,12 +27,14 @@ from app.services.caregiver_permissions import require_caregiver_permission
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.care_attention_intelligence import build_care_attention_assessment
+from app.services.care_attention_intelligence import build_care_attention_assessment, CARE_ATTENTION_POLICY_VERSION
 from app.services.care_continuity import get_freshness
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.change import Situation as SituationModel, Change, Baseline
+from app.models.significance import SignificanceAssessment
+from app.models.open_loop import OpenLoopRecord
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
@@ -3345,6 +3347,19 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "is_active": bool(change.is_active),
                 "superseded_by_change_id": change.superseded_by_change_id,
                 "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "significance_assessment_id": getattr(change, "significance_assessment_id", None),
+                "significance_assessment_status": significance_status_by_change_id.get(str(change.id), "not_recorded"),
+                "evidence_status": (
+                    getattr(getattr(significance_by_change_id.get(str(change.id)), "evidence_status", None), "value",
+                            getattr(significance_by_change_id.get(str(change.id)), "evidence_status", None))
+                    if significance_by_change_id.get(str(change.id)) else "unknown"
+                ),
+                "evidence_confidence": getattr(significance_by_change_id.get(str(change.id)), "evidence_confidence", None),
+                "significance_confidence": getattr(significance_by_change_id.get(str(change.id)), "significance_confidence", None),
+                "assessment_dimensions": list(getattr(significance_by_change_id.get(str(change.id)), "dimensions", None) or []),
+                "action_status": str(linked_follow_up_by_change_id[str(change.id)].status) if str(change.id) in linked_follow_up_by_change_id else "not_recorded",
+                "linked_follow_up_outcome_status": str(linked_follow_up_by_change_id[str(change.id)].outcome_status) if str(change.id) in linked_follow_up_by_change_id else "not_recorded",
+                "linked_follow_up_id": str(linked_follow_up_by_change_id[str(change.id)].id) if str(change.id) in linked_follow_up_by_change_id else None,
                 "attention_candidate": bool(change.attention_candidate),
                 "follow_up_candidate": bool(change.follow_up_candidate),
                 "confirmation_status": change.confirmation_status,
@@ -3470,6 +3485,110 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                     Evidence.person_id == person_id, Evidence.id.in_(source_record_ids)
                 ).all()
             }
+
+        # Keep evidence confidence, significance and follow-up state as separate
+        # persisted dimensions. Link each assessment to this exact change.
+        significance_table_available = inspector.has_table("significance_assessments")
+        significance_columns = {column["name"] for column in inspector.get_columns("significance_assessments")} if significance_table_available else set()
+        required_significance_columns = {
+            "id", "person_id", "subject_type", "subject_id", "target_type", "target_id",
+            "verdict", "evidence_status", "evidence_confidence", "significance_confidence",
+            "dimensions", "attention_candidate", "follow_up_candidate", "explanation",
+            "is_active", "superseded_by_assessment_id",
+        }
+        significance_schema_available = required_significance_columns.issubset(significance_columns)
+        significance_ids = sorted({
+            str(getattr(change, "significance_assessment_id", ""))
+            for change in active_change_rows if getattr(change, "significance_assessment_id", None)
+        })
+        significance_by_change_id = {}
+        significance_status_by_change_id = {}
+        for change in active_change_rows:
+            assessment_id = str(getattr(change, "significance_assessment_id", "") or "")
+            significance_status_by_change_id[str(change.id)] = (
+                "not_recorded" if not assessment_id
+                else "missing_or_inactive" if significance_schema_available
+                else "schema_unavailable"
+            )
+        if significance_schema_available and significance_ids:
+            significance_rows = db.query(
+                SignificanceAssessment.id, SignificanceAssessment.subject_type,
+                SignificanceAssessment.subject_id, SignificanceAssessment.target_type,
+                SignificanceAssessment.target_id, SignificanceAssessment.verdict,
+                SignificanceAssessment.evidence_status, SignificanceAssessment.evidence_confidence,
+                SignificanceAssessment.significance_confidence, SignificanceAssessment.dimensions,
+                SignificanceAssessment.attention_candidate, SignificanceAssessment.follow_up_candidate,
+                SignificanceAssessment.explanation,
+            ).filter(
+                SignificanceAssessment.person_id == person_id,
+                SignificanceAssessment.id.in_(significance_ids),
+                SignificanceAssessment.is_active.is_(True),
+                SignificanceAssessment.superseded_by_assessment_id.is_(None),
+            ).all()
+            assessment_by_id = {str(row.id): row for row in significance_rows}
+            for change in active_change_rows:
+                change_id = str(change.id)
+                assessment_id = str(getattr(change, "significance_assessment_id", "") or "")
+                assessment = assessment_by_id.get(assessment_id)
+                if assessment is None:
+                    continue
+                if (
+                    str(assessment.target_type or "") != "change"
+                    or str(assessment.target_id or "") != change_id
+                    or str(assessment.subject_type or "") != str(change.subject_type or "")
+                    or str(assessment.subject_id or "") != str(change.subject_id or "")
+                ):
+                    significance_status_by_change_id[change_id] = "target_mismatch"
+                    continue
+                significance_by_change_id[change_id] = assessment
+                significance_status_by_change_id[change_id] = "linked"
+
+        # Find the latest persisted follow-up for each change, scoped to this person.
+        open_loop_columns = {column["name"] for column in inspector.get_columns("open_loop_records")} if inspector.has_table("open_loop_records") else set()
+        required_open_loop_columns = {"id", "person_id", "source_type", "source_id", "status", "outcome_status", "updated_at", "created_at"}
+        linked_follow_up_by_change_id = {}
+        if required_open_loop_columns.issubset(open_loop_columns) and active_change_rows:
+            change_ids_for_follow_up = [str(change.id) for change in active_change_rows]
+            ranked_follow_ups = db.query(
+                OpenLoopRecord.id.label("id"),
+                OpenLoopRecord.source_id.label("source_id"),
+                OpenLoopRecord.status.label("status"),
+                OpenLoopRecord.outcome_status.label("outcome_status"),
+                OpenLoopRecord.updated_at.label("updated_at"),
+                func.row_number().over(
+                    partition_by=OpenLoopRecord.source_id,
+                    order_by=(desc(OpenLoopRecord.updated_at), desc(OpenLoopRecord.created_at), OpenLoopRecord.id.asc()),
+                ).label("row_number"),
+            ).filter(
+                OpenLoopRecord.person_id == person_id,
+                OpenLoopRecord.source_type == "persisted_change",
+                OpenLoopRecord.source_id.in_(change_ids_for_follow_up),
+            ).subquery()
+            latest_follow_ups = db.query(
+                ranked_follow_ups.c.id, ranked_follow_ups.c.source_id,
+                ranked_follow_ups.c.status, ranked_follow_ups.c.outcome_status,
+                ranked_follow_ups.c.updated_at,
+            ).filter(ranked_follow_ups.c.row_number == 1).all()
+            linked_follow_up_by_change_id = {str(row.source_id): row for row in latest_follow_ups}
+
+        change_state_by_id = {str(row.get("id")): row for row in change_source_state}
+        for change in active_change_rows:
+            change_id = str(change.id)
+            assessment = significance_by_change_id.get(change_id)
+            linked_follow_up = linked_follow_up_by_change_id.get(change_id)
+            state = change_state_by_id.get(change_id)
+            if state is not None:
+                state.update({
+                    "significance_assessment_id": getattr(change, "significance_assessment_id", None),
+                    "significance_assessment_status": significance_status_by_change_id.get(change_id, "not_recorded"),
+                    "significance_evidence_status": getattr(getattr(assessment, "evidence_status", None), "value", getattr(assessment, "evidence_status", None)) if assessment else None,
+                    "significance_evidence_confidence": assessment.evidence_confidence if assessment else None,
+                    "significance_confidence": assessment.significance_confidence if assessment else None,
+                    "significance_dimensions": list(assessment.dimensions or []) if assessment else [],
+                    "linked_follow_up_id": str(linked_follow_up.id) if linked_follow_up else None,
+                    "linked_follow_up_status": str(linked_follow_up.status) if linked_follow_up else "not_recorded",
+                    "linked_follow_up_outcome_status": str(linked_follow_up.outcome_status) if linked_follow_up else "not_recorded",
+                })
         for change in relevant_changes:
             baseline = baseline_by_id.get(str(change.baseline_id)) if change.baseline_id else None
             source_refs = _change_source_refs(
@@ -3511,6 +3630,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "expected_baseline_ids": baseline_ids,
                 "baseline_source_available": baseline_source_available,
                 "baseline_source_complete": baseline_source_complete,
+                "care_attention_policy_version": CARE_ATTENTION_POLICY_VERSION,
                 "canonical_conflicts": conflict_items,
             },
         ),
