@@ -341,6 +341,7 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "evidence_status": _text(change.get("evidence_status")) or "unknown",
             "evidence_confidence": change.get("evidence_confidence"),
             "significance_confidence": change.get("significance_confidence"),
+            "confidence_interpretation": "uncalibrated_score_not_probability",
             "assessment_dimensions": (
                 change.get("assessment_dimensions")
                 if isinstance(change.get("assessment_dimensions"), list) else []
