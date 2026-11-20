@@ -200,6 +200,14 @@ def _snapshot(loop):
         "status": loop.status, "outcome_status": loop.outcome_status,
         "owner_role": loop.owner_role, "owner_label": loop.owner_label,
         "source_type": loop.source_type, "source_id": loop.source_id,
+        "appointment_id": next((
+            item.get("appointment_id") for item in (loop.evidence or [])
+            if isinstance(item, dict) and item.get("appointment_id")
+        ), None),
+        "appointment_workspace_id": next((
+            item.get("record_id") for item in (loop.evidence or [])
+            if isinstance(item, dict) and item.get("record_type") == "appointment_workspace"
+        ), None),
         "evidence": loop.evidence or [], "uncertainty": loop.uncertainty,
         "missing_information": loop.missing_information or [], "options": loop.options or [],
         "request_text": loop.request_text, "recipient_label": loop.recipient_label,
