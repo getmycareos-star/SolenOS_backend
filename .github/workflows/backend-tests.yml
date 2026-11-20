@@ -43,7 +43,7 @@ concurrency:
   # Keep only the newest main-branch validation queued; obsolete revisions
   # must not starve verification of the current source.
   group: backend-tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test:
