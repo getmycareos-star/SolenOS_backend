@@ -1931,6 +1931,18 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
         )
         assert follow_up_changed.status_code == 200, follow_up_changed.text
         assert follow_up_changed.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+
+        after_closure = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert after_closure.status_code == 200, after_closure.text
+        closed_item = next(
+            item for item in after_closure.json()["assessment"]["care_attention"]["important_to_address"]
+            if item["record_id"] == change_id
+        )
+        assert closed_item["action_status"] == "closed"
+        assert closed_item["linked_follow_up_id"] == "freshness-linked-follow-up"
     finally:
         teardown_db()
 
