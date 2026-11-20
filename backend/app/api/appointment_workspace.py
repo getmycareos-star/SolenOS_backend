@@ -70,6 +70,7 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     ).first()
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    require_caregiver_permission(db, str(session.person_id), str(session.caregiver_id), "view_lcr")
     return str(session.person_id), str(session.caregiver_id)
 
 
