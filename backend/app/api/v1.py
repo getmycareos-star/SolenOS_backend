@@ -11,7 +11,11 @@ from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
-from app.services.capture_review import persist_capture_analysis, persist_source_grounded_daily_observations
+from app.services.capture_review import (
+    persist_capture_analysis,
+    persist_source_grounded_daily_observations,
+    persist_structured_daily_capture_observations,
+)
 from app.services.uncertainty import persist_source_clarification_questions
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
@@ -704,6 +708,37 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 existing_event.evidence_ids = linked_evidence_ids
                 db.commit()
                 db.refresh(existing_event)
+            structured_detail_count = 0
+            structured_details_status = "not_applicable"
+            if event_type in {"structured_daily_capture", "daily_care_entry"} and linked_evidence_ids:
+                existing_source_evidence = db.query(EvidenceModel).filter(
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.id == linked_evidence_ids[0],
+                    EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+                ).first()
+                if existing_source_evidence is not None:
+                    try:
+                        clean_detail = {
+                            key: value for key, value in existing_detail.items()
+                            if key not in {"capture_idempotency_key", "capture_request_fingerprint"}
+                        }
+                        structured_detail_count = persist_structured_daily_capture_observations(
+                            db,
+                            person_id=person_id,
+                            caregiver_id=caregiver_id,
+                            evidence_id=existing_source_evidence.id,
+                            source_event_id=existing_event.id,
+                            source_text=existing_source_evidence.source_text or "",
+                            detail=clean_detail,
+                            reported_at=existing_event.recorded_at,
+                        )
+                        db.commit()
+                        structured_details_status = "verified" if structured_detail_count else "not_applicable"
+                    except Exception:
+                        db.rollback()
+                        structured_details_status = "unavailable"
+                        logger.exception("Could not backfill structured Daily Care details for event %s", existing_event.id)
+
             existing_analysis = (
                 db.query(CaptureAnalysisModel)
                 .filter(
@@ -753,12 +788,30 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 except Exception:
                     db.rollback()
                     logger.exception("Could not backfill saved Daily Care clarification questions for event %s", existing_event.id)
+            replay_execution_status = (
+                dict(existing_analysis.execution_status or {})
+                if existing_analysis and isinstance(existing_analysis.execution_status, dict)
+                else {
+                    "source_preservation": "verified",
+                    "evidence": "verified" if linked_evidence_ids else "not_applicable",
+                    "extraction": (
+                        "available" if existing_analysis and existing_analysis.extraction_status == "available"
+                        else "failed"
+                    ),
+                    "assessment": "pending",
+                    "review": "required" if reviewable_candidates else "not_required",
+                    "reconciliation": "pending",
+                    "longitudinal_retrieval": "not_verified",
+                }
+            )
+            replay_execution_status["structured_details"] = structured_details_status
             return {
                 "success": True,
                 "id": existing_event.id,
                 "event_type": existing_event.event_type,
                 "recorded_at": existing_event.recorded_at,
                 "evidence_ids": linked_evidence_ids,
+                "structured_detail_count": structured_detail_count,
                 "idempotent_replay": True,
                 "qwen_extraction_status": existing_analysis.extraction_status if existing_analysis else (
                     "queued" if existing_job and existing_job.status in {"queued", "processing"}
@@ -775,22 +828,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     and existing_analysis.extraction_status == "available"
                     and reviewable_candidates
                 ),
-                "execution_status": (
-                    existing_analysis.execution_status
-                    if existing_analysis and existing_analysis.execution_status
-                    else {
-                        "source_preservation": "verified",
-                        "evidence": "verified" if linked_evidence_ids else "not_applicable",
-                        "extraction": (
-                            "available" if existing_analysis and existing_analysis.extraction_status == "available"
-                            else "failed"
-                        ),
-                        "assessment": "pending",
-                        "review": "required" if reviewable_candidates else "not_required",
-                        "reconciliation": "pending",
-                        "longitudinal_retrieval": "not_verified",
-                    }
-                ),
+                "execution_status": replay_execution_status,
                 "qwen_written_to_lcr": False,
             }
         detail["capture_request_fingerprint"] = capture_request_fingerprint
@@ -909,7 +947,12 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             evidence_kind="caregiver_report",
             epistemic_status="caregiver_reported",
             source_text=json.dumps(
-                {"original_capture": detail},
+                {
+                    "original_capture": {
+                        key: value for key, value in detail.items()
+                        if key not in {"capture_idempotency_key", "capture_request_fingerprint"}
+                    }
+                },
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -991,6 +1034,28 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             EvidenceModel.person_id == person_id,
             EvidenceModel.id == str(event.evidence_ids[0]),
         ).first()
+
+    structured_detail_count = 0
+    structured_details_status = "not_applicable"
+    if event_type in {"structured_daily_capture", "daily_care_entry"} and evidence is not None:
+        try:
+            structured_detail_count = persist_structured_daily_capture_observations(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=evidence.id,
+                source_event_id=event.id,
+                source_text=evidence.source_text or "",
+                detail=detail,
+                reported_at=event.recorded_at,
+            )
+            db.commit()
+            structured_details_status = "verified" if structured_detail_count else "not_applicable"
+        except Exception:
+            db.rollback()
+            structured_details_status = "unavailable"
+            logger.exception("Could not persist structured Daily Care details for event %s", event.id)
+
     if evidence is not None:
         # The caregiver-facing save ends after the event, evidence, analysis
         # placeholder and durable work item commit. Extraction, clarification,
@@ -998,6 +1063,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         execution_status = {
             "source_preservation": "verified",
             "evidence": "verified",
+            "structured_details": structured_details_status,
             "extraction": "queued",
             "assessment": "pending",
             "review": "not_required" if natural_language_update else "required",
@@ -1070,6 +1136,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     "event_type": event.event_type,
                     "recorded_at": event.recorded_at,
                     "evidence_ids": list(event.evidence_ids or []),
+                    "structured_detail_count": structured_detail_count,
                     "idempotent_replay": False if capture_idempotency_key else None,
                     "learning_pipeline_status": learning_pipeline_status,
                     "qwen_extraction_status": "queued",
@@ -1117,6 +1184,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             "event_type": event.event_type,
             "recorded_at": event.recorded_at,
             "evidence_ids": list(event.evidence_ids or []),
+            "structured_detail_count": structured_detail_count,
             "idempotent_replay": False if capture_idempotency_key else None,
             "learning_pipeline_status": learning_pipeline_status,
             "qwen_extraction_status": "unavailable",

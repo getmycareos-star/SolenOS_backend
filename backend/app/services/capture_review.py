@@ -1,7 +1,9 @@
 """Persist source-linked Daily Care extraction and safe, non-authoritative observations."""
 from __future__ import annotations
 
+import json
 import re
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -290,3 +292,179 @@ def persist_source_grounded_daily_observations(
     if created:
         db.flush()
     return created
+
+
+
+def _capture_timestamp(value: Any):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def persist_structured_daily_capture_observations(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    evidence_id: str,
+    source_event_id: str,
+    source_text: str,
+    detail: dict[str, Any] | None,
+    reported_at,
+) -> int:
+    """Persist deterministic, source-span-bound details already supplied in Daily Care.
+
+    This does not interpret free text or promote a caregiver report to a clinical
+    fact. It records the note, ratings, measurements and medication details
+    exactly as submitted, independently of optional model extraction.
+    """
+    if not isinstance(detail, dict) or not isinstance(source_text, str) or not source_text:
+        return 0
+
+    candidates: list[dict[str, Any]] = []
+
+    note = detail.get("notes")
+    if isinstance(note, str) and note.strip():
+        quoted_note = json.dumps(note, ensure_ascii=False)
+        marker = json.dumps("notes") + ":" + quoted_note
+        marker_start = source_text.find(marker)
+        if marker_start >= 0:
+            passage_start = marker_start + len(json.dumps("notes") + ":")
+            candidates.append({
+                "attribute": "caregiver_note",
+                "value_text": note,
+                "units": None,
+                "context": "Original wording shared by a caregiver; not independently verified.",
+                "source_passage": quoted_note,
+                "source_span_start": passage_start,
+                "source_span_end": passage_start + len(quoted_note),
+                "observed_at": None,
+            })
+
+    def append_structured_items(key: str, attribute_for, value_for, units_for, context_for, time_for):
+        items = detail.get(key)
+        if not isinstance(items, list):
+            return
+        cursor = 0
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            passage = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+            start = source_text.find(passage, cursor)
+            if start < 0:
+                # Do not invent a source span when the exact submitted fragment
+                # cannot be found in the immutable evidence text.
+                continue
+            end = start + len(passage)
+            cursor = end
+            attribute = attribute_for(raw)
+            value_text = value_for(raw)
+            if not isinstance(attribute, str) or not attribute.strip():
+                continue
+            if value_text is None or not str(value_text).strip():
+                continue
+            candidates.append({
+                "attribute": attribute[:160],
+                "value_text": str(value_text)[:2000],
+                "units": units_for(raw),
+                "context": context_for(raw),
+                "source_passage": passage,
+                "source_span_start": start,
+                "source_span_end": end,
+                "observed_at": _capture_timestamp(time_for(raw)),
+            })
+
+    def scale_attribute(raw):
+        axis = raw.get("axis")
+        return str(axis).strip().lower().replace(" ", "_") if isinstance(axis, str) and axis.strip() else None
+
+    append_structured_items(
+        "scales",
+        scale_attribute,
+        lambda raw: raw.get("score"),
+        lambda raw: "score",
+        lambda raw: str(raw.get("note")).strip() if isinstance(raw.get("note"), str) and raw.get("note").strip() else "Caregiver-entered rating; shown as reported.",
+        lambda raw: raw.get("observed_at"),
+    )
+
+    vital_attributes = {
+        "bp_systolic": "blood_pressure_systolic",
+        "bp_diastolic": "blood_pressure_diastolic",
+        "heart_rate": "heart_rate",
+        "temperature": "temperature",
+        "oxygen_saturation": "oxygen_saturation",
+        "weight": "weight",
+    }
+    append_structured_items(
+        "vitals",
+        lambda raw: vital_attributes.get(str(raw.get("vital_type") or "").strip().lower(), str(raw.get("vital_type") or "").strip().lower().replace(" ", "_") or None),
+        lambda raw: raw.get("value"),
+        lambda raw: str(raw.get("unit")).strip() if isinstance(raw.get("unit"), str) and raw.get("unit").strip() else None,
+        lambda raw: str(raw.get("note")).strip() if isinstance(raw.get("note"), str) and raw.get("note").strip() else "Caregiver-entered measurement; shown as reported and not independently checked.",
+        lambda raw: raw.get("measured_at"),
+    )
+
+    append_structured_items(
+        "medications",
+        lambda raw: "medication",
+        lambda raw: raw.get("medication_name") or raw.get("name"),
+        lambda raw: None,
+        lambda raw: "; ".join(
+            part for part in (
+                f"Dose recorded: {raw.get('dose')}" if raw.get("dose") not in (None, "") else "",
+                f"Status: {raw.get('status')}" if raw.get("status") not in (None, "") else "",
+                str(raw.get("note")).strip() if isinstance(raw.get("note"), str) and raw.get("note").strip() else "",
+            ) if part
+        ) or "Medication information entered by a caregiver.",
+        lambda raw: raw.get("observed_at") or raw.get("recorded_at"),
+    )
+
+    for candidate in candidates:
+        start = candidate["source_span_start"]
+        end = candidate["source_span_end"]
+        passage = candidate["source_passage"]
+        if source_text[start:end] != passage:
+            continue
+        existing = db.query(EvidenceObservation.id).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+            EvidenceObservation.source_span_start == start,
+            EvidenceObservation.source_span_end == end,
+            EvidenceObservation.extraction_method == "structured_daily_capture",
+        ).first()
+        if existing:
+            continue
+        db.add(EvidenceObservation(
+            person_id=person_id,
+            evidence_id=evidence_id,
+            observation_kind="caregiver_report",
+            epistemic_status="reported",
+            subject_label="Care recipient",
+            attribute=candidate["attribute"],
+            value_text=candidate["value_text"],
+            units=candidate["units"],
+            context=candidate["context"],
+            observed_at=candidate["observed_at"],
+            reported_at=reported_at,
+            observer_label="Caregiver",
+            observer_caregiver_id=caregiver_id,
+            observation_method="Daily Care form",
+            source_passage=passage,
+            source_span_start=start,
+            source_span_end=end,
+            extraction_method="structured_daily_capture",
+            extraction_version="structured-daily-capture-v1",
+            extraction_run_id=source_event_id,
+            created_by_caregiver_id=caregiver_id,
+        ))
+    db.flush()
+    return db.query(EvidenceObservation.id).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id == evidence_id,
+        EvidenceObservation.extraction_method == "structured_daily_capture",
+        EvidenceObservation.extraction_run_id == source_event_id,
+    ).count()
