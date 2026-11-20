@@ -157,7 +157,7 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
         assert "baseline-event-b" not in {item["id"] for item in payload["events"]}
 
         forbidden = client.get(
-            f"/change/baselines/{person.id}/comparison",
+            f"/api/v1/change/baselines/{person.id}/comparison",
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert forbidden.status_code == 403
