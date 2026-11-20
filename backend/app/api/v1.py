@@ -2341,6 +2341,8 @@ def update_appointment_lifecycle_endpoint(
     require_request_caregiver_permission(request, db, "add_evidence")
 
     if payload is not None:
+        previous_status = appointment.status
+        previous_scheduled_at = appointment.scheduled_at
         supplied = payload.model_fields_set
         rescheduled_at = payload.scheduled_at
         if rescheduled_at is not None and rescheduled_at.tzinfo is None:
@@ -2371,6 +2373,29 @@ def update_appointment_lifecycle_endpoint(
             appointment.completed_at = utc_now()
         elif appointment.status == "resolved" and appointment.resolved_at is None:
             appointment.resolved_at = utc_now()
+        if appointment.status != previous_status or appointment.scheduled_at != previous_scheduled_at:
+            caregiver_id = str(getattr(request.state, "scoped_caregiver_id", "") or "")
+            if not caregiver_id:
+                raise HTTPException(status_code=401, detail="A verified caregiver session is required.")
+            previous_date = previous_scheduled_at.isoformat() if previous_scheduled_at else "not recorded"
+            current_date = appointment.scheduled_at.isoformat() if appointment.scheduled_at else "not recorded"
+            db.add(CareEventModel(
+                person_id=appointment.person_id,
+                event_type="appointment_status_change",
+                status="recorded",
+                occurred_at=utc_now(),
+                title=f"Appointment status recorded: {appointment.title}",
+                description=(
+                    f"Caregiver recorded appointment status as {appointment.status}; "
+                    f"previous status was {previous_status}. Current appointment date: {current_date}; "
+                    f"previously recorded date: {previous_date}. This status report does not confirm "
+                    "an external booking or provider communication."
+                ),
+                evidence_ids=list(appointment.evidence_ids or []),
+                time_provenance="caregiver_recorded_status_change",
+                tags=["appointment", "status_change", str(appointment.status)],
+                created_by_caregiver_id=caregiver_id,
+            ))
         db.commit()
         db.refresh(appointment)
     else:
