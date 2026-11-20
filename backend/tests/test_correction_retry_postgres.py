@@ -186,3 +186,122 @@ def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(
             db.query(Person).filter(Person.id.in_([person_id, foreign_person_id])).delete(synchronize_session=False)
             db.commit()
         engine.dispose()
+
+
+def test_postgres_delta_replay_is_invalidated_by_a_later_correction():
+    """Repeated identical input reuses one run; a later correction forces a new comparison."""
+    from app.models.care_continuity import CareDeltaRun
+    from app.models.anonymous_session import AnonymousSession
+    from app.models.care import CareEvent, Caregiver, Correction, Person
+
+    import os
+    database_url = os.environ["DATABASE_URL"]
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = database_url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    suffix = uuid.uuid4().hex
+    person_id = f"delta-replay-person-{suffix}"
+    caregiver_id = f"delta-replay-caregiver-{suffix}"
+    raw_token = f"delta-replay-token-{uuid.uuid4().hex}"
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    event_id = f"delta-replay-event-{suffix}"
+    source_text = "Caregiver reports that overnight waking has increased."
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {raw_token}"}
+
+    with Session() as db:
+        db.add(Person(id=person_id, name="Delta replay integration person"))
+        db.flush()
+        db.add(Caregiver(
+            id=caregiver_id,
+            name="Delta replay caregiver",
+            relationship="family",
+            person_id=person_id,
+        ))
+        db.flush()
+        event = CareEvent(
+            id=event_id,
+            person_id=person_id,
+            event_type="caregiver_report",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=1),
+            title="Overnight waking report",
+            description=source_text,
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(event)
+        db.add(AnonymousSession(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        ))
+        db.commit()
+        event_date = event.occurred_at.isoformat()
+
+    payload = {
+        "person_id": person_id,
+        "event_date": event_date,
+        "source": "postgres_longitudinal_replay_acceptance",
+        "content": source_text,
+        "source_event_id": event_id,
+        "evidence_ids": [],
+        "persist": True,
+    }
+    first = client.post("/api/v1/care-delta/reconcile", headers=headers, json=payload)
+    assert first.status_code == 200, first.text
+    first_id = first.json()["provenance"]["delta_run_id"]
+
+    replay = client.post("/api/v1/care-delta/reconcile", headers=headers, json=payload)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["provenance"]["delta_run_id"] == first_id
+
+    with Session() as db:
+        assert db.query(CareDeltaRun).filter(
+            CareDeltaRun.person_id == person_id,
+            CareDeltaRun.source_event_id == event_id,
+            CareDeltaRun.source == payload["source"],
+        ).count() == 1
+
+    correction = client.post("/api/v1/corrections", headers=headers, json={
+        "person_id": person_id,
+        "caregiver_id": caregiver_id,
+        "target_type": "care_event",
+        "target_id": event_id,
+        "original_text": source_text,
+        "corrected_text": "Caregiver corrects the report: the frequency was not confirmed.",
+        "reason": "Later clarification of the original report.",
+        "idempotency_key": f"delta-replay-correction-{suffix}",
+    })
+    assert correction.status_code == 200, correction.text
+    assert correction.json()["processing_status"] == "completed"
+
+    # The correction is append-only: original source text remains intact. Its
+    # revision changes the comparison basis, so the earlier Delta run is stale.
+    runs_response = client.get(f"/api/v1/care-delta/runs/{person_id}", headers=headers)
+    assert runs_response.status_code == 200, runs_response.text
+    prior = next(item for item in runs_response.json() if item["id"] == first_id)
+    assert prior["source_freshness"]["status"] == "stale"
+    assert prior["source_freshness"]["changed_context_count"] > 0
+
+    refreshed = client.post("/api/v1/care-delta/reconcile", headers=headers, json=payload)
+    assert refreshed.status_code == 200, refreshed.text
+    second_id = refreshed.json()["provenance"]["delta_run_id"]
+    assert second_id != first_id, "a corrected care record must not reuse a Delta run from the earlier comparison basis"
+
+    with Session() as db:
+        assert db.query(CareDeltaRun).filter(
+            CareDeltaRun.person_id == person_id,
+            CareDeltaRun.source_event_id == event_id,
+            CareDeltaRun.source == payload["source"],
+        ).count() == 2
+        original = db.query(CareEvent).filter(CareEvent.id == event_id).one()
+        assert original.description == source_text
+        assert db.query(Correction).filter(
+            Correction.person_id == person_id,
+            Correction.target_id == event_id,
+        ).count() == 1
+    engine.dispose()
