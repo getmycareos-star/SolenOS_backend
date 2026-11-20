@@ -25,6 +25,13 @@ class CareReminderSnooze(BaseModel):
     snooze_until: datetime
 
 
+class CareReminderAssignmentEvent(BaseModel):
+    actor_caregiver_id: str
+    previous_assignee_caregiver_id: Optional[str] = None
+    assigned_to_caregiver_id: str
+    occurred_at: datetime
+
+
 class CareReminderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -34,6 +41,7 @@ class CareReminderRead(BaseModel):
     created_by_caregiver_id: str
     assigned_to_caregiver_id: Optional[str] = None
     version: int = 1
+    assignment_history: list[CareReminderAssignmentEvent] = Field(default_factory=list)
     title: str
     note: Optional[str] = None
     due_at: datetime
