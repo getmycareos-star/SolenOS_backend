@@ -4445,6 +4445,15 @@ def update_follow_up_link(
             table.c.id == follow_up_id,
             table.c.person_id == person_id,
         )).mappings().one()
+        _append_unified_core_source_revision(
+            db,
+            person_id,
+            caregiver_id,
+            "care_follow_up_links",
+            dict(updated),
+            change_kind="updated",
+            before_state=_jsonable(dict(current)),
+        )
         db.commit()
         return _jsonable(dict(updated))
     except HTTPException:
