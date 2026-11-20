@@ -2245,7 +2245,7 @@ def test_safety_audit_history_rejects_cross_record_person_id():
 
         client = authorized_client(person.id)
         response = client.get("/api/v1/safety/audit/safety-person-other")
-        assert response.status_code == 404
+        assert response.status_code == 403
     finally:
         teardown_db()
 
@@ -2470,13 +2470,13 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
         assert created.json()["evidence_ids"] == ["safety-scope-evidence"]
 
         forged_scope = client.post(
-            "/api/v1/escalations",
+            "/api/v1/safety/escalations",
             params={**params, "person_id": other_person.id, "affected_person_id": other_person.id},
         )
         assert forged_scope.status_code == 403, forged_scope.text
 
         cross_record_evidence = client.post(
-            "/api/v1/escalations",
+            "/api/v1/safety/escalations",
             params={**params, "evidence_ids": ["safety-scope-other-evidence"]},
         )
         assert cross_record_evidence.status_code == 404, cross_record_evidence.text
@@ -2484,13 +2484,13 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
         listed = client.get(f"/api/v1/safety/escalations/{person.id}")
         assert listed.status_code == 200, listed.text
         assert all(row["person_id"] == person.id for row in listed.json())
-        assert other_client.get(f"/api/v1/escalations/{person.id}").status_code == 403
+        assert other_client.get(f"/api/v1/safety/escalations/{person.id}").status_code == 403
         assert other_client.patch(
             f"/api/v1/safety/escalations/{escalation_id}",
             params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
         ).status_code == 404
         owner_update = client.patch(
-            f"/api/v1/escalations/{escalation_id}",
+            f"/api/v1/safety/escalations/{escalation_id}",
             params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
         )
         assert owner_update.status_code == 200, owner_update.text
@@ -2498,7 +2498,7 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
         assert client.get(f"/api/v1/safety/escalations/{other_person.id}").status_code == 403
 
         unauthenticated = TestClient(app)
-        denied = unauthenticated.get(f"/api/v1/escalations/{person.id}")
+        denied = unauthenticated.get(f"/api/v1/safety/escalations/{person.id}")
         assert denied.status_code in (401, 403), denied.text
     finally:
         teardown_db()
