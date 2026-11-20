@@ -15,6 +15,7 @@ def test_runtime_endpoint_inventory_expands_nested_routers_and_matches_product_r
     assert inventory["duplicate_method_paths"] == {}
     assert ("POST", "/api/v1/sessions/anonymous") in routes
     assert ("POST", "/api/v1/conversation/message") in routes
+    assert ("GET", "/api/v1/conversations") in routes
     assert ("GET", "/api/v1/care-network-state") in routes
     assert ("GET", "/api/v1/care-continuity/context") in routes
     assert not any(path == "/api/v1/community" or path.startswith("/api/v1/community/") for _, path in routes)
