@@ -811,3 +811,29 @@ def test_explicit_empty_member_permissions_deny_operations_without_legacy_fallba
         headers=member_headers,
     )
     assert denied.status_code == 403, denied.text
+
+
+def test_handoff_reads_require_explicit_manage_handoffs_permission():
+    client = TestClient(app)
+    primary = create_primary(client)
+    headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=primary["person"]["id"],
+            caregiver_id=primary["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr", "add_evidence"]
+        db.commit()
+    finally:
+        db.close()
+
+    for path in (
+        "/api/v1/handoffs/directory/recipients",
+        "/api/v1/handoffs/inbox",
+        "/api/v1/handoffs/outbox",
+    ):
+        response = client.get(path, headers=headers)
+        assert response.status_code == 403, (path, response.text)
+        assert "manage handoffs" in response.text.lower()
