@@ -284,7 +284,7 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
     now = datetime.now(timezone.utc)
     appointment = db.query(Appointment).filter(
         Appointment.person_id == person_id,
-        Appointment.status == "scheduled",
+        Appointment.status.in_(["scheduled", "upcoming", "today"]),
         Appointment.scheduled_at >= now,
     ).order_by(Appointment.scheduled_at.asc()).with_for_update().first()
     if appointment is None:
@@ -440,7 +440,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     # upcoming scheduled visit rather than the furthest future appointment.
     next_appointment_row = db.query(Appointment).filter(
         Appointment.person_id == person_id,
-        Appointment.status == "scheduled",
+        Appointment.status.in_(["scheduled", "upcoming", "today"]),
         Appointment.scheduled_at >= now,
     ).order_by(Appointment.scheduled_at.asc()).first()
     next_appointment = ({
