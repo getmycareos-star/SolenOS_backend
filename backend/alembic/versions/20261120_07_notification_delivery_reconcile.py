@@ -58,6 +58,73 @@ def _ensure_index(bind, table_name, column_name):
         raise RuntimeError(f"Failed to create {table_name}.{column_name} index")
 
 
+def _backfill_nullable_attempt_values(bind):
+    """Repair legacy nullable attempt fields without inventing delivery outcomes."""
+    null_created_at = bind.execute(sa.text(
+        "SELECT count(*) FROM notification_delivery_attempts WHERE created_at IS NULL"
+    )).scalar_one()
+    if null_created_at:
+        raise RuntimeError(
+            f"Cannot repair notification attempts: {null_created_at} rows have no created_at timestamp"
+        )
+
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET attempted_at = created_at WHERE attempted_at IS NULL"
+    ))
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET updated_at = created_at WHERE updated_at IS NULL"
+    ))
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET result = 'unknown_legacy' WHERE result IS NULL"
+    ))
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET metadata = '{}' WHERE metadata IS NULL"
+    ))
+
+    if bind.dialect.name == "sqlite":
+        missing = bind.execute(sa.text(
+            "SELECT id, notification_id FROM notification_delivery_attempts "
+            "WHERE attempt_number IS NULL ORDER BY notification_id, attempted_at, id"
+        )).all()
+        next_numbers = {}
+        for row in missing:
+            if row.notification_id not in next_numbers:
+                next_numbers[row.notification_id] = bind.execute(sa.text(
+                    "SELECT COALESCE(MAX(attempt_number), 0) + 1 "
+                    "FROM notification_delivery_attempts WHERE notification_id = :notification_id"
+                ), {"notification_id": row.notification_id}).scalar_one()
+            number = next_numbers[row.notification_id]
+            bind.execute(sa.text(
+                "UPDATE notification_delivery_attempts SET attempt_number = :number WHERE id = :id"
+            ), {"number": number, "id": row.id})
+            next_numbers[row.notification_id] = number + 1
+    else:
+        bind.execute(sa.text("""
+            WITH missing_attempts AS (
+                SELECT candidate.id,
+                       COALESCE((
+                           SELECT MAX(existing.attempt_number)
+                           FROM notification_delivery_attempts AS existing
+                           WHERE existing.notification_id = candidate.notification_id
+                       ), 0)
+                       + ROW_NUMBER() OVER (
+                           PARTITION BY candidate.notification_id
+                           ORDER BY COALESCE(candidate.attempted_at, candidate.created_at), candidate.id
+                       ) AS repaired_attempt_number
+                FROM notification_delivery_attempts AS candidate
+                WHERE candidate.attempt_number IS NULL
+            )
+            UPDATE notification_delivery_attempts AS target
+            SET attempt_number = missing_attempts.repaired_attempt_number
+            FROM missing_attempts
+            WHERE target.id = missing_attempts.id
+        """))
+
+
 def upgrade():
     bind = op.get_bind()
     inspector = inspect(bind)
@@ -124,54 +191,8 @@ def upgrade():
         raise RuntimeError(
             "Care notification delivery-attempt table is incomplete: " + ", ".join(missing)
         )
-    # Preserve historical attempts while repairing nullable legacy columns.
-    # Unknown historical results remain explicitly unknown; never relabel them
-    # as delivered or failed. Missing attempt numbers are assigned after the
-    # highest known attempt for that notification in deterministic time order.
-    null_created_at = bind.execute(sa.text(
-        "SELECT count(*) FROM notification_delivery_attempts WHERE created_at IS NULL"
-    )).scalar_one()
-    if null_created_at:
-        raise RuntimeError(
-            f"Cannot repair notification attempts: {null_created_at} rows have no created_at timestamp"
-        )
-
-    bind.execute(sa.text(
-        "UPDATE notification_delivery_attempts "
-        "SET attempted_at = created_at WHERE attempted_at IS NULL"
-    ))
-    bind.execute(sa.text(
-        "UPDATE notification_delivery_attempts "
-        "SET updated_at = created_at WHERE updated_at IS NULL"
-    ))
-    bind.execute(sa.text(
-        "UPDATE notification_delivery_attempts "
-        "SET result = 'unknown_legacy' WHERE result IS NULL"
-    ))
-    bind.execute(sa.text(
-        "UPDATE notification_delivery_attempts "
-        "SET metadata = '{}' WHERE metadata IS NULL"
-    ))
-    bind.execute(sa.text("""
-        WITH missing_attempts AS (
-            SELECT candidate.id,
-                   COALESCE((
-                       SELECT MAX(existing.attempt_number)
-                       FROM notification_delivery_attempts AS existing
-                       WHERE existing.notification_id = candidate.notification_id
-                   ), 0)
-                   + ROW_NUMBER() OVER (
-                       PARTITION BY candidate.notification_id
-                       ORDER BY COALESCE(candidate.attempted_at, candidate.created_at), candidate.id
-                   ) AS repaired_attempt_number
-            FROM notification_delivery_attempts AS candidate
-            WHERE candidate.attempt_number IS NULL
-        )
-        UPDATE notification_delivery_attempts AS target
-        SET attempt_number = missing_attempts.repaired_attempt_number
-        FROM missing_attempts
-        WHERE target.id = missing_attempts.id
-    """))
+    # Preserve historical attempt rows while enforcing the active storage contract.
+    _backfill_nullable_attempt_values(bind)
 
     attempt_columns = {
         column["name"]: column
