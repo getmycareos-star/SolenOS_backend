@@ -194,7 +194,11 @@ def review_qwen_assistance_proposal(
                 db,
                 person_id,
                 workflow="qwen_assistance_summary_review",
-                source_caregiver_id=caregiver_id,
+                # A Companion summary may cite reports from several caregivers.
+                # The proposal reviewer is not necessarily the source author;
+                # person scope and persisted event/evidence linkage are validated
+                # by the shared coordinator, while this endpoint validates the
+                # reviewer's own session and proposal ownership.
                 source_event_ids=event_ids,
                 source_evidence_ids=evidence_ids,
                 source_assertion_id=assertion_id,
