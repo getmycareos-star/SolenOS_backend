@@ -482,7 +482,7 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
 
             loop = client.post(
                 "/api/v1/open-loops",
-                headers=primary_headers,
+                headers=recipient_headers,
                 json={
                     "loop_type": "follow_up",
                     "title": f"Confirm appointment {suffix}",
@@ -494,10 +494,10 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
 
             responsibility = client.post(
                 "/api/v1/caregiver-responsibilities",
-                headers=primary_headers,
+                headers=recipient_headers,
                 json={
                     "person_id": person_id,
-                    "caregiver_id": primary_body["caregiver"]["profile_id"],
+                    "caregiver_id": recipient["caregiver_profile_id"],
                     "responsibility_type": "clinic_follow_up",
                     "scope": "Confirm the appointment with the practice",
                     "effective_start": "2026-11-20T09:00:00+00:00",
@@ -511,10 +511,10 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
 
             transfer = client.post(
                 "/api/v1/caregiver-access/responsibility-transfers",
-                headers=primary_headers,
+                headers=recipient_headers,
                 json={
                     "source_responsibility_id": source_id,
-                    "to_caregiver_profile_id": recipient["caregiver_profile_id"],
+                    "to_caregiver_profile_id": primary_body["caregiver"]["profile_id"],
                     "related_record_type": "open_loop",
                     "related_record_id": loop_id,
                     "reason": "The recipient accepted ongoing appointment coordination.",
@@ -525,33 +525,33 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
 
             pending = client.get(
                 "/api/v1/caregiver-access/responsibility-transfers",
-                headers=recipient_headers,
+                headers=primary_headers,
             )
             assert pending.status_code == 200, pending.text
             pending_item = next(item for item in pending.json() if item["id"] == transfer_id)
             assert pending_item["status"] == "pending"
 
-            before_acceptance = client.get("/api/v1/open-loops", headers=recipient_headers)
+            before_acceptance = client.get("/api/v1/open-loops", headers=primary_headers)
             assert before_acceptance.status_code == 200, before_acceptance.text
             assert not any(item["id"] == loop_id for item in before_acceptance.json()["items"])
 
             with Session() as db:
                 original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
                 assert original.status.value == "active"
-                assert original.caregiver_id == primary_body["caregiver"]["profile_id"]
+                assert original.caregiver_id == recipient["caregiver_profile_id"]
 
             accepted_transfer = client.post(
                 f"/api/v1/caregiver-access/responsibility-transfers/{transfer_id}/accept",
-                headers=recipient_headers,
+                headers=primary_headers,
             )
             assert accepted_transfer.status_code == 200, accepted_transfer.text
             assert accepted_transfer.json()["accepted"] is True
 
-            after_acceptance = client.get("/api/v1/open-loops", headers=recipient_headers)
+            after_acceptance = client.get("/api/v1/open-loops", headers=primary_headers)
             assert after_acceptance.status_code == 200, after_acceptance.text
             assigned_loop = next(item for item in after_acceptance.json()["items"] if item["id"] == loop_id)
-            assert assigned_loop["assigned_caregiver_id"] == recipient["caregiver_id"]
-            assert assigned_loop["caregiver_id"] == primary_body["caregiver"]["id"]
+            assert assigned_loop["assigned_caregiver_id"] == primary_body["caregiver"]["id"]
+            assert assigned_loop["caregiver_id"] == recipient["caregiver_id"]
 
             with Session() as db:
                 original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
@@ -566,9 +566,11 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
                 assert original.status.value == "historical"
                 assert original.effective_end is not None
                 assert replacement.status.value == "active"
-                assert replacement.caregiver_id == recipient["caregiver_profile_id"]
+                assert replacement.caregiver_id == primary_body["caregiver"]["profile_id"]
                 assert stored_transfer.status == "accepted"
                 assert stored_handoff.acceptance_status.value == "accepted"
+                assert stored_handoff.from_caregiver_id == recipient["caregiver_profile_id"]
+                assert stored_handoff.to_caregiver_id == primary_body["caregiver"]["profile_id"]
                 assert stored_handoff.is_completed is False
     finally:
         if Session and person_id:
