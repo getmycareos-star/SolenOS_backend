@@ -64,7 +64,7 @@ def test_s3_storage_writes_reads_verifies_and_deletes_original_binary(monkeypatc
         mime_type="application/pdf",
     )
     assert stored["storage_backend"] == "s3"
-    assert stored["content"] is None
+    assert stored["content"] == payload
     assert stored["storage_key"] == "care-records/person-1/documents/evidence-2"
     assert client.put_calls[0]["Metadata"]["sha256"] == hashlib.sha256(payload).hexdigest()
 
@@ -81,6 +81,34 @@ def test_s3_storage_writes_reads_verifies_and_deletes_original_binary(monkeypatc
         "Bucket": "solenos-care-documents",
         "Key": stored["storage_key"],
     }]
+
+
+def test_s3_object_can_be_restored_from_the_postgresql_recovery_copy(monkeypatch):
+    monkeypatch.setenv("DOCUMENT_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("DOCUMENT_S3_BUCKET", "solenos-care-documents")
+    client = FakeS3()
+    monkeypatch.setattr(storage, "_s3_client", lambda: client)
+    payload = b"backup recovery document"
+    stored = storage.store_document_binary(
+        person_id="person-2",
+        evidence_id="evidence-recovery",
+        data=payload,
+        mime_type="application/pdf",
+    )
+    row = SimpleNamespace(
+        evidence_id="evidence-recovery",
+        storage_backend="s3",
+        storage_key=stored["storage_key"],
+        content=stored["content"],
+        mime_type="application/pdf",
+        size_bytes=stored["size_bytes"],
+        sha256=stored["sha256"],
+    )
+    storage.delete_document_binary(row)
+    assert ("solenos-care-documents", stored["storage_key"]) not in client.objects
+    restored = storage.restore_document_binary_from_database(row)
+    assert restored == payload
+    assert storage.read_document_binary(row) == payload
 
 
 def test_s3_storage_fails_closed_when_bucket_credentials_are_missing(monkeypatch):
