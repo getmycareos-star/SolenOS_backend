@@ -2163,3 +2163,50 @@ def test_shared_only_handoff_projection_uses_enum_labels_and_fails_closed_withou
         dialect=postgresql.dialect()
     ))
     assert "WHERE false" in compiled_unscoped
+
+def test_tampered_lcr_snapshot_is_unknown_and_cannot_be_approved(client):
+    from app.models.privacy_delivery import HandoffDraft
+
+    test_client, session = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    prepared = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers=headers,
+        json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+    )
+    assert prepared.status_code == 200, prepared.text
+    draft_id = prepared.json()["draft_id"]
+    assert prepared.json()["source_freshness"]["status"] == "current"
+
+    db = TestSessionLocal()
+    try:
+        draft = db.query(HandoffDraft).filter(HandoffDraft.id == draft_id).one()
+        tampered_snapshot = dict(draft.source_snapshot)
+        tampered_snapshot["limitations"] = list(tampered_snapshot.get("limitations") or []) + [{
+            "source": "care_facts",
+            "status": "available",
+            "reason": "tampered snapshot content",
+        }]
+        draft.source_snapshot = tampered_snapshot
+        db.add(draft)
+        db.commit()
+    finally:
+        db.close()
+
+    retrieved = test_client.get(f"/api/v1/handoff-drafts/{draft_id}", headers=headers)
+    assert retrieved.status_code == 200, retrieved.text
+    assert retrieved.json()["source_freshness"]["status"] == "unknown"
+    assert retrieved.json()["source_freshness"]["reason"] == "source_snapshot_integrity_check_failed"
+
+    approval = test_client.post(
+        f"/api/v1/handoff-drafts/{draft_id}/approve",
+        headers=headers,
+        json={
+            "recipient_caregiver_ids": ["not-a-real-recipient"],
+            "scope": ["lcr_summary"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+            "reviewed_source_refs": [],
+            "semantic_review_acknowledged": True,
+        },
+    )
+    assert approval.status_code == 409, approval.text
