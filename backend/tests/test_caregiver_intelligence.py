@@ -951,3 +951,110 @@ def test_communication_not_handoff():
         assert data["content_summary"] == "Mom has an appointment tomorrow"
     finally:
         teardown_db()
+
+def test_responsibility_gap_cannot_be_created_as_already_resolved():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        client = get_test_client()
+        response = client.post(
+            "/api/v1/responsibility-gaps",
+            json={
+                "person_id": "person-1",
+                "responsibility_type": "medication",
+                "status": "resolved",
+                "resolution": "Marked complete without review",
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        assert response.status_code == 422, response.text
+    finally:
+        teardown_db()
+
+
+def test_responsibility_gap_last_known_caregiver_must_belong_to_same_person():
+    from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
+
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.add(Person(id="person-2", name="Unrelated person"))
+        db.add(Caregiver(id="caregiver-other-person", name="Other", email="other@example.com", relationship="Family", person_id="person-2"))
+        db.flush()
+        db.add(CaregiverProfileModel(id="profile-other-person", person_id="person-2", name="Other", relationship="Family"))
+        db.commit()
+        db.close()
+        client = get_test_client()
+        response = client.post(
+            "/api/v1/responsibility-gaps",
+            json={
+                "person_id": "person-1",
+                "responsibility_type": "medication",
+                "last_known_caregiver_id": "profile-other-person",
+            },
+        )
+        assert response.status_code == 404, response.text
+    finally:
+        teardown_db()
+
+
+def test_perspective_conflict_cannot_be_created_as_resolved():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        _, caregiver_a = create_test_profile("caregiver-sarah", "Sarah")
+        client_b, caregiver_b = create_test_profile("caregiver-john", "John")
+        response = client_b.post(
+            "/api/v1/perspective-conflicts",
+            json={
+                "person_id": "person-1",
+                "caregiver_a_id": caregiver_a,
+                "caregiver_b_id": caregiver_b,
+                "conflict_type": "observation_conflict",
+                "claim_a": "One caregiver reported an event.",
+                "claim_b": "Another caregiver reported a different account.",
+                "status": "resolved",
+                "resolution": "Automatically selected one report.",
+                "resolved_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        assert response.status_code == 422, response.text
+    finally:
+        teardown_db()
+
+
+def test_perspective_conflict_rejects_caregiver_from_another_person():
+    from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
+
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.add(Person(id="person-2", name="Unrelated person"))
+        db.add(Caregiver(id="caregiver-other-person", name="Other", email="other@example.com", relationship="Family", person_id="person-2"))
+        db.flush()
+        db.add(CaregiverProfileModel(id="profile-other-person", person_id="person-2", name="Other", relationship="Family"))
+        db.commit()
+        db.close()
+        client, caregiver_a = create_test_profile("caregiver-sarah", "Sarah")
+        response = client.post(
+            "/api/v1/perspective-conflicts",
+            json={
+                "person_id": "person-1",
+                "caregiver_a_id": caregiver_a,
+                "caregiver_b_id": "profile-other-person",
+                "conflict_type": "observation_conflict",
+                "claim_a": "First report.",
+                "claim_b": "Second report.",
+                "status": "unresolved",
+            },
+        )
+        assert response.status_code == 404, response.text
+    finally:
+        teardown_db()
+
