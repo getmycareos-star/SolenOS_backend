@@ -154,15 +154,37 @@ def database_schema_differences(bind=None):
         if missing_columns:
             differences.append(f"{table_name}: missing columns {', '.join(missing_columns)}")
 
-        type_mismatches = sorted(
-            column.name
+        def describe_schema_type(value):
+            affinity = getattr(value, "_type_affinity", type(value))
+            return {
+                "class": type(value).__name__,
+                "affinity": getattr(affinity, "__name__", str(affinity)),
+                "enum_labels": getattr(value, "enums", None),
+                "length": getattr(value, "length", None),
+                "precision": getattr(value, "precision", None),
+                "scale": getattr(value, "scale", None),
+            }
+
+        type_mismatch_details = sorted(
+            (
+                column.name,
+                describe_schema_type(column.type),
+                describe_schema_type(reflected_columns[column.name]["type"]),
+            )
             for column in table.columns
             if column.name in reflected_columns
-            and not _schema_column_types_compatible(\n                column.type, reflected_columns[column.name]["type"], target.dialect.name\n            )
+            and not _schema_column_types_compatible(
+                column.type, reflected_columns[column.name]["type"], target.dialect.name
+            )
         )
-        if type_mismatches:
+        if type_mismatch_details:
+            names = ", ".join(name for name, _, _ in type_mismatch_details)
+            details = "; ".join(
+                f"{name}: expected {expected}; actual {actual}"
+                for name, expected, actual in type_mismatch_details
+            )
             differences.append(
-                f"{table_name}: data types differ for {', '.join(type_mismatches)}"
+                f"{table_name}: data types differ for {names}; details: {details}"
             )
 
         expected_primary_key = tuple(column.name for column in table.primary_key.columns)
