@@ -256,6 +256,7 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db)):
 @router.get("/persons/{person_id}", response_model=Person)
 def get_person(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -292,6 +293,7 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
 @router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema])
 def list_caregivers(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -573,6 +575,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
     _require_session_scope(request, db, person_id, caregiver_id)
+    _require_full_record_access(request)
     capture_idempotency_key = payload.get("capture_idempotency_key")
     if capture_idempotency_key is not None and (
         not isinstance(capture_idempotency_key, str)
@@ -1428,6 +1431,7 @@ def create_event(event: CareEventCreate, request: Request, db: Session = Depends
     # This legacy event-ingestion route is still reachable by clients. Bind it
     # to the same server-issued person+caregiver capability as Daily Care.
     _require_session_scope(request, db, event.person_id, event.created_by_caregiver_id)
+    _require_full_record_access(request)
     _require_person_and_linked_caregiver(
         db, event.person_id, event.created_by_caregiver_id
     )
@@ -1473,6 +1477,7 @@ def create_event(event: CareEventCreate, request: Request, db: Session = Depends
 @router.get("/events/{person_id}", response_model=List[CareEventSchema])
 def list_events(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     return (
         db.query(CareEventModel)
         .filter(CareEventModel.person_id == person_id)
@@ -1484,6 +1489,7 @@ def list_events(person_id: str, request: Request, db: Session = Depends(get_db))
 @router.post("/insights", response_model=InsightSchema)
 def create_insight(insight: InsightCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, insight.person_id)
+    _require_full_record_access(request)
     person = db.query(PersonModel).filter(PersonModel.id == insight.person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -1531,6 +1537,7 @@ def create_insight(insight: InsightCreate, request: Request, db: Session = Depen
 @router.get("/insights/{person_id}", response_model=List[InsightSchema])
 def list_insights(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     return (
         db.query(InsightModel)
         .filter(InsightModel.person_id == person_id, InsightModel.is_active)
@@ -1740,6 +1747,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
 @router.post("/corrections", response_model=CorrectionSchema)
 def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
+    _require_full_record_access(request)
     if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
         raise HTTPException(status_code=403, detail="This caregiver can review documents, not correct other care information.")
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
@@ -1821,6 +1829,7 @@ def retry_correction(
     db: Session = Depends(get_db),
 ):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
         raise HTTPException(status_code=403, detail="This caregiver can review documents, not process care corrections.")
     correction_row = db.query(CorrectionModel).filter(
@@ -1836,6 +1845,7 @@ def retry_correction(
 @router.get("/corrections/{person_id}", response_model=List[CorrectionSchema])
 def list_corrections(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     return (
         db.query(CorrectionModel)
         .filter(CorrectionModel.person_id == person_id)
@@ -1847,6 +1857,7 @@ def list_corrections(person_id: str, request: Request, db: Session = Depends(get
 @router.post("/observations", response_model=ObservationSchema)
 def create_observation(observation: ObservationCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, observation.person_id, observation.caregiver_id)
+    _require_full_record_access(request)
     # Validate referential integrity before persisting an observation.
     person = db.query(PersonModel).filter(PersonModel.id == observation.person_id).first()
     if not person:
@@ -1898,6 +1909,7 @@ def create_observation(observation: ObservationCreate, request: Request, db: Ses
 @router.get("/observations/{person_id}", response_model=List[ObservationSchema])
 def list_observations(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     return (
         db.query(ObservationModel)
         .filter(ObservationModel.person_id == person_id)
@@ -1909,6 +1921,7 @@ def list_observations(person_id: str, request: Request, db: Session = Depends(ge
 @router.get("/observations/{person_id}/trends", response_model=List[ObservationTrend])
 def get_observation_trends(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     engine = LearningEngine(db)
     return engine.get_observation_trends(person_id)
 
@@ -1916,6 +1929,7 @@ def get_observation_trends(person_id: str, request: Request, db: Session = Depen
 @router.post("/reasoning-memory", response_model=ReasoningMemorySchema)
 def create_reasoning_memory(memory: ReasoningMemoryCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, memory.person_id)
+    _require_full_record_access(request)
     db_memory = ReasoningMemoryModel(**memory.model_dump())
     db.add(db_memory)
     db.commit()
@@ -1926,6 +1940,7 @@ def create_reasoning_memory(memory: ReasoningMemoryCreate, request: Request, db:
 @router.get("/reasoning-memory/{person_id}", response_model=List[ReasoningMemorySchema])
 def list_reasoning_memory(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     return (
         db.query(ReasoningMemoryModel)
         .filter(
@@ -1940,6 +1955,7 @@ def list_reasoning_memory(person_id: str, request: Request, db: Session = Depend
 @router.get("/reasoning/{person_id}/summary", response_model=ReasoningSummary)
 def get_reasoning_summary(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     engine = LearningEngine(db)
     return engine.get_reasoning_summary(person_id)
 
@@ -1947,6 +1963,7 @@ def get_reasoning_summary(person_id: str, request: Request, db: Session = Depend
 @router.get("/learning-events/{person_id}", response_model=List[LearningEventSchema])
 def list_learning_events(person_id: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    _require_full_record_access(request)
     return (
         db.query(LearningEventModel)
         .filter(LearningEventModel.person_id == person_id)
@@ -1969,6 +1986,7 @@ def record_feedback(
     # write endpoint. Resolve identity from the bearer session and require the
     # caregiver's persisted opt-in before recording or learning from any detail.
     session = _require_session_scope(request, db, person_id, caregiver_id)
+    _require_full_record_access(request)
     consent = (
         db.query(ConsentRecord)
         .filter_by(person_id=session.person_id, caregiver_id=session.caregiver_id)
