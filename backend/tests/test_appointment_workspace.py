@@ -89,7 +89,7 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
             VALUES
               ('owner-fact', :owner_id, 'person', :owner_id, 'sleep_pattern', 'Caregiver-reported sleep changes', 'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
               ('other-fact', :other_id, 'person', :other_id, 'private_detail', 'Other person private care detail', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
+        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"], "decision_outcome_id": decision_outcome_id, "other_outcome_id": other_outcome_id})
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
     response = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
@@ -2803,6 +2803,9 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
 
 def test_current_care_projection_exposes_persisted_outcomes_outside_attention_limit(client):
     test_client, owner, other = client
+    decision_outcome_id = str(uuid.uuid4())
+    other_outcome_id = str(uuid.uuid4())
+    action_outcome_id = str(uuid.uuid4())
     with engine.begin() as connection:
         connection.exec_driver_sql("""
             CREATE TABLE IF NOT EXISTS decision_outcomes (
@@ -2821,15 +2824,15 @@ def test_current_care_projection_exposes_persisted_outcomes_outside_attention_li
             INSERT INTO decision_outcomes
               (id, person_id, decision_id, outcome_status, description, evidence_ids, is_intended_outcome, created_at)
             VALUES
-              ('owner-decision-outcome', :owner_id, 'owner-decision', 'outcome_reported', 'Caregiver recorded the result', '[]', 0, CURRENT_TIMESTAMP),
-              ('other-decision-outcome', :other_id, 'other-decision', 'outcome_reported', 'PRIVATE OTHER PERSON RESULT', '[]', 0, CURRENT_TIMESTAMP)
+              (:decision_outcome_id, :owner_id, 'owner-decision', 'outcome_reported', 'Caregiver recorded the result', '[]', 0, CURRENT_TIMESTAMP),
+              (:other_outcome_id, :other_id, 'other-decision', 'outcome_reported', 'PRIVATE OTHER PERSON RESULT', '[]', 0, CURRENT_TIMESTAMP)
         """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
         connection.execute(text("""
             INSERT INTO care_action_outcomes
               (id, person_id, action_id, action_type, outcome_status, notes, correction_text, evidence_ids, created_by_caregiver_id, created_at)
             VALUES
-              ('owner-action-outcome', :owner_id, 'owner-action', 'care_action', 'outcome_attested', 'Family caregiver recorded what happened', NULL, '[]', :caregiver_id, CURRENT_TIMESTAMP)
-        """), {"owner_id": owner["person"]["id"], "caregiver_id": owner["caregiver"]["id"]})
+              (:action_outcome_id, :owner_id, 'owner-action', 'care_action', 'outcome_attested', 'Family caregiver recorded what happened', NULL, '[]', :caregiver_id, CURRENT_TIMESTAMP)
+        """), {"owner_id": owner["person"]["id"], "caregiver_id": owner["caregiver"]["id"], "action_outcome_id": action_outcome_id})
 
     response = test_client.get(
         "/api/v1/care-continuity/current-care?limit_per_source=1",
@@ -2838,9 +2841,9 @@ def test_current_care_projection_exposes_persisted_outcomes_outside_attention_li
     assert response.status_code == 200, response.text
     body = response.json()
     outcomes = body["outcomes"]
-    assert {item["id"] for item in outcomes} == {"owner-decision-outcome", "owner-action-outcome"}
-    decision = next(item for item in outcomes if item["id"] == "owner-decision-outcome")
-    action = next(item for item in outcomes if item["id"] == "owner-action-outcome")
+    assert {item["id"] for item in outcomes} == {decision_outcome_id, action_outcome_id}
+    decision = next(item for item in outcomes if item["id"] == decision_outcome_id)
+    action = next(item for item in outcomes if item["id"] == action_outcome_id)
     assert decision["related_record_type"] == "care_decision"
     assert decision["related_record_id"] == "owner-decision"
     assert action["related_record_type"] == "care_action"
