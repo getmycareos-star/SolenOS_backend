@@ -2477,3 +2477,65 @@ def test_documents_only_member_cannot_read_or_write_appointment_workspace(client
         json={"expected_version": 1, "payload": {"visit_purpose": "Unauthorized edit"}, "change_reason": "Unauthorized edit attempt"},
     )
     assert denied_update.status_code == 403, denied_update.text
+
+
+def test_appointment_preparation_brief_includes_person_scoped_unresolved_follow_ups(client):
+    test_client, owner, other = client
+    db = TestSessionLocal()
+    try:
+        db.add_all([
+            OpenLoopRecord(
+                person_id=owner["person"]["id"],
+                caregiver_id=owner["caregiver"]["id"],
+                loop_type="follow_up",
+                title="Call clinic about pending result",
+                description="Check whether the test result is available",
+                status="open",
+                source_fingerprint="a" * 64,
+                owner_role="unassigned",
+                owner_label=None,
+            ),
+            OpenLoopRecord(
+                person_id=owner["person"]["id"],
+                caregiver_id=owner["caregiver"]["id"],
+                loop_type="follow_up",
+                title="Clarify transport arrangement",
+                description="Transport arrangement still needs clarification",
+                status="blocked",
+                source_fingerprint="b" * 64,
+            ),
+            OpenLoopRecord(
+                person_id=owner["person"]["id"],
+                caregiver_id=owner["caregiver"]["id"],
+                loop_type="follow_up",
+                title="Already completed follow-up",
+                description="This item is closed",
+                status="closed",
+                source_fingerprint="c" * 64,
+            ),
+            OpenLoopRecord(
+                person_id=other["person"]["id"],
+                caregiver_id=other["caregiver"]["id"],
+                loop_type="follow_up",
+                title="Other person's private follow-up",
+                description="Must not appear in this visit brief",
+                status="open",
+                source_fingerprint="d" * 64,
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    titles = [item["title"] for item in body["open_loops"]]
+    assert "Call clinic about pending result" in titles
+    assert "Clarify transport arrangement" in titles
+    assert "Already completed follow-up" not in titles
+    assert "Other person's private follow-up" not in titles
+    assert body["source_coverage"]["open_loops"] == "available"
+    assert body["source_completeness"]["open_loops"]["retrieval_complete"] is True
+    assert all(item["interpretation_limit"] for item in body["open_loops"])
