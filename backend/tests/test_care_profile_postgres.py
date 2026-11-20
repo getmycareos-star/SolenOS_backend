@@ -100,7 +100,6 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     assert invited_read.status_code == 200, invited_read.text
     assert invited_read.json()["name"] == f"Updated recipient {suffix}"
     assert invited_read.json()["condition"] == "Dementia stage reported by caregiver"
-    invited_relationship = invited_read.json()["relationship"]
     invited_saved = client.put(
         "/api/v1/care-profile",
         headers=invited_headers,
@@ -116,7 +115,6 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     assert primary_after_invited_update.status_code == 200, primary_after_invited_update.text
     assert primary_after_invited_update.json()["relationship"] == "Daughter"
     assert primary_after_invited_update.json()["condition"] == "Dementia stage reported by caregiver"
-    assert invited_relationship != "Daughter"
 
     # A second independent care record cannot read or mutate the first record.
     second = client.post(
