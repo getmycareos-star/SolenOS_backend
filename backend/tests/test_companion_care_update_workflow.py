@@ -374,6 +374,36 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         assert current_care.status_code == 200, current_care.text
         assert any(item.get("id") == assertion_id for item in current_care.json().get("items", []))
 
+        # Rejection is also a terminal, idempotent review receipt and must never
+        # create a CareAssertion.
+        second_source = "She did not finish lunch yesterday."
+        second_message = send(client, first, second_source)
+        assert second_message.status_code == 200, second_message.text
+        second_message_id = second_message.json()["source_message_id"]
+        second_created = client.post(
+            f"/api/v1/companion/care-updates/from-message/{second_message_id}",
+            headers=headers,
+            json={"confirm_care_report": True},
+        )
+        assert second_created.status_code == 200, second_created.text
+        second_proposal_id = second_created.json()["proposal"]["id"]
+        rejected = review(client, first, second_proposal_id, {"decision": "reject"})
+        assert rejected.status_code == 200, rejected.text
+        assert rejected.json()["status"] == "rejected"
+        assert rejected.json()["decision"] == "reject"
+        assert rejected.json()["written_to_lcr"] is False
+        rejected_replay = review(client, first, second_proposal_id, {"decision": "reject"})
+        assert rejected_replay.status_code == 200, rejected_replay.text
+        assert rejected_replay.json()["idempotent_replay"] is True
+        assert rejected_replay.json()["status"] == "rejected"
+        assert rejected_replay.json()["decision"] == "reject"
+        assert rejected_replay.json()["written_to_lcr"] is False
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 1
+        finally:
+            db.close()
+
         prompt_count_before_readback = len(captured_prompts)
         follow_up = client.post(
             "/api/v1/conversation/message",
