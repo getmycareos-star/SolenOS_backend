@@ -482,7 +482,7 @@ class CaregiverIntelligenceService:
         active_handoffs = self.get_pending_handoffs(person_id)
         gaps = self.get_open_gaps(person_id)
         conflicts = self.get_conflicts(person_id)
-        duplicates = self.get_duplicate_actions(person_id)
+        duplicates = [item for item in self.get_duplicate_actions(person_id) if item.status == DuplicateActionStatus.POTENTIAL_DUPLICATE]
         caregivers = [self.get_caregiver_summary(person_id, p.id, include_private=False) for p in profiles]
         return MultiCaregiverSummary(
             person_id=person_id,
