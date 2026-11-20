@@ -26,7 +26,6 @@ from app.models.qwen_background_job import QwenBackgroundJob
 import app.api.daily_care_intelligence as daily_care_intelligence
 import app.api.collaboration as collaboration
 import app.services.qwen_background_worker as qwen_background_worker
-import app.services.care_continuity_execution as care_continuity_execution
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
 
@@ -244,11 +243,6 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
 
             monkeypatch.setattr(
                 qwen_background_worker, "extract_review_candidates", fake_capture_extraction
-            )
-            monkeypatch.setattr(
-                care_continuity_execution,
-                "execute_care_continuity_reconciliation",
-                lambda *args, **kwargs: {"run_id": "ci-reconciliation"},
             )
             assert asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id)) is True
             with SessionLocal() as db:
