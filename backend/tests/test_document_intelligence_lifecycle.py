@@ -171,6 +171,18 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["written_to_lcr"] is False
 
+        qualifier_dropping_correction = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 0,
+                "decision": "correct",
+                "corrected_subject": "Metformin",
+                "corrected_observation": "Metformin 1000 mg twice daily.",
+            },
+        )
+        assert qualifier_dropping_correction.status_code == 409, qualifier_dropping_correction.text
+
         corrected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
@@ -481,7 +493,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
-    quote = "Metformin 1000 mg twice daily. Event date 2026-10-12. Recorded on 2026-10-13."
+    quote = "The patient has not been taking Metformin 1000 mg twice daily. Event date 2026-10-12. Recorded on 2026-10-13."
     source = f"[Page 1]\nMedication reconciliation: {quote}"
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
@@ -522,7 +534,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
                 "candidate_index": 0,
                 "decision": "correct",
                 "corrected_subject": "Metformin",
-                "corrected_observation": "Metformin 1000 mg twice daily.",
+                "corrected_observation": quote,
             },
         )
         assert corrected.status_code == 200, corrected.text
@@ -545,15 +557,15 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
             assert len(review_events) == 2
             assert [event.decision for event in review_events] == ["correct", "accept"]
             assert review_events[0].before_state["observation"] == quote
-            assert review_events[0].after_state["observation"] == "Metformin 1000 mg twice daily."
+            assert review_events[0].after_state["observation"] == quote
             assert review_events[0].after_state["source_quote"] == quote
-            assert review_events[1].before_state["observation"] == "Metformin 1000 mg twice daily."
+            assert review_events[1].before_state["observation"] == quote
             assertion = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"]
             ).one()
             assert assertion.field == "medication"
             assert "Strength: 1000 mg" in assertion.asserted_value
-            assert "Dosage instructions: Metformin 1000 mg twice daily" in assertion.asserted_value
+            assert "Dosage instructions: The patient has not been taking Metformin 1000 mg twice daily" in assertion.asserted_value
             assert quote == assertion.source_text
             assert "Event date: 2026-10-12" in assertion.asserted_value
             assert "Source-recorded date: 2026-10-13" in assertion.asserted_value

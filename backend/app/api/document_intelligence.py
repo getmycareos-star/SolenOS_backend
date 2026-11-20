@@ -1444,13 +1444,13 @@ def review_document_candidate(
             or not quote
             or quote not in (analysis.source_text or "")
             or subject.casefold() not in quote.casefold()
-            or observation.casefold() not in quote.casefold()
+            or observation != quote
         ):
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "A document-derived correction must remain directly supported by its preserved source quotation. "
-                    "Record new caregiver-provided information as a separate care update instead."
+                    "A document-derived correction must preserve the complete source quotation, including negation, "
+                    "time qualifiers, conditions and attribution. Record new caregiver-provided information as a separate care update."
                 ),
             )
         candidate["subject"] = subject[:120]
