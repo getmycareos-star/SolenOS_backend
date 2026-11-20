@@ -1486,6 +1486,7 @@ def main():
         # and snapshot invalidation through the real PostgreSQL-backed HTTP path.
         care_change_id = str(uuid.uuid4())
         significance_assessment_id = str(uuid.uuid4())
+        initial_significance_assessment_id = significance_assessment_id
         linked_follow_up_id = str(uuid.uuid4())
         with SessionLocal() as db:
             db.add(SignificanceAssessment(
