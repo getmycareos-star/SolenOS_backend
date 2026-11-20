@@ -2448,7 +2448,7 @@ def current_care_projection(
             name: {"status": value.get("status"), "returned_count": value.get("returned_count", 0), "has_more": value.get("has_more", False)}
             for name, value in sources.items()
         },
-        "notice": "This is a bounded record view, not a clinical conclusion. Conflicting claims remain separate; unavailable sources may make this view incomplete.",
+        "notice": "This summary uses the care information currently available. Different reports are kept separate when they do not agree. It is not a diagnosis or medical advice.",
     }
 
 

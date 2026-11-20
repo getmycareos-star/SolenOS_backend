@@ -423,23 +423,23 @@ def evaluate_longitudinal_interpretations(
         change_kind = str(item.get("change_type") or item.get("classification") or "").casefold()
         if invalid_reference_ids:
             status = "unsupported"
-            justification = "One or more linked source records could not be verified for this care record."
+            justification = "SolenOS could not confirm that all linked notes belong to this care record."
         elif change_kind == "conflicting" or item.get("classification") == "conflicting":
             if len(reference_ids) >= 2:
                 status = "conflicting"
-                justification = "Competing reports are preserved; the evaluator does not choose which report is correct."
+                justification = "The reports do not agree. SolenOS keeps both and does not choose which one is correct."
             else:
                 status = "insufficient_evidence"
-                justification = "The disagreement does not have two independently verified source records."
+                justification = "There are not two separately confirmed sources to help resolve the difference."
         elif explicit_stale:
             status = "stale_evidence"
-            justification = "The linked source is explicitly marked historical or requiring confirmation."
+            justification = "The linked information is marked as older or still needing confirmation."
         elif not reference_ids:
             status = "insufficient_evidence"
-            justification = "No verifiable source record is linked to this interpretation."
+            justification = "No supporting note or document is linked to this explanation."
         elif item.get("evidence_supported") is not True or item.get("source_reference_status") not in (None, "matched"):
             status = "unsupported"
-            justification = "The linked records do not satisfy the source-verification requirement."
+            justification = "The linked information has not been checked enough to support this conclusion."
         elif item.get("claim_supported") is True and item.get("certainty") in {"candidate", "supported"}:
             baseline_value = item.get("baseline_coverage_status")
             current_value = item.get("current_coverage_status")
@@ -448,13 +448,13 @@ def evaluate_longitudinal_interpretations(
             complete = {"covered", "complete", "full", "sufficient"}
             if (baseline and baseline not in complete) or (current and current not in complete):
                 status = "partially_supported"
-                justification = "Source records are linked, but the comparison window is not fully covered."
+                justification = "The linked information is available, but it does not cover the full period being compared."
             else:
                 status = "supported"
-                justification = "Source records are independently verified and existing deterministic comparison checks passed; this is not a clinical conclusion."
+                justification = "The linked information supports this change, but it does not establish a medical diagnosis."
         else:
             status = "partially_supported"
-            justification = "Some source support exists, but the interpretation has not passed every support check."
+            justification = "Some information supports this change, but there are still details to check."
 
         item["interpretation_status"] = status
         item["interpretation_caregiver_visible"] = status in {
@@ -1952,7 +1952,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             for item in delta_claims
         ) else "some_findings_unmatched" if delta_claims else "no_findings",
         "claims": delta_claims,
-        "interpretation_limit": "A matched excerpt identifies its source. Deterministic state checks do not establish clinical truth, independent corroboration, or causation.",
+        "interpretation_limit": "The quoted wording is linked to its original note. This does not prove that the information is true, comes from a separate source or explains what caused the change.",
     }
 
     def loop_provenance(item: dict[str, Any]) -> tuple[list[str], list[dict[str, str]]]:
