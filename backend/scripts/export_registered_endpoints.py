@@ -102,6 +102,9 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
         dependant = getattr(context, "dependant", None) or route.dependant
         effective_path = getattr(context, "path", route.path)
         effective_methods = getattr(context, "methods", route.methods)
+        effective_tags = getattr(context, "tags", route.tags)
+        effective_include_in_schema = getattr(context, "include_in_schema", route.include_in_schema)
+        effective_deprecated = getattr(context, "deprecated", route.deprecated)
         module = getattr(endpoint, "__module__", "unknown")
         handler = getattr(endpoint, "__qualname__", getattr(endpoint, "__name__", "unknown"))
         for method in sorted(effective_methods or []):
@@ -111,13 +114,13 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
                 {
                     "method": method,
                     "operation_id": route.operation_id,
-                    "include_in_schema": route.include_in_schema,
-                    "deprecated": bool(route.deprecated),
+                    "include_in_schema": effective_include_in_schema,
+                    "deprecated": bool(effective_deprecated),
                     "path": effective_path,
                     "name": route.name,
                     "router_module": module,
                     "handler": handler,
-                    "tags": sorted(route.tags or []),
+                    "tags": sorted(effective_tags or []),
                     "request_model": _model_name(
                         getattr(getattr(route, "body_field", None), "type_", None)
                     ),
