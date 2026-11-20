@@ -31,6 +31,22 @@ def test_schema_verifier_reports_missing_columns():
         engine.dispose()
 
 
+def test_schema_verifier_reports_data_type_and_primary_key_drift():
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "CREATE TABLE persons (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"
+            ))
+        differences = database_schema_differences(engine)
+        assert any(
+            item.startswith("persons: data types differ") and "id" in item
+            for item in differences
+        )
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_reports_missing_indexes():
     from sqlalchemy import inspect
 
