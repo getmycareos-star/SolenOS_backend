@@ -17,6 +17,7 @@ from app.models.privacy_delivery import AuditLogEvent
 from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus, HandoffAcceptanceStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.api.accounts import _hash_password, _validate_email
+from app.services.caregiver_permissions import CAREGIVER_PERMISSION_KEYS, DEFAULT_FAMILY_PERMISSIONS
 
 router = APIRouter(prefix="/caregiver-access", tags=["caregiver access"])
 SESSION_TTL_DAYS = 365
@@ -106,6 +107,7 @@ def list_members(request: Request, db: Session = Depends(get_db)):
         "access_scope": grant.access_scope or "full_record",
         "status": grant.status,
         "can_manage_members": bool(grant.can_manage_members),
+        "permissions": sorted(grant.permissions or DEFAULT_FAMILY_PERMISSIONS),
         "granted_at": grant.granted_at.isoformat() if grant.granted_at else None,
         "revoked_at": grant.revoked_at.isoformat() if grant.revoked_at else None,
     } for grant, profile in grants]
@@ -199,6 +201,7 @@ def create_invitation(payload: InvitationCreate, request: Request, db: Session =
         token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
         invited_by_caregiver_id=actor_id,
         role="family",
+        permissions=sorted(DEFAULT_FAMILY_PERMISSIONS),
         status="pending",
         expires_at=datetime.now(timezone.utc) + timedelta(days=payload.expires_in_days),
     )
@@ -274,6 +277,7 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
         caregiver_id=caregiver.id,
         caregiver_profile_id=profile.id,
         role=invitation.role,
+        permissions=list(invitation.permissions or DEFAULT_FAMILY_PERMISSIONS),
         status="active",
         can_manage_members=False,
         granted_by_caregiver_id=invitation.invited_by_caregiver_id,
@@ -351,6 +355,42 @@ def update_member_access_scope(
     }))
     db.commit()
     return {"updated": True, "caregiver_id": caregiver_id, "access_scope": grant.access_scope}
+
+class MembershipPermissionsUpdate(BaseModel):
+    permissions: list[str] = Field(default_factory=list)
+
+
+@router.patch("/members/{caregiver_id}/permissions")
+def update_member_permissions(
+    caregiver_id: str,
+    payload: MembershipPermissionsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, actor_id = _actor_scope(request, db)
+    requested = set(payload.permissions)
+    if requested - CAREGIVER_PERMISSION_KEYS:
+        raise HTTPException(status_code=422, detail="One or more caregiver permissions are not recognised.")
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    if grant is None:
+        raise HTTPException(status_code=404, detail="Active caregiver access was not found.")
+    if grant.role == "primary" or grant.can_manage_members:
+        raise HTTPException(status_code=409, detail="Primary care-record administration cannot be reassigned through ordinary permissions.")
+    grant.permissions = sorted(requested)
+    grant.updated_at = datetime.now(timezone.utc)
+    db.add(_audit_event(
+        actor_id, person_id, "caregiver.permissions.updated",
+        "caregiver_access_grant", grant.id,
+        {"caregiver_id": caregiver_id, "permissions": sorted(requested)},
+    ))
+    db.commit()
+    return {"updated": True, "caregiver_id": caregiver_id, "permissions": sorted(requested)}
+
 
 @router.patch("/members/{caregiver_id}/status")
 def update_member_status(
