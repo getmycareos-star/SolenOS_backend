@@ -3404,6 +3404,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             if significance and (
                 str(significance.target_type or "") != "change"
                 or str(significance.target_id or "") != str(change.id)
+                or str(significance.subject_type or "") != str(change.subject_type or "")
+                or str(significance.subject_id or "") != str(change.subject_id or "")
             ):
                 # Never attach a same-person assessment to the wrong change.
                 significance_link_status_by_change_id[str(change.id)] = "target_mismatch"
