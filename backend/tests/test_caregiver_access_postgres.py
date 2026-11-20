@@ -3,7 +3,7 @@
 Unlike the SQLite transition tests, this exercises the real migrated PostgreSQL
 schema and the application middleware with two distinct bearer identities.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 import uuid
 
