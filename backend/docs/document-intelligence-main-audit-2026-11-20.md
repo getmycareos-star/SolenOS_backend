@@ -80,7 +80,7 @@ The Railway project `SolenOS` production backend was inspected read-only:
 
 ## Continued implementation on main — 2026-11-20
 
-Latest main commit observed during the continued implementation: `ad853cf6f2b86dcbe346d0d93f18fe371fd81164`.
+Latest main commit observed during the continued implementation: `27a018cf3c983edbabbbd9026eeb2286bb84046b`.
 
 Additional document-specific commits:
 - `17547f9fb63c41a7a283dd46f5c9006caee1edeb` — API-level exact duplicate uploads reuse one accepted LCR assertion and retain separate review-event provenance.
