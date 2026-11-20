@@ -34,6 +34,7 @@ from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.change import Situation as SituationModel, Change, Baseline
 from app.models.significance import SignificanceAssessment
+from app.models.open_loop import OpenLoopRecord
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
@@ -3347,6 +3348,47 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             significance_assessment_by_id = {
                 str(row.id): row for row in significance_rows
             }
+        # Read the latest persisted follow-up for each active change directly
+        # from its person-scoped source link. The general LCR page is bounded and
+        # must not make a real follow-up appear absent when it falls outside that page.
+        linked_follow_up_by_change_id = {}
+        open_loop_columns = (
+            {column["name"] for column in inspector.get_columns("open_loop_records")}
+            if inspector.has_table("open_loop_records") else set()
+        )
+        required_open_loop_columns = {
+            "id", "person_id", "source_type", "source_id", "status", "updated_at", "created_at"
+        }
+        change_ids_for_follow_up = [str(change.id) for change in active_change_rows]
+        if required_open_loop_columns.issubset(open_loop_columns) and change_ids_for_follow_up:
+            ranked_follow_ups = db.query(
+                OpenLoopRecord.id.label("id"),
+                OpenLoopRecord.source_id.label("source_id"),
+                OpenLoopRecord.status.label("status"),
+                OpenLoopRecord.updated_at.label("updated_at"),
+                func.row_number().over(
+                    partition_by=OpenLoopRecord.source_id,
+                    order_by=(
+                        desc(OpenLoopRecord.updated_at),
+                        desc(OpenLoopRecord.created_at),
+                        OpenLoopRecord.id.asc(),
+                    ),
+                ).label("row_number"),
+            ).filter(
+                OpenLoopRecord.person_id == person_id,
+                OpenLoopRecord.source_type == "persisted_change",
+                OpenLoopRecord.source_id.in_(change_ids_for_follow_up),
+            ).subquery()
+            latest_follow_ups = db.query(
+                ranked_follow_ups.c.id,
+                ranked_follow_ups.c.source_id,
+                ranked_follow_ups.c.status,
+                ranked_follow_ups.c.updated_at,
+            ).filter(ranked_follow_ups.c.row_number == 1).all()
+            linked_follow_up_by_change_id = {
+                str(row.source_id): row for row in latest_follow_ups
+            }
+
         # Fingerprint every active change row, not only candidates selected for
         # caregiver attention. Rejection, retirement, or a changed verdict must
         # invalidate an older situation snapshot too.
@@ -3377,6 +3419,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             follow_up_candidate = bool(
                 significance.follow_up_candidate if significance else change.follow_up_candidate
             )
+            linked_follow_up = linked_follow_up_by_change_id.get(str(change.id))
             change_source_state.append({
                 "id": str(change.id),
                 "updated_at": change.updated_at,
@@ -3404,6 +3447,9 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "significance_explanation": significance.explanation if significance else None,
                 "attention_candidate": attention_candidate,
                 "follow_up_candidate": follow_up_candidate,
+                "linked_follow_up_id": str(linked_follow_up.id) if linked_follow_up else None,
+                "linked_follow_up_status": str(linked_follow_up.status) if linked_follow_up else "not_recorded",
+                "linked_follow_up_updated_at": linked_follow_up.updated_at if linked_follow_up else None,
                 "confirmation_status": change.confirmation_status,
                 "baseline_id": change.baseline_id,
                 "baseline_coverage_status": change.baseline_coverage_status,
@@ -3528,10 +3574,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 observation_by_id=observation_by_id,
             )
             significance = significance_by_change_id.get(str(change.id))
-            linked_follow_up = next(
-                (loop for loop in open_loops if str(loop.get("source_id") or "") == str(change.id)),
-                None,
-            )
+            linked_follow_up = linked_follow_up_by_change_id.get(str(change.id))
             persisted_change_items.append({
                 "id": str(change.id),
                 "title": str(change.subject_type or "Recorded care change").replace("_", " ").capitalize(),
