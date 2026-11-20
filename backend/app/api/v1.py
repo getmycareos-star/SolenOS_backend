@@ -551,6 +551,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
     _require_session_scope(request, db, person_id, caregiver_id)
     _require_full_record_access(request)
+    require_request_caregiver_permission(request, db, "add_evidence")
     capture_idempotency_key = payload.get("capture_idempotency_key")
     if capture_idempotency_key is not None and (
         not isinstance(capture_idempotency_key, str)
