@@ -2338,7 +2338,7 @@ def update_appointment_lifecycle_endpoint(
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     _require_session_scope(request, db, appointment.person_id)
-    require_request_caregiver_permission(request, db, "correct_records")
+    require_request_caregiver_permission(request, db, "add_evidence")
 
     if payload is not None:
         supplied = payload.model_fields_set
