@@ -2084,7 +2084,7 @@ def current_care_projection(
         source_id = str(row.get("id") or "")
         if not source_id or (source_name, source_id) in seen:
             return
-        raw_status = row.get("status") or row.get("lifecycle_status") or row.get("reconciliation_status") or row.get("assertion_status") or row.get("decision_status") or row.get("epistemic_status")
+        raw_status = row.get("status") or row.get("lifecycle_status") or row.get("reconciliation_status") or row.get("assertion_status") or row.get("decision_status") or row.get("outcome_status") or row.get("epistemic_status")
         status = str(raw_status).strip().lower() if raw_status is not None else "status_unknown"
         closed_statuses = {"resolved", "completed", "closed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled"}
         if require_open and status in closed_statuses:
@@ -2180,6 +2180,8 @@ def current_care_projection(
             ),
             "claim_refs": claim_refs[:20],
             "claim_count": len(claim_refs),
+            "related_record_type": ("care_decision" if source_name == "decision_outcomes" else "care_action" if source_name == "action_outcomes" else "follow_up" if source_name == "follow_up_outcomes" else None),
+            "related_record_id": (row.get("decision_id") if source_name == "decision_outcomes" else row.get("action_id") if source_name == "action_outcomes" else row.get("related_record_id") if source_name == "follow_up_outcomes" else None),
             "supersedes_observation_id": row.get("supersedes_observation_id") if source_name == "evidence_observations" else None,
             "correction_rationale": row.get("correction_rationale") if source_name == "evidence_observations" else None,
             "source_span_start": row.get("source_span_start") if source_name == "evidence_observations" else None,
@@ -2382,6 +2384,16 @@ def current_care_projection(
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
         add("decisions", row, "Care decision", 9, require_open=True)
+
+    # Completed outcomes remain part of the care history after an action closes.
+    for row in (sources.get("decision_outcomes") or {}).get("items", []):
+        add("decision_outcomes", row, "Decision outcome", 10)
+    for row in (sources.get("action_outcomes") or {}).get("items", []):
+        add("action_outcomes", row, "Action outcome", 10)
+    for row in (sources.get("follow_up_links") or {}).get("items", []):
+        status = str(row.get("status") or "").strip().lower()
+        if status in {"completed", "closed", "resolved"}:
+            add("follow_up_outcomes", {**row, "id": row.get("id"), "status": status, "title": "Follow-up outcome", "description": row.get("notes") or row.get("follow_up_kind") or "Follow-up recorded", "related_record_id": row.get("source_id") or row.get("target_id")}, "Follow-up outcome", 10)
 
     def sort_key(item: dict[str, Any]) -> tuple[int, str]:
         return (int(item["priority"]), str(item.get("recorded_at") or item.get("occurred_at") or ""))
