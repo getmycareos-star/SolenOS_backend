@@ -250,25 +250,35 @@ def test_saved_snap_care_photo_is_linked_to_situation_without_document_ocr():
         )
         assert uploaded.status_code == 201, uploaded.text
         evidence_id = uploaded.json()["evidence_id"]
+        capture_payload = {
+            "caregiver_id": caregiver_id,
+            "person_id": person_id,
+            "raw_input": "",
+            "ingestion_key": "snap-photo-capture-retry-001",
+            "documents": [{
+                "id": "snap-photo",
+                "name": "care-photo.png",
+                "mime_type": "image/png",
+                "extracted_text": "",
+                "evidence_id": evidence_id,
+                "extraction_source": "unknown",
+            }],
+        }
         response = client.post(
             "/api/situation",
             headers=headers,
-            json={
-                "caregiver_id": caregiver_id,
-                "person_id": person_id,
-                "raw_input": "",
-                "documents": [{
-                    "id": "snap-photo",
-                    "name": "care-photo.png",
-                    "mime_type": "image/png",
-                    "extracted_text": "",
-                    "evidence_id": evidence_id,
-                    "extraction_source": "unknown",
-                }],
-            },
+            json=capture_payload,
         )
         assert response.status_code == 200, response.text
         event_id = response.json()["care_event_id"]
+        replay = client.post(
+            "/api/situation",
+            headers=headers,
+            json=capture_payload,
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+        assert replay.json()["care_event_id"] == event_id
         with TestingSessionLocal() as db:
             evidence = db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).one()
             original = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
@@ -277,6 +287,9 @@ def test_saved_snap_care_photo_is_linked_to_situation_without_document_ocr():
             assert original.content == photo_bytes
             assert original.sha256 == hashlib.sha256(photo_bytes).hexdigest()
             assert evidence_id in event.evidence_ids
+            assert event.ingestion_key == capture_payload["ingestion_key"]
+            assert event.ingestion_request_sha256
+            assert db.query(CareEvent).filter_by(person_id=person_id).count() == 1
             assert db.query(Evidence).filter_by(person_id=person_id).count() == 1
     finally:
         teardown_db()
