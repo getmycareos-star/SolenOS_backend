@@ -1283,11 +1283,17 @@ def test_session_derived_caregiver_network_reads_use_bearer_scope():
         assert summary.status_code == 200, summary.text
         state = client.get("/api/v1/care-network-state")
         assert state.status_code == 200, state.text
+        path_summary = client.get("/api/v1/multi-caregiver-summary/person-1")
+        assert path_summary.status_code == 200, path_summary.text
+        path_state = client.get("/api/v1/care-network-state/person-1")
+        assert path_state.status_code == 200, path_state.text
         cross_record = client.get(
             "/api/v1/multi-caregiver-summary",
             params={"person_id": "another-person"},
         )
         assert cross_record.status_code == 403, cross_record.text
+        cross_record_path = client.get("/api/v1/multi-caregiver-summary/another-person")
+        assert cross_record_path.status_code == 403, cross_record_path.text
     finally:
         teardown_db()
 
