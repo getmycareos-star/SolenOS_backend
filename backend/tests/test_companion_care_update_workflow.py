@@ -365,6 +365,9 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
         replay_review = review(client, first, proposal["id"], {"decision": "accept"})
         assert replay_review.status_code == 200, replay_review.text
         assert replay_review.json()["idempotent_replay"] is True
+        assert replay_review.json()["status"] == "accepted"
+        assert replay_review.json()["decision"] == "accept"
+        assert replay_review.json()["written_to_lcr"] is True
         assert replay_review.json()["assertion_id"] == assertion_id
 
         current_care = client.get("/api/v1/care-continuity/current-care", headers=headers)
