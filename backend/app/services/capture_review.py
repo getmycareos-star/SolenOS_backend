@@ -220,6 +220,11 @@ def persist_source_grounded_daily_observations(
         return 0
 
     created = 0
+    # SQLAlchemy sessions used by the background worker disable autoflush.
+    # The database lookup alone therefore cannot see rows added earlier in this
+    # same extraction batch. Track exact source-span identities in memory too,
+    # so duplicate model candidates cannot create duplicate LCR observations.
+    seen_source_keys: set[tuple[int, int, str, str, str]] = set()
     for candidate in candidates["observations"][:12]:
         if not isinstance(candidate, dict):
             continue
@@ -242,6 +247,10 @@ def persist_source_grounded_daily_observations(
         if start < 0:
             continue
         end = start + len(quote)
+        source_key = (start, end, quote, observation_text, subject_text)
+        if source_key in seen_source_keys:
+            continue
+        seen_source_keys.add(source_key)
         existing = db.query(EvidenceObservation.id).filter(
             EvidenceObservation.person_id == person_id,
             EvidenceObservation.evidence_id == evidence_id,
