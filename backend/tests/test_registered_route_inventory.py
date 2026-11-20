@@ -11,7 +11,7 @@ def test_runtime_endpoint_inventory_expands_nested_routers_and_matches_product_r
     # A small count would indicate that only the app's directly registered
     # routes were read and the lazy include_router tree was silently omitted.
     assert inventory["route_count"] > 100
-    assert inventory["unique_method_path_count"] == inventory["route_count"]
+    assert inventory["unique_method_path_count"] == inventory["route_count"], inventory["duplicate_method_paths"]
     assert inventory["duplicate_method_paths"] == {}
     assert ("POST", "/api/v1/sessions/anonymous") in routes
     assert ("POST", "/api/v1/conversation/message") in routes
