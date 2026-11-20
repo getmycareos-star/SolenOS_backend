@@ -454,6 +454,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
 def test_live_qwen_companion_preserves_conflicting_document_medication_sources(monkeypatch):
     """Real Qwen retrieval must expose both conflicting reviewed document assertions."""
     import io
+    import zipfile
     from PIL import Image, ImageDraw, ImageFont
     from app.models.uncertainty import Contradiction
     from app.services.lcr_context import build_lcr_context
@@ -469,6 +470,15 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
     scanned_pdf_buffer = io.BytesIO()
     scanned_page.save(scanned_pdf_buffer, format="PDF", resolution=200)
     scanned_page.close()
+    docx_buffer = io.BytesIO()
+    with zipfile.ZipFile(docx_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "word/document.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body><w:p><w:r><w:t>Current medication list: Metformin 1000 mg twice daily.</w:t></w:r></w:p></w:body>
+            </w:document>""",
+        )
     documents = [
         (
             "discharge-medications-old-scan.pdf",
@@ -477,9 +487,9 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
             "Metformin 500 mg",
         ),
         (
-            "discharge-medications-new.txt",
-            b"Current medication list: Metformin 1000 mg twice daily.",
-            "text/plain",
+            "discharge-medications-new.docx",
+            docx_buffer.getvalue(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "Metformin 1000 mg",
         ),
     ]
@@ -524,6 +534,8 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
                 assert extracted.json()["extraction_method"] == "server_tesseract_ocr_pdf"
                 assert extracted.json()["processed_page_numbers"] == [1]
                 assert extracted.json()["ocr_quality_by_page"][0]["page_number"] == 1
+            if filename.endswith(".docx"):
+                assert extracted.json()["extraction_method"] == "server_docx_xml"
             analysis_id = extracted.json()["analysis_id"]
             analysis_ids.append(analysis_id)
 
