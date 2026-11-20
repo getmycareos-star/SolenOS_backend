@@ -77,3 +77,46 @@ The Railway project `SolenOS` production backend was inspected read-only:
 - A pre-existing staged Railway patch was present, with five staged changes and target source commit `893913b11edf109138d2541ad5895910ba3fedd1`; it was not created or committed by this implementation.
 - This implementation did not accept staged changes, trigger a Railway deployment, restart the service, or alter production variables.
 - Consequently, the commits in this audit are on GitHub `main`; they are not claimed to be running in the production service.
+
+## Continued implementation on main — 2026-11-20
+
+Latest main commit observed during the continued implementation: `f516da2ef3f6d7bf9b85dcee1245bf22569d722f`.
+
+Additional document-specific commits:
+- `17547f9fb63c41a7a283dd46f5c9006caee1edeb` — API-level exact duplicate uploads reuse one accepted LCR assertion and retain separate review-event provenance.
+- `d17791299e57bc225007d9d03a47b25f56284eee` — PostgreSQL advisory transaction lock around exact duplicate source review.
+- `9148cd2c60c7ea19b4430160f3b48614ac5dd26d` — PostgreSQL concurrent duplicate-review regression test.
+- `4c22ad23c54780574a24663325a722decf75ed40` — workflow now runs the PostgreSQL document persistence/review/duplicate/restart suite with `SOLENOS_TEST_POSTGRES_RESTART=1`.
+- `4258ad90e21fa1fab116807391eba42e736b10f0` — duplicate-source idempotency key widened to source identity; contradictory field/subject reinterpretations of identical binary+quotation are blocked rather than silently creating another assertion.
+- `dbfd6eb074598c73d00abf93b51aaf74591c0367` — regression test for changed field interpretation on exact duplicate source.
+- `edfbf0ab649bff55344efb21b26a97613f592821` — regression test proving a later correction request cannot overwrite an already accepted assertion.
+- `f516da2ef3f6d7bf9b85dcee1245bf22569d722f` — live-Qwen Companion cross-person document-source isolation assertion.
+
+Related main commits supporting the same end-to-end objective:
+- `3e8a315a844ca03f5c9df57aed94e77f3f247f95` — Companion prompt serialization now wraps every LCR record with explicit `source_type` and `source_id`, preserving typed provenance through model context.
+- `2396ad2e0f525cc49bf341c24875903464f90691` — regression test for typed LCR source identity and retrieval receipts.
+- `f10111519d9ae4aba3b0df18b8ba246cf64ee412` — care-state revision/invalidation table coverage extended to Core-written longitudinal and document review tables.
+
+### Duplicate-source correctness change
+
+The duplicate assertion lookup previously narrowed its search by proposed field, subject and assertion kind. That could miss a second interpretation of the same exact uploaded bytes and source quotation if model classification changed between analyses. The lookup now:
+1. Acquires a PostgreSQL transaction advisory lock keyed by person, original binary SHA-256 and exact source quotation.
+2. Searches existing assertions for that person and exact quotation across fields/subjects.
+3. Restricts the candidate assertions to evidence IDs in the exact-binary duplicate group.
+4. Reuses only an assertion whose interpretation and typed identity also match.
+5. Rejects a conflicting interpretation with HTTP 409 instead of creating a second contradictory assertion.
+
+Different documents with different binary hashes are not collapsed by this duplicate guard; they remain eligible for normal LCR contradiction reconciliation.
+
+### Added verification coverage
+
+- Sequential duplicate document uploads with matching interpretations resolve to one LCR assertion and two source-specific append-only review events.
+- An exact duplicate with a different proposed field interpretation is rejected; it cannot create a second assertion.
+- PostgreSQL concurrency test exercises two simultaneous reviews against separate analyses for the same duplicate source.
+- An accepted assertion cannot be overwritten by a subsequent correction request.
+- Live-Qwen Companion test asserts another person's authenticated session cannot retrieve the first person's document evidence, analysis or accepted assertion identifiers.
+- The live-Qwen workflow now invokes the PostgreSQL document integration test, including an explicit PostgreSQL service restart.
+
+### Execution status
+
+These changes and test definitions are committed on `main`. The CI workflow is configured to execute the PostgreSQL and real-Qwen suites on relevant main pushes. A successful workflow run, test counts, per-case live-Qwen metrics and production deployment revision have not yet been independently confirmed; no passing result is inferred from the commits or Railway deployment status contexts.
