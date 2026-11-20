@@ -11,6 +11,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.appointment_workspace import AppointmentWorkspaceRecord
+from app.models.open_loop import OpenLoopRecord
 from app.models.care import CareEvent, Evidence
 from app.models.time_location import Appointment
 from app.models.caregiver_access import CaregiverAccessGrant
@@ -1332,6 +1333,9 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
         "medications_and_allergies": "unavailable",
         "documents": "empty",
         "community": "not_authorized",
+        "open_loops": "empty",
+        "decisions": "unavailable_schema",
+        "decision_outcomes": "unavailable_schema",
     }
 
     # The preparation brief must never disclose another person's care data.
