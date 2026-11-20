@@ -290,8 +290,11 @@ def test_postgres_document_upload_extraction_retry_persistence_and_person_isolat
             assert saved["extracted_text"] == original.decode("utf-8")
             assert saved["document"]["binary_sha256"] == digest
 
-        # A different person's identity must not extract or read this evidence.
+        # Give the second fixture a valid independent membership so this
+        # assertion proves person-boundary isolation, not merely missing access.
         with Session() as db:
+            _ensure_test_caregiver_access(db, person_b, caregiver_b)
+            db.commit()
             with pytest.raises(HTTPException) as denied:
                 extract_saved_document(
                     evidence_id, _request(person_b, caregiver_b), db
