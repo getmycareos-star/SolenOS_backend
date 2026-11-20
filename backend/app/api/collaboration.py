@@ -1068,7 +1068,14 @@ async def upload_evidence(
             byteorder="big",
             signed=True,
         )
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": retry_lock_key})
+        # Advisory-lock acquisition can block while another upload commits.
+        # Keep the wait off the event loop so the lock holder can resume after
+        # its storage await and release the transaction-scoped lock.
+        await asyncio.to_thread(
+            db.execute,
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": retry_lock_key},
+        )
     if ingestion_key:
         prior = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == scoped_person_id,
@@ -1141,7 +1148,14 @@ async def upload_evidence(
             byteorder="big",
             signed=True,
         )
-        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        # This is a transaction-scoped lock. Waiting synchronously here would
+        # block the event loop and prevent the current lock holder from resuming
+        # after its storage await, creating a self-inflicted upload deadlock.
+        await asyncio.to_thread(
+            db.execute,
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": lock_key},
+        )
     # Exact binary checksum comparison is deterministic duplicate detection.
     # Keep the new upload and its uploader attribution, but explicitly link the
     # earlier identical artifact instead of silently deduplicating evidence.
