@@ -1168,6 +1168,13 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         item for item in open_loops
         if item.get("source_type") == "appointment_workspace_follow_up" or item.get("appointment_id")
     ]
+    # Caregiver-recorded visit events are existing care history, not a new
+    # appointment booking. Surface them as visit evidence when no appointment
+    # row has been separately created.
+    appointment_recorded_events = [
+        item for item in event_items
+        if str(item.get("event_type", "")).casefold() in {"appointment", "clinic_visit"}
+    ]
     context_retrieval_failed = bool(
         living_care_record_context.get("retrieval_error")
         or living_care_record_context.get("schema_status") == "failed"
@@ -1199,12 +1206,14 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         appointment_context_code = "follow_up_needed"
     elif appointment_items:
         appointment_context_code = "no_upcoming_appointment"
+    elif appointment_recorded_events:
+        appointment_context_code = "visit_recorded"
     else:
         appointment_context_code = "no_appointment_information"
 
     appointment_context_status = {
         "code": appointment_context_code,
-        "has_appointment_information": bool(appointment_items or appointment_need_items or appointment_related_open_loops),
+        "has_appointment_information": bool(appointment_items or appointment_need_items or appointment_related_open_loops or appointment_recorded_events),
         "date_known": (
             None if next_appointment_row is None
             else next_appointment_row.scheduled_at is not None
@@ -1249,6 +1258,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         },
         "appointment_context_status": appointment_context_status,
         "appointment_related_open_loops": appointment_related_open_loops,
+        "appointment_recorded_events": appointment_recorded_events,
         "lcr_retrieval_status": lcr_retrieval_status,
         "open_loops": open_loops,
         "prior_decisions": prior_decisions,
