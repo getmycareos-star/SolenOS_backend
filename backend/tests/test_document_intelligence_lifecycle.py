@@ -169,6 +169,10 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
             assert len(understood.json()["observations"]) == 1
             analysis_ids.append(understood.json()["analysis_id"])
 
+        before_review_situation = client.get("/api/situation", headers=auth)
+        assert before_review_situation.status_code == 200, before_review_situation.text
+        assert before_review_situation.json()["document_assertions"] == []
+
         first_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_ids[0]}/review",
             headers=auth,
@@ -214,6 +218,28 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
                 first_evidence_id, second_evidence_id
             }
             assert {event.resulting_assertion_id for event in events} == {first_assertion_id}
+
+        # The existing Progressive Understanding situation endpoint now receives
+        # accepted document assertions as typed source projections, not as new facts.
+        situation = client.get("/api/situation", headers=auth)
+        assert situation.status_code == 200, situation.text
+        situation_payload = situation.json()
+        projected_assertions = situation_payload["document_assertions"]
+        assert len(projected_assertions) == 1
+        projected = projected_assertions[0]
+        assert projected["assertion_id"] == first_assertion_id
+        assert projected["source_evidence_id"] == first_evidence_id
+        assert projected["source_quote"] == quote
+        assert projected["source_page"] == 1
+        assert projected["review_status"] == "accepted"
+        assert projected["reviewer_caregiver_id"] == caregiver["caregiver"]["id"]
+        assert projected["source_type"] == "document_intelligence"
+        assert projected["temporal_context"] == "not_established"
+        projected_observation = next(
+            item for item in situation_payload["active_care_situation"]["observations"]
+            if item["id"] == first_evidence_id
+        )
+        assert projected_observation["document_assertions"][0]["assertion_id"] == first_assertion_id
     finally:
         client.close()
         app.dependency_overrides.clear()
