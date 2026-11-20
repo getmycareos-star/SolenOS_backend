@@ -168,7 +168,8 @@ def _record_out(record: AppointmentWorkspaceRecord, db: Session | None = None) -
 
 @router.get("")
 def list_appointment_workspaces(request: Request, db: Session = Depends(get_db)):
-    person_id, _ = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     rows = db.query(AppointmentWorkspaceRecord).filter(
         AppointmentWorkspaceRecord.person_id == person_id
     ).order_by(AppointmentWorkspaceRecord.updated_at.desc()).limit(50).all()
@@ -1563,8 +1564,8 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
 
 @router.get("/{record_id}/revisions")
 def list_appointment_workspace_revisions(record_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _ = _scope(request, db)
-    _require_appointment_permission(request, db, person_id, str(request.state.scoped_caregiver_id), "view_lcr", read_only=True)
+    person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     row = db.query(AppointmentWorkspaceRecord.id).filter(
         AppointmentWorkspaceRecord.id == record_id,
         AppointmentWorkspaceRecord.person_id == person_id,
