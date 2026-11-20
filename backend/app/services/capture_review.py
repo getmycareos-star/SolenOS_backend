@@ -368,22 +368,10 @@ def persist_structured_daily_capture_observations(
             if value_text is None or not str(value_text).strip():
                 continue
 
-            # Prefer the caregiver's exact note when one was entered. Keep the
-            # structured value separately, so the UI can show both without
-            # exposing a serialized JSON object.
-            note = raw.get("note")
-            if isinstance(note, str) and note.strip():
-                passage = json.dumps(note, ensure_ascii=False)
-                note_marker = json.dumps("note") + ":" + passage
-                relative_start = fragment.find(note_marker)
-                if relative_start >= 0:
-                    start = fragment_start + relative_start + len(json.dumps("note") + ":")
-                    end = start + len(passage)
-                else:
-                    passage, start, end = fragment, fragment_start, fragment_end
-            else:
-                passage, start, end = fragment, fragment_start, fragment_end
-
+            # Keep the complete structured source fragment. The caregiver
+            # interface formats known fields into readable text while this
+            # exact span preserves the original submitted structure.
+            passage, start, end = fragment, fragment_start, fragment_end
             units = units_for(raw)
             candidates.append({
                 "attribute": attribute[:160],
