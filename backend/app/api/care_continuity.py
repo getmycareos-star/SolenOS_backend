@@ -4545,10 +4545,6 @@ def update_care_continuity_resource(
                 "after_value": _jsonable(dict(updated_row)),
             },
         )
-        _append_unified_core_source_revision(
-            db, person_id, caregiver_id, "care_decisions",
-            dict(updated_row), change_kind="updated", before_state=before,
-        )
         db.commit()
         return _jsonable(dict(updated_row))
     except HTTPException:
