@@ -424,6 +424,9 @@ def build_inventory() -> dict[str, Any]:
         "internal_service_or_operations_count": sum(
             route["disposition"] == "internal_service_or_operations" for route in entries
         ),
+        "intentionally_unused_count": sum(
+            route["disposition"] == "intentionally_unused" for route in entries
+        ),
         "disposition_review_required_count": sum(
             route["disposition"] == "REVIEW_REQUIRED" for route in entries
         ),
@@ -467,6 +470,7 @@ def main() -> None:
             f"Duplicate method/path registrations: {len(inventory['duplicate_method_paths'])}",
             f"Frontend product workflow dispositions: {inventory['frontend_product_workflow_count']}",
             f"Internal service/operations dispositions: {inventory['internal_service_or_operations_count']}",
+            f"Intentionally unused routes: {inventory['intentionally_unused_count']}",
             f"Disposition review required: {inventory['disposition_review_required_count']}",
             f"Consumer mapping review required: {inventory['consumer_review_required_count']}",
             f"Persistence mapping review required: {inventory['persistence_review_required_count']}",
