@@ -382,10 +382,11 @@ def test_persisted_change_remains_visible_when_baseline_coverage_is_incomplete()
         "records": [{"source": "events", "record_id": "event-2", "title": "Night waking",
                      "evidence_ids": ["ev-2"]}],
     }])
-    assert len(important) == 1
-    assert important[0]["history_completeness"] == "partial_or_unknown"
-    assert "size and timing of the change remain uncertain" in important[0]["reason"]
-    assert clarification == []
+    assert important == []
+    assert len(clarification) == 1
+    assert clarification[0]["record_id"] == "change-2"
+    assert clarification[0]["category"] == "needs_clarification"
+    assert "baseline or source history is incomplete" in clarification[0]["reason"]
 
 
 def test_persisted_change_remains_visible_when_source_records_are_unavailable():
@@ -399,10 +400,10 @@ def test_persisted_change_remains_visible_when_source_records_are_unavailable():
         "explanation": "A recorded change exists.",
         "records": [],
     }])
-    assert len(important) == 1
-    assert important[0]["history_completeness"] == "partial_or_unknown"
-    assert important[0]["source_record_ids"] == []
-    assert clarification == []
+    assert important == []
+    assert len(clarification) == 1
+    assert clarification[0]["record_id"] == "change-3"
+    assert clarification[0]["category"] == "needs_clarification"
 
 
 def test_follow_up_candidate_remains_visible_with_insufficient_evidence_verdict():
@@ -519,10 +520,11 @@ def test_persisted_change_remains_visible_when_source_record_coverage_is_partial
         "baseline_history_completeness": "complete", "expected_source_record_count": 2,
         "records": [{"source": "events", "record_id": "event-resolved", "evidence_ids": []}],
     }])
-    assert len(important) == 1
-    assert important[0]["history_completeness"] == "partial_or_unknown"
-    assert "does not cancel the recorded need for follow-up" in important[0]["reason"]
-    assert clarification == []
+    assert important == []
+    assert len(clarification) == 1
+    assert clarification[0]["record_id"] == "change-partial-source"
+    assert clarification[0]["category"] == "needs_clarification"
+    assert "baseline or source history is incomplete" in clarification[0]["reason"]
 
 
 def test_repeated_dementia_caregiver_observations_are_reviewed_without_claiming_change():
