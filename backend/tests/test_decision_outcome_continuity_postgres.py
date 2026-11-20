@@ -358,6 +358,24 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             assert completed.json()["status"] == "completed"
             assert completed.json()["evidence_ids"] == [evidence_id]
 
+            # Accepted follow-up lifecycle transitions must be durable in the
+            # canonical person-scoped revision ledger; rejected attempts above
+            # must not create revisions.
+            with Session(engine) as db:
+                follow_up_revisions = db.query(CareStateRevision).filter(
+                    CareStateRevision.person_id == person_id,
+                    CareStateRevision.target_type == "care_follow_up_links",
+                    CareStateRevision.target_id == follow_up_id,
+                ).order_by(CareStateRevision.revision_number.asc()).all()
+                assert [row.revision_number for row in follow_up_revisions] == [1, 2]
+                assert follow_up_revisions[0].change_kind == "created"
+                assert follow_up_revisions[0].before_state is None
+                assert follow_up_revisions[0].after_state
+                assert follow_up_revisions[1].change_kind == "updated"
+                assert follow_up_revisions[1].before_state
+                assert '"status":"completed"' in follow_up_revisions[1].after_state
+                assert evidence_id in follow_up_revisions[1].after_state
+
             hidden = client.get("/api/v1/care-continuity/decisions", headers=other_headers)
             assert hidden.status_code == 200, hidden.text
             assert all(row["id"] != decision_id for row in hidden.json())
