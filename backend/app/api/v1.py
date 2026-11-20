@@ -2384,7 +2384,7 @@ def update_appointment_lifecycle_endpoint(
                 event_type="appointment_status_change",
                 status="recorded",
                 occurred_at=utc_now(),
-                title=f"Appointment status recorded: {appointment.title}",
+                title=f"Appointment status recorded: {appointment.title}"[:240],
                 description=(
                     f"Caregiver recorded appointment status as {appointment.status}; "
                     f"previous status was {previous_status}. Current appointment date: {current_date}; "
