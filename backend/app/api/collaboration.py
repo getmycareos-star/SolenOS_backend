@@ -4227,14 +4227,15 @@ async def create_qwen_background_job(
     """Queue a caregiver request; workflow routing is internal, never user-selected."""
     person_id, caregiver_id = _scope(request, db)
     if payload.evidence_ids:
-        rows = db.query(EvidenceModel.id).filter(
+        rows = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == person_id,
-            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
             (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
             EvidenceModel.id.in_(payload.evidence_ids),
         ).all()
-        if len({str(row[0]) for row in rows}) != len(set(payload.evidence_ids)):
-            raise HTTPException(status_code=403, detail="One or more evidence items are outside this care-record session")
+        if len({str(row.id) for row in rows}) != len(set(payload.evidence_ids)):
+            raise HTTPException(status_code=403, detail="One or more evidence items are outside this care record")
+        if any(row.type == "document" for row in rows):
+            require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     job = QwenBackgroundJob(
         person_id=person_id,
         caregiver_id=caregiver_id,
@@ -4425,6 +4426,13 @@ async def get_qwen_background_job(
 async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: Session = Depends(get_db)):
     """Read-only Qwen support across SolenOS; never mutates the Living Care Record."""
     person_id, caregiver_id = _scope(request, db)
+    can_view_documents = True
+    try:
+        require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        can_view_documents = False
     context_lines: list[str] = []
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
@@ -4533,12 +4541,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     if payload.evidence_ids:
         evidence_rows = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == person_id,
-            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
             EvidenceModel.id.in_(payload.evidence_ids),
         ).all()
         by_id = {str(row.id): row for row in evidence_rows}
         if len(by_id) != len(set(payload.evidence_ids)):
-            raise HTTPException(status_code=403, detail="One or more evidence items are outside this care-record session")
+            raise HTTPException(status_code=403, detail="One or more evidence items are outside this care record")
+        if any(row.type == "document" for row in evidence_rows) and not can_view_documents:
+            raise HTTPException(status_code=403, detail="This caregiver does not have permission to view documents.")
         for evidence_id in payload.evidence_ids:
             row = by_id[evidence_id]
             source_metadata = {
@@ -4561,14 +4570,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 
     document_query_text = (payload.text or "").casefold()
     document_context_requested = payload.workflow in appointment_workflows or _is_document_question(payload.text)
-    if document_context_requested:
+    if document_context_requested and can_view_documents:
         source_document_status = "empty"
         try:
             document_analyses = (
                 db.query(CaptureAnalysis)
                 .filter(
                     CaptureAnalysis.person_id == person_id,
-                    CaptureAnalysis.caregiver_id == caregiver_id,
                 )
                 .order_by(CaptureAnalysis.created_at.desc())
                 .limit(30)
@@ -4581,7 +4589,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 source_document = db.query(EvidenceModel).filter(
                     EvidenceModel.id == analysis.source_evidence_id,
                     EvidenceModel.person_id == person_id,
-                    EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
                     EvidenceModel.type == "document",
                     (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
                 ).first()
@@ -4608,6 +4615,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             context_lines.append(
                 "Persisted document extraction context could not be retrieved. Document content is unknown for this request."
             )
+    elif document_context_requested and not can_view_documents:
+        source_document_status = "not_authorized"
 
     # All LCR-facing Qwen workflows consume the same bounded, caregiver-scoped
     # projection as Companion and the LCR UI. Purpose-specific records above remain
@@ -6053,6 +6062,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     companion_request_started = _time.perf_counter()
     companion_request_id = getattr(request.state, "request_id", None)
     person_id, caregiver_id = _scope(request, db)
+    can_view_documents = True
+    try:
+        require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        can_view_documents = False
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
 
@@ -6274,8 +6290,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ))
         evidence_query = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == person_id,
-            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
+        if not can_view_documents:
+            evidence_query = evidence_query.filter(EvidenceModel.type != "document")
         linked_rows = (
             evidence_query.filter(EvidenceModel.id.in_(linked_ids))
             .order_by(EvidenceModel.uploaded_at.desc())
@@ -6350,14 +6367,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .join(EvidenceModel, EvidenceModel.id == CaptureAnalysis.source_evidence_id)
             .filter(
                 CaptureAnalysis.person_id == person_id,
-                CaptureAnalysis.caregiver_id == caregiver_id,
                 CaptureAnalysis.extraction_status == "available",
                 EvidenceModel.person_id == person_id,
-                EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+                EvidenceModel.type == "document",
             )
             .order_by(CaptureAnalysis.created_at.desc())
             .limit(12)
             .all()
+            if can_view_documents else []
         )
         for analysis, evidence in document_analysis_rows:
             if evidence.type != "document":
@@ -6558,9 +6575,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 }, ensure_ascii=False))
 
             existing_evidence_ids = set(_context_record_ids(evidence_context, "evidence_id"))
-            historical_evidence = db.query(EvidenceModel).filter(
+            historical_evidence_query = db.query(EvidenceModel).filter(
                 EvidenceModel.person_id == person_id,
-                EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+            )
+            if not can_view_documents:
+                historical_evidence_query = historical_evidence_query.filter(EvidenceModel.type != "document")
+            historical_evidence = historical_evidence_query.filter(
                 or_(*[
                     column.ilike(f"%{term}%")
                     for column in (
