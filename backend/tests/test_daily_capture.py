@@ -1749,7 +1749,7 @@ def test_medication_authoring_and_review_are_person_scoped():
             headers=foreign_headers,
             json={},
         )
-        assert foreign_review.status_code == 403
+        assert foreign_review.status_code == 404
         foreign_projection = client.get("/api/v1/care-continuity/medications", headers=foreign_headers)
         assert foreign_projection.status_code == 200
         assert foreign_projection.json()["medications"] == []
