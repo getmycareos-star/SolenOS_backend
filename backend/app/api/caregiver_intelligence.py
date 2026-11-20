@@ -388,9 +388,13 @@ def update_care_recipient_profile(
             "epistemic_status": "caregiver_reported",
             "reported_by_session_caregiver_id": session_caregiver_id,
         }
-        recipient_changed = any(
-            previous_recipient_snapshot.get(field) != recipient_snapshot.get(field)
-            for field in ("recipient_name", "condition")
+        recipient_changed = (
+            any(
+                previous_recipient_snapshot.get(field) != recipient_snapshot.get(field)
+                for field in ("recipient_name", "condition")
+            )
+            if previous_recipient_snapshot
+            else (previous_person_name != name or condition is not None)
         )
         if recipient_changed:
             if latest_recipient_context is not None and latest_recipient_context.effective_end is None:
