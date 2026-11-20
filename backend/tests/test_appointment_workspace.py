@@ -3328,3 +3328,32 @@ def test_overdue_appointment_is_not_assumed_to_have_occurred(client):
     refreshed = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()["appointment_context_status"]["code"] == "occurred"
+
+
+def test_caregiver_recorded_visit_event_is_recognised_without_fabricating_a_booking(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    event = CareEvent(
+        id=str(uuid.uuid4()),
+        person_id=owner["person"]["id"],
+        event_type="clinic_visit",
+        occurred_at=datetime.now(timezone.utc) - timedelta(days=1),
+        title="Caregiver-recorded clinic discussion",
+        description="The caregiver recorded that a clinic discussion took place.",
+        status="recorded",
+        created_by_caregiver_id=owner["caregiver"]["id"],
+        time_provenance="caregiver_recorded",
+    )
+    with TestSessionLocal() as db:
+        db.add(event)
+        db.commit()
+        event_id = event.id
+
+    brief = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert brief.status_code == 200, brief.text
+    body = brief.json()
+    assert body["appointment_context_status"]["code"] == "visit_recorded"
+    assert body["next_appointment"] is None
+    assert body["appointment_recorded_events"][0]["source_id"] == event_id
+    assert body["appointment_recorded_events"][0]["recorded_by_role"] == "caregiver"
+    assert body["appointment_recorded_events"][0]["occurred_at"]
