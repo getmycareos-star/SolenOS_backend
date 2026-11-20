@@ -1617,6 +1617,14 @@ def main():
             persisted_change.significance_assessment_id = replacement_assessment_id
             significance_assessment_id = replacement_assessment_id
             db.commit()
+            original_assessment = db.query(SignificanceAssessment).filter(
+                SignificanceAssessment.id == initial_significance_assessment_id,
+                SignificanceAssessment.person_id == person_a,
+            ).one()
+            require(
+                original_assessment.evidence_confidence == 0.42,
+                "PostgreSQL significance revision mutated the prior assessment instead of preserving it",
+            )
 
         status, changed_significance = request(
             "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
