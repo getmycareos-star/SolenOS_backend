@@ -150,7 +150,7 @@ TRACKED_TABLES = {
     "caregiver_handoffs", "caregiver_activities", "caregiver_communications",
     "care_network_relationships", "responsibility_gaps", "perspective_conflicts",
     "duplicate_actions", "capture_analyses", "document_review_events",
-    "significance_assessments",
+    "significance_assessments", "care_follow_up_links",
 }
 
 
