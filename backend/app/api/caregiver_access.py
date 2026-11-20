@@ -58,19 +58,38 @@ def _audit_event(actor_id: str | None, person_id: str, action: str, target_type:
     )
 
 
-def _actor_scope(request: Request) -> tuple[str, str]:
-    person_id = getattr(request.state, "scoped_person_id", None)
-    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_id:
+def _actor_scope(request: Request, db: Session) -> tuple[str, str]:
+    # Resolve the actor from the bearer capability at the route boundary.
+    # Middleware request.state is useful context, but access-management routes
+    # must remain correct even when mounted through a router that does not
+    # preserve that state object.
+    scheme, _, raw_token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid care-record session is required")
-    if not bool(getattr(request.state, "caregiver_can_manage_members", False)):
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Caregiver session is invalid or expired")
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == session.person_id,
+        CaregiverAccessGrant.caregiver_id == session.caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="This caregiver no longer has access to this care record.")
+    if not grant.can_manage_members:
         raise HTTPException(status_code=403, detail="Only an authorised care-record administrator can manage access")
-    return str(person_id), str(caregiver_id)
+    return str(session.person_id), str(session.caregiver_id)
 
 
 @router.get("/members")
 def list_members(request: Request, db: Session = Depends(get_db)):
-    person_id, _actor_id = _actor_scope(request)
+    person_id, _actor_id = _actor_scope(request, db)
     grants = (
         db.query(CaregiverAccessGrant, CaregiverProfile)
         .outerjoin(CaregiverProfile, CaregiverProfile.id == CaregiverAccessGrant.caregiver_profile_id)
@@ -154,7 +173,7 @@ def list_assignable_members(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/invitations", status_code=201)
 def create_invitation(payload: InvitationCreate, request: Request, db: Session = Depends(get_db)):
-    person_id, actor_id = _actor_scope(request)
+    person_id, actor_id = _actor_scope(request, db)
     email = _validate_email(payload.email)
     if db.query(CaregiverAccessGrant).join(
         CaregiverProfile, CaregiverProfile.id == CaregiverAccessGrant.caregiver_profile_id
@@ -290,7 +309,7 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
 
 @router.delete("/invitations/{invitation_id}")
 def revoke_invitation(invitation_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _actor_id = _actor_scope(request)
+    person_id, _actor_id = _actor_scope(request, db)
     invitation = db.query(CaregiverInvitation).filter(
         CaregiverInvitation.id == invitation_id,
         CaregiverInvitation.person_id == person_id,
@@ -313,7 +332,7 @@ def update_member_access_scope(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, actor_id = _actor_scope(request)
+    person_id, actor_id = _actor_scope(request, db)
     grant = db.query(CaregiverAccessGrant).filter(
         CaregiverAccessGrant.person_id == person_id,
         CaregiverAccessGrant.caregiver_id == caregiver_id,
@@ -340,7 +359,7 @@ def update_member_status(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, actor_id = _actor_scope(request)
+    person_id, actor_id = _actor_scope(request, db)
     if str(caregiver_id) == actor_id:
         raise HTTPException(status_code=409, detail="An administrator cannot suspend or restore their own access here.")
     grant = db.query(CaregiverAccessGrant).filter(
@@ -385,7 +404,7 @@ def update_member_status(
 
 @router.delete("/members/{caregiver_id}")
 def revoke_member_access(caregiver_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, actor_id = _actor_scope(request)
+    person_id, actor_id = _actor_scope(request, db)
     if str(caregiver_id) == actor_id:
         raise HTTPException(status_code=409, detail="An administrator cannot revoke their own access through this operation.")
     grant = db.query(CaregiverAccessGrant).filter(
@@ -436,7 +455,7 @@ def create_responsibility_transfer(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, actor_id = _actor_scope(request)
+    person_id, actor_id = _actor_scope(request, db)
     source = db.query(CaregiverResponsibility).filter(
         CaregiverResponsibility.id == payload.source_responsibility_id,
         CaregiverResponsibility.person_id == person_id,
@@ -689,7 +708,7 @@ class PrimaryTransferCreate(BaseModel):
 
 @router.post("/primary-transfers", status_code=201)
 def create_primary_transfer(payload: PrimaryTransferCreate, request: Request, db: Session = Depends(get_db)):
-    person_id, actor_id = _actor_scope(request)
+    person_id, actor_id = _actor_scope(request, db)
     current_grant = db.query(CaregiverAccessGrant).filter(
         CaregiverAccessGrant.person_id == person_id,
         CaregiverAccessGrant.caregiver_id == actor_id,
