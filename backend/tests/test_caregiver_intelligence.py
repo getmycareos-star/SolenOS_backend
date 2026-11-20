@@ -9,6 +9,7 @@ from app.core.database import Base, SessionLocal as DefaultSessionLocal
 import app.main as main_module
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import Person, Caregiver
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -54,6 +55,19 @@ def get_test_client(caregiver_id=None):
             caregiver = query.order_by(Caregiver.id.asc()).first()
         if caregiver is None:
             raise AssertionError("test fixture must create a caregiver before creating an authenticated session")
+        grant = db.query(CaregiverAccessGrant).filter_by(person_id="person-1", caregiver_id=caregiver.id).first()
+        if grant is None:
+            db.add(CaregiverAccessGrant(
+                person_id="person-1",
+                caregiver_id=caregiver.id,
+                role="primary" if caregiver.id == "caregiver-sarah" else "family",
+                access_scope="full_record",
+                status="active",
+                can_manage_members=caregiver.id == "caregiver-sarah",
+                permissions=["view_lcr", "add_evidence", "correct_records", "manage_responsibilities", "manage_reminders", "complete_assigned_reminders", "manage_handoffs", "share_summaries", "share_observations", "view_documents", "view_communications"],
+                granted_by_caregiver_id="caregiver-sarah",
+            ))
+            db.flush()
         token = f"{TEST_TOKEN}-{caregiver.id}"
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         existing = db.query(AnonymousSession).filter(AnonymousSession.token_hash == token_hash).first()

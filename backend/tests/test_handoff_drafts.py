@@ -15,6 +15,7 @@ from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverRole, CaregiverResponsibility, CaregiverHandoff
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.core.caregiver_enums import CaregiverRoleType, ResponsibilityStatus, ResponsibilityAcceptanceStatus, HandoffAcceptanceStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.time_location import Appointment
