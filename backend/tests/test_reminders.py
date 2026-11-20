@@ -218,6 +218,13 @@ def test_due_reminders_create_one_in_app_notification_and_are_idempotent():
         assert notifications[0].caregiver_id == session["caregiver"]["id"]
         assert notifications[0].title == "Call the clinic"
         assert notifications[0].body == "Ask about the appointment time."
+
+    delivered_view = client.get(
+        f"/api/v1/reminders/{session['person']['id']}",
+        headers=headers,
+    )
+    assert delivered_view.status_code == 200, delivered_view.text
+    assert delivered_view.json()[0]["notification_delivery_status"] == "in_app_notification_created"
     finally:
         db.close()
 
