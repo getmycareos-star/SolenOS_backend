@@ -139,3 +139,6 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 - `c8378886cbb1fb2502ad490b0e9fffba24cd8bcc` — adversarial regression for "The clinician suspects an infection."
 - `42bfe188d409ce153639a2b0d2b26e738b65c65b` — semantic gold case isolates the suspicion verb without the word "possible".
 - `eae8b0cffcfa29e0544612b898ea3b8db96003fb` — live-Qwen metrics now calculate modality accuracy, source-quotation accuracy and unsupported-candidate rate from observed candidates instead of hardcoding those metrics.
+
+- `cb06d3a0219f1a28ad2dfac61566fffc05f63c47` — live conflict workflow now sends a scanned PDF through actual Tesseract OCR and then real Qwen candidate generation before review and LCR reconciliation.
+- `8fcfa6d998a94da45b91b23e4d0b00d42ce68e7f` — the second conflicting medication document is now a generated DOCX, so the same live-Qwen test covers scanned-PDF OCR and DOCX extraction through to Companion conflict retrieval.
