@@ -979,3 +979,94 @@ def test_due_reminder_is_not_disclosed_to_revoked_assignee_or_silently_reassigne
         ).count() == 0
     finally:
         db.close()
+
+
+def test_reminders_cannot_be_assigned_to_caregivers_without_completion_permission():
+    client = TestClient(app)
+    primary = create_session(client, "Primary caregiver")
+    primary_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    person_id = primary["person"]["id"]
+    primary_id = primary["caregiver"]["id"]
+    invite_email = "reminder-permission@example.test"
+
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=primary_headers,
+        json={"email": invite_email, "expires_in_days": 7},
+    )
+    assert invitation.status_code == 201, invitation.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": invite_email,
+            "password": "reminder-permission-password-456",
+            "name": "Second caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    second_id = accepted.json()["caregiver_id"]
+
+    permissions = [
+        "view_lcr",
+        "add_evidence",
+        "manage_responsibilities",
+        "manage_reminders",
+        "manage_handoffs",
+        "share_summaries",
+        "share_observations",
+        "view_documents",
+        "view_communications",
+    ]
+    updated = client.patch(
+        f"/api/v1/caregiver-access/members/{second_id}/permissions",
+        headers=primary_headers,
+        json={"permissions": permissions},
+    )
+    assert updated.status_code == 200, updated.text
+
+    due_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    create_for_ineligible = client.post(
+        "/api/v1/reminders",
+        headers=primary_headers,
+        json={
+            "person_id": person_id,
+            "title": "Do not assign un-actionable responsibility",
+            "due_at": due_at,
+            "assigned_to_caregiver_id": second_id,
+        },
+    )
+    assert create_for_ineligible.status_code == 403, create_for_ineligible.text
+
+    created_for_primary = client.post(
+        "/api/v1/reminders",
+        headers=primary_headers,
+        json={
+            "person_id": person_id,
+            "title": "Keep responsibility with an eligible caregiver",
+            "due_at": due_at,
+            "assigned_to_caregiver_id": primary_id,
+        },
+    )
+    assert created_for_primary.status_code == 201, created_for_primary.text
+    reminder_id = created_for_primary.json()["id"]
+    reassignment = client.patch(
+        f"/api/v1/reminders/{reminder_id}/assignment",
+        headers=primary_headers,
+        json={"assigned_to_caregiver_id": second_id, "expected_version": 1},
+    )
+    assert reassignment.status_code == 403, reassignment.text
+
+    restored = client.patch(
+        f"/api/v1/caregiver-access/members/{second_id}/permissions",
+        headers=primary_headers,
+        json={"permissions": permissions + ["complete_assigned_reminders"]},
+    )
+    assert restored.status_code == 200, restored.text
+    eligible_assignment = client.patch(
+        f"/api/v1/reminders/{reminder_id}/assignment",
+        headers=primary_headers,
+        json={"assigned_to_caregiver_id": second_id, "expected_version": 1},
+    )
+    assert eligible_assignment.status_code == 200, eligible_assignment.text
+    assert eligible_assignment.json()["assigned_to_caregiver_id"] == second_id
