@@ -12,7 +12,7 @@ def test_runtime_endpoint_inventory_covers_every_registered_api_route():
         for item in inventory["routes"]
     )
 
-    assert inventory["source"] == "app.main:app runtime route registry"
+    assert inventory["source"] == "app.main:app expanded runtime route contexts"
     assert inventory["route_count"] == len(inventory["routes"])
     assert inventoried == registered
     assert sum(inventoried.values()) == len(inventory["routes"])
