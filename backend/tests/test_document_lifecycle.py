@@ -1273,3 +1273,65 @@ def test_pdf_page_text_layer_exception_falls_back_to_ocr_for_that_page(client, m
     assert "Recovered content from page two." in extracted
     assert response.json()["unreadable_page_numbers"] == []
     assert response.json()["unprocessed_page_numbers"] == []
+
+
+
+def test_second_authorized_caregiver_can_retrieve_shared_document_extraction(client):
+    test_client, owner = client
+    evidence_id = persist_document(
+        owner,
+        b"Care note: breakfast was mostly uneaten.",
+        filename="shared-care-note.txt",
+    )
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    extracted = test_client.post(
+        f"/api/v1/documents/{evidence_id}/extract",
+        headers=owner_headers,
+    )
+    assert extracted.status_code == 201, extracted.text
+    analysis_id = extracted.json()["analysis_id"]
+
+    account = test_client.post(
+        "/api/v1/accounts",
+        headers=owner_headers,
+        json={"email": "document-collaborator@example.com", "password": "another-long-password-789"},
+    )
+    assert account.status_code == 201, account.text
+    invitation = test_client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "document-collaborator@example.com", "expires_in_days": 7},
+    )
+    assert invitation.status_code == 201, invitation.text
+    accepted = test_client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": "document-collaborator@example.com",
+            "password": "another-long-password-789",
+            "name": "Document Collaborator",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    collaborator_headers = {"Authorization": f"Bearer {accepted.json()['access_token']}"}
+
+    retrieved = test_client.get(
+        f"/api/v1/documents/analyses/{analysis_id}",
+        headers=collaborator_headers,
+    )
+    assert retrieved.status_code == 200, retrieved.text
+    assert retrieved.json()["extracted_text"] == "Care note: breakfast was mostly uneaten."
+
+    listed = test_client.get(
+        "/api/v1/documents/intelligence",
+        headers=collaborator_headers,
+    )
+    assert listed.status_code == 200, listed.text
+    assert any(item["source_evidence_id"] == evidence_id for item in listed.json()["items"])
+
+    queued = test_client.post(
+        f"/api/v1/documents/{evidence_id}/queue",
+        headers=collaborator_headers,
+    )
+    assert queued.status_code == 202, queued.text
+    assert queued.json()["evidence_id"] == evidence_id
