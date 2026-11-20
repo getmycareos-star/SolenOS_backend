@@ -142,15 +142,15 @@ def database_schema_differences(bind=None):
 
         expected_foreign_keys = set()
         for constraint in table.foreign_key_constraints:
-            local_columns = tuple(sorted(element.parent.name for element in constraint.elements))
+            local_columns = tuple(element.parent.name for element in constraint.elements)
             referred_table = next(iter(constraint.elements)).column.table.name
-            referred_columns = tuple(sorted(element.column.name for element in constraint.elements))
+            referred_columns = tuple(element.column.name for element in constraint.elements)
             expected_foreign_keys.add((local_columns, referred_table, referred_columns))
         actual_foreign_keys = {
             (
-                tuple(sorted(item.get("constrained_columns") or [])),
+                tuple(item.get("constrained_columns") or []),
                 item.get("referred_table"),
-                tuple(sorted(item.get("referred_columns") or [])),
+                tuple(item.get("referred_columns") or []),
             )
             for item in inspector.get_foreign_keys(table_name)
         }
@@ -170,7 +170,7 @@ def database_schema_differences(bind=None):
             if constraint.__class__.__name__ == "UniqueConstraint"
         }
         actual_unique_constraints = {
-            tuple(sorted(item.get("column_names") or []))
+            tuple(item.get("column_names") or [])
             for item in inspector.get_unique_constraints(table_name)
         }
         missing_unique_constraints = expected_unique_constraints - actual_unique_constraints
