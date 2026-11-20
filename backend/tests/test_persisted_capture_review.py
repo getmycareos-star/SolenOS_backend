@@ -639,16 +639,14 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     first = create_session(client, "Shared care recipient")
     first_auth = {"Authorization": f"Bearer {first['access_token']}"}
     source = "Caregiver report: the person prefers a quiet room after lunch."
-    from app.services import qwen_background_worker
-
     monkeypatch.setattr(
-        qwen_background_worker,
+        api_v1_module,
         "extract_review_candidates",
         lambda source_text, *, source_event_id, source_evidence_id=None: {
             "observations": [{
                 "subject": "environment",
                 "observation": "The person prefers a quiet room after lunch.",
-                "source_quote": source_text,
+                "source_quote": source,
                 "source_event_id": source_event_id,
                 "source_evidence_id": source_evidence_id,
                 "review_status": "pending_review",
