@@ -55,7 +55,6 @@ def get_capture_analysis(
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Capture analysis not found")
@@ -96,7 +95,6 @@ def review_capture_candidate(
         .filter(
             CaptureAnalysis.id == analysis_id,
             CaptureAnalysis.person_id == person_id,
-            CaptureAnalysis.caregiver_id == caregiver_id,
         )
         .with_for_update()
         .first()
@@ -148,12 +146,11 @@ def review_capture_candidate(
         source_event = db.query(CareEvent).filter(
             CareEvent.id == analysis.source_event_id,
             CareEvent.person_id == person_id,
-            CareEvent.created_by_caregiver_id == caregiver_id,
             CareEvent.event_type.in_({
                 "structured_daily_capture", "quick_daily_checkin", "daily_care_entry",
             }),
         ).with_for_update().first()
-        if source_event is None:
+        if source_event is None or str(source_event.created_by_caregiver_id) != str(analysis.caregiver_id):
             raise HTTPException(status_code=409, detail="The original Daily Care source could not be verified")
 
         if not analysis.source_evidence_id or analysis.source_evidence_id not in (source_event.evidence_ids or []):
@@ -161,7 +158,7 @@ def review_capture_candidate(
         source_evidence = db.query(EvidenceModel).filter(
             EvidenceModel.id == analysis.source_evidence_id,
             EvidenceModel.person_id == person_id,
-            EvidenceModel.reported_by_caregiver_id == caregiver_id,
+            EvidenceModel.reported_by_caregiver_id == analysis.caregiver_id,
         ).first()
         if source_evidence is None:
             raise HTTPException(status_code=409, detail="The Daily Care source evidence could not be verified")
