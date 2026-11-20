@@ -1922,6 +1922,11 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
             ).one()
             persisted_change.significance_assessment_id = replacement_assessment_id
             db.commit()
+            original_assessment = db.query(SignificanceAssessment).filter(
+                SignificanceAssessment.id == assessment_id,
+                SignificanceAssessment.person_id == person_id,
+            ).one()
+            assert original_assessment.evidence_confidence == 0.42
 
         current_after = client.get(
             "/api/v1/care-continuity/situation-understanding",
