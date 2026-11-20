@@ -91,6 +91,8 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
         from app.models.action import Action
         action = db.query(Action).filter_by(id=approved_action.json()["id"]).one()
         linked = db.query(CareReminder).filter_by(action_id=action.id).one()
+        linked_reminder_id = linked.id
+        action_id = action.id
         assert action.responsible_caregiver_id == recipient_id
         assert linked.created_by_caregiver_id == primary_id
         assert linked.assigned_to_caregiver_id == recipient_id
@@ -101,6 +103,27 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
         ).one()
         assert assignment_audit.actor_id == primary_id
         assert assignment_audit.record_metadata["responsible_caregiver_id"] == recipient_id
+
+    linked_reassignment = client.patch(
+        f"/api/v1/reminders/{linked_reminder_id}/assignment",
+        headers=recipient_headers,
+        json={"assigned_to_caregiver_id": primary_id, "expected_version": 1},
+    )
+    assert linked_reassignment.status_code == 200, linked_reassignment.text
+    with SessionLocal() as db:
+        from app.models.action import Action
+        action = db.query(Action).filter_by(id=action_id).one()
+        linked = db.query(CareReminder).filter_by(id=linked_reminder_id).one()
+        assert action.responsible_caregiver_id == primary_id
+        assert linked.assigned_to_caregiver_id == primary_id
+        reassignment_audit = db.query(AuditLogEvent).filter_by(
+            action="care.action.responsibility_reassigned",
+            target_type="registered_action",
+            target_id=action_id,
+        ).one()
+        assert reassignment_audit.actor_id == recipient_id
+        assert reassignment_audit.record_metadata["previous_responsible_caregiver_id"] == recipient_id
+        assert reassignment_audit.record_metadata["responsible_caregiver_id"] == primary_id
 
     due_at = datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat()
     created = client.post(
