@@ -21,6 +21,8 @@ from app.models.action import Action, ActionLifecycleAudit
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence
 from app.models.reminder import CareReminder
+from app.models.caregiver_access import CaregiverAccessGrant
+from app.models.privacy_delivery import AuditLogEvent
 from app.schemas.action import ActionCandidate
 from app.services.action_normalization import ActionNormalizationService
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
@@ -177,14 +179,29 @@ def _audit(db: Session, action: Action, actor_id: str, old: Optional[str], new: 
     ))
 
 
+def _require_active_responsible_caregiver(db: Session, person_id: str, caregiver_id: str) -> None:
+    grant = db.query(CaregiverAccessGrant.id).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.access_scope == "full_record",
+    ).first()
+    if grant is None:
+        raise HTTPException(
+            status_code=403,
+            detail="The responsible caregiver must have active full-record access",
+        )
+
+
 @router.post("/registered-actions/{person_id}/approve", response_model=RegisteredActionRead, status_code=201)
 def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Request,
                       db: Session = Depends(get_db)):
     scoped_person_id, caregiver_id = _session_scope(request, db)
     if person_id != scoped_person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
-    if payload.responsible_caregiver_id and payload.responsible_caregiver_id != caregiver_id:
-        raise HTTPException(status_code=403, detail="Assigning another caregiver requires a separate consent and handoff workflow")
+    responsible_caregiver_id = payload.responsible_caregiver_id or caregiver_id
+    _require_active_responsible_caregiver(db, scoped_person_id, responsible_caregiver_id)
     if payload.create_reminder and payload.reminder_due_at is None:
         raise HTTPException(status_code=422, detail="Select an explicit due date to create a reminder")
     if not payload.create_reminder and payload.reminder_due_at is not None:
@@ -294,18 +311,35 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         requires_confirmation=False,
         risk_tier="not_assessed",
         created_by_caregiver_id=caregiver_id,
-        responsible_caregiver_id=caregiver_id,
+        responsible_caregiver_id=responsible_caregiver_id,
         version=1,
     )
     db.add(action)
     db.flush()
     _audit(db, action, caregiver_id, None, "approved", "Explicit caregiver approval", evidence_ids)
+    db.add(AuditLogEvent(
+        actor_id=caregiver_id,
+        subject_id=scoped_person_id,
+        person_id=scoped_person_id,
+        caregiver_id=caregiver_id,
+        action="care.action.responsibility_assigned",
+        target_type="registered_action",
+        target_id=action.id,
+        occurred_at=now,
+        outcome="success",
+        policy_version="registered-action-responsibility-v1",
+        record_metadata={
+            "responsible_caregiver_id": responsible_caregiver_id,
+            "source_evidence_ids": evidence_ids,
+        },
+    ))
 
     if payload.create_reminder:
         db.add(CareReminder(
             person_id=scoped_person_id,
             action_id=action.id,
             created_by_caregiver_id=caregiver_id,
+            assigned_to_caregiver_id=responsible_caregiver_id,
             title=payload.title.strip()[:180],
             note="Reminder linked to caregiver-approved registered action.",
             due_at=payload.reminder_due_at.astimezone(timezone.utc),
