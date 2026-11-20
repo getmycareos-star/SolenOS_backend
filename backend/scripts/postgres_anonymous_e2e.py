@@ -1458,7 +1458,7 @@ def main():
         # items. Verify the accepted assertion through the paginated History LCR
         # context instead of incorrectly requiring every assertion in that card.
         status, reviewed_history = request(
-            "GET", "/api/v1/daily-care/history?limit=200&offset=0", token=token_a,
+            "GET", f"/api/v1/daily-care/history?person_id={person_a}&limit=200&offset=0", token=token_a,
         )
         require(status == 200, f"Reviewed Daily Care history failed: {status}: {reviewed_history}")
         reviewed_assertions = [
@@ -1494,18 +1494,10 @@ def main():
         ), "Accepted Daily Care assertion did not survive session refresh and paginated LCR history")
 
         status, foreign_history = request(
-            "GET", "/api/v1/daily-care/history?limit=200&offset=0", token=token_b,
+            "GET", f"/api/v1/daily-care/history?person_id={person_a}&limit=200&offset=0", token=token_b,
         )
-        require(status == 200 and not any(
-            row.get("id") == accepted_assertion_id
-            for row in (
-                foreign_history.get("history", {})
-                .get("lcr_context", {})
-                .get("sources", {})
-                .get("assertions", {})
-                .get("items", [])
-            )
-        ), "A different care recipient session received another person's accepted assertion")
+        require(status == 403,
+                f"A different care recipient session was not denied another person's paginated LCR history: {status}: {foreign_history}")
 
         status, daily_evidence = request(
             "GET", f"/api/v1/evidence/{person_a}", token=token_a,
