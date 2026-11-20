@@ -89,9 +89,43 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
         assert accepted.status_code == 201, accepted.text
         invited = accepted.json()
         invited_caregiver_id = invited["caregiver_id"]
+        original_invited_session_id = invited["session_id"]
         invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
         assert invited["person_id"] == person_id
         assert invited_caregiver_id != primary_caregiver_id
+
+        suspended = client.patch(
+            f"/api/v1/caregiver-access/members/{invited_caregiver_id}/status",
+            headers=primary_headers,
+            json={"status": "suspended"},
+        )
+        assert suspended.status_code == 200, suspended.text
+        assert suspended.json()["status"] == "suspended"
+        assert suspended.json()["sessions_revoked"] is True
+        suspended_session = client.get(
+            f"/api/v1/evidence/{person_id}", headers=invited_headers
+        )
+        assert suspended_session.status_code == 401, suspended_session.text
+        blocked_login = client.post(
+            "/api/v1/accounts/login",
+            json={"email": invite_email, "password": "invited-postgres-password-456"},
+        )
+        assert blocked_login.status_code == 403, blocked_login.text
+
+        restored = client.patch(
+            f"/api/v1/caregiver-access/members/{invited_caregiver_id}/status",
+            headers=primary_headers,
+            json={"status": "active"},
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["reauthentication_required"] is True
+        relogin = client.post(
+            "/api/v1/accounts/login",
+            json={"email": invite_email, "password": "invited-postgres-password-456"},
+        )
+        assert relogin.status_code == 200, relogin.text
+        invited = relogin.json()
+        invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
 
         primary_assignable = client.get(
             "/api/v1/caregiver-access/assignable-members", headers=primary_headers
@@ -155,7 +189,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             stored_grant = db.query(CaregiverAccessGrant).filter_by(
                 person_id=person_id, caregiver_id=invited_caregiver_id
             ).one()
-            stored_session = db.query(AnonymousSession).filter_by(id=invited["session_id"]).one()
+            stored_session = db.query(AnonymousSession).filter_by(id=original_invited_session_id).one()
             assert stored_invitation.status == "accepted"
             assert stored_invitation.accepted_caregiver_id == invited_caregiver_id
             assert stored_grant.status == "revoked"
