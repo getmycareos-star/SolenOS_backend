@@ -1320,3 +1320,70 @@ def test_daily_intelligence_refresh_updates_one_persisted_projection():
     finally:
         db.close()
 
+def test_appointment_remains_successful_after_secondary_learning_failure(monkeypatch):
+    import app.api.v1 as api_v1_module
+    from app.models.time_location import Appointment
+
+    client = TestClient(app)
+    created = create_session(client, "Appointment persistence owner")
+
+    def fail_learning(*args, **kwargs):
+        raise RuntimeError("simulated optional learning outage")
+
+    monkeypatch.setattr(api_v1_module, "_log_and_learn", fail_learning)
+    response = client.post(
+        "/api/v1/appointments",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "person_id": created["person"]["id"],
+            "title": "Neurology follow-up",
+            "scheduled_at": "2026-12-01T10:00:00Z",
+            "created_by_caregiver_id": created["caregiver"]["id"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["title"] == "Neurology follow-up"
+
+    db = TestSessionLocal()
+    try:
+        rows = db.query(Appointment).filter_by(person_id=created["person"]["id"]).all()
+        assert len(rows) == 1
+        assert rows[0].title == "Neurology follow-up"
+    finally:
+        db.close()
+
+
+def test_care_transition_remains_successful_after_secondary_learning_failure(monkeypatch):
+    import app.api.v1 as api_v1_module
+    from app.models.time_location import CareTransition
+
+    client = TestClient(app)
+    created = create_session(client, "Transition persistence owner")
+
+    def fail_learning(*args, **kwargs):
+        raise RuntimeError("simulated optional learning outage")
+
+    monkeypatch.setattr(api_v1_module, "_log_and_learn", fail_learning)
+    response = client.post(
+        "/api/v1/transitions",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "person_id": created["person"]["id"],
+            "from_location": "Home",
+            "to_location": "Hospital",
+            "transition_type": "unknown",
+            "occurred_at": "2026-11-20T09:00:00Z",
+            "created_by_caregiver_id": created["caregiver"]["id"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["to_location"] == "Hospital"
+
+    db = TestSessionLocal()
+    try:
+        rows = db.query(CareTransition).filter_by(person_id=created["person"]["id"]).all()
+        assert len(rows) == 1
+        assert rows[0].to_location == "Hospital"
+    finally:
+        db.close()
+
