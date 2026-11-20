@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import get_db
 from app.models.care_continuity import CareAssertion
+from app.models.capture_analysis import DocumentReviewEvent
 from app.main import app
 import app.main as main_module
 
@@ -218,6 +219,74 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         finally:
             db.close()
 
+        # Re-upload the identical original binary, run real Qwen again, and verify
+        # its same source interpretation reuses the existing canonical assertion.
+        duplicate_upload = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data={
+                "person_id": session["person"]["id"],
+                "caregiver_id": session["caregiver"]["id"],
+                "evidence_type": "document",
+                "extracted_text": "",
+            },
+            files={"file": ("discharge-summary-copy.txt", source.encode("utf-8"), "text/plain")},
+        )
+        assert duplicate_upload.status_code == 201, duplicate_upload.text
+        assert duplicate_upload.json()["duplicate_detected"] is True
+        assert duplicate_upload.json()["duplicate_of_evidence_id"] == evidence_id
+        duplicate_evidence_id = duplicate_upload.json()["evidence_id"]
+        duplicate_extraction = client.post(
+            f"/api/v1/documents/{duplicate_evidence_id}/extract",
+            headers=headers,
+        )
+        assert duplicate_extraction.status_code == 201, duplicate_extraction.text
+        duplicate_analysis_id = duplicate_extraction.json()["analysis_id"]
+        duplicate_understanding = client.post(
+            f"/api/v1/documents/{duplicate_evidence_id}/intelligence",
+            headers=headers,
+        )
+        assert duplicate_understanding.status_code == 201, duplicate_understanding.text
+        duplicate_candidates = duplicate_understanding.json()["observations"]
+        original_mobility_candidate = candidates[0]
+        duplicate_mobility_index = next(
+            index for index, candidate in enumerate(duplicate_candidates)
+            if candidate.get("source_quote") == original_mobility_candidate.get("source_quote")
+        )
+        duplicate_mobility_candidate = duplicate_candidates[duplicate_mobility_index]
+        assert duplicate_mobility_candidate["subject"] == original_mobility_candidate["subject"]
+        assert duplicate_mobility_candidate["field_type"] == original_mobility_candidate["field_type"]
+        duplicate_review = client.post(
+            f"/api/v1/documents/intelligence/{duplicate_analysis_id}/review",
+            headers=headers,
+            json={"candidate_index": duplicate_mobility_index, "decision": "accept"},
+        )
+        assert duplicate_review.status_code == 200, duplicate_review.text
+        assert duplicate_review.json()["source_record_ref"]["record_id"] == assertion_id
+
+        db = TestingSessionLocal()
+        try:
+            all_assertions = db.query(CareAssertion).filter_by(
+                person_id=session["person"]["id"],
+            ).all()
+            accepted_assertion_count = len(all_assertions)
+            duplicate_assertion_count = len(all_assertions) - len({
+                row.source_text for row in all_assertions
+            })
+            assert accepted_assertion_count == 3
+            assert duplicate_assertion_count == 0
+            duplicate_review_events = db.query(DocumentReviewEvent).filter(
+                DocumentReviewEvent.person_id == session["person"]["id"],
+                DocumentReviewEvent.decision == "accept",
+                DocumentReviewEvent.resulting_assertion_id == assertion_id,
+            ).all()
+            assert len(duplicate_review_events) == 2
+            assert {event.source_evidence_id for event in duplicate_review_events} == {
+                evidence_id, duplicate_evidence_id
+            }
+        finally:
+            db.close()
+
         # The accepted document assertion must be available to the same caregiver's
         # real-Qwen Companion response, with the original upload retained as source.
         companion = client.post(
@@ -309,7 +378,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
                     "unsupported_candidate_rate": 0.0,
                     "companion_lcr_assertion_retrieval": True,
                     "accepted_assertion_count": accepted_assertion_count,
-                    "duplicate_assertion_count": 0,
+                    "duplicate_assertion_count": duplicate_assertion_count,
                 },
                 sort_keys=True,
             )
