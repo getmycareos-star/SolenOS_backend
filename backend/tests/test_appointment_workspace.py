@@ -3063,3 +3063,46 @@ def test_saving_an_upcoming_appointment_automatically_prepares_its_workspace(cli
     )
     assert other_workspaces.status_code == 200, other_workspaces.text
     assert appointment_id not in other_workspaces.text
+
+def test_appointment_save_remains_durable_when_auto_preparation_fails(client, monkeypatch):
+    import app.api.appointment_workspace as appointment_workspace_api
+
+    test_client, owner, _ = client
+
+    def fail_preparation(*args, **kwargs):
+        raise RuntimeError("appointment preparation unavailable")
+
+    monkeypatch.setattr(
+        appointment_workspace_api,
+        "ensure_upcoming_appointment_workspace",
+        fail_preparation,
+    )
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    scheduled_at = datetime.now(timezone.utc) + timedelta(days=5)
+    response = test_client.post(
+        "/api/v1/appointments",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "created_by_caregiver_id": owner["caregiver"]["id"],
+            "title": "Visit remains saved if preparation fails",
+            "scheduled_at": scheduled_at.isoformat(),
+            "status": "scheduled",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(Appointment).filter(
+            Appointment.id == response.json()["id"],
+            Appointment.person_id == owner["person"]["id"],
+        ).first()
+        assert persisted is not None
+        assert persisted.title == "Visit remains saved if preparation fails"
+        assert db.query(AppointmentWorkspaceRecord).filter_by(
+            person_id=owner["person"]["id"],
+            appointment_id=persisted.id,
+        ).count() == 0
+    finally:
+        db.close()
