@@ -24,7 +24,7 @@ class CaregiverAccessGrant(Base):
     access_scope = Column(String(32), nullable=False, default="full_record")
     status = Column(String(16), nullable=False, default="active", index=True)
     can_manage_members = Column(Boolean, nullable=False, default=False)
-    permissions = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    permissions = Column(JSON, nullable=False, default=lambda: ["view_lcr", "add_evidence", "manage_responsibilities", "manage_reminders", "complete_assigned_reminders", "manage_handoffs", "share_summaries", "share_observations", "view_documents", "view_communications"], server_default=text("'[]'"))
     granted_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
     granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
