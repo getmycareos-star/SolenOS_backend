@@ -270,8 +270,15 @@ class CaregiverIntelligenceService:
             .all()
         )
 
-    def create_context(self, context: CaregiverContextCreate) -> CaregiverContext:
-        db_context = CaregiverContext(**context.model_dump())
+    def create_context(
+        self,
+        context: CaregiverContextCreate,
+        reported_by_caregiver_id: Optional[str] = None,
+    ) -> CaregiverContext:
+        values = context.model_dump()
+        if reported_by_caregiver_id:
+            values["reported_by_caregiver_id"] = reported_by_caregiver_id
+        db_context = CaregiverContext(**values)
         self.db.add(db_context)
         self.db.commit()
         self.db.refresh(db_context)
