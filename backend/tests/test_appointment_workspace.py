@@ -2434,6 +2434,14 @@ def test_appointment_workspace_reports_unknown_when_revision_history_is_unavaila
 def test_documents_only_member_cannot_read_or_write_appointment_workspace(client):
     test_client, session, _ = client
     headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={"payload": {"visit_purpose": "Private appointment preparation"}},
+    )
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
     db = TestSessionLocal()
     try:
         grant = db.query(CaregiverAccessGrant).filter_by(
@@ -2447,8 +2455,14 @@ def test_documents_only_member_cannot_read_or_write_appointment_workspace(client
     finally:
         db.close()
 
-    listed = test_client.get("/api/v1/appointment-workspaces", headers=headers)
-    assert listed.status_code == 403, listed.text
+    for path in (
+        "/api/v1/appointment-workspaces",
+        f"/api/v1/appointment-workspaces/{record_id}",
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-draft",
+        f"/api/v1/appointment-workspaces/{record_id}/revisions",
+    ):
+        denied_read = test_client.get(path, headers=headers)
+        assert denied_read.status_code == 403, (path, denied_read.text)
 
     denied_write = test_client.post(
         "/api/v1/appointment-workspaces",
@@ -2456,3 +2470,10 @@ def test_documents_only_member_cannot_read_or_write_appointment_workspace(client
         json={"payload": {"visit_purpose": "Must remain inaccessible"}},
     )
     assert denied_write.status_code == 403, denied_write.text
+
+    denied_update = test_client.patch(
+        f"/api/v1/appointment-workspaces/{record_id}",
+        headers=headers,
+        json={"payload": {"visit_purpose": "Unauthorized edit"}},
+    )
+    assert denied_update.status_code == 403, denied_update.text
