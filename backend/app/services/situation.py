@@ -199,6 +199,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 analysis_warning=(
                     "The original save was found. Derived analysis was not rerun during this retry."
                 ),
+                idempotent_replay=True,
             )
 
     target_situation = None
