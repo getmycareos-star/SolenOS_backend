@@ -3544,3 +3544,88 @@ def test_medication_review_repairs_nonpersisted_helper_status_before_commit(monk
             db.close()
     finally:
         teardown_db()
+
+
+def test_structured_capture_preserves_multiple_details_and_unvalidated_vital_value():
+    from app.services.capture_review import persist_structured_daily_capture_observations
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        seed_person_and_caregiver()
+        detail = {
+            "notes": "she's loosing weight",
+            "scales": [{
+                "axis": "mood",
+                "note": "she's sad",
+                "observed_at": "2026-11-11T21:10:00.000Z",
+                "score": 5,
+            }],
+            "vitals": [{
+                "vital_type": "bp_systolic",
+                "value": 10,
+                "unit": "mmHg",
+                "note": "yes",
+                "measured_at": "2026-11-11T21:10:00.000Z",
+            }],
+            "medications": [],
+        }
+        source_text = json.dumps(
+            {"original_capture": detail},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        evidence = Evidence(
+            id="multi-detail-source-evidence",
+            person_id="person-daily-test",
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=source_text,
+            uploaded_by_caregiver_id="caregiver-daily-test",
+            reported_by_caregiver_id="caregiver-daily-test",
+            reported_by_label="Caregiver",
+            source_type="caregiver_report",
+        )
+        db.add(evidence)
+        db.flush()
+
+        created = persist_structured_daily_capture_observations(
+            db,
+            person_id="person-daily-test",
+            caregiver_id="caregiver-daily-test",
+            evidence_id=evidence.id,
+            source_event_id="multi-detail-source-event",
+            source_text=source_text,
+            detail=detail,
+            reported_at=datetime(2026, 11, 11, 22, 13, tzinfo=timezone.utc),
+            recorded_at=datetime(2026, 11, 11, 22, 13, tzinfo=timezone.utc),
+        )
+        rows = db.query(EvidenceObservation).filter(
+            EvidenceObservation.person_id == "person-daily-test",
+            EvidenceObservation.evidence_id == evidence.id,
+        ).all()
+
+        assert created == 3
+        assert {row.attribute for row in rows} == {
+            "caregiver_note", "mood", "blood_pressure_systolic",
+        }
+        note = next(row for row in rows if row.attribute == "caregiver_note")
+        mood = next(row for row in rows if row.attribute == "mood")
+        systolic = next(row for row in rows if row.attribute == "blood_pressure_systolic")
+
+        assert note.value_text == "she's loosing weight"
+        assert mood.value_text == "5"
+        assert "she's sad" in mood.context
+        assert systolic.value_text == "10"
+        assert systolic.units == "mmHg"
+        assert systolic.epistemic_status == "reported"
+        assert "yes" in systolic.context
+        assert "not validated as a clinically usable measurement" in systolic.context
+        for row in rows:
+            assert row.evidence_id == evidence.id
+            assert source_text[row.source_span_start:row.source_span_end] == row.source_passage
+    finally:
+        db.close()
+        teardown_db()
