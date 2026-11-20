@@ -48,6 +48,7 @@ from app.services.caregiver_permissions import require_request_caregiver_permiss
 from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
 from app.request_metrics import RequestMetricsMiddleware
 from app.models.anonymous_session import AnonymousSession
+from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.change import Situation as SituationModel
