@@ -27,12 +27,13 @@ from app.services.caregiver_permissions import require_caregiver_permission
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.care_attention_intelligence import build_care_attention_assessment
+from app.services.care_attention_intelligence import build_care_attention_assessment, CARE_ATTENTION_POLICY_VERSION
 from app.services.care_continuity import get_freshness
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.change import Situation as SituationModel, Change, Baseline
+from app.models.significance import SignificanceAssessment
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
@@ -3280,7 +3281,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     change_columns = {column["name"] for column in inspector.get_columns("changes")} if change_table_available else set()
     required_change_columns = {
         "id", "person_id", "is_active", "superseded_by_change_id", "created_at",
-        "significance_verdict", "attention_candidate", "follow_up_candidate",
+        "significance_assessment_id", "significance_verdict", "attention_candidate", "follow_up_candidate",
         "confirmation_status", "baseline_id", "baseline_coverage_status",
         "current_coverage_status", "evidence_ids", "subject_type", "change_type",
         "change_direction", "previous_state", "current_state", "explanation",
@@ -3296,6 +3297,41 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         )
         persisted_change_history_bounded = len(active_change_rows) > 100
         active_change_rows = active_change_rows[:100]
+        # Load the persisted significance assessment linked to each change.
+        # Evidence confidence and care significance remain separate dimensions.
+        significance_assessment_by_id = {}
+        significance_table_available = inspector.has_table("significance_assessments")
+        significance_columns = {
+            column["name"] for column in inspector.get_columns("significance_assessments")
+        } if significance_table_available else set()
+        required_significance_columns = {
+            "id", "person_id", "evidence_status", "evidence_confidence",
+            "significance_confidence", "dimensions", "explanation", "is_active",
+            "superseded_by_assessment_id",
+        }
+        significance_schema_available = required_significance_columns.issubset(significance_columns)
+        significance_assessment_ids = sorted({
+            str(change.significance_assessment_id)
+            for change in active_change_rows
+            if getattr(change, "significance_assessment_id", None)
+        })
+        if significance_schema_available and significance_assessment_ids:
+            significance_rows = db.query(
+                SignificanceAssessment.id,
+                SignificanceAssessment.evidence_status,
+                SignificanceAssessment.evidence_confidence,
+                SignificanceAssessment.significance_confidence,
+                SignificanceAssessment.dimensions,
+                SignificanceAssessment.explanation,
+            ).filter(
+                SignificanceAssessment.person_id == person_id,
+                SignificanceAssessment.id.in_(significance_assessment_ids),
+                SignificanceAssessment.is_active.is_(True),
+                SignificanceAssessment.superseded_by_assessment_id.is_(None),
+            ).all()
+            significance_assessment_by_id = {
+                str(row.id): row for row in significance_rows
+            }
         # Fingerprint every active change row, not only candidates selected for
         # caregiver attention. Rejection, retirement, or a changed verdict must
         # invalidate an older situation snapshot too.
@@ -3307,6 +3343,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "is_active": bool(change.is_active),
                 "superseded_by_change_id": change.superseded_by_change_id,
                 "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "significance_assessment_id": getattr(change, "significance_assessment_id", None),
                 "attention_candidate": bool(change.attention_candidate),
                 "follow_up_candidate": bool(change.follow_up_candidate),
                 "confirmation_status": change.confirmation_status,
@@ -3434,18 +3471,36 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 assertion_by_id=assertion_by_id,
                 observation_by_id=observation_by_id,
             )
+            significance = significance_assessment_by_id.get(str(getattr(change, "significance_assessment_id", "") or ""))
+            linked_follow_up = next(
+                (loop for loop in open_loops if str(loop.get("source_id") or "") == str(change.id)),
+                None,
+            )
             persisted_change_items.append({
                 "id": str(change.id),
                 "title": str(change.subject_type or "Recorded care change").replace("_", " ").capitalize(),
                 "change_type": getattr(change.change_type, "value", change.change_type),
                 "change_direction": getattr(change.change_direction, "value", change.change_direction),
                 "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "significance_assessment_id": getattr(change, "significance_assessment_id", None),
+                "evidence_status": (
+                    getattr(significance.evidence_status, "value", significance.evidence_status)
+                    if significance else "unknown"
+                ),
+                "evidence_confidence": significance.evidence_confidence if significance else None,
+                "significance_confidence": significance.significance_confidence if significance else None,
+                "assessment_dimensions": list(significance.dimensions or []) if significance else [],
                 "attention_candidate": bool(change.attention_candidate),
                 "follow_up_candidate": bool(change.follow_up_candidate),
+                "action_status": str(linked_follow_up.get("status") or "unknown") if linked_follow_up else "not_recorded",
+                "linked_follow_up_id": str(linked_follow_up.get("id")) if linked_follow_up else None,
                 "confirmation_status": change.confirmation_status,
                 "previous_state": change.previous_state,
                 "current_state": change.current_state,
-                "explanation": change.explanation,
+                "explanation": (
+                    significance.explanation if significance and significance.explanation
+                    else change.explanation
+                ),
                 "baseline_coverage_status": change.baseline_coverage_status or (baseline.coverage_status if baseline else None),
                 "current_coverage_status": change.current_coverage_status,
                 "baseline_is_stable": bool(baseline.is_stable) if baseline else False,
@@ -3467,6 +3522,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "baseline_source_available": baseline_source_available,
                 "baseline_source_complete": baseline_source_complete,
                 "canonical_conflicts": conflict_items,
+                "care_attention_policy_version": CARE_ATTENTION_POLICY_VERSION,
             },
         ),
         "person_id": str(person_id),
