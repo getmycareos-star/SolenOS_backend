@@ -1138,3 +1138,137 @@ def test_shared_perspectives_are_detected_only_after_both_caregivers_promote_the
     finally:
         teardown_db()
 
+def test_responsibility_gap_review_is_persisted_and_audited():
+    from app.models.privacy_delivery import AuditLogEvent
+
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        client = get_test_client()
+        created = client.post(
+            "/api/v1/responsibility-gaps",
+            json={"person_id": "person-1", "responsibility_type": "medication"},
+        )
+        assert created.status_code == 200, created.text
+        gap_id = created.json()["id"]
+        reviewed = client.post(
+            f"/api/v1/responsibility-gaps/{gap_id}/review",
+            json={
+                "status": "partially_covered",
+                "resolution": "One caregiver covers weekdays; weekends remain unassigned.",
+            },
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["status"] == "partially_covered"
+        listed = client.get("/api/v1/responsibility-gaps/person-1")
+        assert listed.status_code == 200
+        assert any(item["id"] == gap_id for item in listed.json())
+        db = TestingSessionLocal()
+        try:
+            event = db.query(AuditLogEvent).filter_by(
+                target_type="responsibility_gap",
+                target_id=gap_id,
+                action="caregiver_responsibility_gap_reviewed",
+            ).one()
+            assert event.record_metadata["new_status"] == "partially_covered"
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_shared_perspective_conflict_resolution_preserves_both_reports_and_audits():
+    from app.models.privacy_delivery import AuditLogEvent
+
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        sarah_client, sarah_profile = create_test_profile("caregiver-sarah", "Sarah")
+        john_client, john_profile = create_test_profile("caregiver-john", "John")
+        created = sarah_client.post(
+            "/api/v1/perspective-conflicts",
+            json={
+                "person_id": "person-1",
+                "caregiver_a_id": sarah_profile,
+                "caregiver_b_id": john_profile,
+                "conflict_type": "observation_conflict",
+                "claim_a": "Mom fell yesterday",
+                "claim_b": "Mom did not fall",
+                "status": "unresolved",
+            },
+        )
+        assert created.status_code == 200, created.text
+        conflict_id = created.json()["id"]
+        reviewed = john_client.post(
+            f"/api/v1/perspective-conflicts/{conflict_id}/resolve",
+            json={"resolution": "Reports refer to different observation periods; retain both accounts."},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["status"] == "resolved"
+        assert reviewed.json()["claim_a"] == "Mom fell yesterday"
+        assert reviewed.json()["claim_b"] == "Mom did not fall"
+        assert sarah_client.get("/api/v1/perspective-conflicts/person-1").json() == []
+        db = TestingSessionLocal()
+        try:
+            event = db.query(AuditLogEvent).filter_by(
+                target_type="perspective_conflict",
+                target_id=conflict_id,
+                action="caregiver_perspective_conflict_resolved",
+            ).one()
+            assert event.record_metadata["new_status"] == "resolved"
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_duplicate_action_review_is_persisted_and_audited():
+    from app.models.privacy_delivery import AuditLogEvent
+
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        sarah_client, sarah_profile = create_test_profile("caregiver-sarah", "Sarah")
+        john_client, john_profile = create_test_profile("caregiver-john", "John")
+        created = sarah_client.post(
+            "/api/v1/duplicate-actions",
+            json={
+                "person_id": "person-1",
+                "caregiver_a_id": sarah_profile,
+                "caregiver_b_id": john_profile,
+                "action_type": "appointment_booking",
+                "action_description_a": "Booked the neurology appointment.",
+                "action_description_b": "Booked the same neurology appointment.",
+            },
+        )
+        assert created.status_code == 200, created.text
+        duplicate_id = created.json()["id"]
+        reviewed = john_client.post(
+            f"/api/v1/duplicate-actions/{duplicate_id}/review",
+            json={
+                "status": "confirmed_duplicate",
+                "resolution": "Both reports refer to the same appointment booking.",
+            },
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["status"] == "confirmed_duplicate"
+        assert reviewed.json()["resolution"] == "Both reports refer to the same appointment booking."
+        db = TestingSessionLocal()
+        try:
+            event = db.query(AuditLogEvent).filter_by(
+                target_type="duplicate_action",
+                target_id=duplicate_id,
+                action="caregiver_duplicate_action_reviewed",
+            ).one()
+            assert event.record_metadata["new_status"] == "confirmed_duplicate"
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
