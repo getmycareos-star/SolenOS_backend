@@ -70,7 +70,10 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     ).first()
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
-    require_caregiver_permission(db, str(session.person_id), str(session.caregiver_id), "view_lcr")
+    # Endpoint handlers enforce their operation-specific permission below.
+    # Do not pre-require view_lcr here: document-scoped members may read the
+    # explicitly permitted document/appointment context through the handler's
+    # read_only permission mapping, while all writes remain separately gated.
     return str(session.person_id), str(session.caregiver_id)
 
 
