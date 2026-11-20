@@ -79,7 +79,10 @@ def get_test_client(caregiver_id=None):
                 token_hash=token_hash,
                 expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
             ))
-            db.commit()
+        # Persist the grant even when the deterministic bearer session already
+        # exists. The old conditional commit left newly-added grants transient
+        # for reused sessions, causing false 403s in authorization-aware tests.
+        db.commit()
     finally:
         db.close()
     return TestClient(app, headers={"Authorization": f"Bearer {token}"})
