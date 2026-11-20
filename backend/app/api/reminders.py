@@ -65,6 +65,24 @@ def _require_active_full_access(db: Session, person_id: str, caregiver_id: str) 
         raise HTTPException(status_code=403, detail="The assigned caregiver does not have active full-record access")
 
 
+def _resolve_previous_assignee_notifications(db: Session, reminder_id: str, previous_assignee_id: str) -> None:
+    now = datetime.now(timezone.utc)
+    db.query(CareNotification).filter(
+        CareNotification.source_event_id == reminder_id,
+        CareNotification.category == "reminder_due",
+        CareNotification.caregiver_id == previous_assignee_id,
+        CareNotification.status == "active",
+    ).update(
+        {
+            CareNotification.status: "resolved",
+            CareNotification.resolved_at: now,
+            CareNotification.resolution_reason: "reminder_reassigned",
+        },
+        synchronize_session=False,
+    )
+    _cancel_pending_reminder_pushes(db, reminder_id)
+
+
 def _assignment_audit(person_id: str, actor_id: str, reminder_id: str, previous_id: str | None, next_id: str):
     return AuditLogEvent(
         actor_id=actor_id,
@@ -147,6 +165,8 @@ def reassign_reminder(
     previous_id = reminder.assigned_to_caregiver_id
     if previous_id == payload.assigned_to_caregiver_id:
         return reminder
+    if previous_id:
+        _resolve_previous_assignee_notifications(db, reminder.id, previous_id)
     reminder.assigned_to_caregiver_id = payload.assigned_to_caregiver_id
     db.add(_assignment_audit(person_id, actor_id, reminder.id, previous_id, payload.assigned_to_caregiver_id))
     _commit_reminder_update(db)
