@@ -77,3 +77,11 @@ Do not mark backup recovery as verified until a fresh run against disposable Pos
 - operator, run timestamp, sanitized logs and any deviations.
 
 Treat the `Backup and recovery verification` workflow as a required main-branch release check; configure branch protection/rulesets to require it before production releases. Production readiness additionally requires a separate, authorized recovery exercise using the actual provider backup mechanism and a production-equivalent isolated target. Never perform that exercise by restoring over production.
+
+## Document binary storage recovery
+
+- `DOCUMENT_STORAGE_BACKEND=postgres` keeps the original binary in PostgreSQL, matching the existing production behavior.
+- `DOCUMENT_STORAGE_BACKEND=s3` writes the original binary to the configured S3-compatible bucket and retains a PostgreSQL recovery copy. API reads use the object-store copy and verify its size and SHA-256 checksum.
+- `python scripts/verify_document_binary_storage.py` checks every document through the same storage adapter used by the API.
+- When S3 is enabled, `python scripts/verify_backup_restore.py` simulates loss of the synthetic object after the PostgreSQL dump and rebuilds it from the restored database copy before verifying the checksum.
+- This is not proof of independent bucket backup, versioning, retention, or cross-region replication. Those controls remain unverified until a separate backup target and provider recovery test exist.
