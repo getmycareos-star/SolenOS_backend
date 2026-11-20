@@ -74,7 +74,7 @@ jobs:
         id: endpoint_inventory
         if: always() && steps.backend_image.outcome == 'success'
         run: |
-          docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace/backend solenos-backend-ci-tests python scripts/export_endpoint_inventory.py --output /workspace/backend/reports/registered-endpoint-inventory.json
+          docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace/backend solenos-backend-ci-tests python scripts/export_registered_routes.py --output /workspace/backend/reports/registered-endpoint-inventory.json --markdown-output /workspace/backend/reports/registered-endpoint-inventory.md
       - name: Upload registered endpoint inventory
         if: always() && steps.endpoint_inventory.outcome == 'success'
         uses: actions/upload-artifact@v4
