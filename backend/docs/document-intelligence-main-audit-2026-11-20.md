@@ -162,3 +162,6 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 - `0dfbd77077c30eb50e6f954d89b257344396057a` — live conflict evaluation verifies unresolved document conflicts are also surfaced through caregiver return-continuity context, not only the internal LCR projection.
 
 - `0ad9f6a6a05fbae17384d920a6a3cf7ff2d0cbf7` / `5b6007f6d1ebd9d5e562e9bcf1a0e76a6313cae0` — live-Qwen evaluation now accepts a patient denial, verifies the persisted negation qualifier, and checks Companion preserves the denial rather than reversing its meaning.
+
+- `bc42a051e58efb88bf9c2604e3fe7059ce756e71` / `4c201420e20fb2bf9a5eb0d17a691f7e87d9283a` — the live-Qwen workflow now publishes a pending and final commit-status context with a direct Actions run URL, so end-to-end verification can be inspected against the exact tested SHA.
+- The expected `document-intelligence-live-validation` status has not yet been observed in the repository's combined commit-status response. Existing Railway deployment status contexts are not treated as test results. Test execution and the actual Qwen/PostgreSQL output therefore remain unverified until the GitHub Actions run is visible.
