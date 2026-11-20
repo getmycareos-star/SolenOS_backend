@@ -533,6 +533,8 @@ def create_responsibility_transfer(
     ).first()
     if target_grant is None:
         raise HTTPException(status_code=403, detail="The receiving caregiver is not authorised for this care record.")
+    require_caregiver_permission(db, person_id, target_grant.caregiver_id, "view_lcr")
+    require_caregiver_permission(db, person_id, target_grant.caregiver_id, "manage_responsibilities")
     if str(source.caregiver_id) == str(target.id):
         raise HTTPException(status_code=409, detail="This responsibility is already assigned to that caregiver.")
     from_profile = db.query(CaregiverProfile).filter(
@@ -787,6 +789,7 @@ def create_primary_transfer(payload: PrimaryTransferCreate, request: Request, db
     ).first()
     if target_grant is None or str(target_grant.caregiver_id) == actor_id:
         raise HTTPException(status_code=404, detail="The receiving caregiver does not have active access.")
+    require_caregiver_permission(db, person_id, target_grant.caregiver_id, "view_lcr")
     pending = db.query(CaregiverPrimaryTransfer).filter(
         CaregiverPrimaryTransfer.person_id == person_id,
         CaregiverPrimaryTransfer.status == "pending",
