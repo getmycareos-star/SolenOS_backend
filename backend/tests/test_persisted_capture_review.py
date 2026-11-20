@@ -13,7 +13,7 @@ from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Evidence
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.uncertainty import OpenQuestion
 
 pytestmark = pytest.mark.session_security
@@ -109,6 +109,80 @@ def create_session(client, name):
     assert response.status_code == 201, response.text
     return response.json()
 
+
+
+
+def test_structured_daily_capture_persists_source_linked_details_without_model_extraction(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Structured capture recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    payload = {
+        "person_id": session["person"]["id"],
+        "caregiver_id": session["caregiver"]["id"],
+        "capture_idempotency_key": "structured-capture-key-001",
+        "notes": "she's loosing weight",
+        "medications": [],
+        "scales": [{
+            "axis": "mood",
+            "note": "she's sad",
+            "observed_at": "2026-11-11T21:10:00.000Z",
+            "score": 5,
+        }],
+        "vitals": [{
+            "measured_at": "2026-11-11T21:10:00.000Z",
+            "note": "yes",
+            "unit": "mmHg",
+            "value": 10,
+            "vital_type": "bp_systolic",
+        }],
+    }
+
+    saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["structured_detail_count"] == 3
+    assert body["execution_status"]["structured_details"] == "verified"
+
+    db = TestSessionLocal()
+    try:
+        evidence = db.query(Evidence).filter_by(
+            person_id=session["person"]["id"],
+            id=body["evidence_ids"][0],
+        ).one()
+        assert "capture_idempotency_key" not in evidence.source_text
+        assert "capture_request_fingerprint" not in evidence.source_text
+        assert "she's loosing weight" in evidence.source_text
+        details = db.query(EvidenceObservation).filter_by(
+            person_id=session["person"]["id"],
+            evidence_id=evidence.id,
+            extraction_method="structured_daily_capture",
+        ).all()
+        assert {item.attribute for item in details} == {
+            "caregiver_note", "mood", "blood_pressure_systolic",
+        }
+        assert all(item.epistemic_status == "reported" for item in details)
+        assert all(evidence.source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
+        assert next(item for item in details if item.attribute == "mood").value_text == "5"
+        assert next(item for item in details if item.attribute == "mood").units == "score"
+        assert next(item for item in details if item.attribute == "blood_pressure_systolic").value_text == "10"
+        assert next(item for item in details if item.attribute == "blood_pressure_systolic").units == "mmHg"
+    finally:
+        db.close()
+
+    replay = client.post("/api/v1/daily/log", headers=auth, json=payload)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["structured_detail_count"] == 3
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(EvidenceObservation).filter_by(
+            person_id=session["person"]["id"],
+            evidence_id=body["evidence_ids"][0],
+            extraction_method="structured_daily_capture",
+        ).count() == 3
+    finally:
+        db.close()
 
 def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_assertion(monkeypatch):
     client = TestClient(app)
