@@ -252,6 +252,8 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         assert progressive_observation["raw_text"] == quote
         assert progressive_observation["human_fact"] == quote
         assert progressive_observation["epistemic_kind"] == "mixed"
+        assert progressive_observation["speaker_label"] is None
+        assert progressive_observation["speaker_attribution_status"] == "unknown"
         assert progressive_observation["source_reference_id"] == first_evidence_id
         assert progressive_observation["temporal_context"] == "not_established"
     finally:
