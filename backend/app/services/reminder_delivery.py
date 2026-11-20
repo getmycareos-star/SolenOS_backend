@@ -29,6 +29,7 @@ from app.models.notifications import CareNotification, CareNotificationPreferenc
 # Browser push is reserved for explicitly due reminders.
 PUSH_NOTIFICATION_CATEGORIES = frozenset({"reminder_due", "open_loop_due"})
 from app.models.reminder import CareReminder
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.services.web_push_config import vapid_configuration_error
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,20 @@ def deliver_due_reminders(db=None, now=None):
         )
         for reminder in due:
             recipient_caregiver_id = reminder.assigned_to_caregiver_id or reminder.created_by_caregiver_id
+            recipient_grant = session.query(CaregiverAccessGrant.id).filter(
+                CaregiverAccessGrant.person_id == reminder.person_id,
+                CaregiverAccessGrant.caregiver_id == recipient_caregiver_id,
+                CaregiverAccessGrant.status == "active",
+                CaregiverAccessGrant.revoked_at.is_(None),
+                CaregiverAccessGrant.access_scope == "full_record",
+            ).first()
+            if recipient_grant is None:
+                # Do not disclose care reminders to a caregiver whose access has
+                # expired or been revoked. Keep the reminder open and retry after
+                # a bounded delay; never silently reassign responsibility.
+                reminder.notification_deferred_until = current + timedelta(hours=1)
+                session.commit()
+                continue
             preference = (
                 session.query(CareNotificationPreference)
                 .filter(
