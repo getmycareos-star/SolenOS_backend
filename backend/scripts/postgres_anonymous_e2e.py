@@ -1323,6 +1323,7 @@ def main():
             source_db.add(review_event)
             source_db.flush()
             review_event_id = review_event.id
+            require(review_event_id != daily_event_id, "Review lifecycle fixture must not share an event with the asynchronous extraction worker")
             analysis = CaptureAnalysis(
                 person_id=person_a,
                 caregiver_id=caregiver_a,
