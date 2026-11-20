@@ -14,6 +14,7 @@ from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.notifications import CareNotification, CarePushDelivery
 from app.schemas.reminder import CareReminderAssign, CareReminderComplete, CareReminderCreate, CareReminderRead, CareReminderSnooze
+from app.services.caregiver_permissions import require_caregiver_permission
 
 router = APIRouter(tags=["care reminders"])
 
@@ -179,6 +180,7 @@ def _commit_reminder_update(db: Session) -> None:
 @router.post("/reminders", response_model=CareReminderRead, status_code=201)
 def create_reminder(payload: CareReminderCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _session_scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_reminders")
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     if payload.due_at.tzinfo is None or payload.due_at.utcoffset() is None:
@@ -214,6 +216,7 @@ def reassign_reminder(
     db: Session = Depends(get_db),
 ):
     person_id, actor_id = _session_scope(request, db)
+    require_caregiver_permission(db, person_id, actor_id, "manage_reminders")
     reminder = db.query(CareReminder).filter(
         CareReminder.id == reminder_id,
         CareReminder.person_id == person_id,
@@ -278,9 +281,10 @@ def list_reminders(
     status: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    scoped_person_id, _ = _session_scope(request, db)
+    scoped_person_id, scoped_caregiver_id = _session_scope(request, db)
     if person_id != scoped_person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "view_lcr")
     if status and status not in {"open", "completed", "cancelled"}:
         raise HTTPException(status_code=400, detail="Invalid reminder status")
     query = db.query(CareReminder).filter(CareReminder.person_id == scoped_person_id)
@@ -307,6 +311,8 @@ def complete_reminder(
     if reminder is None:
         # Do not reveal whether another care record owns this reminder.
         raise HTTPException(status_code=404, detail="Reminder not found")
+    permission = "complete_assigned_reminders" if (reminder.assigned_to_caregiver_id or reminder.created_by_caregiver_id) == caregiver_id else "manage_reminders"
+    require_caregiver_permission(db, person_id, caregiver_id, permission)
     if reminder.status == "cancelled":
         raise HTTPException(status_code=409, detail="A cancelled reminder cannot be completed")
     if reminder.status == "open":
@@ -341,6 +347,8 @@ def snooze_reminder(
     )
     if reminder is None:
         raise HTTPException(status_code=404, detail="Reminder not found")
+    permission = "complete_assigned_reminders" if (reminder.assigned_to_caregiver_id or reminder.created_by_caregiver_id) == caregiver_id else "manage_reminders"
+    require_caregiver_permission(db, person_id, caregiver_id, permission)
     if reminder.status != "open":
         raise HTTPException(status_code=409, detail="Only an open reminder can be snoozed")
     if payload.snooze_until.tzinfo is None or payload.snooze_until.utcoffset() is None:
@@ -384,6 +392,7 @@ def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(ge
     )
     if reminder is None:
         raise HTTPException(status_code=404, detail="Reminder not found")
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_reminders")
     if reminder.status == "completed":
         raise HTTPException(status_code=409, detail="A completed reminder cannot be cancelled")
     if reminder.status == "open":
