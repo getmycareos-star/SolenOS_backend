@@ -862,6 +862,8 @@ def test_postgres_appointment_continuity_is_shared_and_linked_across_authorised_
                 if item.get("source_type") == "appointment_workspace_follow_up"
                 and item.get("source_id", "").startswith(workspace_id + ":")
             )
+            assert shared_loop["appointment_id"] == appointment_id
+            assert shared_loop["appointment_workspace_id"] == workspace_id
             shared_loop_detail = client.get(
                 f"/api/v1/open-loops/{shared_loop['id']}",
                 headers=shared_headers,
