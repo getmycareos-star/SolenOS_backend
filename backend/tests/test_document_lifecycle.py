@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
-from app.models.care import Evidence
+from app.models.care import CaregiverAccessGrant, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob
@@ -1314,6 +1314,13 @@ def test_second_authorized_caregiver_can_retrieve_shared_document_extraction(cli
         },
     )
     assert accepted.status_code == 201, accepted.text
+    with TestSessionLocal() as db:
+        collaborator_grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=owner["person"]["id"],
+            caregiver_id=accepted.json()["caregiver_id"],
+        ).one()
+        assert collaborator_grant.status == "active"
+        assert collaborator_grant.access_scope == "full_record"
     collaborator_headers = {"Authorization": f"Bearer {accepted.json()['access_token']}"}
 
     retrieved = test_client.get(
