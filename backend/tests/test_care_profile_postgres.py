@@ -36,9 +36,25 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
         "context_metadata",
         "effective_start",
         "effective_end",
+        "reported_by_caregiver_id",
     }
     assert required_context_columns <= set(schema_columns)
     assert schema_columns["effective_start"]["nullable"] is True
+    assert schema_columns["person_id"]["nullable"] is False
+    assert schema_columns["created_at"]["nullable"] is False
+    context_indexes = {
+        tuple(index.get("column_names") or ())
+        for index in inspect(engine).get_indexes("caregiver_contexts")
+    }
+    assert ("person_id",) in context_indexes
+    assert ("caregiver_id",) in context_indexes
+    context_foreign_keys = {
+        (tuple(item.get("constrained_columns") or ()), item.get("referred_table"))
+        for item in inspect(engine).get_foreign_keys("caregiver_contexts")
+    }
+    assert (("person_id",), "persons") in context_foreign_keys
+    assert (("caregiver_id",), "caregiver_profiles") in context_foreign_keys
+    assert (("reported_by_caregiver_id",), "caregivers") in context_foreign_keys
 
     suffix = uuid.uuid4().hex[:12]
     email = f"care-profile-{suffix}@example.test"
