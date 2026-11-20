@@ -310,14 +310,47 @@ class CaregiverIntelligenceService:
         return db_conflict
 
     def get_conflicts(self, person_id: str) -> List[PerspectiveConflict]:
-        return (
+        active_statuses = {
+            PerspectiveConflictStatus.UNRESOLVED,
+            PerspectiveConflictStatus.CONFLICTING,
+            PerspectiveConflictStatus.CONTEXTUALLY_DIVERGENT,
+        }
+        conflicts = (
             self.db.query(PerspectiveConflict)
             .filter(
                 PerspectiveConflict.person_id == person_id,
-                PerspectiveConflict.status == PerspectiveConflictStatus.UNRESOLVED,
+                PerspectiveConflict.status.in_(active_statuses),
+            )
+            .order_by(PerspectiveConflict.created_at.desc())
+            .all()
+        )
+        shared_perspectives = (
+            self.db.query(CaregiverPerspective)
+            .filter(
+                CaregiverPerspective.person_id == person_id,
+                CaregiverPerspective.is_promoted_to_shared.is_(True),
+                CaregiverPerspective.information_visibility == InformationVisibility.SHARED,
             )
             .all()
         )
+        shared_sources = {
+            (str(item.caregiver_id), str(item.claim_type.value), item.claim_content)
+            for item in shared_perspectives
+        }
+        visible = []
+        for conflict in conflicts:
+            # An explicit conflict submission is itself a deliberate shared
+            # action. Auto-detected conflicts must still resolve to two
+            # currently shared source perspectives before they are returned.
+            if conflict.evidence_ref == "caregiver_shared_conflict_submission":
+                visible.append(conflict)
+                continue
+            claim_type = str(conflict.conflict_type or "").removesuffix("_conflict")
+            source_a = (str(conflict.caregiver_a_id), claim_type, conflict.claim_a)
+            source_b = (str(conflict.caregiver_b_id), claim_type, conflict.claim_b)
+            if source_a in shared_sources and source_b in shared_sources:
+                visible.append(conflict)
+        return visible
 
     def create_duplicate_action(self, duplicate: DuplicateActionCreate) -> DuplicateAction:
         db_dup = DuplicateAction(**duplicate.model_dump())
@@ -382,6 +415,7 @@ class CaregiverIntelligenceService:
         perspective.promoted_by_caregiver_id = promoting_caregiver_id
         self.db.commit()
         self.db.refresh(perspective)
+        self._detect_perspective_conflicts(perspective.person_id)
         return perspective
 
     def get_caregiver_summary(
@@ -406,6 +440,7 @@ class CaregiverIntelligenceService:
                     CaregiverObservation.person_id == person_id,
                     CaregiverObservation.caregiver_id == caregiver_id,
                     CaregiverObservation.is_promoted_to_shared.is_(True),
+                    CaregiverObservation.information_visibility == InformationVisibility.SHARED,
                 )
                 .order_by(CaregiverObservation.report_time.desc())
                 .limit(10)
@@ -417,6 +452,7 @@ class CaregiverIntelligenceService:
                     CaregiverPerspective.person_id == person_id,
                     CaregiverPerspective.caregiver_id == caregiver_id,
                     CaregiverPerspective.is_promoted_to_shared.is_(True),
+                    CaregiverPerspective.information_visibility == InformationVisibility.SHARED,
                 )
                 .order_by(CaregiverPerspective.timestamp.desc())
                 .all()
@@ -504,52 +540,95 @@ class CaregiverIntelligenceService:
         return gaps
 
     def _detect_perspective_conflicts(self, person_id: str) -> List[PerspectiveConflict]:
+        # Private and conditionally shared perspectives are never inputs to
+        # care-network conflict detection. Only explicit, completed sharing
+        # consent permits cross-caregiver comparison.
         perspectives = (
             self.db.query(CaregiverPerspective)
-            .filter(CaregiverPerspective.person_id == person_id)
+            .filter(
+                CaregiverPerspective.person_id == person_id,
+                CaregiverPerspective.is_promoted_to_shared.is_(True),
+                CaregiverPerspective.information_visibility == InformationVisibility.SHARED,
+            )
             .order_by(CaregiverPerspective.timestamp.desc())
             .all()
         )
+        existing = self.db.query(PerspectiveConflict).filter(
+            PerspectiveConflict.person_id == person_id
+        ).all()
+        def conflict_key(caregiver_a: str, caregiver_b: str, claim_a: str, claim_b: str, conflict_type: str):
+            sources = tuple(sorted([
+                (str(caregiver_a), str(claim_a)),
+                (str(caregiver_b), str(claim_b)),
+            ]))
+            return conflict_type, sources
+        seen_keys = {
+            conflict_key(
+                item.caregiver_a_id, item.caregiver_b_id,
+                item.claim_a, item.claim_b, item.conflict_type,
+            )
+            for item in existing
+        }
         conflicts = []
-        seen_pairs = set()
         for i, p_a in enumerate(perspectives):
             for p_b in perspectives[i + 1:]:
-                pair = tuple(sorted([p_a.caregiver_id, p_b.caregiver_id]))
-                if pair in seen_pairs:
-                    continue
                 if p_a.caregiver_id == p_b.caregiver_id:
                     continue
-                if p_a.claim_type == p_b.claim_type and p_a.claim_content != p_b.claim_content:
-                    ctx_a = (
-                        self.db.query(CaregiverContext)
-                        .filter(CaregiverContext.caregiver_id == p_a.caregiver_id, CaregiverContext.person_id == person_id)
-                        .first()
+                if p_a.claim_type != p_b.claim_type or p_a.claim_content == p_b.claim_content:
+                    continue
+                conflict_type = f"{p_a.claim_type.value}_conflict"
+                key = conflict_key(
+                    p_a.caregiver_id, p_b.caregiver_id,
+                    p_a.claim_content, p_b.claim_content, conflict_type,
+                )
+                if key in seen_keys:
+                    continue
+                ctx_a = (
+                    self.db.query(CaregiverContext)
+                    .filter(
+                        CaregiverContext.caregiver_id == p_a.caregiver_id,
+                        CaregiverContext.person_id == person_id,
                     )
-                    ctx_b = (
-                        self.db.query(CaregiverContext)
-                        .filter(CaregiverContext.caregiver_id == p_b.caregiver_id, CaregiverContext.person_id == person_id)
-                        .first()
+                    .order_by(CaregiverContext.effective_start.desc())
+                    .first()
+                )
+                ctx_b = (
+                    self.db.query(CaregiverContext)
+                    .filter(
+                        CaregiverContext.caregiver_id == p_b.caregiver_id,
+                        CaregiverContext.person_id == person_id,
                     )
-                    context_a = ctx_a.observation_window_start + " to " + ctx_a.observation_window_end if ctx_a and ctx_a.observation_window_start else None
-                    context_b = ctx_b.observation_window_start + " to " + ctx_b.observation_window_end if ctx_b and ctx_b.observation_window_start else None
-                    if context_a and context_b and context_a != context_b:
-                        status = PerspectiveConflictStatus.CONTEXTUALLY_DIVERGENT
-                    else:
-                        status = PerspectiveConflictStatus.CONFLICTING
-                    conflict = PerspectiveConflictCreate(
-                        person_id=person_id,
-                        caregiver_a_id=p_a.caregiver_id,
-                        caregiver_b_id=p_b.caregiver_id,
-                        conflict_type=f"{p_a.claim_type.value}_conflict",
-                        claim_a=p_a.claim_content,
-                        claim_b=p_b.claim_content,
-                        context_a=context_a,
-                        context_b=context_b,
-                        status=status,
-                    )
-                    db_conflict = self.create_perspective_conflict(conflict)
-                    conflicts.append(db_conflict)
-                    seen_pairs.add(pair)
+                    .order_by(CaregiverContext.effective_start.desc())
+                    .first()
+                )
+                context_a = (
+                    ctx_a.observation_window_start + " to " + ctx_a.observation_window_end
+                    if ctx_a and ctx_a.observation_window_start and ctx_a.observation_window_end else None
+                )
+                context_b = (
+                    ctx_b.observation_window_start + " to " + ctx_b.observation_window_end
+                    if ctx_b and ctx_b.observation_window_start and ctx_b.observation_window_end else None
+                )
+                status = (
+                    PerspectiveConflictStatus.CONTEXTUALLY_DIVERGENT
+                    if context_a and context_b and context_a != context_b
+                    else PerspectiveConflictStatus.CONFLICTING
+                )
+                conflict = PerspectiveConflictCreate(
+                    person_id=person_id,
+                    caregiver_a_id=p_a.caregiver_id,
+                    caregiver_b_id=p_b.caregiver_id,
+                    conflict_type=conflict_type,
+                    claim_a=p_a.claim_content,
+                    claim_b=p_b.claim_content,
+                    context_a=context_a,
+                    context_b=context_b,
+                    status=status,
+                    evidence_ref="shared_perspective_detection_v1",
+                )
+                db_conflict = self.create_perspective_conflict(conflict)
+                conflicts.append(db_conflict)
+                seen_keys.add(key)
         return conflicts
 
     def detect_duplicate_actions(self, person_id: str, caregiver_a_id: str, caregiver_b_id: str, action_type: str, desc_a: str, desc_b: str) -> DuplicateAction:
