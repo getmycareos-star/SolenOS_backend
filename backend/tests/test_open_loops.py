@@ -854,3 +854,37 @@ def test_follow_up_rejects_unknown_response_outcome():
         json={"text": "A clinic response was reported.", "response_outcome": "appointment_booked"},
     )
     assert response.status_code == 422, response.text
+
+def test_open_loop_offset_pagination_returns_stable_complete_pages():
+    client = TestClient(app)
+    _, headers = session(client, "Paginated follow-up recipient")
+    created = [
+        create_loop(
+            client,
+            headers,
+            loop_type="follow_up",
+            title=f"Follow-up page {index}",
+            description=f"Persisted follow-up record {index}",
+        )
+        for index in range(3)
+    ]
+
+    first = client.get("/api/v1/open-loops?limit=2&offset=0", headers=headers)
+    second = client.get("/api/v1/open-loops?limit=2&offset=2", headers=headers)
+    repeated_first = client.get("/api/v1/open-loops?limit=2&offset=0", headers=headers)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert repeated_first.status_code == 200, repeated_first.text
+    first_body = first.json()
+    second_body = second.json()
+    assert first_body["count"] == 3
+    assert second_body["count"] == 3
+    assert len(first_body["items"]) == 2
+    assert len(second_body["items"]) == 1
+    first_ids = [item["id"] for item in first_body["items"]]
+    second_ids = [item["id"] for item in second_body["items"]]
+    assert first_ids == [item["id"] for item in repeated_first.json()["items"]]
+    assert len(set(first_ids + second_ids)) == 3
+    assert set(first_ids + second_ids) == {item["id"] for item in created}
+
