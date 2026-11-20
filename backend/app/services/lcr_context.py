@@ -160,6 +160,27 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "evidence_ids", "is_intended_outcome", "created_at"],
         "order": ["observed_at", "created_at"],
     },
+    "action_outcomes": {
+        "table": "care_action_outcomes",
+        "required": False,
+        "fields": ["id", "action_id", "action_type", "outcome_status", "notes",
+                   "correction_text", "evidence_ids", "created_by_caregiver_id", "created_at"],
+        "order": ["created_at"],
+    },
+    "open_loop_events": {
+        "table": "open_loop_events",
+        "required": False,
+        "fields": ["id", "loop_id", "caregiver_id", "event_type", "before_state",
+                   "after_state", "evidence", "actor", "created_at"],
+        "order": ["created_at"],
+    },
+    "open_loop_occurrences": {
+        "table": "open_loop_occurrences",
+        "required": False,
+        "fields": ["id", "loop_id", "caregiver_id", "source_type", "source_id",
+                   "source_fingerprint", "evidence", "occurred_at", "created_at"],
+        "order": ["occurred_at", "created_at"],
+    },
     "handoffs": {
         "table": "caregiver_handoffs",
         "required": False,
@@ -328,6 +349,9 @@ SEARCH_FIELDS = {
     "document_extractions": ["source_text"],
     "decisions": ["title", "decision_text", "context", "decision_status"],
     "decision_outcomes": ["outcome_status", "description"],
+    "action_outcomes": ["action_type", "outcome_status", "notes", "correction_text"],
+    "open_loop_events": ["event_type", "actor"],
+    "open_loop_occurrences": ["source_type", "source_id"],
     "handoffs": ["responsibility_type", "scope", "context", "acceptance_status", "acceptance_evidence", "completion_evidence", "provenance"],
     "timeline": ["entry_type", "title", "summary", "epistemic_status"],
     "uncertainties": ["question", "uncertainty_type", "status"],
@@ -375,6 +399,7 @@ def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
 TEXT_FIELDS = {
     "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
     "decision_text", "context", "summary", "title", "question", "answer", "answer_provenance",
+    "notes", "correction_text",
     "closed_reason", "necessity_rationale", "intended_answerer_label", "rationale", "topic", "perspective_text",
     "notes", "reason", "review_notes", "resolution",
 }
