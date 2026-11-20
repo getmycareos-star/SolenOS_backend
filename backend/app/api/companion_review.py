@@ -325,7 +325,9 @@ def list_companion_care_updates(
         AIOutputLCRProposal.caregiver_id == caregiver_id,
         AIOutputLCRProposal.proposal_type == "companion_care_observation",
     )
-    if not include_reviewed:
+    if include_reviewed:
+        query = query.filter(AIOutputLCRProposal.status != "pending_authorization")
+    else:
         query = query.filter(AIOutputLCRProposal.status == "pending_authorization")
     if session_id:
         session = db.query(ConversationSession).filter_by(
