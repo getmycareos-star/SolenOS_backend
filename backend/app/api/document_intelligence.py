@@ -16,7 +16,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -226,9 +226,34 @@ def _existing_assertion_for_exact_document_duplicate(
     subject_id: str | None = None,
     assertion_kind: str = "document_reviewed_observation",
 ):
-    """Reuse a prior assertion only when the uploaded binaries are exact duplicates."""
+    """Reuse a prior assertion only when the uploaded binaries are exact duplicates.
+
+    PostgreSQL advisory transaction locks serialize concurrent caregiver reviews
+    of the same source span across separate duplicate-upload analyses. A row lock
+    on CaptureAnalysis alone cannot protect this cross-analysis idempotency key.
+    """
     if subject_id is None and subject_type == "person":
         subject_id = person_id
+    duplicate_lock_material = "\\0".join((
+        person_id,
+        upload.sha256,
+        field,
+        source_quote,
+        subject_type,
+        str(subject_id or ""),
+        assertion_kind,
+    ))
+    duplicate_lock_id = int.from_bytes(
+        hashlib.sha256(duplicate_lock_material.encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": duplicate_lock_id},
+        )
+
     existing_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         CareAssertion.field == field,
