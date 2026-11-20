@@ -54,7 +54,7 @@ permissions:
 # the same branch. The final main commit must receive the complete gate.
 concurrency:
   # Keep the persisted messy-care benchmark result for each exact main commit.
-  group: messy-care-benchmark-${{ github.ref }}-${{ github.sha }}
+  group: messy-care-benchmark-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
