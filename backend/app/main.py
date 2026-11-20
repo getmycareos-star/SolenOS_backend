@@ -75,6 +75,7 @@ from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent  # register durable job tables
+from app.models.operational_worker_heartbeat import OperationalWorkerHeartbeat  # register migration-owned worker health table
 from app.services.qwen_background_worker import qwen_worker_loop
 from app.services.reminder_delivery import reminder_delivery_loop
 from app.services.privacy_export_expiry import expire_privacy_exports_once
