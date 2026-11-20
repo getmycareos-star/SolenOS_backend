@@ -1262,9 +1262,9 @@ def get_situation(
 
     active_situation = None
     active_turn = None
-    if observations:
-        first_timestamp = observations[0]["captured_at"]
-        last_timestamp = observations[-1]["captured_at"]
+    if progressive_observations:
+        first_timestamp = progressive_observations[0]["captured_at"]
+        last_timestamp = progressive_observations[-1]["captured_at"]
         root_event_id = events[0].id if events else None
         active_situation = {
             "id": (events[0].situation_id if events and events[0].situation_id else None) or root_event_id or observations[0]["id"],
