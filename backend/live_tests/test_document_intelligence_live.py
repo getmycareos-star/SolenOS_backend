@@ -453,16 +453,40 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
 
 def test_live_qwen_companion_preserves_conflicting_document_medication_sources(monkeypatch):
     """Real Qwen retrieval must expose both conflicting reviewed document assertions."""
+    import io
+    from PIL import Image, ImageDraw, ImageFont
     from app.models.uncertainty import Contradiction
     from app.services.lcr_context import build_lcr_context
+
+    scanned_page = Image.new("RGB", (3800, 700), "white")
+    draw = ImageDraw.Draw(scanned_page)
+    draw.text(
+        (70, 230),
+        "Current medication list: Metformin 500 mg once daily.",
+        fill="black",
+        font=ImageFont.load_default(size=80),
+    )
+    scanned_pdf_buffer = io.BytesIO()
+    scanned_page.save(scanned_pdf_buffer, format="PDF", resolution=200)
+    scanned_page.close()
+    documents = [
+        (
+            "discharge-medications-old-scan.pdf",
+            scanned_pdf_buffer.getvalue(),
+            "application/pdf",
+            "Metformin 500 mg",
+        ),
+        (
+            "discharge-medications-new.txt",
+            b"Current medication list: Metformin 1000 mg twice daily.",
+            "text/plain",
+            "Metformin 1000 mg",
+        ),
+    ]
 
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
-    documents = [
-        ("discharge-medications-old.txt", "Metformin 500 mg once daily."),
-        ("discharge-medications-new.txt", "Metformin 1000 mg twice daily."),
-    ]
     try:
         created = client.post(
             "/api/v1/sessions/anonymous",
@@ -475,8 +499,7 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
         analysis_ids = []
         assertion_ids = []
 
-        for filename, statement in documents:
-            source = "[Page 1]\\nCurrent medication list: " + statement
+        for filename, original_bytes, mime_type, source_marker in documents:
             uploaded = client.post(
                 "/api/v1/upload",
                 headers=headers,
@@ -486,7 +509,7 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
                     "evidence_type": "document",
                     "extracted_text": "",
                 },
-                files={"file": (filename, source.encode("utf-8"), "text/plain")},
+                files={"file": (filename, original_bytes, mime_type)},
             )
             assert uploaded.status_code == 201, uploaded.text
             evidence_id = uploaded.json()["evidence_id"]
@@ -497,6 +520,10 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
                 headers=headers,
             )
             assert extracted.status_code == 201, extracted.text
+            if filename.endswith(".pdf"):
+                assert extracted.json()["extraction_method"] == "server_tesseract_ocr_pdf"
+                assert extracted.json()["processed_page_numbers"] == [1]
+                assert extracted.json()["ocr_quality_by_page"][0]["page_number"] == 1
             analysis_id = extracted.json()["analysis_id"]
             analysis_ids.append(analysis_id)
 
@@ -508,7 +535,7 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
             candidates = understood.json()["observations"]
             candidate_index = next(
                 index for index, candidate in enumerate(candidates)
-                if statement in candidate.get("source_quote", "")
+                if source_marker in candidate.get("source_quote", "")
             )
             assert candidates[candidate_index]["field_type"] == "medication"
             reviewed = client.post(
@@ -527,8 +554,8 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
                 CareAssertion.id.in_(assertion_ids),
             ).all()
             assert all(
-                any(statement in (row.source_text or "") for row in assertions)
-                for _, statement in documents
+                any(source_marker in (row.source_text or "") for row in assertions)
+                for _, _, _, source_marker in documents
             )
             assert {row.evidence_ids[0] for row in assertions} == set(evidence_ids)
             contradictions = db.query(Contradiction).filter(
