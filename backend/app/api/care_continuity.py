@@ -3379,9 +3379,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         ]
         for change in active_change_rows:
             verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
-            if verdict not in {"meaningful_candidate", "insufficient_evidence"}:
+            has_linked_assessment_reference = bool(getattr(change, "significance_assessment_id", None))
+            if verdict not in {"meaningful_candidate", "insufficient_evidence"} and not has_linked_assessment_reference:
                 continue
-            if not (change.attention_candidate or change.follow_up_candidate):
+            if not (change.attention_candidate or change.follow_up_candidate or has_linked_assessment_reference):
                 continue
             if str(change.confirmation_status or "").casefold() in {"rejected", "dismissed", "cancelled", "withdrawn", "superseded"}:
                 continue
