@@ -419,6 +419,7 @@ TEXT_FIELDS = {
 MAX_TEXT_CHARS = 2400
 JSON_TEXT_FIELDS = {
     "evidence_ids", "source_ids", "claim_refs", "competing_claim_ids",
+    "source_assertion_ids", "matching_candidate_ids",
     "context", "metadata", "context_payload", "missing_information", "options", "priority_reasons",
 }
 
