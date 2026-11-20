@@ -32,6 +32,13 @@ class CareReminderAssignmentEvent(BaseModel):
     occurred_at: datetime
 
 
+class CareReminderLifecycleEvent(BaseModel):
+    action: str
+    actor_caregiver_id: str
+    occurred_at: datetime
+    details: dict = Field(default_factory=dict)
+
+
 class CareReminderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -42,6 +49,7 @@ class CareReminderRead(BaseModel):
     assigned_to_caregiver_id: Optional[str] = None
     version: int = 1
     assignment_history: list[CareReminderAssignmentEvent] = Field(default_factory=list)
+    lifecycle_history: list[CareReminderLifecycleEvent] = Field(default_factory=list)
     title: str
     note: Optional[str] = None
     due_at: datetime
