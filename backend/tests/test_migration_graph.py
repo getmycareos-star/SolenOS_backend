@@ -60,3 +60,14 @@ def test_shared_care_permissions_migration_is_reachable_from_canonical_head():
     assert len(heads) == 1
     reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
     assert "20261120_04_caregiver_operation_permissions" in reachable
+
+
+def test_reminder_assignment_repair_migration_is_reachable_from_canonical_head():
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    assert len(heads) == 1
+    reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
+    assert "20261120_05_reminder_assignment_repair" in reachable
