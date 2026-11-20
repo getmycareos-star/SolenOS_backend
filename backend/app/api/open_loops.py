@@ -1077,7 +1077,8 @@ def list_occurrences(
         OpenLoopOccurrence.loop_id == loop.id,
         OpenLoopOccurrence.person_id == person_id,
     ).order_by(
-        OpenLoopOccurrence.occurred_at.asc(),
+        # Paginate by immutable server creation time, not caregiver-supplied
+        # event time, so a backdated occurrence cannot shift later pages.
         OpenLoopOccurrence.created_at.asc(),
         OpenLoopOccurrence.id.asc(),
     ).offset(offset).limit(limit).all()
