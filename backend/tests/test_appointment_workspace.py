@@ -2826,7 +2826,7 @@ def test_current_care_projection_exposes_persisted_outcomes_outside_attention_li
             VALUES
               (:decision_outcome_id, :owner_id, 'owner-decision', 'outcome_reported', 'Caregiver recorded the result', '[]', 0, CURRENT_TIMESTAMP),
               (:other_outcome_id, :other_id, 'other-decision', 'outcome_reported', 'PRIVATE OTHER PERSON RESULT', '[]', 0, CURRENT_TIMESTAMP)
-        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
+        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"], "decision_outcome_id": decision_outcome_id, "other_outcome_id": other_outcome_id})
         connection.execute(text("""
             INSERT INTO care_action_outcomes
               (id, person_id, action_id, action_type, outcome_status, notes, correction_text, evidence_ids, created_by_caregiver_id, created_at)
