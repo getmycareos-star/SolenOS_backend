@@ -364,13 +364,21 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             item["reason"] += " This possible change has not had a separate importance review yet. It is based on the saved care information."
         if item["action_status"] == "closed" and item["linked_follow_up_outcome_status"] in {"outcome_unknown", "unknown", "not_recorded"}:
             item["reason"] += " The follow-up was closed, but no result was recorded."
-        # A persisted care-attention decision and the completeness of its
-        # supporting history are separate facts. Missing baseline/source
-        # coverage must not silently hide an explicitly saved follow-up need.
+        if attention_candidate and not history_complete:
+            # A candidate without a complete baseline and source set cannot be
+            # elevated as an important change. Keep it visible for clarification.
+            item["category"] = "needs_clarification"
+            item["care_significance"] = "unverified_attention_candidate"
+            item["reason"] += (
+                " The baseline or source history is incomplete. Confirm the missing care history "
+                "before treating this as an important change."
+            )
+            clarification.append(item)
+            continue
         if not history_complete:
             item["reason"] += (
                 " The available history is incomplete, so the size and timing of the change remain uncertain. "
-                "This limitation does not cancel the recorded need for follow-up."
+                "The recorded follow-up remains visible."
             )
         else:
             item["reason"] += " This is a review prompt based on the recorded history, not a diagnosis or a causal conclusion."
