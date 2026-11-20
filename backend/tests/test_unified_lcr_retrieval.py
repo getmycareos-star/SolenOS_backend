@@ -12,7 +12,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
-from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
+from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision, EvidenceObservation
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
@@ -81,7 +81,7 @@ def _postgres_conversation_db():
         connection,
         tables=[
             Person.__table__, Caregiver.__table__, CareEvent.__table__,
-            CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, CaptureAnalysis.__table__,
+            CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, EvidenceObservation.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
             CaregiverProfile.__table__, CaregiverHandoff.__table__,
             metadata.tables["care_facts"], metadata.tables["evidence"],
