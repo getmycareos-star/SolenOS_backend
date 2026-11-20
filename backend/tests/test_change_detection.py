@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.exc import IntegrityError
 import hashlib
+import json
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -1340,6 +1341,104 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
     finally:
         teardown_db()
 
+
+
+
+
+def test_change_reassessment_backfills_older_structured_daily_capture_details_idempotently():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-lcr-backfill", name="Backfill recipient")
+        caregiver = Caregiver(
+            id="caregiver-lcr-backfill",
+            name="Backfill caregiver",
+            email="backfill@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        detail = {
+            "capture_idempotency_key": "legacy-capture-key",
+            "capture_request_fingerprint": "legacy-fingerprint",
+            "notes": "she's loosing weight",
+            "medications": [],
+            "scales": [{
+                "axis": "mood", "note": "she's sad",
+                "observed_at": "2026-11-11T21:10:00.000Z", "score": 5,
+            }],
+            "vitals": [{
+                "measured_at": "2026-11-11T21:10:00.000Z", "note": "yes",
+                "unit": "mmHg", "value": 10, "vital_type": "bp_systolic",
+            }],
+        }
+        source_text = json.dumps(
+            {"original_capture": {
+                key: value for key, value in detail.items()
+                if key not in {"capture_idempotency_key", "capture_request_fingerprint"}
+            }},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        )
+        evidence = Evidence(
+            person_id=person.id,
+            type="note",
+            source_text=source_text,
+            uploaded_by_caregiver_id=caregiver.id,
+            occurred_at=datetime.now(timezone.utc),
+        )
+        db.add(evidence)
+        db.flush()
+        event = CareEvent(
+            person_id=person.id,
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            recorded_at=datetime.now(timezone.utc),
+            title="Daily care update",
+            description=json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add(event)
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        person_id = person.id
+        evidence_id = evidence.id
+        db.close()
+
+        client = TestClient(app)
+        url = f"/api/v1/change/changes/reassess?person_id={person_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+        first = client.post(url, headers=headers)
+        assert first.status_code == 200, first.text
+
+        db = TestingSessionLocal()
+        details = db.query(EvidenceObservation).filter_by(
+            person_id=person_id,
+            evidence_id=evidence_id,
+            extraction_method="structured_daily_capture",
+        ).all()
+        assert {item.attribute for item in details} == {
+            "caregiver_note", "mood", "blood_pressure_systolic",
+        }
+        assert all(item.epistemic_status == "reported" for item in details)
+        assert all(source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
+        db.close()
+
+        second = client.post(url, headers=headers)
+        assert second.status_code == 200, second.text
+        db = TestingSessionLocal()
+        assert db.query(EvidenceObservation).filter_by(
+            person_id=person_id,
+            evidence_id=evidence_id,
+            extraction_method="structured_daily_capture",
+        ).count() == 3
+        db.close()
+    finally:
+        teardown_db()
 
 
 def test_change_confirmation_accepts_same_person_saved_evidence_and_rejects_other_person_evidence():

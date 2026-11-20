@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import EvidenceObservation
 
 
@@ -474,3 +475,84 @@ def persist_structured_daily_capture_observations(
         EvidenceObservation.extraction_method == "structured_daily_capture",
         EvidenceObservation.extraction_run_id == source_event_id,
     ).count()
+
+
+
+def backfill_structured_daily_capture_observations(
+    db: Session,
+    *,
+    person_id: str,
+    limit: int = 200,
+) -> dict[str, int | bool]:
+    """Idempotently backfill source-linked details for older Daily Care entries.
+
+    This is called only by the explicit, authenticated change-reassessment
+    workflow. It never changes the original event or evidence source.
+    """
+    bounded_limit = max(1, min(int(limit), 500))
+    events = (
+        db.query(CareEvent)
+        .filter(
+            CareEvent.person_id == person_id,
+            CareEvent.event_type.in_({
+                "structured_daily_capture",
+                "daily_care_entry",
+                "daily_capture",
+            }),
+        )
+        .order_by(CareEvent.recorded_at.desc(), CareEvent.id.asc())
+        .limit(bounded_limit + 1)
+        .all()
+    )
+    truncated = len(events) > bounded_limit
+    events = events[:bounded_limit]
+    evidence_ids = {
+        str(evidence_id)
+        for event in events
+        for evidence_id in (event.evidence_ids or [])
+        if evidence_id
+    }
+    evidence_rows = (
+        db.query(Evidence)
+        .filter(Evidence.person_id == person_id, Evidence.id.in_(evidence_ids))
+        .all()
+        if evidence_ids else []
+    )
+    evidence_by_id = {str(row.id): row for row in evidence_rows}
+    observations_available = 0
+    evidence_missing = 0
+
+    for event in events:
+        try:
+            parsed = json.loads(event.description) if isinstance(event.description, str) else event.description
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        detail = parsed.get("original_capture") if isinstance(parsed.get("original_capture"), dict) else parsed
+        caregiver_id = event.created_by_caregiver_id
+        for raw_evidence_id in (event.evidence_ids or []):
+            evidence = evidence_by_id.get(str(raw_evidence_id))
+            if evidence is None or not evidence.source_text:
+                evidence_missing += 1
+                continue
+            source_caregiver_id = caregiver_id or evidence.uploaded_by_caregiver_id
+            if not source_caregiver_id:
+                continue
+            observations_available += persist_structured_daily_capture_observations(
+                db,
+                person_id=person_id,
+                caregiver_id=source_caregiver_id,
+                evidence_id=evidence.id,
+                source_event_id=event.id,
+                source_text=evidence.source_text,
+                detail=detail,
+                reported_at=event.recorded_at,
+            )
+
+    return {
+        "events_scanned": len(events),
+        "observations_available": observations_available,
+        "evidence_missing": evidence_missing,
+        "truncated": truncated,
+    }

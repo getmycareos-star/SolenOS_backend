@@ -302,8 +302,13 @@ def reassess_changes(person_id: str, request: Request, db: Session = Depends(get
     """Reconcile change assessments from this person's persisted care events only."""
     _require_person_scope(request, db, person_id)
     try:
+        from app.services.capture_review import backfill_structured_daily_capture_observations
         from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
+        # Backfill deterministic details from older structured Daily Care
+        # submissions before reassessing the longitudinal record. This is
+        # idempotent and runs only on this authenticated, explicit write path.
+        backfill_structured_daily_capture_observations(db, person_id=person_id, limit=200)
         # Shared by this explicit endpoint and source-write paths so the same
         # reconciliation semantics apply to new/late evidence and corrections.
         reconcile_person_change_intelligence(db, person_id)
