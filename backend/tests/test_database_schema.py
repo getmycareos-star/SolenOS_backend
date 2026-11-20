@@ -12,6 +12,21 @@ def test_schema_verifier_accepts_registered_tables_and_columns():
         engine.dispose()
 
 
+
+def test_schema_type_contract_accepts_json_and_wider_string_storage():
+    from sqlalchemy import String, Text
+    from sqlalchemy.dialects.postgresql import JSON as PostgreSQLJSON, JSONB
+
+    from app.core.database import _schema_column_types_compatible
+    from app.core.types import JSONList
+
+    assert _schema_column_types_compatible(JSONList(), PostgreSQLJSON(), "postgresql")
+    assert _schema_column_types_compatible(JSONList(), JSONB(), "postgresql")
+    assert _schema_column_types_compatible(String(64), Text(), "postgresql")
+    assert _schema_column_types_compatible(String(64), String(128), "postgresql")
+    assert not _schema_column_types_compatible(String(128), String(64), "postgresql")
+
+
 def test_schema_verifier_reports_missing_columns():
     engine = create_engine("sqlite:///:memory:")
     try:
