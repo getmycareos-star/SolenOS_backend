@@ -1028,6 +1028,24 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
                 )
                 for row in contradictions
             ), "Both conflicting document assertions must remain represented in unresolved contradiction state"
+            from app.services.lcr_context import build_lcr_context
+            projection = build_lcr_context(
+                db,
+                caregiver["person"]["id"],
+                caregiver_id=caregiver["caregiver"]["id"],
+                limit_per_source=50,
+            )
+            lcr_assertions = projection["sources"]["assertions"]["items"]
+            assert {first_document_assertion_id, second_document_assertion_id}.issubset(
+                {item["id"] for item in lcr_assertions}
+            )
+            lcr_contradictions = projection["sources"]["contradictions"]["items"]
+            assert any(
+                {first_document_assertion_id, second_document_assertion_id}.issubset(
+                    set(item.get("source_assertion_ids") or [])
+                )
+                for item in lcr_contradictions
+            )
         finally:
             db.close()
     finally:
