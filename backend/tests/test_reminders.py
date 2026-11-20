@@ -1094,3 +1094,9 @@ def test_reminders_cannot_be_assigned_to_caregivers_without_completion_permissio
         json={"permissions": permissions},
     )
     assert safe_removal.status_code == 200, safe_removal.text
+
+    assignable = client.get("/api/v1/caregiver-access/assignable-members", headers=primary_headers)
+    assert assignable.status_code == 200, assignable.text
+    eligibility = {item["caregiver_id"]: item["can_complete_assigned_reminders"] for item in assignable.json()}
+    assert eligibility[second_id] is False
+    assert eligibility[primary_id] is True
