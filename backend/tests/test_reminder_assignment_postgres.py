@@ -213,3 +213,43 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
         assert events[0].record_metadata["assigned_to_caregiver_id"] == recipient_id
         assert events[1].record_metadata["previous_assignee_caregiver_id"] == recipient_id
         assert events[1].record_metadata["assigned_to_caregiver_id"] == primary_id
+
+
+    revoked_assignee_reminder = client.post(
+        "/api/v1/reminders",
+        headers=primary_headers,
+        json={
+            "person_id": person_id,
+            "title": "Do not disclose after access revocation",
+            "due_at": datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat(),
+            "assigned_to_caregiver_id": recipient_id,
+        },
+    )
+    assert revoked_assignee_reminder.status_code == 201, revoked_assignee_reminder.text
+    revoked_member = client.delete(
+        f"/api/v1/caregiver-access/members/{recipient_id}",
+        headers=primary_headers,
+    )
+    assert revoked_member.status_code == 200, revoked_member.text
+    assert revoked_member.json()["sessions_revoked"] is True
+
+    with SessionLocal() as db:
+        from app.services.reminder_delivery import deliver_due_reminders
+        deliver_due_reminders(db=db, now=datetime.now(timezone.utc))
+        blocked_reminder = db.query(CareReminder).filter_by(
+            id=revoked_assignee_reminder.json()["id"]
+        ).one()
+        assert blocked_reminder.status == "open"
+        assert blocked_reminder.assigned_to_caregiver_id == recipient_id
+        assert blocked_reminder.notification_deferred_until is not None
+        assert db.query(CareNotification).filter_by(
+            person_id=person_id,
+            source_event_id=blocked_reminder.id,
+            category="reminder_due",
+        ).count() == 0
+
+    revoked_token_replay = client.get(
+        f"/api/v1/reminders/{person_id}",
+        headers=recipient_headers,
+    )
+    assert revoked_token_replay.status_code == 401, revoked_token_replay.text
