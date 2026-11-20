@@ -299,6 +299,18 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert accepted_body["candidate"]["review_status"] == "accepted_by_caregiver"
     assert accepted_body["care_continuity_execution"]["source_caregiver_id"] == session["caregiver"]["id"]
 
+    # Verify the decision through a separate authenticated read, not only the
+    # POST receipt or the in-memory SQLAlchemy instance.
+    persisted_review = client.get(
+        f"/api/v1/capture/analyses/{body['qwen_analysis_id']}",
+        headers=auth,
+    )
+    assert persisted_review.status_code == 200, persisted_review.text
+    persisted_payload = persisted_review.json()
+    assert persisted_payload["candidates"]["observations"][0]["review_status"] == "accepted_by_caregiver"
+    assert persisted_payload["written_to_lcr"] is True
+    assert persisted_payload["review_required"] is False
+
     repeated = client.post(
         f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
         headers=auth,
