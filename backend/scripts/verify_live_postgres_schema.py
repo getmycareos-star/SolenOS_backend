@@ -92,13 +92,18 @@ def _orm_inventory() -> dict:
                 if constraint.__class__.__name__ == "CheckConstraint"
             ),
             "indexes": sorted(
-                {
-                    "columns": [expression.name for expression in index.expressions
-                                if hasattr(expression, "name")],
-                    "unique": bool(index.unique),
-                }
-                for index in table.indexes
-            , key=lambda item: (item["columns"], item["unique"])),
+                [
+                    {
+                        "columns": [
+                            expression.name for expression in index.expressions
+                            if hasattr(expression, "name")
+                        ],
+                        "unique": bool(index.unique),
+                    }
+                    for index in table.indexes
+                ],
+                key=lambda item: (item["columns"], item["unique"]),
+            ),
         }
     return result
 
