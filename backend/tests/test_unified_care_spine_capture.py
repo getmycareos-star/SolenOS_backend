@@ -18,6 +18,7 @@ from app.core.database import get_db
 from app.api.document_lifecycle import _verify_persisted_extraction
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
@@ -79,6 +80,11 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                     id=other_caregiver_id, name="Other caregiver",
                     relationship="Family", person_id=other_person_id,
                 ),
+            ])
+            db.flush()
+            db.add_all([
+                CaregiverAccessGrant(person_id=person_id, caregiver_id=caregiver_id, role="primary", access_scope="full_record", status="active", can_manage_members=True, granted_by_caregiver_id=caregiver_id),
+                CaregiverAccessGrant(person_id=other_person_id, caregiver_id=other_caregiver_id, role="primary", access_scope="full_record", status="active", can_manage_members=True, granted_by_caregiver_id=other_caregiver_id),
             ])
             db.flush()
             own_document_text = "Care document reports interrupted sleep overnight."
