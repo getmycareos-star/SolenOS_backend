@@ -48,3 +48,15 @@ def test_handoff_draft_persistence_migration_is_reachable_from_canonical_head():
     assert len(heads) == 1
     reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
     assert "20261107_05_appt_idempotency" in reachable
+
+
+
+def test_shared_care_permissions_migration_is_reachable_from_canonical_head():
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    assert len(heads) == 1
+    reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
+    assert "20261120_04_caregiver_operation_permissions" in reachable
