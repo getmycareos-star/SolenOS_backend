@@ -424,3 +424,144 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         client.close()
         app.dependency_overrides.clear()
         engine.dispose()
+
+
+def test_live_qwen_companion_preserves_conflicting_document_medication_sources(monkeypatch):
+    """Real Qwen retrieval must expose both conflicting reviewed document assertions."""
+    from app.models.uncertainty import Contradiction
+    from app.services.lcr_context import build_lcr_context
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    client = TestClient(app)
+    documents = [
+        ("discharge-medications-old.txt", "Metformin 500 mg once daily."),
+        ("discharge-medications-new.txt", "Metformin 1000 mg twice daily."),
+    ]
+    try:
+        created = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"caregiver_name": "Synthetic medication conflict evaluator"},
+        )
+        assert created.status_code == 201, created.text
+        session = created.json()
+        headers = {"Authorization": "Bearer " + session["access_token"]}
+        evidence_ids = []
+        analysis_ids = []
+        assertion_ids = []
+
+        for filename, statement in documents:
+            source = "[Page 1]\\nCurrent medication list: " + statement
+            uploaded = client.post(
+                "/api/v1/upload",
+                headers=headers,
+                data={
+                    "person_id": session["person"]["id"],
+                    "caregiver_id": session["caregiver"]["id"],
+                    "evidence_type": "document",
+                    "extracted_text": "",
+                },
+                files={"file": (filename, source.encode("utf-8"), "text/plain")},
+            )
+            assert uploaded.status_code == 201, uploaded.text
+            evidence_id = uploaded.json()["evidence_id"]
+            evidence_ids.append(evidence_id)
+
+            extracted = client.post(
+                f"/api/v1/documents/{evidence_id}/extract",
+                headers=headers,
+            )
+            assert extracted.status_code == 201, extracted.text
+            analysis_id = extracted.json()["analysis_id"]
+            analysis_ids.append(analysis_id)
+
+            understood = client.post(
+                f"/api/v1/documents/{evidence_id}/intelligence",
+                headers=headers,
+            )
+            assert understood.status_code == 201, understood.text
+            candidates = understood.json()["observations"]
+            candidate_index = next(
+                index for index, candidate in enumerate(candidates)
+                if statement in candidate.get("source_quote", "")
+            )
+            assert candidates[candidate_index]["field_type"] == "medication"
+            reviewed = client.post(
+                f"/api/v1/documents/intelligence/{analysis_id}/review",
+                headers=headers,
+                json={"candidate_index": candidate_index, "decision": "accept"},
+            )
+            assert reviewed.status_code == 200, reviewed.text
+            assert reviewed.json()["written_to_lcr"] is True
+            assertion_ids.append(reviewed.json()["source_record_ref"]["record_id"])
+
+        assert len(set(assertion_ids)) == 2
+        with TestingSessionLocal() as db:
+            assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == session["person"]["id"],
+                CareAssertion.id.in_(assertion_ids),
+            ).all()
+            assert {row.source_text for row in assertions} == {
+                "Metformin 500 mg once daily.",
+                "Metformin 1000 mg twice daily.",
+            }
+            assert {row.evidence_ids[0] for row in assertions} == set(evidence_ids)
+            contradictions = db.query(Contradiction).filter(
+                Contradiction.person_id == session["person"]["id"],
+                Contradiction.field == "medication",
+                Contradiction.resolution_status == "unresolved",
+            ).all()
+            assert any(
+                set(assertion_ids).issubset(set(row.source_assertion_ids or []))
+                for row in contradictions
+            ), "Both reviewed document assertions must remain in an unresolved medication conflict"
+            projection = build_lcr_context(
+                db,
+                session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+                limit_per_source=50,
+            )
+            lcr_assertion_ids = {
+                item["id"] for item in projection["sources"]["assertions"]["items"]
+            }
+            assert set(assertion_ids).issubset(lcr_assertion_ids)
+            lcr_conflicts = projection["sources"]["contradictions"]["items"]
+            assert any(
+                set(assertion_ids).issubset(set(item.get("source_assertion_ids") or []))
+                for item in lcr_conflicts
+            )
+
+        companion = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": session["person"]["id"],
+                "text": "The two discharge documents list different Metformin strengths and schedules. What does each document say, and are the instructions consistent?",
+            },
+        )
+        assert companion.status_code == 200, companion.text
+        payload = companion.json()
+        assert set(evidence_ids).issubset(set(payload.get("source_evidence_ids", []))), payload
+        assert set(analysis_ids).issubset(set(payload.get("source_document_analysis_ids", []))), payload
+        assert set(assertion_ids).issubset(set(payload.get("source_assertion_ids", []))), payload
+        reply = payload.get("reply", "").casefold()
+        assert any(
+            term in reply
+            for term in ("conflict", "conflicting", "different", "differ", "inconsistent", "both documents")
+        ), payload
+        assert payload.get("written_to_lcr") is False, payload
+        print(
+            "DOCUMENT_CONFLICT_LIVE_EVALUATION="
+            + json.dumps({
+                "real_qwen_inference": True,
+                "document_count": len(evidence_ids),
+                "accepted_assertion_count": len(assertion_ids),
+                "both_sources_retrieved": True,
+                "unresolved_conflict_preserved": True,
+                "companion_conflict_explanation": True,
+            }, sort_keys=True)
+        )
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        engine.dispose()
