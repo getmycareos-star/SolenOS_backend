@@ -2064,7 +2064,13 @@ async def post_situation(
             analysis_ids = [str(item.id) for item in existing_analyses]
             queued_job_ids = [str(item.id) for item in existing_jobs]
             latest_analysis = existing_analyses[0] if existing_analyses else None
-            if any(item.status in {"queued", "processing"} for item in existing_jobs):
+            if (
+                any(item.status in {"queued", "pending", "processing", "running"} for item in existing_jobs)
+                or (
+                    latest_analysis is not None
+                    and latest_analysis.extraction_status in {"queued", "pending", "processing"}
+                )
+            ):
                 extraction_status = "queued"
             elif latest_analysis and latest_analysis.extraction_status == "available":
                 extraction_status = "available"
