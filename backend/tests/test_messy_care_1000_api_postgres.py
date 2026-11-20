@@ -19,6 +19,7 @@ from app.core.database import get_db
 from app.main import app
 import app.main as main_module
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import Caregiver, Person
 
 DATABASE_URL = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL") or os.getenv("DATABASE_URL", "")
@@ -31,6 +32,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 SCENARIO_COUNT = 1_000
+
+def _primary_access_grant(person_id: str, caregiver_id: str) -> CaregiverAccessGrant:
+    """Mirror the server-issued anonymous primary-caregiver grant in API fixtures."""
+    return CaregiverAccessGrant(
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        role="primary",
+        access_scope="full_record",
+        status="active",
+        can_manage_members=True,
+        granted_by_caregiver_id=caregiver_id,
+    )
 
 
 def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
@@ -63,6 +76,7 @@ def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
                 person_id=person_id,
             ))
             db.flush()
+            db.add(_primary_access_grant(person_id, caregiver_id))
             db.add(AnonymousSession(
                 id=f"api10ks{suffix}",
                 person_id=person_id,
@@ -128,6 +142,7 @@ def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
                     person_id=other_person_id,
                 ))
                 db.flush()
+                db.add(_primary_access_grant(other_person_id, other_caregiver_id))
                 db.add(AnonymousSession(
                     id=f"api10ko-session-{suffix}",
                     person_id=other_person_id,
@@ -192,6 +207,7 @@ def test_100_real_api_care_history_lifecycles_preserve_corrections_conflicts_and
                 Caregiver(id=observer_id, name="Observer", relationship="family", person_id=person_id),
             ])
             db.flush()
+            db.add(_primary_access_grant(person_id, uploader_id))
             db.add(AnonymousSession(
                 id=f"life10ks{suffix}",
                 person_id=person_id,
@@ -478,6 +494,7 @@ def test_postgres_open_question_answer_versions_and_historical_unresolved_retrie
                 relationship="family", person_id=person_id,
             ))
             db.flush()
+            db.add(_primary_access_grant(person_id, caregiver_id))
             db.add(AnonymousSession(
                 id=f"qhists{suffix}", person_id=person_id,
                 caregiver_id=caregiver_id,
@@ -715,6 +732,7 @@ def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time(
                 relationship="family", person_id=person_id,
             ))
             db.flush()
+            db.add(_primary_access_grant(person_id, caregiver_id))
             db.add(AnonymousSession(
                 id=f"asofs{suffix}", person_id=person_id,
                 caregiver_id=caregiver_id,
