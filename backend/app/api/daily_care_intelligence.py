@@ -429,6 +429,7 @@ async def ask_daily_care_qwen(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     bundle = _history_bundle(db, person_id, caregiver_id, payload.history_query, context_query=payload.history_query or payload.question)
     records = bundle["records"]
     if not records:
@@ -632,10 +633,10 @@ def review_daily_care_lcr_proposal(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).with_for_update().first()
     if analysis is None or not isinstance(analysis.candidates, dict) or analysis.candidates.get("kind") != "daily_care_qwen_lcr_proposals":
         raise HTTPException(status_code=404, detail="Daily Care proposal not found")
@@ -654,7 +655,6 @@ def review_daily_care_lcr_proposal(
             accepted_assertion = db.query(CareAssertion).filter(
                 CareAssertion.id == proposal.get("accepted_assertion_id"),
                 CareAssertion.person_id == person_id,
-                CareAssertion.created_by_caregiver_id == caregiver_id,
             ).first()
         active_assertion = (
             accepted_assertion is not None
