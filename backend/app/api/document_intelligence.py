@@ -234,14 +234,12 @@ def _existing_assertion_for_exact_document_duplicate(
     """
     if subject_id is None and subject_type == "person":
         subject_id = person_id
+    # Lock by the source identity, not by the model's proposed field/subject.
+    # A changed interpretation of the same duplicate source must serialize too.
     duplicate_lock_material = "\\0".join((
         person_id,
         upload.sha256,
-        field,
         source_quote,
-        subject_type,
-        str(subject_id or ""),
-        assertion_kind,
     ))
     duplicate_lock_id = int.from_bytes(
         hashlib.sha256(duplicate_lock_material.encode("utf-8")).digest()[:8],
@@ -254,16 +252,14 @@ def _existing_assertion_for_exact_document_duplicate(
             {"lock_id": duplicate_lock_id},
         )
 
-    existing_query = db.query(CareAssertion).filter(
+    # Search the whole exact-source duplicate group before comparing the
+    # proposed interpretation. Filtering by field/subject here would allow a
+    # changed Qwen classification of the same bytes and quotation to create a
+    # second, contradictory canonical assertion.
+    existing = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
-        CareAssertion.field == field,
-        CareAssertion.assertion_kind == assertion_kind,
-        CareAssertion.subject_type == subject_type,
         CareAssertion.source_text == source_quote,
-    )
-    if subject_id is not None:
-        existing_query = existing_query.filter(CareAssertion.subject_id == subject_id)
-    existing = existing_query.order_by(CareAssertion.recorded_at.desc()).all()
+    ).order_by(CareAssertion.recorded_at.desc()).all()
     duplicate_group_ids = {
         str(row[0])
         for row in db.query(EvidenceUpload.evidence_id)
@@ -281,7 +277,14 @@ def _existing_assertion_for_exact_document_duplicate(
         and row.assertion_status not in {"rejected", "superseded"}
     ]
     assertion_row = next(
-        (row for row in active_duplicate_assertions if row.asserted_value == asserted_value),
+        (
+            row for row in active_duplicate_assertions
+            if row.asserted_value == asserted_value
+            and row.field == field
+            and row.subject_type == subject_type
+            and str(row.subject_id or "") == str(subject_id or "")
+            and row.assertion_kind == assertion_kind
+        ),
         None,
     )
     if active_duplicate_assertions and assertion_row is None:
