@@ -1805,6 +1805,90 @@ def test_situation_freshness_includes_persisted_delta_engine_changes():
 
 
 @pytest.mark.session_security
+def test_situation_freshness_includes_linked_significance_assessment_updates():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.core.change_enums import ChangeType, ChangeDirection, SignificanceVerdict, EvidenceStatus
+        from app.models.change import Change
+        from app.models.significance import SignificanceAssessment
+
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Significance Freshness Person")
+        person_id = created["person"]["id"]
+        change_id = "freshness-linked-significance-change"
+        assessment_id = "freshness-linked-significance-assessment"
+
+        with TestingSessionLocal() as db:
+            db.add(SignificanceAssessment(
+                id=assessment_id,
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id=person_id,
+                target_type="change",
+                target_id=change_id,
+                verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                evidence_status=EvidenceStatus.REPORTED,
+                evidence_confidence=0.42,
+                significance_confidence=0.61,
+                dimensions=[{"name": "frequency", "score": 0.61}],
+                attention_candidate=True,
+                follow_up_candidate=True,
+                explanation="Initial persisted significance assessment.",
+                evidence_ids=[],
+                is_active=True,
+            ))
+            db.add(Change(
+                id=change_id,
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id=person_id,
+                change_type=ChangeType.TRANSITION,
+                change_direction=ChangeDirection.UNKNOWN,
+                evidence_ids=[],
+                significance_assessment_id=assessment_id,
+                significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                attention_candidate=True,
+                follow_up_candidate=True,
+                confirmation_status="detected",
+                is_active=True,
+            ))
+            db.commit()
+
+        initial = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert initial.status_code == 200, initial.text
+        current_before = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_before.status_code == 200, current_before.text
+        assert current_before.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+
+        with TestingSessionLocal() as db:
+            row = db.query(SignificanceAssessment).filter(
+                SignificanceAssessment.id == assessment_id,
+                SignificanceAssessment.person_id == person_id,
+            ).one()
+            row.evidence_confidence = 0.55
+            row.explanation = "Updated persisted significance assessment."
+            db.commit()
+
+        current_after = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current_after.status_code == 200, current_after.text
+        assert current_after.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+        assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
 def test_situation_freshness_includes_new_persisted_care_events():
     """A newly saved Daily Care event must invalidate the prior situation snapshot."""
     setup_db()
