@@ -1045,7 +1045,7 @@ def test_postgres_invited_caregiver_can_retrieve_shared_document_and_respects_do
     with TestClient(app) as client:
         owner = client.post(
             "/api/v1/sessions/anonymous",
-            json={"name": f"Shared document person {suffix}", "caregiver_name": "Primary caregiver"},
+            json={"caregiver_name": "Primary caregiver"},
         )
         assert owner.status_code == 201, owner.text
         owner_body = owner.json()
