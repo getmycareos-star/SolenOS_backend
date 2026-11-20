@@ -105,25 +105,106 @@ def ensure_database_schema(bind=None):
 
 
 def database_schema_differences(bind=None):
-    """Return missing ORM tables/columns without reading or exposing care records."""
+    """Compare ORM-owned tables, columns, indexes, unique constraints and foreign keys."""
     from sqlalchemy import inspect
 
     target = bind or engine
     inspector = inspect(target)
     existing_tables = set(inspector.get_table_names())
     differences = []
+
     for table_name, table in Base.metadata.tables.items():
         if table_name not in existing_tables:
             differences.append(f"{table_name} (table missing)")
             continue
-        existing_columns = {
-            column["name"] for column in inspector.get_columns(table_name)
+
+        reflected_columns = {
+            column["name"]: column for column in inspector.get_columns(table_name)
         }
         missing_columns = sorted(
-            column.name for column in table.columns if column.name not in existing_columns
+            column.name for column in table.columns if column.name not in reflected_columns
         )
         if missing_columns:
             differences.append(f"{table_name}: missing columns {', '.join(missing_columns)}")
+
+        # Nullability is part of the persisted data contract. Do not silently
+        # accept a nullable production column where the ORM requires a value.
+        nullability_mismatches = sorted(
+            column.name
+            for column in table.columns
+            if column.name in reflected_columns
+            and bool(reflected_columns[column.name].get("nullable", True)) != bool(column.nullable)
+        )
+        if nullability_mismatches:
+            differences.append(
+                f"{table_name}: nullability differs for {', '.join(nullability_mismatches)}"
+            )
+
+        expected_foreign_keys = set()
+        for constraint in table.foreign_key_constraints:
+            local_columns = tuple(sorted(element.parent.name for element in constraint.elements))
+            referred_table = next(iter(constraint.elements)).column.table.name
+            referred_columns = tuple(sorted(element.column.name for element in constraint.elements))
+            expected_foreign_keys.add((local_columns, referred_table, referred_columns))
+        actual_foreign_keys = {
+            (
+                tuple(sorted(item.get("constrained_columns") or [])),
+                item.get("referred_table"),
+                tuple(sorted(item.get("referred_columns") or [])),
+            )
+            for item in inspector.get_foreign_keys(table_name)
+        }
+        missing_foreign_keys = expected_foreign_keys - actual_foreign_keys
+        if missing_foreign_keys:
+            differences.append(
+                f"{table_name}: missing foreign keys "
+                + "; ".join(
+                    f"{local} -> {remote_table}({remote})"
+                    for local, remote_table, remote in sorted(missing_foreign_keys)
+                )
+            )
+
+        expected_unique_constraints = {
+            tuple(sorted(column.name for column in constraint.columns))
+            for constraint in table.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        }
+        actual_unique_constraints = {
+            tuple(sorted(item.get("column_names") or []))
+            for item in inspector.get_unique_constraints(table_name)
+        }
+        missing_unique_constraints = expected_unique_constraints - actual_unique_constraints
+        if missing_unique_constraints:
+            differences.append(
+                f"{table_name}: missing unique constraints "
+                + "; ".join(", ".join(columns) for columns in sorted(missing_unique_constraints))
+            )
+
+        expected_indexes = set()
+        for index in table.indexes:
+            columns = tuple(
+                sorted(expression.name for expression in index.expressions if hasattr(expression, "name"))
+            )
+            if columns and len(columns) == len(index.expressions):
+                expected_indexes.add((columns, bool(index.unique)))
+        actual_indexes = {
+            (
+                tuple(sorted(item.get("column_names") or [])),
+                bool(item.get("unique", False)),
+            )
+            for item in inspector.get_indexes(table_name)
+            if item.get("column_names")
+        }
+        missing_indexes = expected_indexes - actual_indexes
+        if missing_indexes:
+            differences.append(
+                f"{table_name}: missing indexes "
+                + "; ".join(
+                    f"{columns} (unique={unique})"
+                    for columns, unique in sorted(missing_indexes)
+                )
+            )
+
     return differences
 
 
