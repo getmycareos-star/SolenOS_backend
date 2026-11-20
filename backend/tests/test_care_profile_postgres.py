@@ -96,7 +96,7 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     assert saved.json()["condition"] == "Dementia stage reported by caregiver"
 
     context_write = client.post(
-        "/api/caregiver-contexts",
+        "/api/v1/caregiver-contexts",
         headers=first_headers,
         json={
             "caregiver_id": first_caregiver_id,
