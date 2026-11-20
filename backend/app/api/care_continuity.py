@@ -3452,6 +3452,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         assertion_by_id = {}
         observation_by_id = {}
         evidence_by_id = {}
+        event_by_id = {}
+        assertion_by_id = {}
+        observation_by_id = {}
+        evidence_by_id = {}
         if source_record_ids:
             event_by_id = {
                 str(row.id): row for row in db.query(CareEvent).filter(
