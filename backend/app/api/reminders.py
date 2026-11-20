@@ -110,7 +110,39 @@ def _reminder_response(db: Session, reminder: CareReminder) -> dict:
         "assigned_to_caregiver_id": (event.record_metadata or {}).get("assigned_to_caregiver_id"),
         "occurred_at": event.occurred_at,
     } for event in assignment_events]
+    lifecycle_events = db.query(AuditLogEvent).filter(
+        AuditLogEvent.person_id == reminder.person_id,
+        AuditLogEvent.target_type == "care_reminder",
+        AuditLogEvent.target_id == reminder.id,
+        AuditLogEvent.action.in_((
+            "care.reminder.completed",
+            "care.reminder.snoozed",
+            "care.reminder.cancelled",
+        )),
+    ).order_by(AuditLogEvent.occurred_at.asc(), AuditLogEvent.id.asc()).all()
+    payload["lifecycle_history"] = [{
+        "action": event.action,
+        "actor_caregiver_id": event.actor_id or "unknown",
+        "occurred_at": event.occurred_at,
+        "details": event.record_metadata or {},
+    } for event in lifecycle_events]
     return payload
+
+
+def _lifecycle_audit(person_id: str, actor_id: str, reminder_id: str, action: str, details: dict):
+    return AuditLogEvent(
+        actor_id=actor_id,
+        subject_id=person_id,
+        person_id=person_id,
+        caregiver_id=actor_id,
+        action=action,
+        target_type="care_reminder",
+        target_id=reminder_id,
+        occurred_at=datetime.now(timezone.utc),
+        outcome="success",
+        policy_version="care-reminder-lifecycle-v1",
+        record_metadata=details,
+    )
 
 
 def _assignment_audit(person_id: str, actor_id: str, reminder_id: str, previous_id: str | None, next_id: str):
@@ -251,6 +283,10 @@ def complete_reminder(
         _cancel_pending_reminder_pushes(db, reminder.id)
         reminder.completed_at = datetime.now(timezone.utc)
         reminder.completed_by_caregiver_id = caregiver_id
+        db.add(_lifecycle_audit(
+            person_id, caregiver_id, reminder.id, "care.reminder.completed",
+            {"previous_status": "open", "new_status": "completed"},
+        ))
     if payload.completion_note is not None:
         reminder.completion_note = payload.completion_note.strip() or None
     _commit_reminder_update(db)
@@ -285,6 +321,7 @@ def snooze_reminder(
     from datetime import timedelta
     if snooze_until > now + timedelta(days=30):
         raise HTTPException(status_code=422, detail="Snooze time cannot be more than 30 days away")
+    previous_due_at = reminder.due_at
     _cancel_pending_reminder_pushes(db, reminder.id)
     reminder.due_at = snooze_until
     reminder.notification_deferred_until = None
@@ -292,6 +329,14 @@ def snooze_reminder(
     reminder.snoozed_by_caregiver_id = caregiver_id
     reminder.snooze_count = (reminder.snooze_count or 0) + 1
     reminder.delivery_generation = (reminder.delivery_generation or 0) + 1
+    db.add(_lifecycle_audit(
+        person_id, caregiver_id, reminder.id, "care.reminder.snoozed",
+        {
+            "previous_due_at": previous_due_at.isoformat() if previous_due_at else None,
+            "new_due_at": snooze_until.isoformat(),
+            "snooze_count": reminder.snooze_count,
+        },
+    ))
     _commit_reminder_update(db)
     db.refresh(reminder)
     return _reminder_response(db, reminder)
@@ -315,6 +360,10 @@ def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(ge
         reminder.status = "cancelled"
         reminder.cancelled_at = datetime.now(timezone.utc)
         reminder.cancelled_by_caregiver_id = caregiver_id
+        db.add(_lifecycle_audit(
+            person_id, caregiver_id, reminder.id, "care.reminder.cancelled",
+            {"previous_status": "open", "new_status": "cancelled"},
+        ))
     _commit_reminder_update(db)
     db.refresh(reminder)
     return _reminder_response(db, reminder)
