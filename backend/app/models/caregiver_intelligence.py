@@ -57,7 +57,9 @@ class CaregiverRole(Base):
     role_type = Column(Enum(CaregiverRoleType), nullable=False)
     custom_role_name = Column(String, nullable=True)
     scope = Column(Text, nullable=True)
-    effective_start = Column(DateTime(timezone=True), nullable=False)
+    # Legacy caregiver-context rows may predate effective dating. New writes
+    # supply an explicit timestamp; null remains valid for preserved history.
+    effective_start = Column(DateTime(timezone=True), nullable=True)
     effective_end = Column(DateTime(timezone=True), nullable=True)
     is_current = Column(Boolean, nullable=False, default=True)
     assignment_source = Column(String, nullable=True)
