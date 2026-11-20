@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareDeltaRun, EvidenceObservation
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Insight, Person
@@ -98,6 +99,16 @@ def seed_person_and_caregiver():
         person_id=person.id,
     )
     db.add_all([person, caregiver])
+    db.flush()
+    db.add(CaregiverAccessGrant(
+        person_id=person.id,
+        caregiver_id=caregiver.id,
+        role="primary",
+        access_scope="full_record",
+        status="active",
+        can_manage_members=True,
+        granted_by_caregiver_id=caregiver.id,
+    ))
     db.commit()
     db.close()
 
