@@ -295,6 +295,23 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "retrieval_error": "shared_lcr_retrieval_failed",
         }
 
+    lcr_sources = (
+        living_care_record_context.get("sources", {})
+        if isinstance(living_care_record_context, dict)
+        and isinstance(living_care_record_context.get("sources"), dict)
+        else {}
+    )
+    decision_source = lcr_sources.get("decisions", {}) if isinstance(lcr_sources.get("decisions"), dict) else {}
+    outcome_source = lcr_sources.get("decision_outcomes", {}) if isinstance(lcr_sources.get("decision_outcomes"), dict) else {}
+    prior_decisions = [
+        item for item in (decision_source.get("items") or [])
+        if isinstance(item, dict)
+    ]
+    decision_outcomes = [
+        item for item in (outcome_source.get("items") or [])
+        if isinstance(item, dict)
+    ]
+
     fact_has_more = None
     try:
         fact_columns = {column["name"] for column in inspect(db.get_bind()).get_columns("care_facts")}
@@ -868,6 +885,20 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "status": open_loop_source_status,
             "record_limit": 40,
         },
+        "decisions": {
+            "returned_count": len(prior_decisions),
+            "has_more": decision_source.get("has_more"),
+            "retrieval_complete": decision_source.get("status") in {"available", "empty"} and decision_source.get("candidate_scan_complete") is True and decision_source.get("has_more") is False,
+            "status": decision_source.get("status", "unavailable"),
+            "record_limit": decision_source.get("limit", 40),
+        },
+        "decision_outcomes": {
+            "returned_count": len(decision_outcomes),
+            "has_more": outcome_source.get("has_more"),
+            "retrieval_complete": outcome_source.get("status") in {"available", "empty"} and outcome_source.get("candidate_scan_complete") is True and outcome_source.get("has_more") is False,
+            "status": outcome_source.get("status", "unavailable"),
+            "record_limit": outcome_source.get("limit", 40),
+        },
         "care_assertions": {
             "returned_count": len(assertion_items),
             "has_more": assertions_has_more,
@@ -933,6 +964,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "events": event_items,
         "appointments": appointment_items,
         "open_loops": open_loops,
+        "prior_decisions": prior_decisions,
+        "decision_outcomes": decision_outcomes,
         "assertions": assertion_items,
         "open_questions": question_items,
         "contradictions": contradiction_items,
@@ -967,6 +1000,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "care_events": "available" if event_items else "empty",
             "appointments": "available" if appointment_items else "empty",
             "open_loops": open_loop_source_status,
+            "decisions": decision_source.get("status", "unavailable"),
+            "decision_outcomes": outcome_source.get("status", "unavailable"),
             "care_assertions": assertion_source_status,
             "open_questions": question_source_status,
             "contradictions": contradiction_source_status,
