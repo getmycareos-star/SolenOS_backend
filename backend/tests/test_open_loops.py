@@ -200,6 +200,26 @@ def test_persisted_change_can_be_linked_to_person_scoped_follow_up():
     assert linked["source_type"] == "persisted_change"
     assert linked["source_id"] == change_id
 
+    with TestSessionLocal() as db:
+        persisted_change = db.query(Change).filter(Change.id == change_id).one()
+        persisted_change.is_active = False
+        db.commit()
+    inactive_link = client.post(
+        "/api/v1/open-loops",
+        headers=first_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Link an inactive change",
+            "description": "Inactive change references must not create new follow-ups.",
+            "source_type": "persisted_change",
+            "source_id": change_id,
+            "evidence": [],
+            "uncertainty": "unknown",
+            "idempotency_key": "inactive-persisted-change-follow-up",
+        },
+    )
+    assert inactive_link.status_code == 404, inactive_link.text
+
     isolated = client.get("/api/v1/open-loops?limit=100", headers=second_headers)
     assert isolated.status_code == 200, isolated.text
     assert isolated.json()["items"] == []
