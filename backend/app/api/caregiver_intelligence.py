@@ -438,7 +438,6 @@ def list_caregiver_observations(person_id: str, caregiver_id: str, request: Requ
 def promote_observation(observation_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
     require_caregiver_permission(db, person_id, session_caregiver_id, "share_observations")
-    require_caregiver_permission(db, person_id, session_caregiver_id, "share_observations")
     _assert_actor_id(caregiver_id, current_profile.id, session_caregiver_id)
     service = CaregiverIntelligenceService(db)
     observation = service.promote_observation_to_shared(observation_id, current_profile.id, person_id=person_id)
@@ -450,7 +449,6 @@ def promote_observation(observation_id: str, request: Request, caregiver_id: Opt
 @router.post("/caregiver-perspectives", response_model=CaregiverPerspective)
 def create_perspective(perspective: CaregiverPerspectiveCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
-    require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
     require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
     _assert_person_scope(request, db, perspective.person_id)
     _assert_actor_id(perspective.caregiver_id, current_profile.id, session_caregiver_id)
