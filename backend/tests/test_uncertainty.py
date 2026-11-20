@@ -2207,7 +2207,7 @@ def test_safety_response_validation_rejects_unpersisted_evidence_ids():
 
         client = authorized_client(person.id)
         response = client.post(
-            "/api/v1/validate-response",
+            "/api/v1/safety/validate-response",
             params={
                 "candidate_response": "The record confirms the medication was changed.",
                 "risk_class": "informational",
@@ -2463,7 +2463,7 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
             "recommended_reviewer": "caregiver",
             "evidence_ids": ["safety-scope-evidence"],
         }
-        created = client.post("/api/v1/escalations", params=params)
+        created = client.post("/api/v1/safety/escalations", params=params)
         assert created.status_code == 200, created.text
         escalation_id = created.json()["id"]
         assert created.json()["person_id"] == person.id
@@ -2481,12 +2481,12 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
         )
         assert cross_record_evidence.status_code == 404, cross_record_evidence.text
 
-        listed = client.get(f"/api/v1/escalations/{person.id}")
+        listed = client.get(f"/api/v1/safety/escalations/{person.id}")
         assert listed.status_code == 200, listed.text
         assert all(row["person_id"] == person.id for row in listed.json())
         assert other_client.get(f"/api/v1/escalations/{person.id}").status_code == 403
         assert other_client.patch(
-            f"/api/v1/escalations/{escalation_id}",
+            f"/api/v1/safety/escalations/{escalation_id}",
             params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
         ).status_code == 404
         owner_update = client.patch(
@@ -2495,7 +2495,7 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
         )
         assert owner_update.status_code == 200, owner_update.text
         assert owner_update.json()["reviewer_identity"] == caregiver.id
-        assert client.get(f"/api/v1/escalations/{other_person.id}").status_code == 403
+        assert client.get(f"/api/v1/safety/escalations/{other_person.id}").status_code == 403
 
         unauthenticated = TestClient(app)
         denied = unauthenticated.get(f"/api/v1/escalations/{person.id}")
