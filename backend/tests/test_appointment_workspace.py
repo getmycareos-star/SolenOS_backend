@@ -2077,6 +2077,7 @@ def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_re
 
 def test_blocked_appointment_follow_up_creates_and_reassesses_one_evidence_backed_question(client):
     from app.models.open_loop import OpenLoopRecord
+from app.models.time_location import Appointment
     from app.models.uncertainty import OpenQuestion
 
     test_client, owner, _ = client
@@ -2543,3 +2544,55 @@ def test_appointment_preparation_brief_includes_person_scoped_unresolved_follow_
     assert body["source_coverage"]["open_loops"] == "available"
     assert body["source_completeness"]["open_loops"]["retrieval_complete"] is True
     assert all(item["interpretation_limit"] for item in body["open_loops"])
+
+
+def test_appointment_preparation_brief_selects_nearest_upcoming_visit(client):
+    test_client, owner, other = client
+    now = datetime.now(timezone.utc)
+    db = TestSessionLocal()
+    try:
+        db.add_all([
+            Appointment(
+                person_id=owner["person"]["id"],
+                created_by_caregiver_id=owner["caregiver"]["id"],
+                title="Later specialist visit",
+                scheduled_at=now + timedelta(days=8),
+                status="scheduled",
+            ),
+            Appointment(
+                person_id=owner["person"]["id"],
+                created_by_caregiver_id=owner["caregiver"]["id"],
+                title="Next clinic visit",
+                scheduled_at=now + timedelta(days=2),
+                provider="Family doctor",
+                location="Clinic",
+                status="scheduled",
+            ),
+            Appointment(
+                person_id=owner["person"]["id"],
+                created_by_caregiver_id=owner["caregiver"]["id"],
+                title="Past visit still marked scheduled",
+                scheduled_at=now - timedelta(days=2),
+                status="scheduled",
+            ),
+            Appointment(
+                person_id=other["person"]["id"],
+                created_by_caregiver_id=other["caregiver"]["id"],
+                title="Other person's appointment",
+                scheduled_at=now + timedelta(days=1),
+                status="scheduled",
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert response.status_code == 200, response.text
+    next_visit = response.json()["next_appointment"]
+    assert next_visit["title"] == "Next clinic visit"
+    assert next_visit["provider"] == "Family doctor"
+    assert next_visit["location"] == "Clinic"
+    assert next_visit["status"] == "scheduled"
+    assert "Other person's appointment" not in response.text
