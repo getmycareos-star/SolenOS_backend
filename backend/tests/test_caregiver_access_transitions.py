@@ -837,3 +837,99 @@ def test_handoff_reads_require_explicit_manage_handoffs_permission():
         response = client.get(path, headers=headers)
         assert response.status_code == 403, (path, response.text)
         assert "manage handoffs" in response.text.lower()
+
+
+
+def test_legacy_appointment_reads_and_mutations_enforce_operation_permissions():
+    client = TestClient(app)
+    primary = create_primary(client)
+    headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    person_id = primary["person"]["id"]
+    caregiver_id = primary["caregiver"]["id"]
+
+    created = client.post(
+        "/api/v1/appointments",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "title": "Neurology follow-up",
+            "scheduled_at": "2026-12-03T10:00:00+00:00",
+            "created_by_caregiver_id": caregiver_id,
+        },
+    )
+    assert created.status_code == 200, created.text
+    appointment_id = created.json()["id"]
+
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr"]
+        db.commit()
+    finally:
+        db.close()
+
+    readable = client.get(f"/api/v1/appointments/{person_id}", headers=headers)
+    assert readable.status_code == 200, readable.text
+    assert any(item["id"] == appointment_id for item in readable.json())
+
+    denied_create = client.post(
+        "/api/v1/appointments",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "title": "Unauthorized appointment",
+            "scheduled_at": "2026-12-04T10:00:00+00:00",
+            "created_by_caregiver_id": caregiver_id,
+        },
+    )
+    assert denied_create.status_code == 403, denied_create.text
+    assert "correct records" in denied_create.text.lower()
+
+    denied_lifecycle = client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+    )
+    assert denied_lifecycle.status_code == 403, denied_lifecycle.text
+    assert "correct records" in denied_lifecycle.text.lower()
+
+
+def test_handoff_acceptance_and_revocation_require_manage_handoffs_permission():
+    client = TestClient(app)
+    primary = create_primary(client)
+    headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=primary["person"]["id"],
+            caregiver_id=primary["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr", "add_evidence", "share_summaries"]
+        db.commit()
+    finally:
+        db.close()
+
+    denied_revoke = client.post(
+        "/api/v1/handoffs/nonexistent-handoff/revoke",
+        headers=headers,
+    )
+    assert denied_revoke.status_code == 403, denied_revoke.text
+    assert "manage handoffs" in denied_revoke.text.lower()
+
+    denied_accept = client.post(
+        "/api/v1/handoffs/nonexistent-handoff/accept",
+        headers=headers,
+    )
+    assert denied_accept.status_code == 403, denied_accept.text
+    assert "manage handoffs" in denied_accept.text.lower()
+
+    denied_legacy_accept = client.post(
+        "/api/v1/caregiver-handoffs/nonexistent-handoff/accept",
+        headers=headers,
+    )
+    assert denied_legacy_accept.status_code == 403, denied_legacy_accept.text
+    assert "manage handoffs" in denied_legacy_accept.text.lower()
