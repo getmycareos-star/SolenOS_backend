@@ -88,6 +88,41 @@ def list_members(request: Request, db: Session = Depends(get_db)):
     } for grant, profile in grants]
 
 
+
+@router.get("/assignable-members")
+def list_assignable_members(request: Request, db: Session = Depends(get_db)):
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=401, detail="A valid care-record session is required")
+    own_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == str(person_id),
+        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.access_scope == "full_record",
+    ).first()
+    if own_grant is None:
+        raise HTTPException(status_code=403, detail="Full care-record access is required")
+    rows = (
+        db.query(CaregiverAccessGrant, CaregiverProfile)
+        .outerjoin(CaregiverProfile, CaregiverProfile.id == CaregiverAccessGrant.caregiver_profile_id)
+        .filter(
+            CaregiverAccessGrant.person_id == str(person_id),
+            CaregiverAccessGrant.status == "active",
+            CaregiverAccessGrant.revoked_at.is_(None),
+            CaregiverAccessGrant.access_scope == "full_record",
+        )
+        .order_by(CaregiverAccessGrant.granted_at.asc())
+        .all()
+    )
+    return [{
+        "caregiver_id": grant.caregiver_id,
+        "name": profile.name if profile and profile.name else "Caregiver",
+        "role": grant.role,
+    } for grant, profile in rows]
+
+
 @router.post("/invitations", status_code=201)
 def create_invitation(payload: InvitationCreate, request: Request, db: Session = Depends(get_db)):
     person_id, actor_id = _actor_scope(request)
