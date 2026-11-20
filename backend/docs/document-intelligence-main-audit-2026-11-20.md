@@ -129,3 +129,6 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 - `b583ce035c931f518a0d73b9ea36e8bc7f6e097b` — live-Qwen duplicate-upload test reprocesses the exact same binary and verifies the second accepted review reuses the original assertion and creates no duplicate assertion.
 - `13f56cedeb1eb3231282050ec262e5cacecdfb0e` — live-Qwen review tests select mobility and rejection candidates by exact source passage rather than relying on model output ordering.
 - `0deea7eb6309cea927a7608ed8218cde9ea53014` — historical Companion evaluation accepts past-tense wording variants.
+
+- `ca54866ebfebb10538ae4a18e9ef33ea9a0c87f6` — dedicated live-Qwen workflow now installs Tesseract and runs the real document-format extraction suite (native/scanned PDF, images, DOCX, RTF, retries and page provenance) before model evaluation.
+- `1948726a71d3aef6fc441df8f00b3727ce54a7c8` — changes to document format tests and semantic fixtures now trigger the live document evaluation workflow.
