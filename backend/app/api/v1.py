@@ -2360,6 +2360,8 @@ def update_appointment_lifecycle_endpoint(
                 appointment.status = "date_unknown"
         if "status" in supplied and payload.status is not None:
             appointment.status = payload.status
+            if payload.status in {"date_unknown", "rescheduled"} and "scheduled_at" not in supplied:
+                appointment.scheduled_at = None
         if appointment.status == "completed" and appointment.completed_at is None:
             appointment.completed_at = utc_now()
         elif appointment.status == "resolved" and appointment.resolved_at is None:
