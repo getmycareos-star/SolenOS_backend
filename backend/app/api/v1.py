@@ -2345,6 +2345,11 @@ def update_appointment_lifecycle_endpoint(
         rescheduled_at = payload.scheduled_at
         if rescheduled_at is not None and rescheduled_at.tzinfo is None:
             rescheduled_at = rescheduled_at.replace(tzinfo=timezone.utc)
+        if payload.status == "date_unknown" and rescheduled_at is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="An appointment marked date unknown cannot also carry a scheduled timestamp.",
+            )
         if (
             payload.status == "rescheduled"
             and rescheduled_at is not None
