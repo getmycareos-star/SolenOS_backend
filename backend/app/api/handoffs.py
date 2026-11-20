@@ -11,6 +11,7 @@ from sqlalchemy import MetaData, Table, inspect, select, text
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import Caregiver
 from app.models.collaboration import ConsentRecord
 from app.models.notifications import CareNotification
@@ -32,6 +33,15 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if person_id and caregiver_id:
+        grant = db.query(CaregiverAccessGrant.id).filter(
+            CaregiverAccessGrant.person_id == str(person_id),
+            CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+            CaregiverAccessGrant.status == "active",
+            CaregiverAccessGrant.revoked_at.is_(None),
+            CaregiverAccessGrant.access_scope == "full_record",
+        ).first()
+        if grant is None:
+            raise HTTPException(status_code=403, detail="Active full care-record access is required for handoffs")
         return str(person_id), str(caregiver_id)
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
@@ -49,6 +59,15 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     )
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    grant = db.query(CaregiverAccessGrant.id).filter(
+        CaregiverAccessGrant.person_id == session.person_id,
+        CaregiverAccessGrant.caregiver_id == session.caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.access_scope == "full_record",
+    ).first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="Active full care-record access is required for handoffs")
     return str(session.person_id), str(session.caregiver_id)
 
 
