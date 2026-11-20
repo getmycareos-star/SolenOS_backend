@@ -1311,7 +1311,7 @@ def main():
             # Daily Care event after the queue cancellation attempt above.
             review_event = CareEvent(
                 person_id=person_a,
-                event_type="structured_daily_capture",
+                event_type=source_event.event_type,
                 status="recorded",
                 occurred_at=original_event_occurred_at,
                 occurred_at_timezone=source_event.occurred_at_timezone,
