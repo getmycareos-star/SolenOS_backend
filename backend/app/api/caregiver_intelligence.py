@@ -108,6 +108,7 @@ def _resolve_scoped_session(request: Request, db: Session) -> tuple[str, str]:
 
 def _session_profile(request: Request, db: Session) -> tuple[str, str, CaregiverProfileModel]:
     person_id, session_caregiver_id = _resolve_scoped_session(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "view_lcr")
     try:
         profile = ensure_caregiver_profile_for_session(
             db,
@@ -124,6 +125,7 @@ def _session_profile(request: Request, db: Session) -> tuple[str, str, Caregiver
 
 def _assert_person_scope(request: Request, db: Session, person_id: str) -> tuple[str, str]:
     scoped_person_id, scoped_caregiver_id = _resolve_scoped_session(request, db)
+    require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "view_lcr")
     if str(person_id) != str(scoped_person_id):
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     return str(scoped_person_id), str(scoped_caregiver_id)
