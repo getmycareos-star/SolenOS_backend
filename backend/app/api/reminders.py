@@ -198,7 +198,7 @@ def complete_reminder(
         reminder.completed_by_caregiver_id = caregiver_id
     if payload.completion_note is not None:
         reminder.completion_note = payload.completion_note.strip() or None
-    db.commit()
+    _commit_reminder_update(db)
     db.refresh(reminder)
     return reminder
 
@@ -236,7 +236,7 @@ def snooze_reminder(
     reminder.snoozed_by_caregiver_id = caregiver_id
     reminder.snooze_count = (reminder.snooze_count or 0) + 1
     reminder.delivery_generation = (reminder.delivery_generation or 0) + 1
-    db.commit()
+    _commit_reminder_update(db)
     db.refresh(reminder)
     return reminder
 
@@ -258,6 +258,6 @@ def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(ge
         reminder.status = "cancelled"
         reminder.cancelled_at = datetime.now(timezone.utc)
         reminder.cancelled_by_caregiver_id = caregiver_id
-    db.commit()
+    _commit_reminder_update(db)
     db.refresh(reminder)
     return reminder
