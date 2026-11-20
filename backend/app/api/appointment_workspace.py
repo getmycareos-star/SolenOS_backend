@@ -17,6 +17,7 @@ from sqlalchemy import text, inspect
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
@@ -70,6 +71,24 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
     return str(session.person_id), str(session.caregiver_id)
+
+
+
+
+def _require_appointment_permission(
+    request: Request,
+    db: Session,
+    person_id: str,
+    caregiver_id: str,
+    permission: str,
+    *,
+    read_only: bool = False,
+) -> None:
+    if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
+        if not read_only:
+            raise HTTPException(status_code=403, detail="Document-only access cannot change appointment care information.")
+        permission = "view_documents"
+    require_caregiver_permission(db, person_id, caregiver_id, permission)
 
 
 def _iso(value):
@@ -159,6 +178,7 @@ def list_appointment_workspaces(request: Request, db: Session = Depends(get_db))
 @router.post("", status_code=201)
 def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     if len(json.dumps(payload.payload, ensure_ascii=False, default=str)) > 100_000:
         raise HTTPException(status_code=413, detail="Appointment workspace payload exceeds 100 KB")
     if payload.appointment_id:
@@ -250,6 +270,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     if window_days < 1 or window_days > 365:
         raise HTTPException(status_code=422, detail="window_days must be between 1 and 365")
     person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window_days)
     try:
@@ -1038,6 +1059,7 @@ def _parse_appointment_event_time(value: Optional[str]):
 def create_appointment_outcome_proposals(record_id: str, request: Request, db: Session = Depends(get_db)):
     """Create idempotent, review-required LCR candidates from an immutable workspace revision."""
     person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     row = db.query(AppointmentWorkspaceRecord).filter(
         AppointmentWorkspaceRecord.id == record_id,
         AppointmentWorkspaceRecord.person_id == person_id,
@@ -1137,6 +1159,7 @@ def create_appointment_outcome_proposals(record_id: str, request: Request, db: S
 @router.get("/{record_id}/outcome-proposals")
 def list_appointment_outcome_proposals(record_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     row = db.query(AppointmentWorkspaceRecord.id).filter(
         AppointmentWorkspaceRecord.id == record_id,
         AppointmentWorkspaceRecord.person_id == person_id,
@@ -1165,6 +1188,7 @@ def review_appointment_outcome_proposal(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "correct_records", read_only=False)
     decision = (payload.decision or "").strip().lower()
     if decision not in {"accept", "correct", "reject"}:
         raise HTTPException(status_code=422, detail="Decision must be accept, correct, or reject")
@@ -1444,6 +1468,7 @@ def get_appointment_workspace(record_id: str, request: Request, db: Session = De
 @router.patch("/{record_id}")
 def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUpdate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     if len(json.dumps(payload.payload, ensure_ascii=False, default=str)) > 100_000:
         raise HTTPException(status_code=413, detail="Appointment workspace payload exceeds 100 KB")
     row = db.query(AppointmentWorkspaceRecord).filter(
@@ -1539,6 +1564,7 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
 @router.get("/{record_id}/revisions")
 def list_appointment_workspace_revisions(record_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, str(request.state.scoped_caregiver_id), "view_lcr", read_only=True)
     row = db.query(AppointmentWorkspaceRecord.id).filter(
         AppointmentWorkspaceRecord.id == record_id,
         AppointmentWorkspaceRecord.person_id == person_id,
