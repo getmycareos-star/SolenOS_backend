@@ -2019,6 +2019,7 @@ def test_situation_assessment_projects_persisted_delta_change_with_real_event_pr
 def test_situation_assessment_preserves_care_significance_and_exposes_evidence_dimensions():
     from app.api.care_continuity import _build_situation_understanding_assessment
     from app.models.significance import SignificanceAssessment
+    from app.models.open_loop import OpenLoopRecord
     from app.core.change_enums import EvidenceStatus
 
     with TestingSessionLocal() as db:
@@ -2081,6 +2082,31 @@ def test_situation_assessment_preserves_care_significance_and_exposes_evidence_d
             confirmation_status="detected",
             is_active=True,
         ))
+        db.add(OpenLoopRecord(
+            id="loop-attention-incomplete",
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            assigned_caregiver_id=caregiver.id,
+            loop_type="follow_up",
+            title="Review the recorded sleep change",
+            description="The caregiver has not yet confirmed the follow-up outcome.",
+            status="open",
+            outcome_status="outcome_unknown",
+            source_type="persisted_change",
+            source_id=change_id,
+            source_fingerprint="c" * 64,
+            evidence=[],
+            uncertainty="unknown",
+            missing_information=[],
+            options=[],
+            response_evidence=[],
+            action_evidence=[],
+            outcome_evidence=[],
+            priority="normal",
+            priority_reasons=[],
+            closure_evidence=[],
+            version=1,
+        ))
         db.flush()
 
         assessment = _build_situation_understanding_assessment(db, person.id)
@@ -2094,8 +2120,8 @@ def test_situation_assessment_preserves_care_significance_and_exposes_evidence_d
         assert item["evidence_confidence"] == 0.42
         assert item["significance_confidence"] == 0.61
         assert item["significance_assessment_id"] == assessment_id
-        assert item["action_status"] == "not_recorded"
-        assert item["linked_follow_up_id"] is None
+        assert item["action_status"] == "open"
+        assert item["linked_follow_up_id"] == "loop-attention-incomplete"
         assert item["history_completeness"] == "partial_or_unknown"
         assert "size and timing of the change remain uncertain" in item["reason"]
         assert not any(
