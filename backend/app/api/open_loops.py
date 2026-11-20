@@ -555,11 +555,11 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
             )
         )
     total = query.count()
-    # A unique final ordering key makes offset pagination deterministic when
-    # multiple follow-ups share the same deadline and update timestamp.
+    # Offset pagination must not reorder existing rows when a caregiver
+    # edits a deadline, status, or description between page requests. Creation
+    # time and ID are immutable ordering keys; newly created rows append later.
     rows = query.order_by(
-        OpenLoopRecord.deadline_at.asc().nullslast(),
-        OpenLoopRecord.updated_at.desc(),
+        OpenLoopRecord.created_at.asc(),
         OpenLoopRecord.id.asc(),
     ).offset(offset).limit(limit).all()
     items = []
