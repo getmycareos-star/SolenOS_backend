@@ -119,10 +119,12 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
     )
     original_delta = intelligence_module.reconcile_document_delta
     delta_attempts = 0
+    delta_input_content = []
 
     def fail_first_delta(*args, **kwargs):
         nonlocal delta_attempts
         delta_attempts += 1
+        delta_input_content.append(kwargs.get("content"))
         if delta_attempts == 1:
             raise RuntimeError("temporary Delta persistence failure")
         return original_delta(*args, **kwargs)
@@ -243,6 +245,10 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         delta_run_id = accepted_again.json()["delta_run_id"]
         assert delta_run_id
         assert delta_attempts == 2
+        assert delta_input_content == [quotes[1], quotes[1]], (
+            "The Delta Engine must receive only the reviewed candidate quotation, "
+            "never the full document containing unreviewed observations."
+        )
 
         third_replay = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",

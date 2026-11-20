@@ -1231,7 +1231,10 @@ def _persist_document_delta_run(
         person_id=person_id,
         event_date=_explicit_document_event_datetime(candidate, quote),
         source="SolenOS Document Intelligence",
-        content=source_text or quote,
+        # Only the caregiver-approved candidate may enter the Delta Engine.
+        # Passing the entire document here would let unreviewed Qwen candidates
+        # influence longitudinal change detection.
+        content=quote,
         evidence_ids=[evidence_id],
         persist=True,
         created_by_caregiver_id=caregiver_id,
