@@ -10,6 +10,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Caregiver, Person
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverContext, CaregiverObservation, CaregiverHandoff, CaregiverRole, CaregiverResponsibility
+from app.models.privacy_delivery import AuditLogEvent
 from app.core.caregiver_enums import InformationVisibility, CaregiverRoleType
 
 pytestmark = pytest.mark.session_security
@@ -139,6 +140,14 @@ def test_care_recipient_profile_persists_and_isolated_by_bearer_session():
         assert profile_versions[0].context_metadata["condition"] == "Dementia, caregiver-reported profile context"
         assert profile_versions[0].context_metadata["epistemic_status"] == "caregiver_reported"
         assert profile_versions[0].context_metadata["reported_by_session_caregiver_id"] == first["caregiver"]["id"]
+        assert profile_versions[0].context_metadata["recipient_name"] == "Updated recipient"
+        assert profile_versions[0].context_metadata["caregiver_relationship"] == "Daughter"
+        audit = db.query(AuditLogEvent).filter_by(
+            person_id=first["person"]["id"],
+            caregiver_id=first["caregiver"]["id"],
+            action="care_recipient_profile_updated",
+        ).one()
+        assert set(audit.record_metadata["changed_fields"]) == {"recipient_name", "caregiver_relationship", "condition"}
 
         second_person = db.query(Person).filter_by(id=second["person"]["id"]).one()
         assert second_person.name == "Attempted cross-record overwrite"
