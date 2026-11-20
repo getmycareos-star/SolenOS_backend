@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -163,8 +164,14 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
         assert all(item.epistemic_status == "reported" for item in details)
         assert all(evidence.source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
         assert next(item for item in details if item.attribute == "mood").value_text == "5"
-        assert next(item for item in details if item.attribute == "mood").units == "score"
-        assert next(item for item in details if item.attribute == "blood_pressure_systolic").value_text == "10"
+        mood = next(item for item in details if item.attribute == "mood")
+        blood_pressure = next(item for item in details if item.attribute == "blood_pressure_systolic")
+        assert mood.units == "score"
+        assert mood.source_passage == json.dumps("she's sad", ensure_ascii=False)
+        assert blood_pressure.value_text == "10"
+        assert blood_pressure.units == "mmHg"
+        assert blood_pressure.source_passage == json.dumps("yes", ensure_ascii=False)
+        assert next(item for item in details if item.attribute == "caregiver_note").source_passage == json.dumps("she's loosing weight", ensure_ascii=False)
         assert next(item for item in details if item.attribute == "blood_pressure_systolic").units == "mmHg"
     finally:
         db.close()
