@@ -10,6 +10,7 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.appointment_workspace import AppointmentWorkspaceRecord
 from app.models.care import CareEvent, Evidence
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
@@ -300,7 +301,7 @@ def test_appointment_workspace_writes_require_add_evidence_permission(client):
 
     db = TestSessionLocal()
     try:
-        assert db.query(main_module.AppointmentWorkspaceRecord).filter_by(
+        assert db.query(AppointmentWorkspaceRecord).filter_by(
             person_id=session["person"]["id"]
         ).count() == 0
     finally:
