@@ -590,6 +590,9 @@ def test_companion_conversation_history_returns_source_message_ids_and_enforces_
         assert len(assistant_messages) == 1
         assert assistant_messages[0]["id"]
         assert assistant_messages[0]["source_message_id"] is None
+        assert isinstance(assistant_messages[0]["lcr_context_coverage"], dict)
+        assert isinstance(assistant_messages[0]["source_event_ids"], list)
+        assert isinstance(assistant_messages[0]["source_evidence_ids"], list)
 
         second = create_session(client, "Unrelated caregiver")
         cross_record = client.get(
