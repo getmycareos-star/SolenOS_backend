@@ -1729,6 +1729,16 @@ def test_medication_authoring_and_review_are_person_scoped():
             person_id=foreign_person.id,
         )
         db.add_all([foreign_person, foreign_caregiver])
+        db.add(CaregiverAccessGrant(
+            person_id=foreign_person.id,
+            caregiver_id=foreign_caregiver.id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+            permissions=["view_lcr", "correct_records"],
+            granted_by_caregiver_id=foreign_caregiver.id,
+        ))
         db.commit()
         db.close()
 
