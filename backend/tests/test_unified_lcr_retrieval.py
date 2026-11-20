@@ -725,7 +725,7 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
             connection.execute(CareActionOutcome.__table__.insert(), {
                 "id": "action-outcome-local", "person_id": "person-local",
                 "action_id": "follow-up-action-local", "action_type": "care_follow_up",
-                "outcome_status": "completed", "notes": "Caregiver confirmed the follow-up was completed.",
+                "outcome_status": "completed", "notes": "Caregiver confirmed the sleep follow-up was completed.",
                 "correction_text": None, "evidence_ids": [],
                 "created_by_caregiver_id": "caregiver-local", "created_at": now,
             })
@@ -771,7 +771,7 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
         assert "daily-event-local" in {row["id"] for row in sources["events"]["items"]}
         assert {row["id"] for row in sources["action_outcomes"]["items"]} == {"action-outcome-local"}
         assert sources["action_outcomes"]["items"][0]["outcome_status"] == "completed"
-        assert "Caregiver confirmed the follow-up was completed." in str(sources["action_outcomes"]["items"][0])
+        assert "Caregiver confirmed the sleep follow-up was completed." in str(sources["action_outcomes"]["items"][0])
         assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-local"}
         assert {row["id"] for row in sources["assertions"]["items"]} == {
             "accepted-local", "caregiver-reviewed-local"
