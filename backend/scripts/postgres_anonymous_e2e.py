@@ -1306,10 +1306,27 @@ def main():
             source_event = source_db.query(CareEvent).filter_by(id=daily_event_id, person_id=person_a).one()
             original_event_description = source_event.description
             original_event_occurred_at = source_event.occurred_at
+            # Keep the review-lifecycle fixture isolated from the asynchronous
+            # extraction worker, which may still finish a job for the original
+            # Daily Care event after the queue cancellation attempt above.
+            review_event = CareEvent(
+                person_id=person_a,
+                event_type="structured_daily_capture",
+                status="recorded",
+                occurred_at=original_event_occurred_at,
+                occurred_at_timezone=source_event.occurred_at_timezone,
+                title=source_event.title,
+                description=original_event_description,
+                evidence_ids=[daily_evidence_id],
+                created_by_caregiver_id=caregiver_a,
+            )
+            source_db.add(review_event)
+            source_db.flush()
+            review_event_id = review_event.id
             analysis = CaptureAnalysis(
                 person_id=person_a,
                 caregiver_id=caregiver_a,
-                source_event_id=daily_event_id,
+                source_event_id=review_event_id,
                 source_evidence_id=daily_evidence_id,
                 source_text=original_event_description or daily_capture_payload["notes"],
                 extraction_status="available",
@@ -1402,7 +1419,7 @@ def main():
         source_db = SessionLocal()
         try:
             assertions = source_db.query(CareAssertion).filter_by(
-                person_id=person_a, source_event_id=daily_event_id,
+                person_id=person_a, source_event_id=review_event_id,
             ).all()
             require(len(assertions) == 1 and assertions[0].id == accepted_assertion_id,
                     f"Exactly one source-linked assertion must persist: {[row.id for row in assertions]}")
@@ -1423,9 +1440,13 @@ def main():
             require(persisted_candidate["observation"] == "Generated suggestion: interrupted sleep."
                     and persisted_candidate["corrected_observation"] == "Caregiver corrected the report: sleep was interrupted twice overnight.",
                     "Caregiver correction overwrote the original Daily Care candidate instead of preserving both values")
-            persisted_event = source_db.query(CareEvent).filter_by(id=daily_event_id).one()
-            require(persisted_event.description == original_event_description,
-                    "Caregiver review mutated the original Daily Care observation")
+            persisted_event = source_db.query(CareEvent).filter_by(id=review_event_id).one()
+            original_event = source_db.query(CareEvent).filter_by(id=daily_event_id).one()
+            require(
+                persisted_event.description == original_event_description
+                and original_event.description == original_event_description,
+                "Caregiver review mutated the original Daily Care observation or its isolated review source",
+            )
         finally:
             source_db.close()
 
