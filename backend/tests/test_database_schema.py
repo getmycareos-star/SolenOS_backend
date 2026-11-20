@@ -28,6 +28,29 @@ def test_schema_verifier_reports_missing_columns():
         engine.dispose()
 
 
+def test_schema_verifier_reports_missing_indexes():
+    from sqlalchemy import inspect
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        Base.metadata.create_all(bind=engine)
+        indexes = inspect(engine).get_indexes("evidence")
+        person_index = next(
+            item["name"] for item in indexes
+            if item.get("column_names") == ["person_id"] and not item.get("unique", False)
+        )
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP INDEX "{person_index}"'))
+
+        differences = database_schema_differences(engine)
+        assert any(
+            item.startswith("evidence: missing indexes") and "person_id" in item
+            for item in differences
+        )
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_reports_missing_tables():
     engine = create_engine("sqlite:///:memory:")
     try:
