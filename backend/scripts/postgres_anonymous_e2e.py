@@ -1589,12 +1589,33 @@ def main():
                 f"PostgreSQL significance snapshot should initially be current: {status}: {current_significance}")
 
         with SessionLocal() as db:
-            persisted_assessment = db.query(SignificanceAssessment).filter(
-                SignificanceAssessment.id == significance_assessment_id,
-                SignificanceAssessment.person_id == person_a,
+            replacement_assessment_id = str(uuid.uuid4())
+            db.add(SignificanceAssessment(
+                id=replacement_assessment_id,
+                person_id=person_a,
+                subject_type="sleep",
+                subject_id=person_a,
+                target_type="change",
+                target_id=care_change_id,
+                verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                evidence_status=EvidenceStatus.REPORTED,
+                evidence_confidence=0.55,
+                significance_confidence=0.61,
+                dimensions=[{"name": "frequency", "score": 0.61}],
+                attention_candidate=True,
+                follow_up_candidate=True,
+                explanation="PostgreSQL E2E updated significance assessment.",
+                evidence_ids=[daily_event_id],
+                is_active=True,
+                version=2,
+            ))
+            db.flush()
+            persisted_change = db.query(Change).filter(
+                Change.id == care_change_id,
+                Change.person_id == person_a,
             ).one()
-            persisted_assessment.evidence_confidence = 0.55
-            persisted_assessment.explanation = "PostgreSQL E2E updated significance assessment."
+            persisted_change.significance_assessment_id = replacement_assessment_id
+            significance_assessment_id = replacement_assessment_id
             db.commit()
 
         status, changed_significance = request(
