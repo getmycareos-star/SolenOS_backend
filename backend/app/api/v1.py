@@ -2051,8 +2051,9 @@ def time_until(reference_datetime: str, target_datetime: str):
 
 @router.post("/care-windows", response_model=List[CareWindowSchema])
 def create_care_windows_from_event(
-    person_id: str, event_type: str, occurred_at: str, db: Session = Depends(get_db)
+    person_id: str, event_type: str, occurred_at: str, request: Request, db: Session = Depends(get_db)
 ):
+    _require_session_scope(request, db, person_id)
     event_dt = datetime.fromisoformat(occurred_at)
     windows = calculate_care_windows(event_type, event_dt)
     db_windows = []
@@ -2074,7 +2075,8 @@ def create_care_windows_from_event(
 
 
 @router.get("/care-windows/{person_id}", response_model=List[CareWindowSchema])
-def list_care_windows(person_id: str, status: Optional[str] = None, db: Session = Depends(get_db)):
+def list_care_windows(person_id: str, request: Request, status: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     query = db.query(CareWindowModel).filter(CareWindowModel.person_id == person_id)
     if status:
         query = query.filter(CareWindowModel.status == status)
@@ -2082,7 +2084,8 @@ def list_care_windows(person_id: str, status: Optional[str] = None, db: Session 
 
 
 @router.post("/appointments", response_model=AppointmentSchema)
-def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db)):
+def create_appointment(appointment: AppointmentCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, appointment.person_id, appointment.created_by_caregiver_id)
     _require_person_and_linked_caregiver(
         db, appointment.person_id, appointment.created_by_caregiver_id
     )
@@ -2103,7 +2106,8 @@ def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get
 
 
 @router.get("/appointments/{person_id}", response_model=List[AppointmentSchema])
-def list_appointments(person_id: str, db: Session = Depends(get_db)):
+def list_appointments(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(AppointmentModel)
         .filter(AppointmentModel.person_id == person_id)
@@ -2114,13 +2118,14 @@ def list_appointments(person_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/appointments/{appointment_id}/lifecycle")
 def update_appointment_lifecycle_endpoint(
-    appointment_id: str, db: Session = Depends(get_db)
+    appointment_id: str, request: Request, db: Session = Depends(get_db)
 ):
     appointment = (
         db.query(AppointmentModel).filter(AppointmentModel.id == appointment_id).first()
     )
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    _require_session_scope(request, db, appointment.person_id)
 
     appt_dict = {
         "id": appointment.id,
@@ -2142,7 +2147,8 @@ def update_appointment_lifecycle_endpoint(
 
 
 @router.post("/transitions", response_model=CareTransitionSchema)
-def create_care_transition(transition: CareTransitionCreate, db: Session = Depends(get_db)):
+def create_care_transition(transition: CareTransitionCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, transition.person_id, transition.created_by_caregiver_id)
     _require_person_and_linked_caregiver(
         db, transition.person_id, transition.created_by_caregiver_id, caregiver_required=False
     )
@@ -2166,7 +2172,8 @@ def create_care_transition(transition: CareTransitionCreate, db: Session = Depen
 
 
 @router.get("/transitions/{person_id}", response_model=List[CareTransitionSchema])
-def list_care_transitions(person_id: str, db: Session = Depends(get_db)):
+def list_care_transitions(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(CareTransitionModel)
         .filter(CareTransitionModel.person_id == person_id)
@@ -2176,7 +2183,8 @@ def list_care_transitions(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/transitions/{person_id}/sequence/{transition_type}")
-def get_care_transition_sequence(person_id: str, transition_type: str, db: Session = Depends(get_db)):
+def get_care_transition_sequence(person_id: str, transition_type: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     from app.services.location_intelligence import CARE_TRANSITION_SEQUENCES
 
     sequence = CARE_TRANSITION_SEQUENCES.get(transition_type, [])
@@ -2203,7 +2211,8 @@ def get_care_transition_sequence(person_id: str, transition_type: str, db: Sessi
 
 
 @router.post("/locations", response_model=LocationSchema)
-def create_location(location: LocationCreate, db: Session = Depends(get_db)):
+def create_location(location: LocationCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, location.person_id, location.created_by_caregiver_id)
     db_location = LocationModel(**location.model_dump())
     db.add(db_location)
     db.commit()
@@ -2212,7 +2221,8 @@ def create_location(location: LocationCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/locations/{person_id}", response_model=List[LocationSchema])
-def list_locations(person_id: str, db: Session = Depends(get_db)):
+def list_locations(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(LocationModel)
         .filter(LocationModel.person_id == person_id)
@@ -2222,7 +2232,8 @@ def list_locations(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/locations/{person_id}/enriched")
-def get_enriched_locations(person_id: str, timezone: Optional[str] = None, db: Session = Depends(get_db)):
+def get_enriched_locations(person_id: str, request: Request, timezone: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     locations = (
         db.query(LocationModel)
         .filter(LocationModel.person_id == person_id)
@@ -2246,7 +2257,8 @@ def get_enriched_locations(person_id: str, timezone: Optional[str] = None, db: S
 
 
 @router.get("/daily-intelligence/{person_id}", response_model=DailyIntelligenceSchema)
-def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
+def get_daily_intelligence(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     events = (
         db.query(CareEventModel)
         .filter(CareEventModel.person_id == person_id)
@@ -2313,8 +2325,14 @@ def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/timezones", response_model=TimezoneContextSchema)
 def create_timezone_context(
-    person_id: str, caregiver_id: Optional[str] = None, timezone_id: str = "UTC", is_primary: bool = False, db: Session = Depends(get_db)
+    person_id: str, caregiver_id: Optional[str] = None, timezone_id: str = "UTC", is_primary: bool = False, request: Request = None, db: Session = Depends(get_db)
 ):
+    if request is None:
+        raise HTTPException(status_code=401, detail="A valid care session is required")
+    session_person_id, session_caregiver_id = _require_session_scope(request, db, person_id)
+    if caregiver_id and str(caregiver_id) != str(session_caregiver_id):
+        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
+    caregiver_id = session_caregiver_id
     if not validate_timezone(timezone_id):
         raise HTTPException(status_code=400, detail="Invalid or unsupported timezone")
 
@@ -2331,7 +2349,8 @@ def create_timezone_context(
 
 
 @router.get("/timezones/{person_id}", response_model=List[TimezoneContextSchema])
-def list_timezone_contexts(person_id: str, db: Session = Depends(get_db)):
+def list_timezone_contexts(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(TimezoneContextModel)
         .filter(TimezoneContextModel.person_id == person_id)
@@ -2341,8 +2360,9 @@ def list_timezone_contexts(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/temporal-relationships", response_model=TemporalRelationshipSchema)
 def create_temporal_relationship(
-    person_id: str, event_a_id: str, event_b_id: str, db: Session = Depends(get_db)
+    person_id: str, event_a_id: str, event_b_id: str, request: Request, db: Session = Depends(get_db)
 ):
+    _require_session_scope(request, db, person_id)
     event_a = (
         db.query(CareEventModel)
         .filter(CareEventModel.id == event_a_id, CareEventModel.person_id == person_id)
@@ -2381,7 +2401,8 @@ def create_temporal_relationship(
 
 
 @router.get("/temporal-relationships/{person_id}", response_model=List[TemporalRelationshipSchema])
-def list_temporal_relationships(person_id: str, db: Session = Depends(get_db)):
+def list_temporal_relationships(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(TemporalRelationshipModel)
         .filter(TemporalRelationshipModel.person_id == person_id)
@@ -2391,7 +2412,8 @@ def list_temporal_relationships(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/time-patterns/{person_id}")
-def get_time_patterns(person_id: str, window_days: int = 30, db: Session = Depends(get_db)):
+def get_time_patterns(person_id: str, request: Request, window_days: int = 30, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     events = (
         db.query(CareEventModel)
         .filter(CareEventModel.person_id == person_id)
@@ -2413,12 +2435,17 @@ def get_time_patterns(person_id: str, window_days: int = 30, db: Session = Depen
 
 
 @router.post("/temporal/facts", response_model=TemporalFactSchema)
-def create_temporal_fact_endpoint(fact: TemporalFactCreate, db: Session = Depends(get_db)):
+def create_temporal_fact_endpoint(fact: TemporalFactCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, fact.person_id)
     return create_temporal_fact(db, fact)
 
 
 @router.patch("/temporal/facts/{fact_id}", response_model=TemporalFactSchema)
-def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, db: Session = Depends(get_db)):
+def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, request: Request, db: Session = Depends(get_db)):
+    existing = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    _require_session_scope(request, db, existing.person_id)
     result = update_temporal_fact(db, fact_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -2426,7 +2453,12 @@ def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, db: 
 
 
 @router.post("/temporal/facts/{fact_id}/supersede")
-def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, db: Session = Depends(get_db)):
+def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, request: Request, db: Session = Depends(get_db)):
+    existing = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
+    replacement = db.query(TemporalFactModel).filter(TemporalFactModel.id == new_fact_id).first()
+    if existing is None or replacement is None or existing.person_id != replacement.person_id:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    _require_session_scope(request, db, existing.person_id)
     result = supersede_temporal_fact(db, fact_id, new_fact_id)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -2434,7 +2466,8 @@ def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, db: Session
 
 
 @router.get("/temporal/facts/{person_id}", response_model=List[TemporalFactSchema])
-def list_temporal_facts(person_id: str, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_temporal_facts(person_id: str, request: Request, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     query = db.query(TemporalFactModel).filter(TemporalFactModel.person_id == person_id)
     if subject_type:
         query = query.filter(TemporalFactModel.subject_type == subject_type)
@@ -2444,27 +2477,32 @@ def list_temporal_facts(person_id: str, subject_type: Optional[str] = None, subj
 
 
 @router.post("/temporal/relations", response_model=TemporalRelationSchema)
-def create_temporal_relation_endpoint(relation: TemporalRelationCreate, db: Session = Depends(get_db)):
+def create_temporal_relation_endpoint(relation: TemporalRelationCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, relation.person_id)
     return create_temporal_relation(db, relation)
 
 
 @router.get("/temporal/relations/{person_id}", response_model=List[TemporalRelationSchema])
-def list_temporal_relations(person_id: str, db: Session = Depends(get_db)):
+def list_temporal_relations(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return db.query(TemporalRelationModel).filter(TemporalRelationModel.person_id == person_id).order_by(TemporalRelationModel.created_at.desc()).all()
 
 
 @router.post("/temporal/reference-frames", response_model=TemporalReferenceFrameSchema)
-def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, db: Session = Depends(get_db)):
+def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, frame.person_id)
     return create_temporal_reference_frame(db, frame.person_id, frame.name, frame.reference_time, frame.source_event_id, frame.source_fact_id)
 
 
 @router.get("/temporal/reference-frames/{person_id}", response_model=List[TemporalReferenceFrameSchema])
-def list_reference_frames(person_id: str, db: Session = Depends(get_db)):
+def list_reference_frames(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return db.query(TemporalReferenceFrameModel).filter(TemporalReferenceFrameModel.person_id == person_id).order_by(TemporalReferenceFrameModel.created_at.desc()).all()
 
 
 @router.post("/temporal/relative-time", response_model=RelativeTimeResolution)
-def resolve_relative_time_endpoint(person_id: str, expression: str, reference_frame_id: Optional[str] = None, db: Session = Depends(get_db)):
+def resolve_relative_time_endpoint(person_id: str, expression: str, request: Request, reference_frame_id: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return resolve_relative_time(db, person_id, expression, reference_frame_id)
 
 
@@ -2477,7 +2515,8 @@ def infer_relation_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depend
 
 
 @router.get("/temporal/conflicts/{person_id}")
-def list_temporal_conflicts(person_id: str, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_temporal_conflicts(person_id: str, request: Request, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return detect_temporal_conflicts(db, person_id, subject_type, subject_id)
 
 
@@ -2503,18 +2542,24 @@ def check_temporal_conflict_endpoint(fact_a_id: str, fact_b_id: str, db: Session
 
 
 @router.get("/temporal/view/{person_id}", response_model=TemporalViewAtPoint)
-def get_temporal_view_endpoint(person_id: str, point_in_time: str, db: Session = Depends(get_db)):
+def get_temporal_view_endpoint(person_id: str, point_in_time: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     point = datetime.fromisoformat(point_in_time.replace("Z", "+00:00"))
     return get_temporal_view_at_point(db, person_id, point)
 
 
 @router.get("/temporal/subject/{person_id}/{subject_type}/{subject_id}", response_model=SubjectTemporalView)
-def get_subject_temporal_view_endpoint(person_id: str, subject_type: str, subject_id: str, db: Session = Depends(get_db)):
+def get_subject_temporal_view_endpoint(person_id: str, subject_type: str, subject_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return get_subject_temporal_view(db, person_id, subject_type, subject_id)
 
 
 @router.get("/temporal/duration/{fact_id}")
-def get_duration_endpoint(fact_id: str, db: Session = Depends(get_db)):
+def get_duration_endpoint(fact_id: str, request: Request, db: Session = Depends(get_db)):
+    fact_scope = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
+    if fact_scope is None:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    _require_session_scope(request, db, fact_scope.person_id)
     result = calculate_duration(db, fact_id)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -2522,10 +2567,11 @@ def get_duration_endpoint(fact_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/temporal/status/{fact_id}")
-def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = None, db: Session = Depends(get_db)):
+def get_temporal_status_endpoint(fact_id: str, request: Request, reference_time: Optional[str] = None, db: Session = Depends(get_db)):
     fact = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
     if not fact:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
+    _require_session_scope(request, db, fact.person_id)
     ref = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
     status = classify_temporal_status(fact, ref)
     return {"fact_id": fact_id, "temporal_status": status}
