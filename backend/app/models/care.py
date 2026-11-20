@@ -95,6 +95,9 @@ def _prevent_evidence_source_mutation(mapper, connection, target):
 
 class CareEvent(Base):
     __tablename__ = "care_events"
+    __table_args__ = (
+        UniqueConstraint("person_id", "ingestion_key", name="uq_care_events_person_ingestion_key"),
+    )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     event_type = Column(String, nullable=False)
@@ -110,6 +113,11 @@ class CareEvent(Base):
     time_provenance = Column(String, nullable=True)
     tags = Column(JSONList, nullable=True)
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    # A server-verified retry key belongs to the canonical event, not just a
+    # newly-created text Evidence row. This also covers captures that reference
+    # already-uploaded documents and therefore create no new Evidence row.
+    ingestion_key = Column(String(128), nullable=True)
+    ingestion_request_sha256 = Column(String(64), nullable=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     significance_verdict = Column(String, nullable=True)
     attention_candidate = Column(Boolean, nullable=True, default=False)
