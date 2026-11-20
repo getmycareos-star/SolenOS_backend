@@ -1942,6 +1942,7 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
             if item["record_id"] == change_id
         )
         assert closed_item["action_status"] == "closed"
+        assert closed_item["linked_follow_up_outcome_status"] == "outcome_unknown"
         assert closed_item["linked_follow_up_id"] == "freshness-linked-follow-up"
     finally:
         teardown_db()
