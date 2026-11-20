@@ -13,6 +13,8 @@ class CareReminder(Base):
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     action_id = Column(String, ForeignKey("actions.id"), nullable=True, unique=True, index=True)
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    assigned_to_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True, index=True)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
     title = Column(String(180), nullable=False)
     note = Column(Text, nullable=True)
     due_at = Column(DateTime(timezone=True), nullable=False, index=True)
@@ -29,3 +31,5 @@ class CareReminder(Base):
     cancelled_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    __mapper_args__ = {"version_id_col": version}
