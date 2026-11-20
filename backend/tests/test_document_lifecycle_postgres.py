@@ -1020,8 +1020,8 @@ def test_postgres_document_upload_compensates_external_binary_after_implicit_flu
                     db,
                     person_id,
                     caregiver_id,
-                    "flush-failure-discharge-note.pdf",
-                    b"%PDF-1.4 synthetic CI bytes for external-object compensation",
+                    "flush-failure-discharge-note.txt",
+                    b"Synthetic CI bytes for external-object compensation",
                 )
             assert failure.value.status_code == 503
             assert flush_calls >= 2
