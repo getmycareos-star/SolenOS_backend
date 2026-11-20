@@ -5522,6 +5522,9 @@ def create_evidence_observation(
     """Persist a typed observation only when its quoted span exists in scoped original evidence."""
     person_id, caregiver_id = _scoped_identity(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
+    supersedes_id = payload.get("supersedes_observation_id")
+    if supersedes_id is not None:
+        require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     evidence = db.query(Evidence).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
