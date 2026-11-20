@@ -7,7 +7,7 @@ from alembic import op
 from sqlalchemy import inspect
 
 revision = "20261120_06_caregiver_person_index"
-down_revision = "20261120_05_repair_reminder_assignment_backfill"
+down_revision = "20261120_05_reminder_assignment_repair"
 branch_labels = None
 depends_on = None
 
