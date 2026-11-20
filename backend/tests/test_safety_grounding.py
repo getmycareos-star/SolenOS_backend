@@ -551,7 +551,7 @@ class TestSafetyAPI:
         person_id = session.json()["person"]["id"]
         headers = {"Authorization": f"Bearer {session.json()['access_token']}"}
         response = self.client.post(
-            "/api/v1/evaluate",
+            "/api/v1/safety/evaluate",
             headers=headers,
             json={
                 "user_intent": "The medication was changed.",
@@ -630,7 +630,7 @@ class TestSafetyAPI:
         assert "total_adversarial_tests" in data
 
     def test_adversarial_tests_are_not_public(self):
-        response = self.client.post("/api/v1/adversarial-tests")
+        response = self.client.post("/api/v1/safety/adversarial-tests")
         assert response.status_code == 404
 
 
