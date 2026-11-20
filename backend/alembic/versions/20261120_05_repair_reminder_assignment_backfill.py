@@ -40,14 +40,13 @@ def upgrade() -> None:
     bind.execute(sa.text(
         "UPDATE care_reminders SET version = 1 WHERE version IS NULL"
     ))
-    if columns["version"].get("nullable", True):
-        op.alter_column(
-            "care_reminders",
-            "version",
-            existing_type=sa.Integer(),
-            nullable=False,
-            server_default="1",
-        )
+    op.alter_column(
+        "care_reminders",
+        "version",
+        existing_type=sa.Integer(),
+        nullable=False,
+        server_default="1",
+    )
 
     # Ensure the assignment reference is protected even when the column was
     # created by an earlier metadata bootstrap rather than migration 01.
