@@ -98,6 +98,8 @@ CONSUMER_DOMAINS = [
 ]
 
 PERSISTENCE_DOMAINS = [
+    ("/api/lcr/orientation", "Read-only CareAssertion/EvidenceObservation current-care projection; no writes"),
+    ("/api/v1/timezones", "TimezoneContext records and caregiver time-zone preferences"),
     ("/api/v1/assistant/evaluate-production", "No care-record writes; synthetic-only inference acceptance"),
     ("/api/v1/assistant", "QwenBackgroundJob; QwenModelOutput; QwenSafetyEvaluation; AIOutputLCRProposal where caregiver review is required"),
     ("/api/v1/time", "No persistence; deterministic time utility"),
