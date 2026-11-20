@@ -120,6 +120,8 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
     assert created.json()["assigned_to_caregiver_id"] == recipient_id
     assert created.json()["version"] == 1
     assert created.json()["notification_delivery_status"] == "not_created"
+    assert len(created.json()["assignment_history"]) == 1
+    assert created.json()["assignment_history"][0]["assigned_to_caregiver_id"] == recipient_id
 
     # The actual due-reminder worker writes to the assigned caregiver's inbox.
     with SessionLocal() as db:
@@ -149,6 +151,9 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
     assert reassigned.status_code == 200, reassigned.text
     assert reassigned.json()["assigned_to_caregiver_id"] == primary_id
     assert reassigned.json()["version"] == 2
+    assert len(reassigned.json()["assignment_history"]) == 2
+    assert reassigned.json()["assignment_history"][-1]["actor_caregiver_id"] == recipient_id
+    assert reassigned.json()["assignment_history"][-1]["assigned_to_caregiver_id"] == primary_id
 
     # Reassignment advances the delivery generation so the new responsible
     # caregiver receives a fresh in-app notification for the still-due item.
