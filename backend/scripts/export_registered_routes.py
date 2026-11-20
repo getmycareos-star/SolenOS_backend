@@ -469,7 +469,7 @@ def main() -> None:
             "",
             "Generated from FastAPI iter_route_contexts/app.routes and cross-checked against app.openapi(). Consumer and persistence entries are domain-level mappings; they do not prove exact handler write sets or end-to-end verification.",
             "",
-            "| Method | Endpoint | Router module / handler | Authentication | Consumer | Persistence | Disposition |",
+            "| Method | Endpoint | Router module / handler | Authentication | Consumer | Persistence | Disposition | Status |",
             "|---|---|---|---|---|---|---|",
         ]
         for route in inventory["routes"]:
@@ -485,6 +485,7 @@ def main() -> None:
                 str(consumer_label),
                 str(persistence_label),
                 route["disposition"],
+                route["status"],
             ]
             rows.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", " ") for value in values) + " |")
         markdown_output.write_text("\n".join(rows) + "\n", encoding="utf-8")
