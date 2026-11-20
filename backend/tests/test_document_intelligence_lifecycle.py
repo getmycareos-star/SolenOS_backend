@@ -101,12 +101,13 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
     client = TestClient(app)
     source = "[Page 1]\\nDischarge summary: Patient walked 20 metres with a frame."
     quote = "Patient walked 20 metres with a frame."
+    conflicting_evidence_id = None
 
     def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
         assert quote in text
         return {
             "observations": [{
-                "subject": "mobility",
+                "subject": "diagnosis" if source_evidence_id == conflicting_evidence_id else "mobility",
                 "observation": quote,
                 "source_quote": quote,
                 "extraction_method": "test_verbatim",
@@ -124,35 +125,42 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         second_evidence_id = "document-copy-" + hashlib.sha256(
             binary + caregiver["person"]["id"].encode("utf-8") + b"second-copy"
         ).hexdigest()[:24]
+        conflicting_evidence_id = "document-copy-" + hashlib.sha256(
+            binary + caregiver["person"]["id"].encode("utf-8") + b"conflicting-copy"
+        ).hexdigest()[:24]
 
-        # Persist a second evidence identity with the exact same original bytes.
-        # This exercises the duplicate-document assertion guard, not just upload UI metadata.
+        # Persist two additional evidence identities with identical original bytes.
+        # The third analysis deliberately returns a different field classification.
         with Session() as db:
-            db.add(Evidence(
-                id=second_evidence_id,
-                person_id=caregiver["person"]["id"],
-                type="document",
-                source_text="",
-                uploaded_by_caregiver_id=caregiver["caregiver"]["id"],
-                extra_metadata=json.dumps({
-                    "filename": "duplicate-discharge-summary.txt",
-                    "duplicate_of_evidence_id": first_evidence_id,
-                }),
-                source_type="caregiver_upload",
-                evidence_status="recorded",
-            ))
-            db.add(EvidenceUpload(
-                evidence_id=second_evidence_id,
-                filename="duplicate-discharge-summary.txt",
-                mime_type="text/plain",
-                content=binary,
-                size_bytes=len(binary),
-                sha256=digest,
-            ))
+            for evidence_id, filename in (
+                (second_evidence_id, "duplicate-discharge-summary.txt"),
+                (conflicting_evidence_id, "conflicting-discharge-summary.txt"),
+            ):
+                db.add(Evidence(
+                    id=evidence_id,
+                    person_id=caregiver["person"]["id"],
+                    type="document",
+                    source_text="",
+                    uploaded_by_caregiver_id=caregiver["caregiver"]["id"],
+                    extra_metadata=json.dumps({
+                        "filename": filename,
+                        "duplicate_of_evidence_id": first_evidence_id,
+                    }),
+                    source_type="caregiver_upload",
+                    evidence_status="recorded",
+                ))
+                db.add(EvidenceUpload(
+                    evidence_id=evidence_id,
+                    filename=filename,
+                    mime_type="text/plain",
+                    content=binary,
+                    size_bytes=len(binary),
+                    sha256=digest,
+                ))
             db.commit()
 
         analysis_ids = []
-        for evidence_id in (first_evidence_id, second_evidence_id):
+        for evidence_id in (first_evidence_id, second_evidence_id, conflicting_evidence_id):
             extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
             assert extracted.status_code == 201, extracted.text
             understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
@@ -178,6 +186,15 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         assert duplicate_review.status_code == 200, duplicate_review.text
         assert duplicate_review.json()["source_record_ref"]["record_id"] == first_assertion_id
         assert duplicate_review.json()["written_to_lcr"] is True
+
+        # A model classification change on the same exact binary/quotation is
+        # not a second source. It must be blocked rather than creating a second field.
+        conflicting_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_ids[2]}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert conflicting_review.status_code == 409, conflicting_review.text
 
         with Session() as db:
             assertions = db.query(CareAssertion).filter_by(
