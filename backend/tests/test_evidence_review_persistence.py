@@ -963,3 +963,36 @@ def test_evidence_capture_rejects_unvalidated_numeric_confidence(review_records)
         ).count() == 0
     finally:
         db.close()
+
+
+
+def test_evidence_review_mutation_requires_correct_records_permission(review_records):
+    client_a, _ = review_records
+    db = SessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id="review-person-a",
+            caregiver_id="review-caregiver-a",
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr"]
+        db.commit()
+    finally:
+        db.close()
+
+    denied = client_a.post(
+        "/api/v1/care-continuity/evidence/review-evidence-a/reviews",
+        json={
+            "review_type": "reliability",
+            "outcome": "unverified",
+            "rationale": "A read-only caregiver must not create a review.",
+            "policy_version": "evidence-review-v1",
+            "criteria": CRITERIA,
+        },
+    )
+    assert denied.status_code == 403, denied.text
+    assert "correct records" in denied.text.lower()
+
+    history = client_a.get("/api/v1/care-continuity/evidence/review-evidence-a/reviews")
+    assert history.status_code == 200, history.text
+    assert history.json() == []
