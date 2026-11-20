@@ -96,6 +96,18 @@ def _reminder_response(db: Session, reminder: CareReminder) -> dict:
     payload["notification_delivery_status"] = (
         "in_app_notification_created" if notification_exists else "not_created"
     )
+    assignment_events = db.query(AuditLogEvent).filter(
+        AuditLogEvent.person_id == reminder.person_id,
+        AuditLogEvent.target_type == "care_reminder",
+        AuditLogEvent.target_id == reminder.id,
+        AuditLogEvent.action.in_(("care.reminder.assigned", "care.reminder.reassigned")),
+    ).order_by(AuditLogEvent.occurred_at.asc(), AuditLogEvent.id.asc()).all()
+    payload["assignment_history"] = [{
+        "actor_caregiver_id": event.actor_id or "unknown",
+        "previous_assignee_caregiver_id": (event.record_metadata or {}).get("previous_assignee_caregiver_id"),
+        "assigned_to_caregiver_id": (event.record_metadata or {}).get("assigned_to_caregiver_id"),
+        "occurred_at": event.occurred_at,
+    } for event in assignment_events]
     return payload
 
 
