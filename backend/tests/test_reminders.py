@@ -744,3 +744,117 @@ def test_web_push_worker_does_not_attempt_delivery_with_incomplete_vapid_configu
         ),
     )
     assert delivery_service.deliver_pending_web_pushes(db=object()) == 0
+
+
+def test_reminder_assignment_requires_active_member_and_preserves_actor_history():
+    from app.models.privacy_delivery import AuditLogEvent
+    from app.models.reminder import CareReminder
+
+    client = TestClient(app)
+    primary = create_session(client, "Primary caregiver")
+    primary_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=primary_headers,
+        json={"email": "assigned-caregiver@example.test", "expires_in_days": 7},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite.json()["invitation_token"],
+            "email": "assigned-caregiver@example.test",
+            "password": "assigned-caregiver-password-456",
+            "name": "Assigned caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    invited = accepted.json()
+    invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
+
+    due_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=primary_headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "title": "Confirm transport",
+            "due_at": due_at,
+            "assigned_to_caregiver_id": invited["caregiver_id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    reminder = created.json()
+    assert reminder["created_by_caregiver_id"] == primary["caregiver"]["id"]
+    assert reminder["assigned_to_caregiver_id"] == invited["caregiver_id"]
+    assert reminder["version"] == 1
+
+    reassigned = client.patch(
+        f"/api/v1/reminders/{reminder['id']}/assignment",
+        headers=invited_headers,
+        json={
+            "assigned_to_caregiver_id": primary["caregiver"]["id"],
+            "expected_version": reminder["version"],
+        },
+    )
+    assert reassigned.status_code == 200, reassigned.text
+    assert reassigned.json()["assigned_to_caregiver_id"] == primary["caregiver"]["id"]
+    assert reassigned.json()["version"] == 2
+
+    stale_replay = client.patch(
+        f"/api/v1/reminders/{reminder['id']}/assignment",
+        headers=primary_headers,
+        json={
+            "assigned_to_caregiver_id": invited["caregiver_id"],
+            "expected_version": reminder["version"],
+        },
+    )
+    assert stale_replay.status_code == 409, stale_replay.text
+
+    db = TestSessionLocal()
+    try:
+        stored = db.query(CareReminder).filter_by(id=reminder["id"]).one()
+        assert stored.created_by_caregiver_id == primary["caregiver"]["id"]
+        assert stored.assigned_to_caregiver_id == primary["caregiver"]["id"]
+        assert stored.version == 2
+        events = db.query(AuditLogEvent).filter(
+            AuditLogEvent.target_type == "care_reminder",
+            AuditLogEvent.target_id == reminder["id"],
+        ).order_by(AuditLogEvent.occurred_at.asc()).all()
+        assert len(events) == 2
+        assert events[0].action == "care.reminder.assigned"
+        assert events[0].actor_id == primary["caregiver"]["id"]
+        assert events[0].record_metadata["assigned_to_caregiver_id"] == invited["caregiver_id"]
+        assert events[1].action == "care.reminder.reassigned"
+        assert events[1].actor_id == invited["caregiver_id"]
+        assert events[1].record_metadata["previous_assignee_caregiver_id"] == invited["caregiver_id"]
+        assert events[1].record_metadata["assigned_to_caregiver_id"] == primary["caregiver"]["id"]
+    finally:
+        db.close()
+
+
+def test_reminder_assignment_rejects_inactive_or_foreign_caregiver():
+    client = TestClient(app)
+    primary = create_session(client, "Reminder owner")
+    foreign = create_session(client, "Unrelated caregiver")
+    headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    due_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "title": "Follow up",
+            "due_at": due_at,
+        },
+    )
+    assert created.status_code == 201, created.text
+    rejected = client.patch(
+        f"/api/v1/reminders/{created.json()['id']}/assignment",
+        headers=headers,
+        json={
+            "assigned_to_caregiver_id": foreign["caregiver"]["id"],
+            "expected_version": created.json()["version"],
+        },
+    )
+    assert rejected.status_code == 403, rejected.text
