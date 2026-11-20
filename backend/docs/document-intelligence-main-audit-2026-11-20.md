@@ -158,3 +158,5 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 - `5ec20cae34df9ddbbac64dd7536d5dee4adf89c2` — live conflict evaluation uses neutral document names so filename recency cannot bias the model's conflict explanation.
 
 - `c429ccf754e378d9e0aa03f737877491ae9ea7cd` — the live scanned-PDF/DOCX conflict test also verifies both source-backed assertions reach the existing Progressive Understanding situation response.
+
+- `0dfbd77077c30eb50e6f954d89b257344396057a` — live conflict evaluation verifies unresolved document conflicts are also surfaced through caregiver return-continuity context, not only the internal LCR projection.
