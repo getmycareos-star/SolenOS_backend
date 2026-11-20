@@ -910,6 +910,9 @@ def create_context(context: CaregiverContextCreate, request: Request, db: Sessio
     context = CaregiverContextCreate(**{**context.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id})
     service = CaregiverIntelligenceService(db)
     db_context = service.create_context(context)
+    db_context.reported_by_caregiver_id = session_caregiver_id
+    db.commit()
+    db.refresh(db_context)
     return db_context
 
 
