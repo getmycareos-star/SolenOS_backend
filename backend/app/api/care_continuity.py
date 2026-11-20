@@ -4304,7 +4304,15 @@ def create_record_version(payload: dict, request: Request, db: Session = Depends
             "tables_captured": sorted(tables_payload.keys())}
 
 
-def _person_scoped_rows(resource: str, person_id: str, request: Request, db: Session, limit: int = 100):
+def _person_scoped_rows(
+    resource: str,
+    person_id: str,
+    request: Request,
+    db: Session,
+    limit: int = 100,
+    offset: int = 0,
+    stable_ascending: bool = False,
+):
     scoped_person_id, _ = _scoped_identity(request, db)
     if str(person_id) != str(scoped_person_id):
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
@@ -4315,11 +4323,18 @@ def _person_scoped_rows(resource: str, person_id: str, request: Request, db: Ses
     if "person_id" not in table.c:
         raise HTTPException(status_code=422, detail="Resource is not person-scoped")
     query = select(table).where(table.c.person_id == scoped_person_id)
-    for key in ("recorded_at", "changed_at", "created_at", "updated_at"):
-        if key in table.c:
-            query = query.order_by(desc(table.c[key]))
-            break
-    rows = db.execute(query.limit(max(1, min(limit, 200)))).mappings().all()
+    ordering_key = next(
+        (key for key in ("recorded_at", "changed_at", "created_at", "updated_at") if key in table.c),
+        None,
+    )
+    if ordering_key:
+        query = query.order_by(
+            (table.c[ordering_key].asc() if stable_ascending else desc(table.c[ordering_key])),
+            (table.c.id.asc() if stable_ascending else desc(table.c.id)),
+        )
+    rows = db.execute(
+        query.offset(max(0, offset)).limit(max(1, min(limit, 200)))
+    ).mappings().all()
     return [_jsonable(dict(row)) for row in rows]
 
 
@@ -4572,8 +4587,16 @@ def reconstruct_recorded_state_as_of(
 
 
 @router.get("/outcomes/{person_id}")
-def list_person_outcomes(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
-    return _person_scoped_rows("action-outcomes", person_id, request, db, limit)
+def list_person_outcomes(
+    person_id: str,
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    return _person_scoped_rows(
+        "action-outcomes", person_id, request, db, limit, offset, stable_ascending=True,
+    )
 
 
 @router.get("/contradictions/{person_id}")
@@ -4871,27 +4894,45 @@ def update_care_continuity_resource(
 
 
 @router.get("/{resource}")
-def list_resource(resource: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
+def list_resource(
+    resource: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
     if resource not in RESOURCES:
         raise HTTPException(status_code=404, detail="Unknown care-continuity resource")
     person_id, _ = _scoped_identity(request, db)
     table = _table(db, RESOURCES[resource])
     query = select(table).where(table.c.person_id == person_id)
     ordering = []
-    # Revision sequence is the authoritative order for revisions of a given
-    # care item. Timestamps can tie or lose ordering precision across database
-    # backends, so use the monotonic revision number before timestamp fallback.
-    if "revision_number" in table.c:
-        ordering.append(desc(table.c.revision_number))
-    if "created_at" in table.c:
-        ordering.append(desc(table.c.created_at))
-    elif "changed_at" in table.c:
-        ordering.append(desc(table.c.changed_at))
-    elif "updated_at" in table.c:
-        ordering.append(desc(table.c.updated_at))
+    # Decision history is paged oldest-first on immutable keys. Caregiver
+    # updates cannot move a decision across an offset page boundary.
+    if resource == "decisions":
+        if "created_at" in table.c:
+            ordering.append(table.c.created_at.asc())
+        if "id" in table.c:
+            ordering.append(table.c.id.asc())
+    else:
+        # Revision sequence is the authoritative order for revisions of a given
+        # care item. Timestamps can tie or lose ordering precision across database
+        # backends, so use the monotonic revision number before timestamp fallback.
+        if "revision_number" in table.c:
+            ordering.append(desc(table.c.revision_number))
+        if "created_at" in table.c:
+            ordering.append(desc(table.c.created_at))
+        elif "changed_at" in table.c:
+            ordering.append(desc(table.c.changed_at))
+        elif "updated_at" in table.c:
+            ordering.append(desc(table.c.updated_at))
+        if "id" in table.c:
+            ordering.append(desc(table.c.id))
     if ordering:
         query = query.order_by(*ordering)
-    rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
+    rows = db.execute(
+        query.offset(max(0, offset)).limit(max(1, min(limit, 100)))
+    ).mappings().all()
     return [_jsonable(dict(row)) for row in rows]
 
 @router.get("/facts/{fact_id}/evidence-integrity")
