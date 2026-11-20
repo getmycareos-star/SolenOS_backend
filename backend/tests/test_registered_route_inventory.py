@@ -22,6 +22,15 @@ def test_runtime_endpoint_inventory_expands_nested_routers_and_matches_product_r
 
     assert any(route["disposition"] == "frontend_product_workflow" for route in inventory["routes"])
     assert any(route["disposition"] == "internal_service_or_operations" for route in inventory["routes"])
+    assert inventory["intentionally_unused_count"] >= 3
+    intentionally_unused = {
+        (route["method"], route["endpoint"])
+        for route in inventory["routes"]
+        if route["disposition"] == "intentionally_unused"
+    }
+    assert ("POST", "/api/v1/reasoning-memory") in intentionally_unused
+    assert ("GET", "/api/v1/reasoning/{person_id}/summary") in intentionally_unused
+    assert ("GET", "/api/v1/learning-events/{person_id}") in intentionally_unused
     assert all(route["authentication"]["disposition"] for route in inventory["routes"])
     assert all("disposition" in route and "consumer" in route and "persistence" in route for route in inventory["routes"])
     # Unresolved consumer/persistence ownership is emitted explicitly as a review item,
