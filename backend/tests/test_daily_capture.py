@@ -701,6 +701,7 @@ def test_appointment_write_rejects_caregiver_from_another_person():
         )
         assert response.status_code == 403, response.text
         assert response.json()["detail"] in {
+            "Caregiver attribution does not match this session",
             "Caregiver is not linked to this care record",
             "You are not a member of this care circle.",
         }
