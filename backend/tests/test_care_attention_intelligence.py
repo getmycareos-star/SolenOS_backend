@@ -520,10 +520,11 @@ def test_persisted_change_remains_visible_when_source_record_coverage_is_partial
         "baseline_history_completeness": "complete", "expected_source_record_count": 2,
         "records": [{"source": "events", "record_id": "event-resolved", "evidence_ids": []}],
     }])
-    assert len(important) == 1
-    assert important[0]["history_completeness"] == "partial_or_unknown"
-    assert "does not cancel the recorded need for follow-up" in important[0]["reason"]
-    assert clarification == []
+    assert important == []
+    assert len(clarification) == 1
+    assert clarification[0]["record_id"] == "change-partial-source"
+    assert clarification[0]["category"] == "needs_clarification"
+    assert "baseline or source history is incomplete" in clarification[0]["reason"]
 
 
 def test_repeated_dementia_caregiver_observations_are_reviewed_without_claiming_change():
