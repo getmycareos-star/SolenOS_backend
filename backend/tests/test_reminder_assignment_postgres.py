@@ -54,7 +54,7 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
     recipient_id = recipient["caregiver_id"]
     recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
 
-    due_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    due_at = datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat()
     created = client.post(
         "/api/v1/reminders",
         headers=primary_headers,
