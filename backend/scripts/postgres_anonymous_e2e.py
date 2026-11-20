@@ -1472,8 +1472,19 @@ def main():
             )
             if row.get("id") == accepted_assertion_id
         ]
-        require(len(reviewed_assertions) == 1,
-                f"Accepted Daily Care assertion was not returned by paginated LCR history: {reviewed_assertions}")
+        require(
+            len(reviewed_assertions) == 1,
+            "Accepted Daily Care assertion was not returned by paginated LCR history: "
+            + json.dumps({
+                "expected_assertion_id": accepted_assertion_id,
+                "history_keys": list((reviewed_history.get("history") or {}).keys()),
+                "lcr_context_keys": list(((reviewed_history.get("history") or {}).get("lcr_context") or {}).keys()),
+                "assertion_source": (
+                    ((reviewed_history.get("history") or {}).get("lcr_context") or {})
+                    .get("sources", {}).get("assertions", {})
+                ),
+            }, default=str),
+        )
 
         status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_a)
         require(status == 200 and refreshed.get("access_token"),
