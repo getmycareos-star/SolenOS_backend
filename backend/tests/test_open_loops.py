@@ -888,3 +888,63 @@ def test_open_loop_offset_pagination_returns_stable_complete_pages():
     assert len(set(first_ids + second_ids)) == 3
     assert set(first_ids + second_ids) == {item["id"] for item in created}
 
+def test_open_loop_event_and_occurrence_history_support_offset_pagination():
+    client = TestClient(app)
+    _, headers = session(client, "Paginated follow-up history recipient")
+    loop = create_loop(client, headers, loop_type="follow_up")
+
+    for index in range(2):
+        updated = client.patch(
+            f"/api/v1/open-loops/{loop['id']}",
+            headers=headers,
+            json={
+                "description": f"Updated follow-up history entry {index}",
+                "idempotency_key": f"history-page-update-{index}",
+            },
+        )
+        assert updated.status_code == 200, updated.text
+
+    db = TestSessionLocal()
+    try:
+        for index in range(3):
+            db.add(open_loop_api.OpenLoopOccurrence(
+                loop_id=loop["id"],
+                person_id=loop["person_id"],
+                caregiver_id=loop["caregiver_id"],
+                source_type="daily_care_entry",
+                source_id=f"history-page-source-{index}",
+                source_fingerprint=f"{index + 1:064x}",
+                evidence=[],
+                idempotency_key=f"history-page-occurrence-{index}",
+                occurred_at=datetime(2026, 11, 20, 10 + index, tzinfo=timezone.utc),
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    history_first = client.get(
+        f"/api/v1/open-loops/{loop['id']}/history?limit=2&offset=0",
+        headers=headers,
+    )
+    history_second = client.get(
+        f"/api/v1/open-loops/{loop['id']}/history?limit=2&offset=2",
+        headers=headers,
+    )
+    occurrence_first = client.get(
+        f"/api/v1/open-loops/{loop['id']}/occurrences?limit=2&offset=0",
+        headers=headers,
+    )
+    occurrence_second = client.get(
+        f"/api/v1/open-loops/{loop['id']}/occurrences?limit=2&offset=2",
+        headers=headers,
+    )
+
+    for response in (history_first, history_second, occurrence_first, occurrence_second):
+        assert response.status_code == 200, response.text
+    history_ids = [row["id"] for row in history_first.json() + history_second.json()]
+    occurrence_ids = [row["id"] for row in occurrence_first.json() + occurrence_second.json()]
+    assert len(history_ids) == 3
+    assert len(set(history_ids)) == 3
+    assert len(occurrence_ids) == 3
+    assert len(set(occurrence_ids)) == 3
+
