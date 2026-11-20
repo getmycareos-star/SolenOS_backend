@@ -165,6 +165,21 @@ def test_persisted_change_can_be_linked_to_person_scoped_follow_up():
     assert body["source_type"] == "persisted_change"
     assert body["source_id"] == change_id
 
+    foreign_link = client.post(
+        "/api/v1/open-loops",
+        headers=second_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Try to link another person's change",
+            "description": "This must not cross care-record boundaries.",
+            "source_type": "persisted_change",
+            "source_id": change_id,
+            "evidence": [],
+            "uncertainty": "unknown",
+        },
+    )
+    assert foreign_link.status_code == 404, foreign_link.text
+
     listed = client.get("/api/v1/open-loops?limit=100", headers=first_headers)
     assert listed.status_code == 200, listed.text
     linked = next(item for item in listed.json()["items"] if item["id"] == body["id"])
