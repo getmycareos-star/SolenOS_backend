@@ -13,6 +13,8 @@ import re
 import subprocess
 import time
 import uuid
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -37,8 +39,9 @@ from app.api.document_intelligence import (
     list_document_intelligence,
     queue_document_intake,
     review_document_candidate,
+    _existing_assertion_for_exact_document_duplicate,
 )
-from app.models.care import Caregiver, Person
+from app.models.care import Caregiver, Person, Evidence
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.uncertainty import OpenQuestion
@@ -937,4 +940,107 @@ def test_postgres_document_intelligence_resumes_all_page_windows_and_preserves_p
     finally:
         api_client.close()
         app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
+
+
+def test_postgres_concurrent_duplicate_document_reviews_create_one_assertion():
+    """Cross-analysis duplicate reviews serialize on the document-source advisory lock."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    client = TestClient(app)
+    try:
+        created = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"caregiver_name": "Concurrent duplicate review evaluator"},
+        )
+        assert created.status_code == 201, created.text
+        identity = created.json()
+        person_id = identity["person"]["id"]
+        caregiver_id = identity["caregiver"]["id"]
+        original = b"[Page 1]\\nPatient walked 20 metres with a frame."
+        digest = hashlib.sha256(original).hexdigest()
+        evidence_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+        with Session() as db:
+            for index, evidence_id in enumerate(evidence_ids):
+                db.add(Evidence(
+                    id=evidence_id,
+                    person_id=person_id,
+                    type="document",
+                    source_text="",
+                    uploaded_by_caregiver_id=caregiver_id,
+                    extra_metadata=json.dumps({
+                        "filename": f"duplicate-{index}.txt",
+                        "duplicate_of_evidence_id": evidence_ids[0] if index else None,
+                    }),
+                    source_type="caregiver_upload",
+                    evidence_status="recorded",
+                ))
+                db.add(EvidenceUpload(
+                    evidence_id=evidence_id,
+                    filename=f"duplicate-{index}.txt",
+                    mime_type="text/plain",
+                    content=original,
+                    size_bytes=len(original),
+                    sha256=digest,
+                ))
+            db.commit()
+
+        barrier = threading.Barrier(2)
+        asserted_value = (
+            "Subject: mobility\\n"
+            "Statement: Patient walked 20 metres with a frame.\\n"
+            "Event date: Not stated or unresolved\\n"
+            "Source-recorded date: Not stated in document"
+        )
+
+        def accept_same_source(evidence_id):
+            with Session() as db:
+                upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+                barrier.wait(timeout=15)
+                existing = _existing_assertion_for_exact_document_duplicate(
+                    db,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    evidence_id=evidence_id,
+                    upload=upload,
+                    field="observation",
+                    source_quote="Patient walked 20 metres with a frame.",
+                    asserted_value=asserted_value,
+                    subject_type="person",
+                    subject_id=person_id,
+                    assertion_kind="document_reviewed_observation",
+                )
+                if existing is None:
+                    existing = CareAssertion(
+                        person_id=person_id,
+                        subject_type="person",
+                        subject_id=person_id,
+                        field="observation",
+                        assertion_kind="document_reviewed_observation",
+                        asserted_value=asserted_value,
+                        source_label="Caregiver-reviewed document",
+                        source_text="Patient walked 20 metres with a frame.",
+                        evidence_ids=[evidence_id],
+                        created_by_caregiver_id=caregiver_id,
+                        updated_by_caregiver_id=caregiver_id,
+                    )
+                    db.add(existing)
+                    db.flush()
+                assertion_id = existing.id
+                db.commit()
+                return assertion_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            assertion_ids = list(pool.map(accept_same_source, evidence_ids))
+        assert assertion_ids[0] == assertion_ids[1]
+        with Session() as db:
+            rows = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.field == "observation",
+                CareAssertion.source_text == "Patient walked 20 metres with a frame.",
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].id == assertion_ids[0]
+    finally:
+        client.close()
         engine.dispose()
