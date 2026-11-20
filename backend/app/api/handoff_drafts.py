@@ -869,6 +869,10 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
     # Verify it before comparing individual source rows; otherwise a corrupted
     # snapshot could be treated as a valid basis for approval.
     expected_snapshot_hash = snapshot.get("snapshot_sha256")
+    integrity_version = snapshot.get("integrity_version", 1)
+    # Version 1 is retained for drafts created before metadata was included in
+    # the integrity contract. New snapshots bind identity scope and immutable
+    # snapshot metadata as well as the retrieved evidence projection.
     snapshot_hash_payload = {
         "authority": snapshot.get("authority"),
         "person_scope": snapshot.get("person_scope"),
@@ -882,8 +886,15 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
         "appointment_id": snapshot.get("appointment_id"),
         "selected_appointment": snapshot.get("selected_appointment"),
     }
+    if integrity_version == 2:
+        snapshot_hash_payload.update({
+            "snapshot_id": snapshot.get("snapshot_id"),
+            "snapshot_at": snapshot.get("snapshot_at"),
+            "caregiver_scope": snapshot.get("caregiver_scope"),
+        })
     if (
-        not isinstance(expected_snapshot_hash, str)
+        integrity_version not in {1, 2}
+        or not isinstance(expected_snapshot_hash, str)
         or len(expected_snapshot_hash) != 64
         or _fingerprint(snapshot_hash_payload) != expected_snapshot_hash
     ):
@@ -2734,6 +2745,7 @@ def prepare_handoff_draft(
     source_snapshot = {
         "snapshot_id": str(uuid.uuid4()),
         "snapshot_at": now.isoformat(),
+        "integrity_version": 2,
         "authority": "living_care_record",
         "person_scope": person_id,
         "caregiver_scope": caregiver_id,
@@ -2766,6 +2778,9 @@ def prepare_handoff_draft(
         "window": source_snapshot["window"],
         "appointment_id": source_snapshot["appointment_id"],
         "selected_appointment": source_snapshot["selected_appointment"],
+        "snapshot_id": source_snapshot["snapshot_id"],
+        "snapshot_at": source_snapshot["snapshot_at"],
+        "caregiver_scope": source_snapshot["caregiver_scope"],
     })
     structured_content = {
         "template_sections": _template_coverage(payload.audience, statuses),
