@@ -25,7 +25,7 @@ from app.services.document_binary_storage import read_document_binary
 from app.api.care_delta import _scoped_identity
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
-from app.services.lcr_context import build_lcr_context
+from app.services.lcr_context import SOURCE_SPECS, build_lcr_context
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.care_attention_intelligence import build_care_attention_assessment, CARE_ATTENTION_POLICY_VERSION
 from app.services.care_continuity import get_freshness
