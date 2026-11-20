@@ -180,13 +180,18 @@ def _validate_source_record_reference(
     source_id: str | None,
 ) -> None:
     """Reject known persisted source references outside the authenticated care record."""
-    if not source_id or not source_type:
+    if not source_type:
         return
-    if source_type == "persisted_change":
+    if str(source_type).strip().casefold() == "persisted_change":
+        if not source_id or not str(source_id).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="A persisted care change link requires a source identifier",
+            )
         from app.models.change import Change
 
         exists = db.query(Change.id).filter(
-            Change.id == str(source_id),
+            Change.id == str(source_id).strip(),
             Change.person_id == str(person_id),
         ).first()
         if exists is None:
