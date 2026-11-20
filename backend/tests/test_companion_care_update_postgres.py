@@ -227,6 +227,9 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
         replay_review = review(first, proposal["id"], {"decision": "accept"})
         assert replay_review.status_code == 200, replay_review.text
         assert replay_review.json()["idempotent_replay"] is True
+        assert replay_review.json()["status"] == "accepted"
+        assert replay_review.json()["decision"] == "accept"
+        assert replay_review.json()["written_to_lcr"] is True
         assert replay_review.json()["assertion_id"] == assertion_id
 
         current_care = client.get(
