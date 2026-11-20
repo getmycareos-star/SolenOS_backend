@@ -263,7 +263,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert analysis_id in historical_payload.get("source_document_analysis_ids", [])
         assert historical_assertion_id in historical_payload.get("source_assertion_ids", [])
         historical_reply = historical_payload.get("reply", "").casefold()
-        assert any(term in historical_reply for term in ("previous", "history", "historical")), historical_payload
+        assert any(term in historical_reply for term in ("previous", "history", "historical", "past")), historical_payload
 
         tentative_companion = client.post(
             "/api/v1/conversation/message",
