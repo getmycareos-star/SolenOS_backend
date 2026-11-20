@@ -17,6 +17,7 @@ pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated Post
 from app.main import app
 from app.models.care import Person
 from app.models.caregiver_intelligence import CaregiverContext, CaregiverProfile
+from app.models.privacy_delivery import AuditLogEvent
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
@@ -121,6 +122,15 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
         assert any(row.context_metadata.get("condition") == "Dementia stage reported by caregiver" for row in profile_versions)
         assert any(row.context_metadata.get("condition") is None for row in profile_versions)
         assert any(row.effective_end is not None for row in profile_versions)
+        assert any(row.context_metadata.get("recipient_name") == f"Updated recipient {suffix}" for row in profile_versions)
+        assert any(row.context_metadata.get("caregiver_relationship") == "Daughter" for row in profile_versions)
+        audit_events = db.query(AuditLogEvent).filter_by(
+            person_id=first_person_id,
+            caregiver_id=first_caregiver_id,
+            action="care_recipient_profile_updated",
+        ).all()
+        assert len(audit_events) == 2
+        assert all(event.outcome == "success" for event in audit_events)
 
         second_person = db.query(Person).filter_by(id=second.json()["person"]["id"]).one()
         assert second_person.name == f"Separate recipient updated {suffix}"
