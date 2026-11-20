@@ -643,7 +643,7 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
         return {
             "observations": [{
                 "subject": "environment",
-                "observation": "The person prefers a quiet room after lunch.",
+                "observation": "the person prefers a quiet room after lunch.",
                 "source_quote": source,
                 "source_event_id": source_event_id,
                 "source_evidence_id": source_evidence_id,
