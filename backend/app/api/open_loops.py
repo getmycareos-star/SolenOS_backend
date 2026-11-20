@@ -325,6 +325,7 @@ def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
 @router.post("", status_code=201)
 def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     _validate_source_evidence_references(db, person_id, payload.evidence)
     deadline = _utc(payload.deadline_at)
     if deadline and not payload.deadline_source:
@@ -469,6 +470,7 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
                limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
                db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     query = db.query(OpenLoopRecord).filter(
         OpenLoopRecord.person_id == person_id, or_(OpenLoopRecord.caregiver_id == caregiver_id, OpenLoopRecord.assigned_caregiver_id == caregiver_id))
     if status:
@@ -526,6 +528,7 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
 @router.get("/{loop_id}")
 def get_loop(loop_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id)
     deps = db.query(OpenLoopDependency).filter(
         OpenLoopDependency.dependent_id == loop.id, OpenLoopDependency.removed_at.is_(None)).all()
@@ -545,6 +548,7 @@ def get_loop(loop_id: str, request: Request, db: Session = Depends(get_db)):
 @router.patch("/{loop_id}")
 def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "updated", payload.idempotency_key)
     if replay is not None:
@@ -599,6 +603,7 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
 @router.post("/{loop_id}/responses")
 def record_response(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "response_recorded", payload.idempotency_key)
     if replay is not None:
@@ -662,6 +667,7 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
 @router.post("/{loop_id}/actions")
 def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "action_recorded", payload.idempotency_key)
     if replay is not None:
@@ -695,6 +701,7 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
 @router.post("/{loop_id}/reconcile")
 def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "contradiction_reconciled", payload.idempotency_key)
     if replay is not None:
@@ -724,6 +731,7 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
 @router.post("/{loop_id}/outcomes")
 def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_reported", payload.idempotency_key)
     if replay is not None:
@@ -741,6 +749,7 @@ def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
 @router.post("/{loop_id}/verify-outcome")
 def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_attested", payload.idempotency_key)
     if replay is not None:
@@ -774,6 +783,7 @@ def corroborate_outcome(loop_id: str, payload: EvidenceAction, request: Request,
     It does not infer semantic entailment, truth, or causation from source linkage.
     """
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key)
     if replay is not None:
@@ -830,6 +840,7 @@ def corroborate_outcome(loop_id: str, payload: EvidenceAction, request: Request,
 @router.post("/{loop_id}/close")
 def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "closure_verified", payload.idempotency_key)
     if replay is not None:
@@ -915,6 +926,7 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
 @router.post("/{loop_id}/cancel")
 def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "cancelled", payload.idempotency_key)
     if replay is not None:
@@ -936,6 +948,7 @@ def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
 @router.post("/{loop_id}/reopen")
 def reopen_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "reopened", payload.idempotency_key)
     if replay is not None:
@@ -957,6 +970,7 @@ def reopen_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
 @router.post("/{loop_id}/dependencies")
 def add_dependency(loop_id: str, payload: DependencyInput, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     dependent = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     prerequisite = _get_scoped(db, person_id, caregiver_id, payload.prerequisite_id, for_update=True)
     if dependent.id == prerequisite.id:
@@ -993,6 +1007,7 @@ def add_dependency(loop_id: str, payload: DependencyInput, request: Request, db:
 @router.get("/{loop_id}/occurrences")
 def list_occurrences(loop_id: str, request: Request, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id)
     rows = db.query(OpenLoopOccurrence).filter(
         OpenLoopOccurrence.loop_id == loop.id,
@@ -1010,6 +1025,7 @@ def list_occurrences(loop_id: str, request: Request, limit: int = Query(100, ge=
 @router.get("/{loop_id}/history")
 def loop_history(loop_id: str, request: Request, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id)
     events = db.query(OpenLoopEvent).filter(
         OpenLoopEvent.loop_id == loop.id, OpenLoopEvent.person_id == person_id,
@@ -1021,6 +1037,7 @@ def loop_history(loop_id: str, request: Request, limit: int = Query(100, ge=1, l
 @router.post("/reassess")
 def reassess_open_loops(request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loops = db.query(OpenLoopRecord).filter(
         OpenLoopRecord.person_id == person_id, OpenLoopRecord.caregiver_id == caregiver_id,
         OpenLoopRecord.status.notin_(TERMINAL_STATES)).limit(500).all()
