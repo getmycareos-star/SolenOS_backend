@@ -62,7 +62,11 @@ class EvidenceUpload(Base):
     evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), primary_key=True)
     filename = Column(String, nullable=False)
     mime_type = Column(String, nullable=False)
-    content = Column(LargeBinary, nullable=False)
+    # Existing uploads remain PostgreSQL-backed until their storage is migrated.
+    # New uploads may store bytes in the configured S3-compatible object bucket.
+    content = Column(LargeBinary, nullable=True)
+    storage_backend = Column(String(16), nullable=False, default="postgres", server_default="postgres")
+    storage_key = Column(String(512), nullable=True, unique=True)
     size_bytes = Column(Integer, nullable=False)
     sha256 = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
