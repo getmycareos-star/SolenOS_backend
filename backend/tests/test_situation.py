@@ -151,6 +151,61 @@ def test_post_situation_creates_evidence_and_event():
 
 
 @pytest.mark.session_security
+def test_post_situation_idempotency_replays_same_capture_without_duplicate_evidence_or_event():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Idempotent Capture Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+        payload = {
+            "caregiver_id": caregiver_id,
+            "person_id": person_id,
+            "raw_input": "Breakfast was mostly uneaten; the caregiver offered another meal later.",
+            "capture_category": "meal",
+            "ingestion_key": "meal-capture-retry-001",
+        }
+
+        first = client.post("/api/situation", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+
+        replay = client.post("/api/situation", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        replay_data = replay.json()
+        assert replay_data["evidence_id"] == first_data["evidence_id"]
+        assert replay_data["care_event_id"] == first_data["care_event_id"]
+        assert replay_data["message"] == "This care update was already saved. No duplicate was created."
+        assert replay_data["analysis_status"] == "partial"
+
+        with TestingSessionLocal() as db:
+            evidence_rows = db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.ingestion_key == payload["ingestion_key"],
+            ).all()
+            event_rows = db.query(CareEvent).filter(
+                CareEvent.person_id == person_id,
+                CareEvent.evidence_ids.contains([first_data["evidence_id"]]),
+            ).all()
+            assert len(evidence_rows) == 1
+            assert len(event_rows) == 1
+            assert evidence_rows[0].ingestion_request_sha256
+
+        changed = {**payload, "raw_input": "A different capture must not reuse the same retry key."}
+        conflict = client.post("/api/situation", headers=headers, json=changed)
+        assert conflict.status_code == 400, conflict.text
+        with TestingSessionLocal() as db:
+            assert db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.ingestion_key == payload["ingestion_key"],
+            ).count() == 1
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
 def test_saved_snap_care_photo_is_linked_to_situation_without_document_ocr():
     setup_db()
     try:
