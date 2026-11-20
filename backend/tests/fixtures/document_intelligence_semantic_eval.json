@@ -92,6 +92,17 @@
         "negation_status": "not_explicitly_marked",
         "temporal_context": "not_established"
       }
+    },
+    {
+      "id": "possible-condition",
+      "text": "Possible pneumonia; the clinician suspects an infection.",
+      "subject": "pneumonia",
+      "expected": {
+        "source_attribution": "not_stated",
+        "negation_status": "not_explicitly_marked",
+        "temporal_context": "not_established",
+        "modality": "tentative"
+      }
     }
   ]
 }
