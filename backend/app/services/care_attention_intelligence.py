@@ -352,25 +352,14 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
         # Care significance and evidence confidence are independent. A persisted
         # attention/follow-up candidate remains visible even when its baseline or
         # source coverage is incomplete; uncertainty is disclosed on the same item.
-        if attention_candidate or follow_up_candidate:
-            if not (coverage_complete and source_complete):
-                item["reason"] += (
-                    " The available history is incomplete, so the size and timing of the change remain uncertain. "
-                    "This limitation does not cancel the recorded need for follow-up."
-                )
-            else:
-                item["reason"] += " This is a review prompt based on the recorded history, not a diagnosis or a causal conclusion."
-            important.append(item)
-        elif verdict == "meaningful_candidate":
-            item["reason"] += " The saved change needs review against its source records."
-            important.append(item)
-        else:
-            item["category"] = "needs_clarification"
-            item["reason"] = (
-                "The saved change needs more information before its significance can be established. "
-                + str(change.get("explanation") or "Check the linked care records before drawing a conclusion.")[:1800]
+        if not (coverage_complete and source_complete):
+            item["reason"] += (
+                " The available history is incomplete, so the size and timing of the change remain uncertain. "
+                "This limitation does not cancel the recorded need for follow-up."
             )
-            clarification.append(item)
+        else:
+            item["reason"] += " This is a review prompt based on the recorded history, not a diagnosis or a causal conclusion."
+        important.append(item)
     return important, clarification
 
 def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops: list[dict[str, Any]],
