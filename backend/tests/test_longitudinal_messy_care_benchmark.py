@@ -2016,8 +2016,10 @@ def test_situation_assessment_projects_persisted_delta_change_with_real_event_pr
         assert item["evidence_ids"] == []
 
 
-def test_situation_assessment_downgrades_persisted_delta_change_without_complete_baseline():
+def test_situation_assessment_preserves_care_significance_and_exposes_evidence_dimensions():
     from app.api.care_continuity import _build_situation_understanding_assessment
+    from app.models.significance import SignificanceAssessment
+    from app.core.change_enums import EvidenceStatus
 
     with TestingSessionLocal() as db:
         person, caregiver = make_person(db, "attention-delta-incomplete")
@@ -2039,8 +2041,29 @@ def test_situation_assessment_downgrades_persisted_delta_change_without_complete
         )
         db.add(baseline)
         db.flush()
+
+        change_id = "change-attention-incomplete"
+        assessment_id = "significance-attention-incomplete"
+        db.add(SignificanceAssessment(
+            id=assessment_id,
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            target_type="change",
+            target_id=change_id,
+            verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            evidence_status=EvidenceStatus.REPORTED,
+            evidence_confidence=0.42,
+            significance_confidence=0.61,
+            dimensions=[{"name": "frequency", "score": 0.61}],
+            attention_candidate=True,
+            follow_up_candidate=True,
+            explanation="Caregiver-reported change needs follow-up.",
+            evidence_ids=[event.id],
+            is_active=True,
+        ))
         db.add(Change(
-            id="change-attention-incomplete",
+            id=change_id,
             person_id=person.id,
             subject_type="sleep",
             subject_id="sleep",
@@ -2051,6 +2074,7 @@ def test_situation_assessment_downgrades_persisted_delta_change_without_complete
             current_coverage_status="covered",
             evidence_ids=[event.id],
             explanation="Recorded night waking increased.",
+            significance_assessment_id=assessment_id,
             significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
             attention_candidate=True,
             follow_up_candidate=True,
@@ -2061,15 +2085,21 @@ def test_situation_assessment_downgrades_persisted_delta_change_without_complete
 
         assessment = _build_situation_understanding_assessment(db, person.id)
         attention = assessment["care_attention"]
+        item = next(
+            item for item in attention["important_to_address"]
+            if item["record_id"] == change_id
+        )
+        assert item["care_significance"] == "attention_candidate"
+        assert item["evidence_status"] == "reported"
+        assert item["evidence_confidence"] == 0.42
+        assert item["significance_confidence"] == 0.61
+        assert item["significance_assessment_id"] == assessment_id
+        assert item["history_completeness"] == "partial_or_unknown"
+        assert "size and timing of the change remain uncertain" in item["reason"]
         assert not any(
-            item["record_id"] == "change-attention-incomplete"
-            for item in attention["important_to_address"]
+            item["record_id"] == change_id
+            for item in attention["needs_clarification"]
         )
-        clarification = next(
-            item for item in attention["needs_clarification"]
-            if item["record_id"] == "change-attention-incomplete"
-        )
-        assert clarification["category"] == "needs_clarification"
 
 
 def test_delta_does_not_persist_if_source_changes_during_model_inference(monkeypatch):
