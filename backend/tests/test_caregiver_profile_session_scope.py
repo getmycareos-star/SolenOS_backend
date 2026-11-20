@@ -124,24 +124,28 @@ def test_care_recipient_profile_persists_and_isolated_by_bearer_session():
     try:
         first_person = db.query(Person).filter_by(id=first["person"]["id"]).one()
         first_profile = db.query(CaregiverProfile).filter_by(id=first["caregiver"]["profile_id"]).one()
-        first_contexts = (
-            db.query(CaregiverContext)
-            .filter_by(person_id=first["person"]["id"], caregiver_id=first_profile.id)
-            .all()
-        )
+        first_contexts = db.query(CaregiverContext).filter_by(person_id=first["person"]["id"]).all()
         assert first_person.name == "Updated recipient"
         assert first_profile.relationship == "Daughter"
         profile_versions = [
             row for row in first_contexts
-            if isinstance(row.context_metadata, dict)
+            if row.caregiver_id is None
+            and isinstance(row.context_metadata, dict)
             and row.context_metadata.get("record_type") == "care_recipient_profile"
+        ]
+        relationship_versions = [
+            row for row in first_contexts
+            if row.caregiver_id == first_profile.id
+            and isinstance(row.context_metadata, dict)
+            and row.context_metadata.get("record_type") == "caregiver_relationship"
         ]
         assert len(profile_versions) == 1
         assert profile_versions[0].context_metadata["condition"] == "Dementia, caregiver-reported profile context"
         assert profile_versions[0].context_metadata["epistemic_status"] == "caregiver_reported"
         assert profile_versions[0].context_metadata["reported_by_session_caregiver_id"] == first["caregiver"]["id"]
         assert profile_versions[0].context_metadata["recipient_name"] == "Updated recipient"
-        assert profile_versions[0].context_metadata["caregiver_relationship"] == "Daughter"
+        assert len(relationship_versions) == 1
+        assert relationship_versions[0].context_metadata["caregiver_relationship"] == "Daughter"
         audit = db.query(AuditLogEvent).filter_by(
             person_id=first["person"]["id"],
             caregiver_id=first["caregiver"]["id"],
