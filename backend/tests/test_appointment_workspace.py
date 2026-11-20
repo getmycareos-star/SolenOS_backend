@@ -2689,6 +2689,7 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
     )
     assert shared_read.status_code == 200, shared_read.text
     assert shared_read.json()["appointment_id"] == appointment_id
+    assert shared_read.json()["payload"]["caregiverReport"] == "Caregiver recorded that the clinic plans to release the result."
 
     shared_proposals = test_client.get(
         f"/api/v1/appointment-workspaces/{workspace_id}/outcome-proposals",
