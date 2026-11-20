@@ -19,11 +19,12 @@ pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated Post
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence, Person
-from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation
+from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
 from app.models.caregiver_account import CaregiverAccount
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.care_continuity import CareDeltaRun, CareStateRevision
-from app.models.caregiver_intelligence import CaregiverProfile
+from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility, CaregiverHandoff
+from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
@@ -427,6 +428,158 @@ def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution
                 db.query(CareDeltaRun).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Evidence).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+                db.commit()
+
+
+
+def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_history():
+    suffix = uuid.uuid4().hex[:10]
+    invite_email = f"responsibility-{suffix}@example.test"
+    person_id = None
+
+    try:
+        with TestClient(app) as client:
+            primary = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": f"Primary {suffix}"},
+            )
+            assert primary.status_code == 201, primary.text
+            primary_body = primary.json()
+            person_id = primary_body["person"]["id"]
+            primary_headers = {"Authorization": f"Bearer {primary_body['access_token']}"}
+
+            account = client.post(
+                "/api/v1/accounts",
+                headers=primary_headers,
+                json={"email": invite_email, "password": "responsibility-primary-password-456"},
+            )
+            assert account.status_code == 201, account.text
+            invitation = client.post(
+                "/api/v1/caregiver-access/invitations",
+                headers=primary_headers,
+                json={"email": invite_email, "expires_in_days": 7},
+            )
+            assert invitation.status_code == 201, invitation.text
+            accepted = client.post(
+                "/api/v1/caregiver-access/invitations/accept",
+                json={
+                    "token": invitation.json()["invitation_token"],
+                    "email": invite_email,
+                    "password": "responsibility-recipient-password-456",
+                    "name": "Second caregiver",
+                },
+            )
+            assert accepted.status_code == 201, accepted.text
+            recipient = accepted.json()
+            recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
+
+            loop = client.post(
+                "/api/v1/open-loops",
+                headers=primary_headers,
+                json={
+                    "loop_type": "follow_up",
+                    "title": f"Confirm appointment {suffix}",
+                    "description": "Confirm the appointment with the practice.",
+                },
+            )
+            assert loop.status_code == 201, loop.text
+            loop_id = loop.json()["id"]
+
+            responsibility = client.post(
+                "/api/v1/caregiver-responsibilities",
+                headers=primary_headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": primary_body["caregiver"]["profile_id"],
+                    "responsibility_type": "clinic_follow_up",
+                    "scope": "Confirm the appointment with the practice",
+                    "effective_start": "2026-11-20T09:00:00+00:00",
+                    "status": "active",
+                    "acceptance_status": "explicit",
+                    "assignment_source": "caregiver_confirmed",
+                },
+            )
+            assert responsibility.status_code == 200, responsibility.text
+            source_id = responsibility.json()["id"]
+
+            transfer = client.post(
+                "/api/v1/caregiver-access/responsibility-transfers",
+                headers=primary_headers,
+                json={
+                    "source_responsibility_id": source_id,
+                    "to_caregiver_profile_id": recipient["caregiver_profile_id"],
+                    "related_record_type": "open_loop",
+                    "related_record_id": loop_id,
+                    "reason": "The recipient accepted ongoing appointment coordination.",
+                },
+            )
+            assert transfer.status_code == 201, transfer.text
+            transfer_id = transfer.json()["id"]
+
+            pending = client.get(
+                "/api/v1/caregiver-access/responsibility-transfers",
+                headers=recipient_headers,
+            )
+            assert pending.status_code == 200, pending.text
+            pending_item = next(item for item in pending.json() if item["id"] == transfer_id)
+            assert pending_item["status"] == "pending"
+
+            before_acceptance = client.get("/api/v1/open-loops", headers=recipient_headers)
+            assert before_acceptance.status_code == 200, before_acceptance.text
+            assert not any(item["id"] == loop_id for item in before_acceptance.json()["items"])
+
+            with Session() as db:
+                original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
+                assert original.status.value == "active"
+                assert original.caregiver_id == primary_body["caregiver"]["profile_id"]
+
+            accepted_transfer = client.post(
+                f"/api/v1/caregiver-access/responsibility-transfers/{transfer_id}/accept",
+                headers=recipient_headers,
+            )
+            assert accepted_transfer.status_code == 200, accepted_transfer.text
+            assert accepted_transfer.json()["accepted"] is True
+
+            after_acceptance = client.get("/api/v1/open-loops", headers=recipient_headers)
+            assert after_acceptance.status_code == 200, after_acceptance.text
+            assigned_loop = next(item for item in after_acceptance.json()["items"] if item["id"] == loop_id)
+            assert assigned_loop["assigned_caregiver_id"] == recipient["caregiver_id"]
+            assert assigned_loop["caregiver_id"] == primary_body["caregiver"]["id"]
+
+            with Session() as db:
+                original = db.query(CaregiverResponsibility).filter_by(id=source_id).one()
+                replacement = db.query(CaregiverResponsibility).filter_by(
+                    id=accepted_transfer.json()["new_responsibility_id"]
+                ).one()
+                stored_transfer = db.query(CaregiverResponsibilityTransfer).filter_by(id=transfer_id).one()
+                stored_handoff = db.query(CaregiverHandoff).filter(
+                    CaregiverHandoff.person_id == person_id,
+                    CaregiverHandoff.provenance == "caregiver_access.responsibility_transfer:" + transfer_id,
+                ).one()
+                assert original.status.value == "historical"
+                assert original.effective_end is not None
+                assert replacement.status.value == "active"
+                assert replacement.caregiver_id == recipient["caregiver_profile_id"]
+                assert stored_transfer.status == "accepted"
+                assert stored_handoff.acceptance_status.value == "accepted"
+                assert stored_handoff.is_completed is False
+    finally:
+        if Session and person_id:
+            with Session() as db:
+                db.query(CaregiverResponsibilityTransfer).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverHandoff).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverResponsibility).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(OpenLoopOccurrence).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(OpenLoopEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(OpenLoopRecord).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(AuditLogEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
