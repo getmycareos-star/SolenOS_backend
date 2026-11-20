@@ -6,6 +6,7 @@ schema and the application middleware with two distinct bearer identities.
 from datetime import datetime, timedelta, timezone
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,10 +18,11 @@ pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated Post
 
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import Caregiver, Person
+from app.models.care import Caregiver, Evidence, Person
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation
 from app.models.caregiver_account import CaregiverAccount
 from app.models.privacy_delivery import AuditLogEvent
+from app.models.care_continuity import CareDeltaRun, CareStateRevision
 from app.models.caregiver_intelligence import CaregiverProfile
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
@@ -318,3 +320,118 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
                 db.commit()
         if engine:
             engine.dispose()
+
+
+
+def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution_and_shared_reads():
+    suffix = uuid.uuid4().hex[:10]
+    invite_email = f"concurrent-{suffix}@example.test"
+    person_id = None
+    primary_caregiver_id = None
+    invited_caregiver_id = None
+    evidence_ids = []
+
+    try:
+        with TestClient(app) as client:
+            primary = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": f"Primary {suffix}"},
+            )
+            assert primary.status_code == 201, primary.text
+            primary_body = primary.json()
+            person_id = primary_body["person"]["id"]
+            primary_caregiver_id = primary_body["caregiver"]["id"]
+            primary_headers = {"Authorization": f"Bearer {primary_body['access_token']}"}
+
+            account = client.post(
+                "/api/v1/accounts",
+                headers=primary_headers,
+                json={"email": invite_email, "password": "concurrent-primary-password-456"},
+            )
+            assert account.status_code == 201, account.text
+            invitation = client.post(
+                "/api/v1/caregiver-access/invitations",
+                headers=primary_headers,
+                json={"email": invite_email, "expires_in_days": 7},
+            )
+            assert invitation.status_code == 201, invitation.text
+            accepted = client.post(
+                "/api/v1/caregiver-access/invitations/accept",
+                json={
+                    "token": invitation.json()["invitation_token"],
+                    "email": invite_email,
+                    "password": "concurrent-invitee-password-456",
+                    "name": "Second caregiver",
+                },
+            )
+            assert accepted.status_code == 201, accepted.text
+            invited_caregiver_id = accepted.json()["caregiver_id"]
+            invited_headers = {"Authorization": f"Bearer {accepted.json()['access_token']}"}
+
+        def write_evidence(headers, caregiver_id, label):
+            payload = {
+                "person_id": person_id,
+                "type": "note",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "caregiver_reported",
+                "source_text": f"{label}: the room was quiet after lunch.",
+                "source_type": "caregiver_report",
+                "uploaded_by_caregiver_id": caregiver_id,
+                "reported_by_caregiver_id": caregiver_id,
+                "collected_by_caregiver_id": caregiver_id,
+                "reported_by_label": label,
+                "original_author": label,
+                "time_provenance": "caregiver_reported",
+                "ingestion_key": f"concurrent-{label.lower()}-{suffix}",
+            }
+            with TestClient(app) as request_client:
+                return request_client.post("/api/v1/evidence", headers=headers, json=payload)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first_future = executor.submit(write_evidence, primary_headers, primary_caregiver_id, "Primary")
+            second_future = executor.submit(write_evidence, invited_headers, invited_caregiver_id, "Second")
+            first = first_future.result(timeout=45)
+            second = second_future.result(timeout=45)
+
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        evidence_ids = [first.json()["id"], second.json()["id"]]
+        assert evidence_ids[0] != evidence_ids[1]
+
+        with TestClient(app) as client:
+            shared_read = client.get(
+                f"/api/v1/evidence/{person_id}",
+                headers=invited_headers,
+            )
+            assert shared_read.status_code == 200, shared_read.text
+            visible_ids = {item["id"] for item in shared_read.json()}
+            assert set(evidence_ids).issubset(visible_ids)
+
+        with Session() as db:
+            rows = db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).all()
+            assert len(rows) == 2
+            assert {row.uploaded_by_caregiver_id for row in rows} == {
+                primary_caregiver_id,
+                invited_caregiver_id,
+            }
+            assert {row.reported_by_caregiver_id for row in rows} == {
+                primary_caregiver_id,
+                invited_caregiver_id,
+            }
+    finally:
+        if Session and person_id:
+            with Session() as db:
+                db.query(CareDeltaRun).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(Evidence).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+                db.commit()
