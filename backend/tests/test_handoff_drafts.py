@@ -894,6 +894,7 @@ def test_document_source_without_extraction_is_reported_as_partial_retrieval(cli
 def test_draft_persists_idempotently_and_supports_revision_and_approval(client, monkeypatch, generation_status):
     import app.api.handoff_drafts as handoff_drafts
     from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
+    from app.models.caregiver_access import CaregiverAccessGrant
 
     test_client, session = client
     person_id = session["person"]["id"]
@@ -905,9 +906,18 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
         person_id=person_id,
     )
     recipient_id = str(recipient.id)
+    recipient_grant = CaregiverAccessGrant(
+        person_id=person_id,
+        caregiver_id=recipient_id,
+        role="family",
+        access_scope="full_record",
+        status="active",
+        can_manage_members=False,
+        granted_by_caregiver_id=caregiver_id,
+    )
     db = TestSessionLocal()
     try:
-        db.add(recipient)
+        db.add_all([recipient, recipient_grant])
         db.commit()
     finally:
         db.close()
