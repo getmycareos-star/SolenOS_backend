@@ -21,7 +21,7 @@ class Caregiver(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=True)
     relationship = Column(String, nullable=False)
-    person_id = Column(String, ForeignKey("persons.id"), nullable=False)
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     timezone = Column(String, nullable=False, default="UTC")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
