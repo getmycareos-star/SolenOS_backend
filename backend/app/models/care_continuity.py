@@ -139,6 +139,18 @@ TRACKED_TABLES = {
     "timezone_contexts", "temporal_relationships", "insights", "information_gaps",
     "care_assertions", "open_questions", "contradictions", "uncertainty_assessments",
     "baselines", "changes", "patterns", "situations", "corrections", "observation_coverage",
+    # Canonical current-care sources written through SQLAlchemy Core need the
+    # same revision/invalidation coverage as ORM-backed sources.
+    "care_facts", "care_decisions", "decision_outcomes", "care_action_outcomes",
+    "caregiver_observations", "caregiver_contexts", "caregiver_perspectives",
+    # Longitudinal workflow and review state that can change the current
+    # interpretation or its unresolved status.
+    "open_loop_records", "open_loop_events", "open_loop_occurrences",
+    "caregiver_profiles", "caregiver_roles", "caregiver_responsibilities",
+    "caregiver_handoffs", "caregiver_activities", "caregiver_communications",
+    "care_network_relationships", "responsibility_gaps", "perspective_conflicts",
+    "duplicate_actions", "capture_analyses", "document_review_events",
+    "significance_assessments",
 }
 
 
