@@ -1298,12 +1298,6 @@ def test_second_authorized_caregiver_can_retrieve_shared_document_extraction(cli
     assert extracted.status_code == 201, extracted.text
     analysis_id = extracted.json()["analysis_id"]
 
-    account = test_client.post(
-        "/api/v1/accounts",
-        headers=owner_headers,
-        json={"email": "document-collaborator@example.com", "password": "another-long-password-789"},
-    )
-    assert account.status_code == 201, account.text
     invitation = test_client.post(
         "/api/v1/caregiver-access/invitations",
         headers=owner_headers,
