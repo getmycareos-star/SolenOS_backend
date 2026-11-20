@@ -208,7 +208,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
             person_id=session["person"]["id"],
             caregiver_id=session["caregiver"]["id"],
             evidence_id=evidence.id,
-            source_event_id=body["events"][0]["id"],
+            source_event_id=body["id"],
             source_text=evidence.source_text,
             candidates={"observations": [{
                 "subject": "she",
