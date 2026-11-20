@@ -3357,7 +3357,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             if inspector.has_table("open_loop_records") else set()
         )
         required_open_loop_columns = {
-            "id", "person_id", "source_type", "source_id", "status", "updated_at", "created_at"
+            "id", "person_id", "source_type", "source_id", "status", "outcome_status",
+            "updated_at", "created_at"
         }
         change_ids_for_follow_up = [str(change.id) for change in active_change_rows]
         if required_open_loop_columns.issubset(open_loop_columns) and change_ids_for_follow_up:
@@ -3365,6 +3366,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 OpenLoopRecord.id.label("id"),
                 OpenLoopRecord.source_id.label("source_id"),
                 OpenLoopRecord.status.label("status"),
+                OpenLoopRecord.outcome_status.label("outcome_status"),
                 OpenLoopRecord.updated_at.label("updated_at"),
                 func.row_number().over(
                     partition_by=OpenLoopRecord.source_id,
@@ -3383,6 +3385,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 ranked_follow_ups.c.id,
                 ranked_follow_ups.c.source_id,
                 ranked_follow_ups.c.status,
+                ranked_follow_ups.c.outcome_status,
                 ranked_follow_ups.c.updated_at,
             ).filter(ranked_follow_ups.c.row_number == 1).all()
             linked_follow_up_by_change_id = {
@@ -3449,6 +3452,9 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "follow_up_candidate": follow_up_candidate,
                 "linked_follow_up_id": str(linked_follow_up.id) if linked_follow_up else None,
                 "linked_follow_up_status": str(linked_follow_up.status) if linked_follow_up else "not_recorded",
+                "linked_follow_up_outcome_status": (
+                    str(linked_follow_up.outcome_status) if linked_follow_up else "not_recorded"
+                ),
                 "linked_follow_up_updated_at": linked_follow_up.updated_at if linked_follow_up else None,
                 "confirmation_status": change.confirmation_status,
                 "baseline_id": change.baseline_id,
@@ -3601,8 +3607,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "follow_up_candidate": bool(
                     significance.follow_up_candidate if significance else change.follow_up_candidate
                 ),
-                "action_status": str(linked_follow_up.get("status") or "unknown") if linked_follow_up else "not_recorded",
-                "linked_follow_up_id": str(linked_follow_up.get("id")) if linked_follow_up else None,
+                "action_status": str(linked_follow_up.status or "unknown") if linked_follow_up else "not_recorded",
+                "linked_follow_up_outcome_status": (
+                    str(linked_follow_up.outcome_status) if linked_follow_up else "not_recorded"
+                ),
+                "linked_follow_up_id": str(linked_follow_up.id) if linked_follow_up else None,
                 "confirmation_status": change.confirmation_status,
                 "previous_state": change.previous_state,
                 "current_state": change.current_state,
