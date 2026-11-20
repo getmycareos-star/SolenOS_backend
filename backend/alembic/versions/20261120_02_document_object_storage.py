@@ -20,6 +20,8 @@ def upgrade() -> None:
         raise RuntimeError("evidence_uploads must exist before enabling object storage")
 
     columns = {column["name"]: column for column in inspect(bind).get_columns("evidence_uploads")}
+    if "content" not in columns:
+        raise RuntimeError("evidence_uploads.content is missing; refusing an unsafe object-storage migration")
     if "storage_backend" not in columns:
         op.add_column(
             "evidence_uploads",
