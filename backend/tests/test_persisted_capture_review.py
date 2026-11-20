@@ -631,3 +631,106 @@ def test_capture_candidate_review_requires_correct_records_permission():
         headers=headers,
     )
     assert denied_read.status_code == 404, denied_read.text
+
+
+
+def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(monkeypatch):
+    client = TestClient(app)
+    first = create_session(client, "Shared care recipient")
+    first_auth = {"Authorization": f"Bearer {first['access_token']}"}
+    source = "Caregiver report: the person prefers a quiet room after lunch."
+    monkeypatch.setattr(
+        api_v1_module,
+        "extract_review_candidates",
+        lambda source_text, *, source_event_id, source_evidence_id=None: {
+            "observations": [{
+                "subject": "environment",
+                "observation": "The person prefers a quiet room after lunch.",
+                "source_quote": "The person prefers a quiet room after lunch.",
+                "source_event_id": source_event_id,
+                "review_status": "pending_review",
+            }],
+            "open_questions": [],
+            "possible_safety_flags": [],
+        },
+    )
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=first_auth,
+        json={
+            "person_id": first["person"]["id"],
+            "caregiver_id": first["caregiver"]["id"],
+            "notes": source,
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    process_daily_capture_job(body["qwen_job_id"], monkeypatch)
+
+    account = client.post(
+        "/api/v1/accounts",
+        headers=first_auth,
+        json={"email": "shared-reviewer@example.com", "password": "another-long-password-789"},
+    )
+    assert account.status_code == 201, account.text
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=first_auth,
+        json={"email": "shared-reviewer@example.com", "expires_in_days": 7},
+    )
+    assert invitation.status_code == 201, invitation.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": "shared-reviewer@example.com",
+            "password": "another-long-password-789",
+            "name": "Second caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    second_auth = {"Authorization": f"Bearer {accepted.json()['access_token']}"}
+
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=first["person"]["id"],
+            caregiver_id=accepted.json()["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = list(grant.permissions or []) + ["correct_records"]
+        db.commit()
+    finally:
+        db.close()
+
+    visible = client.get(
+        f"/api/v1/capture/analyses/{body['qwen_analysis_id']}",
+        headers=second_auth,
+    )
+    assert visible.status_code == 200, visible.text
+
+    reviewed = client.post(
+        f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
+        headers=second_auth,
+        json={"candidate_index": 0, "decision": "accept"},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    result = reviewed.json()
+    assert result["written_to_lcr"] is True
+    assert result["candidate"]["accepted_by_caregiver_id"] == accepted.json()["caregiver"]["id"]
+
+    db = TestSessionLocal()
+    try:
+        source_event = db.query(CareEvent).filter_by(id=body["id"]).one()
+        source_evidence = db.query(Evidence).filter_by(id=body["evidence_ids"][0]).one()
+        assertion = db.query(CareAssertion).filter_by(id=result["assertion_id"]).one()
+        assert source_event.created_by_caregiver_id == first["caregiver"]["id"]
+        assert source_evidence.reported_by_caregiver_id == first["caregiver"]["id"]
+        assert assertion.created_by_caregiver_id == accepted.json()["caregiver"]["id"]
+        assert assertion.source_event_id == source_event.id
+        assert assertion.evidence_ids == [source_evidence.id]
+    finally:
+        db.close()
