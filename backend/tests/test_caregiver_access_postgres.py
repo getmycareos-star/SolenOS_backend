@@ -531,6 +531,12 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
             assert pending.status_code == 200, pending.text
             pending_item = next(item for item in pending.json() if item["id"] == transfer_id)
             assert pending_item["status"] == "pending"
+            outgoing = client.get(
+                "/api/v1/caregiver-access/responsibility-transfers",
+                headers=recipient_headers,
+            )
+            assert outgoing.status_code == 200, outgoing.text
+            assert any(item["id"] == transfer_id for item in outgoing.json())
 
             before_acceptance = client.get("/api/v1/open-loops", headers=primary_headers)
             assert before_acceptance.status_code == 200, before_acceptance.text
