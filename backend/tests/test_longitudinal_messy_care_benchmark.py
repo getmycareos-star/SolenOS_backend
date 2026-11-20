@@ -2094,6 +2094,8 @@ def test_situation_assessment_preserves_care_significance_and_exposes_evidence_d
         assert item["evidence_confidence"] == 0.42
         assert item["significance_confidence"] == 0.61
         assert item["significance_assessment_id"] == assessment_id
+        assert item["action_status"] == "not_recorded"
+        assert item["linked_follow_up_id"] is None
         assert item["history_completeness"] == "partial_or_unknown"
         assert "size and timing of the change remain uncertain" in item["reason"]
         assert not any(
