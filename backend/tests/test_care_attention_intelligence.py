@@ -462,6 +462,7 @@ def test_persisted_change_keeps_evidence_significance_and_follow_up_dimensions_s
     assert item["evidence_status"] == "reported"
     assert item["evidence_confidence"] == 0.42
     assert item["significance_confidence"] == 0.61
+    assert item["confidence_interpretation"] == "uncalibrated_score_not_probability"
     assert item["assessment_dimensions"] == [{"name": "frequency", "score": 0.61}]
     assert item["action_status"] == "open"
     assert item["linked_follow_up_id"] == "loop-dimensions"
