@@ -304,6 +304,9 @@ def review_capture_candidate(
             analysis.execution_status = dict(execution["stages"])
             change_intelligence_status = "available"
         except Exception as exc:
+            logger.exception(
+                "Care-continuity reconciliation failed during accepted capture review"
+            )
             db.rollback()
             raise HTTPException(
                 status_code=503,
