@@ -37,6 +37,7 @@ def _session_scope(request: Request, db: Session) -> tuple[str, str]:
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if person_id and caregiver_id:
+        _require_active_full_access(db, str(person_id), str(caregiver_id))
         return str(person_id), str(caregiver_id)
 
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
@@ -50,6 +51,7 @@ def _session_scope(request: Request, db: Session) -> tuple[str, str]:
     ).first()
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    _require_active_full_access(db, str(session.person_id), str(session.caregiver_id))
     return str(session.person_id), str(session.caregiver_id)
 
 
