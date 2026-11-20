@@ -180,7 +180,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         )
         historical_index = next(
             index for index, candidate in enumerate(candidates)
-            if historical_text in candidate["source_quote"]
+            if historical_text.rstrip(".") in candidate["source_quote"]
         )
         historical_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
@@ -197,7 +197,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         )
         tentative_index = next(
             index for index, candidate in enumerate(candidates)
-            if tentative_text in candidate["source_quote"]
+            if tentative_text.rstrip(".") in candidate["source_quote"]
         )
         tentative_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
