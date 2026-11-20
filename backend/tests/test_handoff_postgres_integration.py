@@ -30,36 +30,27 @@ def _create_session(client, caregiver_name):
     return response.json()
 
 
-def _add_linked_recipient(person_id):
-    from app.models.anonymous_session import AnonymousSession
-    from app.models.care import Caregiver
-
-    caregiver_id = str(uuid.uuid4())
-    token = "postgres-handoff-" + str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
-    db = SessionLocal()
-    try:
-        db.add(Caregiver(
-            id=caregiver_id,
-            name="PostgreSQL receiving caregiver",
-            relationship="family caregiver",
-            person_id=person_id,
-            timezone="UTC",
-        ))
-        db.flush()
-        db.add(AnonymousSession(
-            id=str(uuid.uuid4()),
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            token_hash=hashlib.sha256(token.encode()).hexdigest(),
-            expires_at=now + timedelta(hours=2),
-            created_at=now,
-        ))
-        db.commit()
-    finally:
-        db.close()
-    return caregiver_id, token
-
+def _add_linked_recipient(client, owner):
+    suffix = uuid.uuid4().hex[:12]
+    email = f"handoff-recipient-{suffix}@example.test"
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=headers,
+        json={"email": email, "expires_in_days": 7},
+    )
+    assert invitation.status_code == 201, invitation.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": email,
+            "password": f"handoff-recipient-{suffix}-password",
+            "name": "PostgreSQL receiving caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    return accepted.json()["caregiver_id"], accepted.json()["access_token"]
 
 def _accept_consent(client, person_id, caregiver_id, access_token):
     response = client.post(
@@ -95,7 +86,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
 
     client = TestClient(app)
     owner = _create_session(client, "PostgreSQL initiating caregiver")
-    recipient_id, recipient_token = _add_linked_recipient(owner["person"]["id"])
+    recipient_id, recipient_token = _add_linked_recipient(client, owner)
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
     expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
