@@ -80,7 +80,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: registered-endpoint-inventory
-          path: backend/reports/registered-endpoint-inventory.json
+          path: |
+            backend/reports/registered-endpoint-inventory.json
+            backend/reports/registered-endpoint-inventory.md
           if-no-files-found: error
 
   deployed-smoke:
