@@ -335,6 +335,20 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "current_state": change.get("current_state"),
             "category": "important_to_address",
             "care_significance": "attention_candidate" if attention_candidate else "follow_up_candidate",
+            "significance_verdict": verdict,
+            "significance_assessment_id": change.get("significance_assessment_id"),
+            "significance_assessment_status": _text(change.get("significance_assessment_status")) or "not_recorded",
+            "evidence_status": _text(change.get("evidence_status")) or "unknown",
+            "evidence_confidence": change.get("evidence_confidence"),
+            "significance_confidence": change.get("significance_confidence"),
+            "assessment_dimensions": (
+                change.get("assessment_dimensions")
+                if isinstance(change.get("assessment_dimensions"), list) else []
+            ),
+            "attention_candidate": attention_candidate,
+            "follow_up_candidate": follow_up_candidate,
+            "action_status": _text(change.get("action_status")) or "not_recorded",
+            "linked_follow_up_id": change.get("linked_follow_up_id"),
             "history_completeness": "complete" if history_complete else "partial_or_unknown",
             "reason": str(change.get("explanation") or "A saved change assessment needs review.")[:2400],
             "evidence_ids": evidence_ids,
@@ -344,6 +358,15 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "baseline_coverage_status": change.get("baseline_coverage_status"),
             "current_coverage_status": change.get("current_coverage_status"),
         }
+        assessment_status = item["significance_assessment_status"]
+        if assessment_status in {"schema_unavailable", "missing_or_inactive", "target_mismatch"}:
+            item["reason"] += (
+                " The linked significance assessment could not be verified, so its evidence details are unavailable."
+            )
+        elif assessment_status == "not_recorded":
+            item["reason"] += (
+                " No separate significance assessment is linked; this item reflects the persisted change flags."
+            )
         # A persisted care-attention decision and the completeness of its
         # supporting history are separate facts. Missing baseline/source
         # coverage must not silently hide an explicitly saved follow-up need.
