@@ -2342,10 +2342,13 @@ def update_appointment_lifecycle_endpoint(
 
     if payload is not None:
         supplied = payload.model_fields_set
+        rescheduled_at = payload.scheduled_at
+        if rescheduled_at is not None and rescheduled_at.tzinfo is None:
+            rescheduled_at = rescheduled_at.replace(tzinfo=timezone.utc)
         if (
             payload.status == "rescheduled"
-            and payload.scheduled_at is not None
-            and payload.scheduled_at <= utc_now()
+            and rescheduled_at is not None
+            and rescheduled_at <= utc_now()
         ):
             raise HTTPException(
                 status_code=422,
