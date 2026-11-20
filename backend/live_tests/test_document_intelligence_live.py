@@ -611,6 +611,10 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
             if item.get("document_assertion_id")
         }
         assert set(assertion_ids).issubset(progressive_document_ids)
+        assert any(
+            item.startswith("Conflicting reports:")
+            for item in situation_payload["return_continuity"]["important_unresolved"]
+        ), situation_payload["return_continuity"]
 
         companion = client.post(
             "/api/v1/conversation/message",
