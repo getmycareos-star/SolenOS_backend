@@ -680,3 +680,184 @@ def test_postgres_appointment_callback_promise_survives_session_refresh_and_retr
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
+
+
+def test_postgres_appointment_continuity_is_shared_and_linked_across_authorised_caregivers(monkeypatch):
+    """A second authorised caregiver sees persisted appointment context and updates the same follow-up."""
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.anonymous_session import AnonymousSession
+    from app.models.appointment_workspace import AppointmentWorkspaceRecord
+    from app.models.care import Caregiver
+    from app.models.caregiver_access import CaregiverAccessGrant
+    from app.models.open_loop import OpenLoopRecord
+    from app.models.time_location import Appointment
+
+    database_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_db():
+        db = test_session_local()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", test_session_local)
+    try:
+        with TestClient(app) as client:
+            owner = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": "PostgreSQL appointment continuity owner"},
+            )
+            unrelated = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": "Unrelated care recipient"},
+            )
+            assert owner.status_code == 201, owner.text
+            assert unrelated.status_code == 201, unrelated.text
+            person_id = owner.json()["person"]["id"]
+            owner_caregiver_id = owner.json()["caregiver"]["id"]
+            owner_headers = {"Authorization": "Bearer " + owner.json()["access_token"]}
+
+            now = datetime.now(timezone.utc)
+            with test_session_local() as db:
+                appointment = Appointment(
+                    person_id=person_id,
+                    created_by_caregiver_id=owner_caregiver_id,
+                    title="Primary care follow-up",
+                    scheduled_at=now + timedelta(days=4),
+                    status="scheduled",
+                )
+                db.add(appointment)
+                db.commit()
+                appointment_id = appointment.id
+
+            payload = {
+                "caregiverReport": "Caregiver recorded that the clinic will call with the result.",
+                "followUps": [{
+                    "id": "clinic-result-call",
+                    "action": "Check whether the clinic called with the result",
+                    "status": "open",
+                }],
+            }
+            created = client.post(
+                "/api/v1/appointment-workspaces",
+                headers=owner_headers,
+                json={
+                    "appointment_id": appointment_id,
+                    "status": "follow_up_pending",
+                    "payload": payload,
+                    "change_reason": "Save appointment continuity",
+                    "idempotency_key": "pg-shared-appointment-" + uuid.uuid4().hex,
+                },
+            )
+            assert created.status_code == 201, created.text
+            workspace_id = created.json()["id"]
+
+            proposals = client.post(
+                f"/api/v1/appointment-workspaces/{workspace_id}/outcome-proposals",
+                headers=owner_headers,
+                json={},
+            )
+            assert proposals.status_code == 200, proposals.text
+            assert proposals.json()["count"] == 1
+            proposal_id = proposals.json()["items"][0]["id"]
+
+            # The second caregiver is a separate identity with an explicit,
+            # server-side grant for the same person and care record.
+            raw_token = uuid.uuid4().hex
+            with test_session_local() as db:
+                shared_caregiver = Caregiver(
+                    name="Authorised second appointment caregiver",
+                    relationship="family",
+                    person_id=person_id,
+                )
+                db.add(shared_caregiver)
+                db.flush()
+                db.add(CaregiverAccessGrant(
+                    person_id=person_id,
+                    caregiver_id=shared_caregiver.id,
+                    role="family",
+                    access_scope="full_record",
+                    status="active",
+                    can_manage_members=False,
+                    permissions=["view_lcr", "add_evidence", "correct_records"],
+                    granted_by_caregiver_id=owner_caregiver_id,
+                ))
+                db.add(AnonymousSession(
+                    person_id=person_id,
+                    caregiver_id=shared_caregiver.id,
+                    token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+                    expires_at=now + timedelta(days=1),
+                ))
+                db.commit()
+            shared_headers = {"Authorization": "Bearer " + raw_token}
+
+            shared_record = client.get(
+                f"/api/v1/appointment-workspaces/{workspace_id}",
+                headers=shared_headers,
+            )
+            assert shared_record.status_code == 200, shared_record.text
+            assert shared_record.json()["appointment_id"] == appointment_id
+            assert shared_record.json()["payload"]["caregiverReport"] == payload["caregiverReport"]
+
+            shared_proposals = client.get(
+                f"/api/v1/appointment-workspaces/{workspace_id}/outcome-proposals",
+                headers=shared_headers,
+            )
+            assert shared_proposals.status_code == 200, shared_proposals.text
+            assert [item["id"] for item in shared_proposals.json()["items"]] == [proposal_id]
+
+            reviewed = client.post(
+                f"/api/v1/appointment-workspaces/{workspace_id}/outcome-proposals/{proposal_id}/review",
+                headers=shared_headers,
+                json={"decision": "accept"},
+            )
+            assert reviewed.status_code == 200, reviewed.text
+            assert reviewed.json()["written_to_lcr"] is True
+
+            updated = client.patch(
+                f"/api/v1/appointment-workspaces/{workspace_id}",
+                headers=shared_headers,
+                json={
+                    "expected_version": 1,
+                    "status": "follow_up_pending",
+                    "payload": payload,
+                    "change_reason": "Second caregiver reviewed the same appointment follow-up",
+                },
+            )
+            assert updated.status_code == 200, updated.text
+
+            with test_session_local() as db:
+                loops = db.query(OpenLoopRecord).filter(
+                    OpenLoopRecord.person_id == person_id,
+                    OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+                    OpenLoopRecord.source_id.like(f"{workspace_id}:%"),
+                ).all()
+                assert len(loops) == 1
+                assert loops[0].evidence[0]["appointment_id"] == appointment_id
+
+            brief = client.get(
+                "/api/v1/appointment-workspaces/preparation-brief",
+                headers=shared_headers,
+            )
+            assert brief.status_code == 200, brief.text
+            linked = [
+                item for item in brief.json()["open_loops"]
+                if item.get("source_workspace_id") == workspace_id
+            ]
+            assert len(linked) == 1
+            assert linked[0]["appointment_id"] == appointment_id
+
+            denied = client.get(
+                f"/api/v1/appointment-workspaces/{workspace_id}",
+                headers={"Authorization": "Bearer " + unrelated.json()["access_token"]},
+            )
+            assert denied.status_code == 404, denied.text
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
