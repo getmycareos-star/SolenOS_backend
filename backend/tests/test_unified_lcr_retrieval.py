@@ -128,10 +128,16 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
                 Person(id="other-fact-person", name="Other care recipient"),
             ])
             db.flush()
-            db.add(Caregiver(
-                id="fact-lineage-caregiver", name="Caregiver",
-                relationship="family", person_id="fact-lineage-person",
-            ))
+            db.add_all([
+                Caregiver(
+                    id="fact-lineage-caregiver", name="Caregiver",
+                    relationship="family", person_id="fact-lineage-person",
+                ),
+                Caregiver(
+                    id="other-fact-caregiver", name="Other caregiver",
+                    relationship="family", person_id="other-fact-person",
+                ),
+            ])
             db.flush()
             now = datetime.now(UTC)
             db.execute(
@@ -147,8 +153,16 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
                 }],
             )
             db.execute(metadata.tables["evidence"].insert(), [
-                {"id": "fact-source-evidence", "person_id": "fact-lineage-person"},
-                {"id": "other-person-evidence", "person_id": "other-fact-person"},
+                {
+                    "id": "fact-source-evidence", "person_id": "fact-lineage-person",
+                    "type": "note", "source_text": "Caregiver reported overnight waking.",
+                    "uploaded_by_caregiver_id": "fact-lineage-caregiver",
+                },
+                {
+                    "id": "other-person-evidence", "person_id": "other-fact-person",
+                    "type": "note", "source_text": "Private information for another person.",
+                    "uploaded_by_caregiver_id": "other-fact-caregiver",
+                },
             ])
             db.execute(metadata.tables["care_fact_evidence"].insert(), [
                 {
