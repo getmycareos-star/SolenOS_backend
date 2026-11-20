@@ -66,6 +66,13 @@ class LoopCreate(BaseModel):
             raise ValueError("Unsupported open-loop type")
         return value
 
+    @field_validator("source_type")
+    @classmethod
+    def normalize_persisted_change_source_type(cls, value):
+        if value is not None and str(value).strip().casefold() == "persisted_change":
+            return "persisted_change"
+        return value
+
     @field_validator("deadline_source")
     @classmethod
     def valid_deadline_source(cls, value):
