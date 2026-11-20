@@ -83,6 +83,7 @@ def _resolve_scoped_session(request: Request, db: Session) -> tuple[str, str]:
     person_id = getattr(request.state, "scoped_person_id", None)
     session_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if person_id and session_caregiver_id:
+        require_caregiver_permission(db, str(person_id), str(session_caregiver_id), "view_lcr")
         return str(person_id), str(session_caregiver_id)
 
     authorization = request.headers.get("authorization", "")
@@ -103,6 +104,7 @@ def _resolve_scoped_session(request: Request, db: Session) -> tuple[str, str]:
     request.state.anonymous_session_id = session.id
     request.state.scoped_person_id = person_id
     request.state.scoped_caregiver_id = session_caregiver_id
+    require_caregiver_permission(db, person_id, session_caregiver_id, "view_lcr")
     return person_id, session_caregiver_id
 
 
@@ -245,7 +247,8 @@ def get_caregiver_profile(caregiver_id: str, request: Request, db: Session = Dep
 
 @router.patch("/caregiver-profiles/{caregiver_id}/involvement")
 def update_caregiver_involvement(caregiver_id: str, status: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     if str(caregiver_id) != str(current_profile.id):
         raise HTTPException(status_code=403, detail="Only the linked caregiver can update their own involvement status")
     service = CaregiverIntelligenceService(db)
@@ -958,7 +961,8 @@ def get_care_network_state(person_id: str, request: Request, db: Session = Depen
 
 @router.post("/unknown-actor-activity")
 def record_unknown_actor_activity(person_id: str, activity_type: str, description: str, occurred_at: str, request: Request, shared_account_id: Optional[str] = None, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id = _assert_person_scope(request, db, person_id)
+    person_id, session_caregiver_id = _assert_person_scope(request, db, person_id)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
     service = CaregiverIntelligenceService(db)
     try:
         activity_type_enum = CaregiverActivityType(activity_type)
