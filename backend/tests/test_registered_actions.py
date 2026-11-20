@@ -705,3 +705,83 @@ def test_explicit_action_clarification_creates_and_resolves_one_source_grounded_
         ).count() > revisions_before
     finally:
         db.close()
+
+
+def test_approved_action_and_linked_reminder_can_be_assigned_to_active_invited_caregiver():
+    from app.models.action import Action
+    from app.models.privacy_delivery import AuditLogEvent
+    from app.models.reminder import CareReminder
+
+    client = TestClient(app)
+    primary = create_session(client, "Action creator")
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=headers(primary),
+        json={"email": "action-owner@example.test"},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite.json()["invitation_token"],
+            "email": "action-owner@example.test",
+            "password": "action-owner-password-456",
+            "name": "Action owner",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    responsible_id = accepted.json()["caregiver_id"]
+
+    evidence = create_evidence(client, primary)
+    payload = approval_payload(
+        evidence["id"],
+        idempotency_key="shared-action-assignment-key",
+        suggestion_id="open-loop:shared-action-assignment",
+        responsible_caregiver_id=responsible_id,
+        create_reminder=True,
+        reminder_due_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+    )
+    approved = client.post(
+        f"/api/v1/registered-actions/{primary['person']['id']}/approve",
+        headers=headers(primary),
+        json=payload,
+    )
+    assert approved.status_code == 201, approved.text
+    assert approved.json()["created_by_caregiver_id"] == primary["caregiver"]["id"]
+    assert approved.json()["responsible_caregiver_id"] == responsible_id
+
+    db = TestSessionLocal()
+    try:
+        action = db.query(Action).filter_by(id=approved.json()["id"]).one()
+        reminder = db.query(CareReminder).filter_by(action_id=action.id).one()
+        assert action.created_by_caregiver_id == primary["caregiver"]["id"]
+        assert action.responsible_caregiver_id == responsible_id
+        assert reminder.created_by_caregiver_id == primary["caregiver"]["id"]
+        assert reminder.assigned_to_caregiver_id == responsible_id
+        audit = db.query(AuditLogEvent).filter_by(
+            action="care.action.responsibility_assigned",
+            target_type="registered_action",
+            target_id=action.id,
+        ).one()
+        assert audit.actor_id == primary["caregiver"]["id"]
+        assert audit.record_metadata["responsible_caregiver_id"] == responsible_id
+    finally:
+        db.close()
+
+
+def test_registered_action_cannot_be_assigned_to_foreign_caregiver():
+    client = TestClient(app)
+    primary = create_session(client, "Action owner")
+    foreign = create_session(client, "Foreign caregiver")
+    evidence = create_evidence(client, primary)
+    rejected = client.post(
+        f"/api/v1/registered-actions/{primary['person']['id']}/approve",
+        headers=headers(primary),
+        json=approval_payload(
+            evidence["id"],
+            idempotency_key="foreign-action-assignment-key",
+            suggestion_id="open-loop:foreign-action-assignment",
+            responsible_caregiver_id=foreign["caregiver"]["id"],
+        ),
+    )
+    assert rejected.status_code == 403, rejected.text
