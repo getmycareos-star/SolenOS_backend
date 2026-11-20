@@ -248,6 +248,7 @@ class CaregiverContext(Base):
     __tablename__ = "caregiver_contexts"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     caregiver_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=True, index=True)
+    reported_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     proximity_category = Column(Enum(CaregiverProximityCategory), nullable=True)
     observation_window_start = Column(String, nullable=True)
