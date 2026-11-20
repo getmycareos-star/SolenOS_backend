@@ -3316,6 +3316,15 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             for change in active_change_rows
             if getattr(change, "significance_assessment_id", None)
         })
+        significance_link_status_by_change_id = {}
+        for change in active_change_rows:
+            assessment_id = str(getattr(change, "significance_assessment_id", "") or "")
+            if not assessment_id:
+                significance_link_status_by_change_id[str(change.id)] = "not_recorded"
+            elif not significance_schema_available:
+                significance_link_status_by_change_id[str(change.id)] = "schema_unavailable"
+            else:
+                significance_link_status_by_change_id[str(change.id)] = "missing_or_inactive"
         if significance_schema_available and significance_assessment_ids:
             significance_rows = db.query(
                 SignificanceAssessment.id,
@@ -3352,8 +3361,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 or str(significance.target_id or "") != str(change.id)
             ):
                 # Never attach a same-person assessment to the wrong change.
+                significance_link_status_by_change_id[str(change.id)] = "target_mismatch"
                 significance = None
             if significance:
+                significance_link_status_by_change_id[str(change.id)] = "linked"
                 significance_by_change_id[str(change.id)] = significance
 
             verdict = (
@@ -3374,6 +3385,9 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "superseded_by_change_id": change.superseded_by_change_id,
                 "significance_verdict": verdict,
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
+                "significance_assessment_status": significance_link_status_by_change_id.get(
+                    str(change.id), "not_recorded"
+                ),
                 "significance_evidence_status": (
                     getattr(significance.evidence_status, "value", significance.evidence_status)
                     if significance else None
@@ -3528,6 +3542,9 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                     if significance else getattr(change.significance_verdict, "value", change.significance_verdict)
                 ),
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
+                "significance_assessment_status": significance_link_status_by_change_id.get(
+                    str(change.id), "not_recorded"
+                ),
                 "evidence_status": (
                     getattr(significance.evidence_status, "value", significance.evidence_status)
                     if significance else "unknown"
