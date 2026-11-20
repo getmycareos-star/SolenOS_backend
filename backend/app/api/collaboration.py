@@ -4582,6 +4582,18 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     if document_context_requested and can_view_documents:
         source_document_status = "empty"
         try:
+            # The primary caregiver's documents are shared with authorized
+            # collaborators. A secondary caregiver's own uploads remain private
+            # to that caregiver unless an explicit sharing flow is added.
+            primary_grant = db.query(CaregiverAccessGrant.caregiver_id).filter(
+                CaregiverAccessGrant.person_id == person_id,
+                CaregiverAccessGrant.role == "primary",
+                CaregiverAccessGrant.status == "active",
+                CaregiverAccessGrant.revoked_at.is_(None),
+            ).first()
+            visible_document_uploaders = {str(caregiver_id)}
+            if primary_grant and primary_grant[0]:
+                visible_document_uploaders.add(str(primary_grant[0]))
             document_analyses = (
                 db.query(CaptureAnalysis)
                 .filter(
@@ -4599,6 +4611,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     EvidenceModel.id == analysis.source_evidence_id,
                     EvidenceModel.person_id == person_id,
                     EvidenceModel.type == "document",
+                    EvidenceModel.uploaded_by_caregiver_id.in_(visible_document_uploaders),
                     (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
                 ).first()
                 if source_document is None:
