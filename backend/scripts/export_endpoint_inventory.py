@@ -323,11 +323,49 @@ def build_inventory() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="reports/registered-endpoint-inventory.json")
+    parser.add_argument("--markdown-output", default="reports/registered-endpoint-inventory.md")
     args = parser.parse_args()
     output = Path(args.output)
+    markdown_output = Path(args.markdown_output)
     output.parent.mkdir(parents=True, exist_ok=True)
+    markdown_output.parent.mkdir(parents=True, exist_ok=True)
     inventory = build_inventory()
     output.write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    markdown_rows = [
+        "# Runtime-registered SolenOS API endpoint inventory",
+        "",
+        f"Generated: {inventory['generated_at']}",
+        "",
+        f"- Registered OpenAPI operations: **{inventory['endpoint_count']}**",
+        f"- Direct handler matches: **{inventory['registered_handler_match_count']}**",
+        f"- Handler-owner resolution required: **{inventory['owner_resolution_required_count']}**",
+        f"- Duplicate handler matches: **{inventory['duplicate_handler_match_count']}**",
+        f"- Community routes registered: **{inventory['community_route_count']}**",
+        "",
+        "Generated from the FastAPI application object through app.openapi(). Consumer and persistence entries are domain-level mappings; exact handler write sets, transaction boundaries, frontend callsites and test evidence still require review.",
+        "",
+        "| Method | Endpoint | Handler / router | Authentication | Consumer | Persistence domain | Status |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for endpoint in inventory["endpoints"]:
+        owner = endpoint["owners"][0] if endpoint["owners"] else {}
+        handler = owner.get("module") or owner.get("router_tags") or "unresolved"
+        handler = str(handler).replace("|", "\\|")
+        consumer = endpoint["consumer"]
+        consumer_label = consumer.get("workflow", "REVIEW_REQUIRED") if isinstance(consumer, dict) else consumer
+        persistence = endpoint["persistence"]
+        persistence_label = persistence.get("domain_tables", "REVIEW_REQUIRED") if isinstance(persistence, dict) else persistence
+        values = [
+            endpoint["method"],
+            endpoint["path"],
+            handler,
+            endpoint["authentication"],
+            str(consumer_label),
+            str(persistence_label),
+            endpoint["integration_status"],
+        ]
+        markdown_rows.append("| " + " | ".join(value.replace("|", "\\|").replace("\n", " ") for value in values) + " |")
+    markdown_output.write_text("\n".join(markdown_rows) + "\n", encoding="utf-8")
     print(
         "REGISTERED_ENDPOINT_INVENTORY "
         f"count={inventory['endpoint_count']} "
@@ -335,7 +373,7 @@ def main() -> int:
         f"owner_review={inventory['owner_resolution_required_count']} "
         f"duplicates={inventory['duplicate_handler_match_count']} "
         f"community={inventory['community_route_count']} "
-        f"output={output}"
+        f"output={output} markdown={markdown_output}"
     )
     if inventory["duplicate_handler_match_count"]:
         return 1
