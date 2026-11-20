@@ -1804,6 +1804,89 @@ def test_situation_freshness_includes_persisted_delta_engine_changes():
         teardown_db()
 
 
+
+def test_situation_freshness_includes_linked_significance_assessment_updates():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.core.change_enums import EvidenceStatus
+        from app.models.significance import SignificanceAssessment
+
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Significance Freshness Person")
+        person_id = created["person"]["id"]
+        change_id = "freshness-significance-change"
+        assessment_id = "freshness-significance-assessment"
+
+        with TestingSessionLocal() as db:
+            db.add(SignificanceAssessment(
+                id=assessment_id,
+                person_id=person_id,
+                subject_type="sleep",
+                subject_id=person_id,
+                target_type="change",
+                target_id=change_id,
+                verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                evidence_status=EvidenceStatus.REPORTED,
+                evidence_confidence=0.32,
+                significance_confidence=0.68,
+                dimensions=[{"name": "frequency", "score": 0.68}],
+                attention_candidate=True,
+                follow_up_candidate=False,
+                explanation="Reported sleep change needs caregiver review.",
+                evidence_ids=[],
+                is_active=True,
+            ))
+            db.add(Change(
+                id=change_id,
+                person_id=person_id,
+                subject_type="sleep",
+                subject_id=person_id,
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state="Usual sleep pattern",
+                current_state="More frequent waking reported",
+                evidence_ids=[],
+                explanation="A persisted sleep change was recorded.",
+                significance_assessment_id=assessment_id,
+                significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                attention_candidate=True,
+                follow_up_candidate=False,
+                confirmation_status="detected",
+                is_active=True,
+                baseline_coverage_status="unknown",
+                current_coverage_status="covered",
+            ))
+            db.commit()
+
+        initial = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert initial.status_code == 200, initial.text
+        current = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert current.status_code == 200, current.text
+        assert current.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+
+        with TestingSessionLocal() as db:
+            persisted = db.query(SignificanceAssessment).filter_by(id=assessment_id).one()
+            persisted.evidence_confidence = 0.57
+            db.commit()
+
+        changed = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+        assert changed.json()["source_freshness"]["reassessment_recommended"] is True
+    finally:
+        teardown_db()
+
 @pytest.mark.session_security
 def test_situation_freshness_includes_new_persisted_care_events():
     """A newly saved Daily Care event must invalidate the prior situation snapshot."""
