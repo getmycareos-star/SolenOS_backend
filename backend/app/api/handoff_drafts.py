@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
 from app.core.database import get_db
+from app.services.document_binary_storage import read_document_binary
 from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraftRevision
 from app.models.care import Evidence, CareEvent, Caregiver
 from app.models.time_location import Appointment
@@ -989,8 +990,9 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 if document is None or upload is None:
                     stale.append(f"{source_table}:{source_id}")
                     continue
-                binary = bytes(upload.content or b"")
-                if len(binary) != upload.size_bytes or hashlib.sha256(binary).hexdigest() != upload.sha256:
+                try:
+                    read_document_binary(upload)
+                except Exception:
                     stale.append(f"{source_table}:{source_id}")
                     continue
                 assertion_rows = db.query(CareAssertion).filter(CareAssertion.person_id == draft.person_id).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
@@ -1718,9 +1720,9 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
             if upload is None:
                 missing_originals += 1
                 continue
-            binary = bytes(upload.content or b"")
-            actual_hash = hashlib.sha256(binary).hexdigest()
-            if len(binary) != upload.size_bytes or actual_hash != upload.sha256:
+            try:
+                read_document_binary(upload)
+            except Exception:
                 return {"status": "failed", "reason": "original_document_integrity_check_failed", "label": "Uploaded documents and extracted text", "count": 0}, []
             extraction = db.query(CaptureAnalysis).filter(
                 CaptureAnalysis.person_id == person_id,
