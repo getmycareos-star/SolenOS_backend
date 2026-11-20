@@ -570,6 +570,9 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
                 for _, _, _, source_marker in documents
             )
             assert {row.evidence_ids[0] for row in assertions} == set(evidence_ids)
+            assert all(row.assertion_status == "accepted" for row in assertions)
+            assert all(row.assertion_kind == "document_reviewed_observation" for row in assertions)
+            assert all(row.epistemic_state == "reported" for row in assertions)
             contradictions = db.query(Contradiction).filter(
                 Contradiction.person_id == session["person"]["id"],
                 Contradiction.field == "medication",
