@@ -8275,9 +8275,12 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
     return {"session_id": session.id, "person_id": person_id, "messages": [{
+        "id": row.id,
+        "source_message_id": row.id if row.role == "user" else None,
         "role": row.role,
         "text": row.content,
         "created_at": row.created_at.isoformat() if row.created_at else None,
+        "guard_verdict": row.guard_verdict,
         "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
         "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
         "ai_generated": _stored_response_metadata(row).get("ai_generated"),
