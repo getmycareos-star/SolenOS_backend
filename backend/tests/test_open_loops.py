@@ -165,6 +165,20 @@ def test_persisted_change_can_be_linked_to_person_scoped_follow_up():
     assert body["source_type"] == "persisted_change"
     assert body["source_id"] == change_id
 
+    missing_source = client.post(
+        "/api/v1/open-loops",
+        headers=first_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Missing persisted source",
+            "description": "A persisted change follow-up must identify its source.",
+            "source_type": "persisted_change",
+            "evidence": [],
+            "uncertainty": "unknown",
+        },
+    )
+    assert missing_source.status_code == 422, missing_source.text
+
     foreign_link = client.post(
         "/api/v1/open-loops",
         headers=second_headers,
