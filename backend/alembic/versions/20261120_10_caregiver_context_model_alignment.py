@@ -61,15 +61,19 @@ def upgrade():
             op.add_column(TABLE, sa.Column(name, column_type, nullable=True))
             columns.add(name)
 
-    index_name = "ix_caregiver_contexts_person_caregiver_effective_start"
-    existing_indexes = {index["name"] for index in inspect(bind).get_indexes(TABLE)}
-    if index_name not in existing_indexes:
-        op.create_index(
-            index_name,
-            TABLE,
-            ["person_id", "caregiver_id", "effective_start"],
-            unique=False,
-        )
+    existing_index_definitions = {
+        (tuple(index.get("column_names") or ()), bool(index.get("unique", False)))
+        for index in inspect(bind).get_indexes(TABLE)
+    }
+    # Match the ORM's explicit single-column indexes as well as the composite
+    # lookup index used by the versioned profile API.
+    for index_name, index_columns in (
+        ("ix_caregiver_contexts_person_id", ["person_id"]),
+        ("ix_caregiver_contexts_caregiver_id", ["caregiver_id"]),
+        ("ix_caregiver_contexts_person_caregiver_effective_start", ["person_id", "caregiver_id", "effective_start"]),
+    ):
+        if (tuple(index_columns), False) not in existing_index_definitions:
+            op.create_index(index_name, TABLE, index_columns, unique=False)
 
     required = {
         "id",
