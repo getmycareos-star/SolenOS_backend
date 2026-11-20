@@ -2735,6 +2735,31 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
     assert linked[0]["appointment_id"] == appointment_id
     assert linked[0]["source_reference"].startswith(workspace_id + ":")
 
+    # The same authorised caregiver must also see this person-level follow-up
+    # in the existing Open Loops surface, including its source history.
+    shared_open_loops = test_client.get("/api/v1/open-loops", headers=shared_headers)
+    assert shared_open_loops.status_code == 200, shared_open_loops.text
+    shared_loop = next(
+        item for item in shared_open_loops.json()["items"]
+        if item["source_type"] == "appointment_workspace_follow_up"
+        and item["source_id"].startswith(workspace_id + ":")
+    )
+    shared_occurrences = test_client.get(
+        f"/api/v1/open-loops/{shared_loop['id']}/occurrences",
+        headers=shared_headers,
+    )
+    assert shared_occurrences.status_code == 200, shared_occurrences.text
+    assert len(shared_occurrences.json()) >= 1
+    shared_history = test_client.get(
+        f"/api/v1/open-loops/{shared_loop['id']}/history",
+        headers=shared_headers,
+    )
+    assert shared_history.status_code == 200, shared_history.text
+    assert {event["event_type"] for event in shared_history.json()} >= {
+        "created_from_appointment_follow_up",
+        "source_reconciled",
+    }
+
     db = TestSessionLocal()
     try:
         loops = db.query(OpenLoopRecord).filter(
