@@ -49,6 +49,59 @@ def _table_inventory(inspector, table_name: str) -> dict:
     }
 
 
+
+
+def _orm_inventory() -> dict:
+    """Return the expected SQLAlchemy storage contract for every registered table."""
+    result = {}
+    for table in sorted(Base.metadata.tables.values(), key=lambda item: item.name):
+        result[table.name] = {
+            "columns": [
+                {
+                    "name": column.name,
+                    "type": str(column.type),
+                    "nullable": bool(column.nullable),
+                    "primary_key": bool(column.primary_key),
+                    "default": str(column.default.arg) if column.default is not None else None,
+                    "server_default": (
+                        str(column.server_default.arg)
+                        if column.server_default is not None else None
+                    ),
+                }
+                for column in table.columns
+            ],
+            "primary_key": [column.name for column in table.primary_key.columns],
+            "foreign_keys": sorted(
+                (
+                    element.parent.name,
+                    element.column.table.name,
+                    element.column.name,
+                    element.ondelete,
+                )
+                for constraint in table.foreign_key_constraints
+                for element in constraint.elements
+            ),
+            "unique_constraints": sorted(
+                sorted(column.name for column in constraint.columns)
+                for constraint in table.constraints
+                if constraint.__class__.__name__ == "UniqueConstraint"
+            ),
+            "check_constraints": sorted(
+                str(constraint.sqltext)
+                for constraint in table.constraints
+                if constraint.__class__.__name__ == "CheckConstraint"
+            ),
+            "indexes": sorted(
+                {
+                    "columns": [expression.name for expression in index.expressions
+                                if hasattr(expression, "name")],
+                    "unique": bool(index.unique),
+                }
+                for index in table.indexes
+            , key=lambda item: (item["columns"], item["unique"])),
+        }
+    return result
+
 def main() -> int:
     if engine.dialect.name != "postgresql":
         print(json.dumps({
@@ -118,6 +171,7 @@ def main() -> int:
         "orm": {
             "registered_model_count": len(Base.metadata.tables),
             "registered_tables": model_tables,
+            "expected_schema": _orm_inventory(),
             "schema_differences": drift,
         },
         "alembic": {
