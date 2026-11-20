@@ -525,17 +525,20 @@ def test_snooze_complete_and_cancel_stop_queued_push_retries():
             json={"snooze_until": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()},
         )
         assert snoozed.status_code == 200, snoozed.text
+        assert snoozed.json()["lifecycle_history"][-1]["action"] == "care.reminder.snoozed"
         completed = client.patch(
             f"/api/v1/reminders/{reminder_ids[1]}/complete",
             headers=headers,
             json={},
         )
         assert completed.status_code == 200, completed.text
+        assert completed.json()["lifecycle_history"][-1]["action"] == "care.reminder.completed"
         cancelled = client.patch(
             f"/api/v1/reminders/{reminder_ids[2]}/cancel",
             headers=headers,
         )
         assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["lifecycle_history"][-1]["action"] == "care.reminder.cancelled"
 
         db.expire_all()
         statuses = {
