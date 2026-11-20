@@ -1617,11 +1617,13 @@ def main():
             ).one()
             persisted_change.significance_assessment_id = replacement_assessment_id
             significance_assessment_id = replacement_assessment_id
-            db.commit()
             original_assessment = db.query(SignificanceAssessment).filter(
                 SignificanceAssessment.id == initial_significance_assessment_id,
                 SignificanceAssessment.person_id == person_a,
             ).one()
+            original_assessment.is_active = False
+            original_assessment.superseded_by_assessment_id = replacement_assessment_id
+            db.commit()
             require(
                 original_assessment.evidence_confidence == 0.42,
                 "PostgreSQL significance revision mutated the prior assessment instead of preserving it",
