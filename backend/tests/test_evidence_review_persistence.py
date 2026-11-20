@@ -996,3 +996,21 @@ def test_evidence_review_mutation_requires_correct_records_permission(review_rec
     history = client_a.get("/api/v1/care-continuity/evidence/review-evidence-a/reviews")
     assert history.status_code == 200, history.text
     assert history.json() == []
+
+
+def test_lcr_medication_write_requires_add_evidence_permission(review_records):
+    client_a, _ = review_records
+    db = SessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id="review-person-a",
+            caregiver_id="review-caregiver-a",
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr"]
+        db.commit()
+    finally:
+        db.close()
+    response = client_a.post("/api/v1/care-continuity/medications", json={})
+    assert response.status_code == 403, response.text
+    assert "add evidence" in response.text.lower()
