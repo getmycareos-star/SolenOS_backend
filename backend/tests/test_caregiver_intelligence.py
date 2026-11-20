@@ -1058,3 +1058,83 @@ def test_perspective_conflict_rejects_caregiver_from_another_person():
     finally:
         teardown_db()
 
+def test_private_perspectives_do_not_generate_or_expose_network_conflicts():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        sarah_client, sarah_profile = create_test_profile("caregiver-sarah", "Sarah")
+        john_client, john_profile = create_test_profile("caregiver-john", "John")
+        for client, profile_id, claim in [
+            (sarah_client, sarah_profile, "Mom fell yesterday"),
+            (john_client, john_profile, "Mom did not fall"),
+        ]:
+            response = client.post(
+                "/api/v1/caregiver-perspectives",
+                json={
+                    "caregiver_id": profile_id,
+                    "person_id": "person-1",
+                    "claim_type": "observation",
+                    "claim_content": claim,
+                },
+            )
+            assert response.status_code == 200, response.text
+        summary = sarah_client.get("/api/v1/multi-caregiver-summary")
+        assert summary.status_code == 200, summary.text
+        assert summary.json()["perspective_conflicts"] == []
+        direct = sarah_client.get("/api/v1/perspective-conflicts/person-1")
+        assert direct.status_code == 200, direct.text
+        assert direct.json() == []
+        assert "Mom fell yesterday" not in summary.text
+        assert "Mom did not fall" not in summary.text
+    finally:
+        teardown_db()
+
+
+def test_shared_perspectives_are_detected_only_after_both_caregivers_promote_them():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        sarah_client, sarah_profile = create_test_profile("caregiver-sarah", "Sarah")
+        john_client, john_profile = create_test_profile("caregiver-john", "John")
+        first = sarah_client.post(
+            "/api/v1/caregiver-perspectives",
+            json={
+                "caregiver_id": sarah_profile,
+                "person_id": "person-1",
+                "claim_type": "observation",
+                "claim_content": "Mom fell yesterday",
+            },
+        )
+        second = john_client.post(
+            "/api/v1/caregiver-perspectives",
+            json={
+                "caregiver_id": john_profile,
+                "person_id": "person-1",
+                "claim_type": "observation",
+                "claim_content": "Mom did not fall",
+            },
+        )
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        assert sarah_client.get("/api/v1/multi-caregiver-summary").json()["perspective_conflicts"] == []
+        promote_first = sarah_client.post(f"/api/v1/caregiver-perspectives/{first.json()['id']}/promote")
+        assert promote_first.status_code == 200, promote_first.text
+        assert sarah_client.get("/api/v1/multi-caregiver-summary").json()["perspective_conflicts"] == []
+        promote_second = john_client.post(f"/api/v1/caregiver-perspectives/{second.json()['id']}/promote")
+        assert promote_second.status_code == 200, promote_second.text
+        summary = sarah_client.get("/api/v1/multi-caregiver-summary")
+        assert summary.status_code == 200, summary.text
+        conflicts = summary.json()["perspective_conflicts"]
+        assert len(conflicts) == 1
+        assert conflicts[0]["status"] == "conflicting"
+        assert {conflicts[0]["claim_a"], conflicts[0]["claim_b"]} == {
+            "Mom fell yesterday",
+            "Mom did not fall",
+        }
+    finally:
+        teardown_db()
+
