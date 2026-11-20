@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -17,7 +18,7 @@ from app.models.privacy_delivery import AuditLogEvent
 from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus, HandoffAcceptanceStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.api.accounts import _hash_password, _validate_email
-from app.services.caregiver_permissions import CAREGIVER_PERMISSION_KEYS, DEFAULT_FAMILY_PERMISSIONS
+from app.services.caregiver_permissions import CAREGIVER_PERMISSION_KEYS, DEFAULT_FAMILY_PERMISSIONS, require_caregiver_permission
 
 router = APIRouter(prefix="/caregiver-access", tags=["caregiver access"])
 SESSION_TTL_DAYS = 365
@@ -492,6 +493,7 @@ def _current_profile(request: Request, db: Session) -> tuple[str, str, Caregiver
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if not person_id or not caregiver_id:
         raise HTTPException(status_code=401, detail="A valid care-record session is required")
+    require_caregiver_permission(db, str(person_id), str(caregiver_id), "view_lcr")
     try:
         profile = ensure_caregiver_profile_for_session(
             db, person_id=str(person_id), session_caregiver_id=str(caregiver_id)
@@ -507,7 +509,8 @@ def create_responsibility_transfer(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, actor_id = _actor_scope(request, db)
+    person_id, actor_id, _actor_profile = _current_profile(request, db)
+    require_caregiver_permission(db, person_id, actor_id, "manage_responsibilities")
     source = db.query(CaregiverResponsibility).filter(
         CaregiverResponsibility.id == payload.source_responsibility_id,
         CaregiverResponsibility.person_id == person_id,
@@ -587,12 +590,16 @@ def create_responsibility_transfer(
 
 @router.get("/responsibility-transfers")
 def list_responsibility_transfers(request: Request, db: Session = Depends(get_db)):
-    person_id, _actor_id, profile = _current_profile(request, db)
+    person_id, session_caregiver_id, profile = _current_profile(request, db)
+    grant = require_caregiver_permission(db, person_id, session_caregiver_id, "view_lcr")
     query = db.query(CaregiverResponsibilityTransfer).filter(
         CaregiverResponsibilityTransfer.person_id == person_id
     )
-    if not bool(getattr(request.state, "caregiver_can_manage_members", False)):
-        query = query.filter(CaregiverResponsibilityTransfer.to_caregiver_profile_id == profile.id)
+    if not grant.can_manage_members:
+        query = query.filter(or_(
+            CaregiverResponsibilityTransfer.from_caregiver_profile_id == profile.id,
+            CaregiverResponsibilityTransfer.to_caregiver_profile_id == profile.id,
+        ))
     transfers = query.order_by(CaregiverResponsibilityTransfer.created_at.desc()).all()
     result = []
     for item in transfers:
@@ -625,6 +632,7 @@ def list_responsibility_transfers(request: Request, db: Session = Depends(get_db
 @router.post("/responsibility-transfers/{transfer_id}/accept")
 def accept_responsibility_transfer(transfer_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, profile = _current_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     transfer = db.query(CaregiverResponsibilityTransfer).filter(
         CaregiverResponsibilityTransfer.id == transfer_id,
         CaregiverResponsibilityTransfer.person_id == person_id,
@@ -738,7 +746,8 @@ def accept_responsibility_transfer(transfer_id: str, request: Request, db: Sessi
 
 @router.post("/responsibility-transfers/{transfer_id}/reject")
 def reject_responsibility_transfer(transfer_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id, profile = _current_profile(request, db)
+    person_id, session_caregiver_id, profile = _current_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     transfer = db.query(CaregiverResponsibilityTransfer).filter(
         CaregiverResponsibilityTransfer.id == transfer_id,
         CaregiverResponsibilityTransfer.person_id == person_id,
