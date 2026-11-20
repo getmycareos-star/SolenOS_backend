@@ -91,6 +91,35 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
         invited_caregiver_id = invited["caregiver_id"]
         original_invited_session_id = invited["session_id"]
         invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
+
+        expired_email = f"expired-{suffix}@example.test"
+        expired_invite = client.post(
+            "/api/v1/caregiver-access/invitations",
+            headers=primary_headers,
+            json={"email": expired_email, "expires_in_days": 7},
+        )
+        assert expired_invite.status_code == 201, expired_invite.text
+        with Session() as db:
+            stored_pending = db.query(CaregiverInvitation).filter_by(
+                id=expired_invite.json()["invitation_id"]
+            ).one()
+            stored_pending.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            db.commit()
+        expired_acceptance = client.post(
+            "/api/v1/caregiver-access/invitations/accept",
+            json={
+                "token": expired_invite.json()["invitation_token"],
+                "email": expired_email,
+                "password": "expired-invite-password-456",
+                "name": "Expired invite",
+            },
+        )
+        assert expired_acceptance.status_code == 410, expired_acceptance.text
+        with Session() as db:
+            expired_row = db.query(CaregiverInvitation).filter_by(
+                id=expired_invite.json()["invitation_id"]
+            ).one()
+            assert expired_row.status == "expired"
         assert invited["person_id"] == person_id
         assert invited_caregiver_id != primary_caregiver_id
 
