@@ -85,6 +85,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Install local OCR engine for real document extraction tests
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -96,6 +98,8 @@ jobs:
       - name: Apply complete Alembic migration chain
         working-directory: backend
         run: python -m alembic upgrade head
+      - name: Run real PDF, scanned PDF, image, DOCX and extraction recovery tests
+        run: python -m pytest backend/tests/test_document_lifecycle.py -q
       - name: Run document semantic and lifecycle regression tests
         run: python -m pytest backend/tests/test_document_candidate_schema.py backend/tests/test_document_candidate_adversarial.py backend/tests/test_document_intelligence_lifecycle.py -q
       - name: Run PostgreSQL document persistence, review, duplicate and restart integration tests
