@@ -120,7 +120,16 @@ def _schema_column_types_compatible(expected, actual, dialect_name: str) -> bool
 
     from sqlalchemy import Float, Numeric
 
-    if isinstance(expected, Float) and isinstance(actual, Numeric) and expected.precision is None:
+    # PostgreSQL NUMERIC and FLOAT are both valid numeric storage for an
+    # ORM Float. When the ORM explicitly declares Numeric precision/scale,
+    # require the reflected database contract to match exactly.
+    if isinstance(expected, (Float, Numeric)) and isinstance(actual, (Float, Numeric)):
+        if isinstance(expected, Numeric) and expected.precision is not None:
+            return (
+                isinstance(actual, Numeric)
+                and expected.precision == actual.precision
+                and expected.scale == actual.scale
+            )
         return True
 
     # JSONList explicitly accepts native PostgreSQL JSON values on read.
