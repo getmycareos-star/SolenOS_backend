@@ -1338,6 +1338,48 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
             headers={"Authorization": f"Bearer {token}"},
         )
         assert missing_reason.status_code == 422
+
+        ask_for_confirmation = client.post(
+            url,
+            json={"status": "awaiting_confirmation", "evidence_ids": [evidence_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert ask_for_confirmation.status_code == 200, ask_for_confirmation.text
+        assert ask_for_confirmation.json()["new_status"] == "awaiting_confirmation"
+
+        could_not_confirm = client.post(
+            url,
+            json={"status": "inconclusive", "reason": "The caregiver does not have enough information to confirm this change.", "evidence_ids": [evidence_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert could_not_confirm.status_code == 200, could_not_confirm.text
+        assert could_not_confirm.json()["new_status"] == "inconclusive"
+
+        dispute = client.post(
+            url,
+            json={"status": "rejected", "reason": "The caregiver disputes this interpretation; the original reports remain unchanged.", "evidence_ids": [evidence_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert dispute.status_code == 200, dispute.text
+        assert dispute.json()["new_status"] == "rejected"
+
+        refreshed = client.get(
+            f"/api/v1/change/changes/{person_id}/{change_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert refreshed.status_code == 200, refreshed.text
+        history = refreshed.json()["confirmation_history"]
+        assert [item["new_status"] for item in history] == [
+            "confirmed", "awaiting_confirmation", "inconclusive", "rejected",
+        ]
+        assert history[-1]["reason"].startswith("The caregiver disputes this interpretation")
+        db = TestingSessionLocal()
+        persisted = db.query(Change).filter(Change.id == change_id, Change.person_id == person_id).one()
+        transitions = db.query(ChangeConfirmationEvent).filter(ChangeConfirmationEvent.change_id == change_id).all()
+        assert persisted.confirmation_status == "rejected"
+        assert len(transitions) == 4
+        assert transitions[-1].reason.startswith("The caregiver disputes this interpretation")
+        db.close()
     finally:
         teardown_db()
 
