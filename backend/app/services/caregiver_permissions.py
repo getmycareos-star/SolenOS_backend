@@ -21,13 +21,13 @@ def caregiver_has_permission(grant: CaregiverAccessGrant | None, permission: str
         return False
     if grant.status != "active" or grant.revoked_at is not None:
         return False
+    permissions = grant.permissions if grant.permissions is not None else list(DEFAULT_FAMILY_PERMISSIONS)
     if grant.access_scope == "documents_only":
-        return permission == "view_documents"
+        return permission == "view_documents" and permission in set(permissions)
     if grant.access_scope != "full_record":
         return False
     if bool(grant.can_manage_members):
         return True
-    permissions = grant.permissions if grant.permissions is not None else list(DEFAULT_FAMILY_PERMISSIONS)
     return permission in set(permissions)
 
 
