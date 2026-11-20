@@ -2606,6 +2606,61 @@ def test_appointment_preparation_brief_selects_nearest_upcoming_visit(client):
     assert "Other person's appointment" not in response.text
 
 
+def test_upcoming_appointment_workspace_is_generated_without_a_form_and_is_idempotent(client):
+    from app.models.appointment_workspace import AppointmentWorkspaceRevision
+
+    test_client, owner, other = client
+    appointment = Appointment(
+        person_id=owner["person"]["id"],
+        created_by_caregiver_id=owner["caregiver"]["id"],
+        title="Scheduled neurology visit",
+        scheduled_at=datetime.now(timezone.utc) + timedelta(days=3),
+        status="scheduled",
+    )
+    db = TestSessionLocal()
+    try:
+        db.add(appointment)
+        db.commit()
+        appointment_id = appointment.id
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    first = test_client.post("/api/v1/appointment-workspaces/ensure-upcoming", headers=headers)
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["created"] is True
+    assert body["reason"] == "prepared_for_existing_appointment"
+    workspace = body["workspace"]
+    assert workspace["appointment_id"] == appointment_id
+    assert workspace["status"] == "preparation"
+    assert workspace["payload"]["captureStage"] == "prepare"
+    assert workspace["payload"]["caregiverReport"] == ""
+    assert workspace["payload"]["generatedBy"] == "solenos_appointment_continuity"
+
+    # A second caregiver with access to the same person's LCR receives the
+    # same workspace; repeated opening must not create duplicate records.
+    shared_headers = {"Authorization": f"Bearer {other['shared_access_token']}"}
+    repeated = test_client.post("/api/v1/appointment-workspaces/ensure-upcoming", headers=shared_headers)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["created"] is False
+    assert repeated.json()["workspace"]["id"] == workspace["id"]
+
+    db = TestSessionLocal()
+    try:
+        rows = db.query(AppointmentWorkspaceRecord).filter(
+            AppointmentWorkspaceRecord.person_id == owner["person"]["id"],
+            AppointmentWorkspaceRecord.appointment_id == appointment_id,
+        ).all()
+        revisions = db.query(AppointmentWorkspaceRevision).filter(
+            AppointmentWorkspaceRevision.record_id == workspace["id"],
+        ).all()
+        assert len(rows) == 1
+        assert len(revisions) == 1
+    finally:
+        db.close()
+
+
 def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_appointment_link(client):
     from app.models.open_loop import OpenLoopRecord
 
