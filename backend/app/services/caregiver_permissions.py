@@ -41,3 +41,12 @@ def require_caregiver_permission(db: Session, person_id: str, caregiver_id: str,
     if not caregiver_has_permission(grant, permission):
         raise HTTPException(status_code=403, detail=f"This caregiver does not have permission to {permission.replace('_', ' ')}.")
     return grant
+
+
+def require_request_caregiver_permission(request, db: Session, permission: str) -> CaregiverAccessGrant:
+    """Enforce an operation permission using the bearer-scoped request identity."""
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=401, detail="A verified caregiver session is required.")
+    return require_caregiver_permission(db, str(person_id), str(caregiver_id), permission)
