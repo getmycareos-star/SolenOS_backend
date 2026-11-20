@@ -1086,6 +1086,40 @@ def get_situation(
         )
     for evidence_id, assertions in document_assertions_by_evidence.items():
         source_statements_by_evidence.setdefault(evidence_id, []).extend(assertions)
+
+    # Feed the existing Progressive Understanding Engine its supported
+    # SituationObservation shape. These are read projections of approved LCR
+    # assertions, not new Evidence rows or independently writable facts.
+    document_progressive_observations = [
+        {
+            "id": f"document-assertion:{item['assertion_id']}",
+            "raw_text": item["source_quote"],
+            "human_fact": item["source_quote"],
+            "kind": "document",
+            "captured_at": item.get("reported_at") or item.get("observed_at") or "",
+            "event_ids": [],
+            "epistemic_kind": "mixed",
+            "speaker_label": None,
+            "speaker_attribution_status": "unknown",
+            "source_reference_id": item["source_evidence_id"],
+            "contributor_id": item["reviewer_caregiver_id"],
+            "document_assertion_id": item["assertion_id"],
+            "source_evidence_id": item["source_evidence_id"],
+            "source_page": item["source_page"],
+            "temporal_context": item["temporal_context"],
+            "negation_status": item["negation_status"],
+            "modality": item["modality"],
+            "conditionality": item["conditionality"],
+            "review_status": item["review_status"],
+            "assertion_status": item["assertion_status"],
+            "epistemic_status": item["epistemic_status"],
+        }
+        for item in document_assertion_payloads
+    ]
+    progressive_observations = sorted(
+        [*observations, *document_progressive_observations],
+        key=lambda item: (item.get("captured_at") or "", item.get("id") or ""),
+    )
     situation_ui_rows = []
     for saved_situation in persisted_situations:
         signal_ids = set(saved_situation.signal_ids or [])
@@ -1241,7 +1275,7 @@ def get_situation(
             "root_event_id": root_event_id,
             "subject_label": person.name,
             "theme": "mixed",
-            "observations": observations,
+            "observations": progressive_observations,
             "document_assertions": list(document_assertion_payloads),
             "open_questions": [],
             "asked_questions": [],
@@ -1277,6 +1311,14 @@ def get_situation(
             situation_observations = [
                 item for item in observations if item["id"] in latest_evidence_ids
             ]
+            linked_document_observations = [
+                item for item in document_progressive_observations
+                if item["source_evidence_id"] in latest_evidence_ids
+            ]
+            situation_observations = sorted(
+                [*situation_observations, *linked_document_observations],
+                key=lambda item: (item.get("captured_at") or "", item.get("id") or ""),
+            )
             active_situation["id"] = latest_ui["id"]
             active_situation["observations"] = situation_observations
             active_situation["document_assertions"] = [
