@@ -141,14 +141,12 @@ def database_schema_differences(bind=None):
             actual_affinity = getattr(actual, "_type_affinity", type(actual))
 
             if expected_enum is not None:
-                string_affinities = {"String", "Enum"}
-                if expected_affinity.__name__ not in string_affinities or actual_affinity.__name__ not in string_affinities:
-                    return False
-                # Native enum-to-enum comparisons must preserve the accepted label
-                # set. VARCHAR-backed enums are accepted for legacy schemas.
-                if actual_enum is not None and set(expected_enum) != set(actual_enum):
-                    return False
-                return True
+                # PostgreSQL's reflected ENUM uses NamedType affinity rather than
+                # String affinity. Compare its actual label set directly; a
+                # VARCHAR-backed legacy enum is compatible storage as well.
+                if actual_enum is not None:
+                    return set(expected_enum) == set(actual_enum)
+                return actual_affinity.__name__ == "String"
 
             if expected_affinity != actual_affinity:
                 return False
