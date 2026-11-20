@@ -160,3 +160,5 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 - `c429ccf754e378d9e0aa03f737877491ae9ea7cd` — the live scanned-PDF/DOCX conflict test also verifies both source-backed assertions reach the existing Progressive Understanding situation response.
 
 - `0dfbd77077c30eb50e6f954d89b257344396057a` — live conflict evaluation verifies unresolved document conflicts are also surfaced through caregiver return-continuity context, not only the internal LCR projection.
+
+- `0ad9f6a6a05fbae17384d920a6a3cf7ff2d0cbf7` / `5b6007f6d1ebd9d5e562e9bcf1a0e76a6313cae0` — live-Qwen evaluation now accepts a patient denial, verifies the persisted negation qualifier, and checks Companion preserves the denial rather than reversing its meaning.
