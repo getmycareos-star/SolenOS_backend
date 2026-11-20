@@ -48,7 +48,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-validation-${{ github.ref }}
+  group: backend-validation-${{ github.ref }}-${{ github.sha }}
   # Keep the current-main validation result instead of cancelling it on the next push.
   cancel-in-progress: false
 
