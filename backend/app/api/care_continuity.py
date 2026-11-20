@@ -3726,9 +3726,10 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
     try:
         from app.services.capture_review import backfill_structured_daily_capture_observations
 
-        # Refresh is an explicit caregiver action. Backfill older structured
-        # Daily Care details before composing the new view, without changing
-        # the original event or source record.
+        # Refresh is an explicit caregiver action. Persist the bounded
+        # historical backfill before composing the new view so a later
+        # assessment failure cannot discard newly linked details. The original
+        # event and source record remain unchanged.
         backfill_structured_daily_capture_observations(db, person_id=person_id, limit=200)
         db.commit()
     except Exception as exc:
