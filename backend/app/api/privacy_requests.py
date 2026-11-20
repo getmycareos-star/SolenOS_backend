@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import Base, get_db
 from app.services.document_binary_storage import read_document_binary
+from app.services.document_binary_storage import delete_document_object
 from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
@@ -803,6 +804,19 @@ def fulfil_approved_correction(
     if row.request_type != "correction":
         raise HTTPException(status_code=409, detail="This privacy request is not a correction")
     metadata = row.record_metadata if isinstance(row.record_metadata, dict) else {}
+    pending_storage_keys = metadata.get("storage_cleanup_pending")
+    if isinstance(pending_storage_keys, list) and pending_storage_keys:
+        try:
+            for storage_key in pending_storage_keys:
+                delete_document_object("s3", str(storage_key))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Approved erasure is waiting for original document storage cleanup.",
+            ) from exc
+        metadata.pop("storage_cleanup_pending", None)
+        row.record_metadata = metadata
+        db.commit()
     existing = metadata.get("fulfilment") if isinstance(metadata.get("fulfilment"), dict) else {}
     if row.request_status == "fulfilled" and existing.get("correction_id"):
         return {
@@ -1024,6 +1038,22 @@ def fulfil_approved_deletion(
                 EvidenceUpload.evidence_id.in_(evidence_ids_to_erase)
             )
         ).scalars().all()
+
+    upload_rows_to_erase = (
+        db.query(EvidenceUpload)
+        .filter(EvidenceUpload.evidence_id.in_(set(evidence_ids_to_erase) | set(evidence_upload_ids_to_erase)))
+        .all()
+        if (evidence_ids_to_erase or evidence_upload_ids_to_erase)
+        else []
+    )
+    storage_cleanup_keys = [
+        str(upload.storage_key)
+        for upload in upload_rows_to_erase
+        if (upload.storage_backend or "postgres") == "s3" and upload.storage_key
+    ]
+    if storage_cleanup_keys:
+        metadata["storage_cleanup_pending"] = storage_cleanup_keys
+        row.record_metadata = metadata
 
     # Inspect the active request transaction. Engine-level inspection can
     # check out the same SQLite StaticPool connection and roll back pending
@@ -1375,6 +1405,22 @@ def fulfil_approved_deletion(
             synchronize_session=False,
         )
         db.commit()
+
+        # The cleanup keys were committed with the database erasure. If object
+        # deletion fails, the approved request retains them for an idempotent
+        # retry instead of falsely reporting the document bytes erased.
+        if storage_cleanup_keys:
+            try:
+                for storage_key in storage_cleanup_keys:
+                    delete_document_object("s3", storage_key)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Care-record rows were removed; original document storage cleanup remains pending.",
+                ) from exc
+            metadata.pop("storage_cleanup_pending", None)
+            row.record_metadata = metadata
+            db.commit()
 
         # Verify after commit. Retry each root deletion in its own transaction
         # before creating the immutable fulfilled receipt.
