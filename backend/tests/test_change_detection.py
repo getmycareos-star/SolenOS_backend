@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from app.core.change_enums import ChangeType, ChangeDirection
 
 from app.core.database import Base, SessionLocal as DefaultSessionLocal
 import app.main as main_module
