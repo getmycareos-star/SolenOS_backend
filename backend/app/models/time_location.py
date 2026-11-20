@@ -25,7 +25,7 @@ class Appointment(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
-    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
     scheduled_at_timezone = Column(String, nullable=True)
     location = Column(String, nullable=True)
     location_type = Column(String, nullable=True)
