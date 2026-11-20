@@ -107,7 +107,7 @@ def list_members(request: Request, db: Session = Depends(get_db)):
         "access_scope": grant.access_scope or "full_record",
         "status": grant.status,
         "can_manage_members": bool(grant.can_manage_members),
-        "permissions": sorted(grant.permissions or DEFAULT_FAMILY_PERMISSIONS),
+        "permissions": sorted(grant.permissions if grant.permissions is not None else DEFAULT_FAMILY_PERMISSIONS),
         "granted_at": grant.granted_at.isoformat() if grant.granted_at else None,
         "revoked_at": grant.revoked_at.isoformat() if grant.revoked_at else None,
     } for grant, profile in grants]
@@ -277,7 +277,7 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
         caregiver_id=caregiver.id,
         caregiver_profile_id=profile.id,
         role=invitation.role,
-        permissions=list(invitation.permissions or DEFAULT_FAMILY_PERMISSIONS),
+        permissions=list(invitation.permissions if invitation.permissions is not None else DEFAULT_FAMILY_PERMISSIONS),
         status="active",
         can_manage_members=False,
         granted_by_caregiver_id=invitation.invited_by_caregiver_id,
