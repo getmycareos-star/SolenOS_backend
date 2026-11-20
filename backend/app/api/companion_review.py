@@ -488,7 +488,13 @@ def review_companion_care_update(
             AIOutputLCRProposal.proposal_version == next_version,
         ).first()
         if existing_corrected:
-            return {"proposal": _proposal_json(proposal), "corrected_proposal": _proposal_json(existing_corrected), "decision": "correct", "idempotent_replay": True}
+            return {
+                "proposal": _proposal_json(proposal),
+                "corrected_proposal": _proposal_json(existing_corrected),
+                "status": proposal.status,
+                "decision": "correct",
+                "idempotent_replay": True,
+            }
         proposal.status = "corrected"
         corrected_proposal = AIOutputLCRProposal(
             id=str(uuid.uuid4()), person_id=person_id, caregiver_id=caregiver_id,
@@ -599,6 +605,7 @@ def review_companion_care_update(
     return {
         "proposal": _proposal_json(proposal),
         "corrected_proposal": _proposal_json(corrected_proposal) if corrected_proposal else None,
+        "status": proposal.status,
         "decision": decision,
         "assertion_id": assertion_id,
         "written_to_lcr": bool(assertion_id),
