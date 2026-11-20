@@ -148,6 +148,27 @@ def upgrade():
             else:
                 op.alter_column(TABLE, column_name, existing_type=column_type, nullable=False)
 
+    # The active ORM permits absent effective-time and optional context
+    # attributes for legacy records. Relax historical NOT NULL constraints
+    # rather than fabricate values; new API writes still provide timestamps.
+    for column_name in (
+        "caregiver_id",
+        "proximity_category",
+        "observation_window_start",
+        "observation_window_end",
+        "availability_notes",
+        "context_metadata",
+        "effective_start",
+        "effective_end",
+    ):
+        column = next(item for item in inspect(bind).get_columns(TABLE) if item["name"] == column_name)
+        if not bool(column.get("nullable", True)):
+            if bind.dialect.name == "sqlite":
+                with op.batch_alter_table(TABLE) as batch:
+                    batch.alter_column(column_name, existing_type=column["type"], nullable=True)
+            else:
+                op.alter_column(TABLE, column_name, existing_type=column["type"], nullable=True)
+
     existing_index_definitions = {
         (tuple(index.get("column_names") or ()), bool(index.get("unique", False)))
         for index in inspect(bind).get_indexes(TABLE)
