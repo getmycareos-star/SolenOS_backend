@@ -1844,9 +1844,6 @@ def create_medication_record(payload: dict[str, Any], request: Request, db: Sess
 def review_medication_record(subject_id: str, request: Request, db: Session = Depends(get_db)):
     """Explicitly accept the caregiver's own medication report as current, append-only review."""
     person_id, caregiver_id = _scoped_identity(request, db)
-    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
-    if not caregiver_id:
-        raise HTTPException(status_code=403, detail="A caregiver identity is required to review a medication record")
     rows = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         func.lower(CareAssertion.subject_type).in_(("medication", "medications")),
@@ -1855,6 +1852,9 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
     ).order_by(CareAssertion.recorded_at.asc(), CareAssertion.id.asc()).all()
     if not rows:
         raise HTTPException(status_code=404, detail="Medication report not found or incomplete in this care record")
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to review a medication record")
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     if not inspect(db.connection()).has_table("care_assertion_revisions"):
         raise HTTPException(
             status_code=503,

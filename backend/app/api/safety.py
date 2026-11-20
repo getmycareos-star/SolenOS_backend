@@ -280,7 +280,7 @@ def update_escalation(
     return db_escalation
 
 
-@router.post("/events", response_model=SafetyEvent)
+@router.post("/safety/events", response_model=SafetyEvent)
 def create_safety_event(
     event_type: SafetyEventType,
     request: Request,
@@ -334,7 +334,7 @@ def create_safety_event(
     return db_event
 
 
-@router.get("/events/{person_id}", response_model=List[SafetyEvent])
+@router.get("/safety/events/{person_id}", response_model=List[SafetyEvent])
 def list_safety_events(person_id: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
     authorized_person_id, _ = _scoped_identity(request, db)
     if person_id != authorized_person_id:
@@ -484,7 +484,7 @@ def list_blind_spots(request: Request, is_mitigated: Optional[bool] = None, db: 
     return query.order_by(SafetyBlindSpotModel.identified_at.desc()).all()
 
 
-@router.post("/feedback", response_model=SafetyFeedback)
+@router.post("/safety/feedback", response_model=SafetyFeedback)
 def create_safety_feedback(
     person_id: str,
     request: Request,
@@ -523,7 +523,7 @@ def create_safety_feedback(
     return db_feedback
 
 
-@router.get("/feedback/{person_id}", response_model=List[SafetyFeedback])
+@router.get("/safety/feedback/{person_id}", response_model=List[SafetyFeedback])
 def list_safety_feedback(person_id: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
     authorized_person_id, _ = _scoped_identity(request, db)
     if person_id != authorized_person_id:

@@ -673,6 +673,7 @@ def test_appointment_write_rejects_caregiver_from_another_person():
         client = TestClient(app)
         response = client.post(
             "/api/v1/appointments",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
             json={
                 "person_id": "person-daily-test",
                 "title": "Ownership test appointment",

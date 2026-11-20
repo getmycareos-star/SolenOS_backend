@@ -118,6 +118,10 @@ def _schema_column_types_compatible(expected, actual, dialect_name: str) -> bool
             return set(expected_enum) == set(actual_enum)
         return actual_affinity.__name__ == "String"
 
+    from sqlalchemy import Float, Numeric
+
+    if isinstance(expected, Float) and isinstance(actual, Numeric) and expected.precision is None:
+        return True
     if expected_affinity != actual_affinity:
         return False
     for attribute in ("length", "precision", "scale"):
