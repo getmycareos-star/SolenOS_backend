@@ -165,3 +165,5 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 
 - `bc42a051e58efb88bf9c2604e3fe7059ce756e71` / `4c201420e20fb2bf9a5eb0d17a691f7e87d9283a` — the live-Qwen workflow now publishes a pending and final commit-status context with a direct Actions run URL, so end-to-end verification can be inspected against the exact tested SHA.
 - The expected `document-intelligence-live-validation` status has not yet been observed in the repository's combined commit-status response. Existing Railway deployment status contexts are not treated as test results. Test execution and the actual Qwen/PostgreSQL output therefore remain unverified until the GitHub Actions run is visible.
+
+- `154cd4abf77b501db24556e8ba551883575a819a` — removes duplicate OCR-format and PostgreSQL-restart suite invocations from the live-Qwen workflow; dedicated backend and PostgreSQL workflows retain those gates, while the live-Qwen conflict test itself still exercises scanned-PDF OCR and DOCX extraction end to end.
