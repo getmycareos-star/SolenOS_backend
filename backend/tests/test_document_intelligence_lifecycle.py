@@ -172,6 +172,10 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         before_review_situation = client.get("/api/situation", headers=auth)
         assert before_review_situation.status_code == 200, before_review_situation.text
         assert before_review_situation.json()["document_assertions"] == []
+        assert not any(
+            item.get("document_assertion_id")
+            for item in before_review_situation.json()["active_care_situation"]["observations"]
+        )
 
         first_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_ids[0]}/review",
@@ -240,6 +244,16 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
             if item["id"] == first_evidence_id
         )
         assert projected_observation["document_assertions"][0]["assertion_id"] == first_assertion_id
+        progressive_observation = next(
+            item for item in situation_payload["active_care_situation"]["observations"]
+            if item.get("document_assertion_id") == first_assertion_id
+        )
+        assert progressive_observation["kind"] == "document"
+        assert progressive_observation["raw_text"] == quote
+        assert progressive_observation["human_fact"] == quote
+        assert progressive_observation["epistemic_kind"] == "mixed"
+        assert progressive_observation["source_reference_id"] == first_evidence_id
+        assert progressive_observation["temporal_context"] == "not_established"
     finally:
         client.close()
         app.dependency_overrides.clear()
