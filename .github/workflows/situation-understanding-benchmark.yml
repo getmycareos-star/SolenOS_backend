@@ -53,8 +53,9 @@ permissions:
 # A new care-critical commit supersedes any older in-progress benchmark for
 # the same branch. The final main commit must receive the complete gate.
 concurrency:
-  group: messy-care-benchmark-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep the persisted messy-care benchmark result for each exact main commit.
+  group: messy-care-benchmark-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   postgres-longitudinal-integration:
