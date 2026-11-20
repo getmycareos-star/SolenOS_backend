@@ -393,6 +393,14 @@ def test_daily_capture_rejection_never_creates_lcr_assertion_or_allows_retry(mon
     assert rejected.json()["candidate"]["review_status"] == "rejected_by_caregiver"
     assert rejected.json()["assertion_id"] is None
 
+    persisted_rejection = client.get(
+        f"/api/v1/capture/analyses/{analysis_id}",
+        headers=auth,
+    )
+    assert persisted_rejection.status_code == 200, persisted_rejection.text
+    assert persisted_rejection.json()["candidates"]["observations"][0]["review_status"] == "rejected_by_caregiver"
+    assert persisted_rejection.json()["written_to_lcr"] is False
+
     for decision in ("accept", "reject"):
         retry = client.post(
             f"/api/v1/capture/analyses/{analysis_id}/review",
