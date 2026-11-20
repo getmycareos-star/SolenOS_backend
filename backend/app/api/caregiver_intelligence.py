@@ -8,6 +8,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.care import Caregiver as SessionCaregiverModel
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.caregiver_intelligence import (
     CaregiverProfile as CaregiverProfileModel,
     CaregiverRole as CaregiverRoleModel,
@@ -321,6 +322,7 @@ def end_caregiver_role(role_id: str, request: Request, db: Session = Depends(get
 @router.post("/caregiver-responsibilities", response_model=CaregiverResponsibility)
 def create_responsibility(responsibility: CaregiverResponsibilityCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     _assert_person_scope(request, db, responsibility.person_id)
     _assert_actor_id(responsibility.caregiver_id, current_profile.id, session_caregiver_id)
     _require_profile_in_person(db, responsibility.caregiver_id if responsibility.caregiver_id != session_caregiver_id else current_profile.id, person_id)
@@ -349,6 +351,7 @@ def list_responsibilities(person_id: str, request: Request, caregiver_id: Option
 @router.patch("/caregiver-responsibilities/{responsibility_id}/end", response_model=CaregiverResponsibility)
 def end_responsibility(responsibility_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     responsibility = db.query(CaregiverResponsibilityModel).filter(
         CaregiverResponsibilityModel.id == str(responsibility_id),
         CaregiverResponsibilityModel.person_id == person_id,
@@ -386,6 +389,7 @@ def get_responsibility_history(caregiver_id: str, person_id: str, request: Reque
 @router.post("/caregiver-observations", response_model=CaregiverObservation)
 def create_observation(observation: CaregiverObservationCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
     _assert_person_scope(request, db, observation.person_id)
     _assert_actor_id(observation.caregiver_id, current_profile.id, session_caregiver_id)
     if observation.is_promoted_to_shared or observation.promoted_by_caregiver_id or observation.promoted_at:
@@ -433,6 +437,7 @@ def list_caregiver_observations(person_id: str, caregiver_id: str, request: Requ
 @router.post("/caregiver-observations/{observation_id}/promote")
 def promote_observation(observation_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "share_observations")
     _assert_actor_id(caregiver_id, current_profile.id, session_caregiver_id)
     service = CaregiverIntelligenceService(db)
     observation = service.promote_observation_to_shared(observation_id, current_profile.id, person_id=person_id)
@@ -444,6 +449,7 @@ def promote_observation(observation_id: str, request: Request, caregiver_id: Opt
 @router.post("/caregiver-perspectives", response_model=CaregiverPerspective)
 def create_perspective(perspective: CaregiverPerspectiveCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
     _assert_person_scope(request, db, perspective.person_id)
     _assert_actor_id(perspective.caregiver_id, current_profile.id, session_caregiver_id)
     if perspective.is_promoted_to_shared or perspective.promoted_by_caregiver_id or perspective.promoted_at:
@@ -474,6 +480,7 @@ def list_perspectives(person_id: str, request: Request, caregiver_id: Optional[s
 @router.post("/caregiver-perspectives/{perspective_id}/promote")
 def promote_perspective(perspective_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "share_observations")
     _assert_actor_id(caregiver_id, current_profile.id, session_caregiver_id)
     service = CaregiverIntelligenceService(db)
     perspective = service.promote_perspective_to_shared(perspective_id, current_profile.id, person_id=person_id)
@@ -485,6 +492,7 @@ def promote_perspective(perspective_id: str, request: Request, caregiver_id: Opt
 @router.post("/caregiver-handoffs", response_model=CaregiverHandoff)
 def create_handoff(handoff: CaregiverHandoffCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_handoffs")
     _assert_person_scope(request, db, handoff.person_id)
     _assert_actor_id(handoff.from_caregiver_id, current_profile.id, session_caregiver_id)
     recipient = _resolve_profile_target(db, handoff.to_caregiver_id, person_id)
