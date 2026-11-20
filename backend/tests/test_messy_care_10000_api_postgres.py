@@ -197,38 +197,39 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                 person_ids.append(person_id)
                 tokens[person_index] = token
 
-                reporter_response = client.post(
-                    "/api/v1/caregivers",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "name": f"Reporter {person_index:04d}",
-                        "relationship": "Family",
-                        "person_id": person_id,
-                        "timezone": "UTC",
-                    },
-                )
-                assert reporter_response.status_code == 200, (
-                    f"identity={person_index} reporter: "
-                    f"{reporter_response.status_code} {reporter_response.text}"
-                )
-                observer_response = client.post(
-                    "/api/v1/caregivers",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "name": f"Observer {person_index:04d}",
-                        "relationship": "Family",
-                        "person_id": person_id,
-                        "timezone": "UTC",
-                    },
-                )
-                assert observer_response.status_code == 200, (
-                    f"identity={person_index} observer: "
-                    f"{observer_response.status_code} {observer_response.text}"
-                )
+                session_headers = {"Authorization": f"Bearer {token}"}
+
+                def invite_and_accept(role: str) -> str:
+                    display_name = f"{role.title()} {person_index:04d}"
+                    email = f"{role}-{suffix}-{person_index:04d}@benchmark.invalid"
+                    invitation = client.post(
+                        "/api/v1/caregiver-access/invitations",
+                        headers=session_headers,
+                        json={"email": email, "expires_in_days": 7},
+                    )
+                    assert invitation.status_code == 201, (
+                        f"identity={person_index} {role} invitation: "
+                        f"{invitation.status_code} {invitation.text}"
+                    )
+                    accepted = client.post(
+                        "/api/v1/caregiver-access/invitations/accept",
+                        json={
+                            "token": invitation.json()["invitation_token"],
+                            "email": email,
+                            "password": f"benchmark-{suffix}-{role}-password",
+                            "name": display_name,
+                        },
+                    )
+                    assert accepted.status_code == 201, (
+                        f"identity={person_index} {role} acceptance: "
+                        f"{accepted.status_code} {accepted.text}"
+                    )
+                    return accepted.json()["caregiver_id"]
+
                 caregiver_ids[person_index] = {
                     "uploader": uploader_id,
-                    "reporter": reporter_response.json()["id"],
-                    "observer": observer_response.json()["id"],
+                    "reporter": invite_and_accept("reporter"),
+                    "observer": invite_and_accept("observer"),
                 }
 
             for journey_index in range(LIFECYCLE_COUNT):
