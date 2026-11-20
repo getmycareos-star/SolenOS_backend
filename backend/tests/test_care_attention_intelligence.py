@@ -439,6 +439,7 @@ def test_persisted_change_keeps_evidence_significance_and_follow_up_dimensions_s
         "attention_candidate": True,
         "follow_up_candidate": True,
         "action_status": "open",
+        "linked_follow_up_outcome_status": "outcome_unknown",
         "linked_follow_up_id": "loop-dimensions",
         "baseline_coverage_status": "unknown",
         "current_coverage_status": "covered",
@@ -465,6 +466,7 @@ def test_persisted_change_keeps_evidence_significance_and_follow_up_dimensions_s
     assert item["confidence_interpretation"] == "uncalibrated_score_not_probability"
     assert item["assessment_dimensions"] == [{"name": "frequency", "score": 0.61}]
     assert item["action_status"] == "open"
+    assert item["linked_follow_up_outcome_status"] == "outcome_unknown"
     assert item["linked_follow_up_id"] == "loop-dimensions"
     assert item["history_completeness"] == "partial_or_unknown"
     assert clarification == []
