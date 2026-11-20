@@ -112,7 +112,7 @@ def test_committed_care_record_survives_engine_recreation(tmp_path):
 
 def test_schema_type_contract_accepts_matching_postgres_native_enum_labels():
     from enum import Enum as PythonEnum
-    from sqlalchemy import Enum as SQLAlchemyEnum
+    from sqlalchemy import Enum as SQLAlchemyEnum, String
     from sqlalchemy.dialects.postgresql import ENUM as PostgreSQLEnum
 
     from app.core.database import _schema_column_types_compatible
