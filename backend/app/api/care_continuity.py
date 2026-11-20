@@ -3252,10 +3252,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             column["name"] for column in inspector.get_columns("significance_assessments")
         } if significance_table_available else set()
         required_significance_columns = {
-            "id", "person_id", "evidence_status", "evidence_confidence",
-            "significance_confidence", "dimensions", "attention_candidate",
-            "follow_up_candidate", "explanation", "is_active",
-            "superseded_by_assessment_id",
+            "id", "person_id", "target_type", "target_id", "verdict",
+            "evidence_status", "evidence_confidence", "significance_confidence",
+            "dimensions", "attention_candidate", "follow_up_candidate",
+            "explanation", "is_active", "superseded_by_assessment_id",
         }
         significance_schema_available = required_significance_columns.issubset(significance_columns)
         significance_assessment_ids = sorted({
@@ -3266,6 +3266,9 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         if significance_schema_available and significance_assessment_ids:
             significance_rows = db.query(
                 SignificanceAssessment.id,
+                SignificanceAssessment.target_type,
+                SignificanceAssessment.target_id,
+                SignificanceAssessment.verdict,
                 SignificanceAssessment.evidence_status,
                 SignificanceAssessment.evidence_confidence,
                 SignificanceAssessment.significance_confidence,
@@ -3294,8 +3297,12 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "superseded_by_change_id": change.superseded_by_change_id,
                 "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
-                "attention_candidate": bool(change.attention_candidate),
-                "follow_up_candidate": bool(change.follow_up_candidate),
+                "attention_candidate": bool(
+                    significance.attention_candidate if significance else change.attention_candidate
+                ),
+                "follow_up_candidate": bool(
+                    significance.follow_up_candidate if significance else change.follow_up_candidate
+                ),
                 "confirmation_status": change.confirmation_status,
                 "baseline_id": change.baseline_id,
                 "baseline_coverage_status": change.baseline_coverage_status,
@@ -3414,6 +3421,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 for event in linked_events
             ]
             significance = significance_assessment_by_id.get(str(getattr(change, "significance_assessment_id", "") or ""))
+            if significance and (
+                str(significance.target_type or "") != "change"
+                or str(significance.target_id or "") != str(change.id)
+            ):
+                # A same-person assessment linked to a different change is not
+                # valid provenance for this row. Keep the change visible using
+                # its own persisted flags, but do not borrow another assessment.
+                significance = None
             linked_follow_up = next(
                 (loop for loop in open_loops if str(loop.get("source_id") or "") == str(change.id)),
                 None,
@@ -3423,7 +3438,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "title": str(change.subject_type or "Recorded care change").replace("_", " ").capitalize(),
                 "change_type": getattr(change.change_type, "value", change.change_type),
                 "change_direction": getattr(change.change_direction, "value", change.change_direction),
-                "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "significance_verdict": (
+                    getattr(significance.verdict, "value", significance.verdict)
+                    if significance else getattr(change.significance_verdict, "value", change.significance_verdict)
+                ),
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
                 "evidence_status": (
                     getattr(significance.evidence_status, "value", significance.evidence_status)
