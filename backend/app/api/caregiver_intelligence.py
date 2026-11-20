@@ -185,6 +185,7 @@ def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, so
 @router.post("/caregiver-profiles", response_model=CaregiverProfile)
 def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id = _assert_person_scope(request, db, profile.person_id)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     # Names/emails are user-supplied profile data, never proof of identity.
     # Link only the first profile created by this authenticated session to its
     # server-resolved caregiver ID. Additional profiles remain unlinked until
@@ -259,6 +260,7 @@ def update_caregiver_involvement(caregiver_id: str, status: str, request: Reques
 @router.post("/caregiver-roles", response_model=CaregiverRole)
 def create_caregiver_role(role: CaregiverRoleCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     _assert_person_scope(request, db, role.person_id)
     _assert_actor_id(role.caregiver_id, current_profile.id, session_caregiver_id)
     _require_profile_in_person(db, role.caregiver_id if role.caregiver_id != session_caregiver_id else current_profile.id, person_id)
@@ -293,6 +295,7 @@ def list_caregiver_roles(person_id: str, request: Request, caregiver_id: Optiona
 @router.patch("/caregiver-roles/{role_id}/end", response_model=CaregiverRole)
 def end_caregiver_role(role_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     role = db.query(CaregiverRoleModel).filter(
         CaregiverRoleModel.id == str(role_id),
         CaregiverRoleModel.person_id == person_id,
@@ -481,7 +484,6 @@ def list_perspectives(person_id: str, request: Request, caregiver_id: Optional[s
 def promote_perspective(perspective_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
     require_caregiver_permission(db, person_id, session_caregiver_id, "share_observations")
-    require_caregiver_permission(db, person_id, session_caregiver_id, "share_observations")
     _assert_actor_id(caregiver_id, current_profile.id, session_caregiver_id)
     service = CaregiverIntelligenceService(db)
     perspective = service.promote_perspective_to_shared(perspective_id, current_profile.id, person_id=person_id)
@@ -541,6 +543,7 @@ def list_handoffs(person_id: str, request: Request, caregiver_id: Optional[str] 
 @router.post("/caregiver-activities", response_model=CaregiverActivity)
 def create_activity(activity: CaregiverActivityCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
     _assert_person_scope(request, db, activity.person_id)
     _assert_actor_id(activity.caregiver_id, current_profile.id, session_caregiver_id)
     if activity.is_anonymous:
@@ -589,6 +592,7 @@ def create_communication(communication: CaregiverCommunicationCreate, request: R
 @router.get("/caregiver-communications", response_model=List[CaregiverCommunication])
 def list_scoped_communications(request: Request, db: Session = Depends(get_db)):
     person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, _session_caregiver_id, "view_communications")
     communications = (
         db.query(CaregiverCommunicationModel)
         .filter(CaregiverCommunicationModel.person_id == person_id)
@@ -640,6 +644,7 @@ def list_communications(person_id: str, request: Request, caregiver_id: Optional
 @router.post("/care-network-relationships", response_model=CareNetworkRelationship)
 def create_network_relationship(relationship: CareNetworkRelationshipCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     _assert_person_scope(request, db, relationship.person_id)
     _assert_actor_id(relationship.from_caregiver_id, current_profile.id, session_caregiver_id)
     target_id = _resolve_profile_target(db, relationship.to_caregiver_id, person_id).id if relationship.to_caregiver_id else None
@@ -659,6 +664,7 @@ def list_network_relationships(person_id: str, request: Request, db: Session = D
 @router.post("/caregiver-contexts", response_model=CaregiverContext)
 def create_context(context: CaregiverContextCreate, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
     _assert_person_scope(request, db, context.person_id)
     _assert_actor_id(context.caregiver_id, current_profile.id, session_caregiver_id)
     context = CaregiverContextCreate(**{**context.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id})
@@ -684,6 +690,7 @@ def list_contexts(person_id: str, request: Request, db: Session = Depends(get_db
 @router.post("/responsibility-gaps", response_model=ResponsibilityGap)
 def create_responsibility_gap(gap: ResponsibilityGapCreate, request: Request, db: Session = Depends(get_db)):
     person_id, _session_caregiver_id, _current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, _session_caregiver_id, "manage_responsibilities")
     _assert_person_scope(request, db, gap.person_id)
     if gap.status != CoverageGapStatus.OPEN or gap.resolution or gap.resolved_at:
         raise HTTPException(
@@ -713,6 +720,7 @@ def list_responsibility_gaps(person_id: str, request: Request, db: Session = Dep
 @router.post("/responsibility-gaps/{gap_id}/review", response_model=ResponsibilityGap)
 def review_responsibility_gap(gap_id: str, review: ResponsibilityGapReview, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, _current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_responsibilities")
     gap = db.query(ResponsibilityGapModel).filter(
         ResponsibilityGapModel.id == str(gap_id),
         ResponsibilityGapModel.person_id == person_id,
@@ -757,6 +765,7 @@ def review_responsibility_gap(gap_id: str, review: ResponsibilityGapReview, requ
 @router.post("/perspective-conflicts", response_model=PerspectiveConflict)
 def create_perspective_conflict(conflict: PerspectiveConflictCreate, request: Request, db: Session = Depends(get_db)):
     person_id, _session_caregiver_id, _current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, _session_caregiver_id, "share_observations")
     _assert_person_scope(request, db, conflict.person_id)
     if str(conflict.caregiver_a_id) == str(conflict.caregiver_b_id):
         raise HTTPException(status_code=422, detail="A perspective comparison requires two different caregivers.")
@@ -792,6 +801,7 @@ def list_perspective_conflicts(person_id: str, request: Request, db: Session = D
 @router.post("/perspective-conflicts/{conflict_id}/resolve", response_model=PerspectiveConflict)
 def resolve_perspective_conflict(conflict_id: str, review: PerspectiveConflictReview, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, _current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "share_observations")
     conflict = db.query(PerspectiveConflictModel).filter(
         PerspectiveConflictModel.id == str(conflict_id),
         PerspectiveConflictModel.person_id == person_id,
@@ -830,6 +840,7 @@ def resolve_perspective_conflict(conflict_id: str, review: PerspectiveConflictRe
 @router.post("/duplicate-actions", response_model=DuplicateAction)
 def create_duplicate_action(duplicate: DuplicateActionCreate, request: Request, db: Session = Depends(get_db)):
     person_id, _session_caregiver_id, _current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, _session_caregiver_id, "correct_records")
     _assert_person_scope(request, db, duplicate.person_id)
     _require_profile_in_person(db, duplicate.caregiver_a_id, person_id)
     _require_profile_in_person(db, duplicate.caregiver_b_id, person_id)
@@ -854,6 +865,7 @@ def list_duplicate_actions(person_id: str, request: Request, db: Session = Depen
 @router.post("/duplicate-actions/{duplicate_id}/review", response_model=DuplicateAction)
 def review_duplicate_action(duplicate_id: str, review: DuplicateActionReview, request: Request, db: Session = Depends(get_db)):
     person_id, session_caregiver_id, _current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "correct_records")
     duplicate = db.query(DuplicateActionModel).filter(
         DuplicateActionModel.id == str(duplicate_id),
         DuplicateActionModel.person_id == person_id,
