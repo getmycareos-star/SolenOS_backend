@@ -115,6 +115,45 @@ def _evidence_ids_from_row(row) -> list[str]:
     return [str(values)] if isinstance(values, str) and values.strip() else []
 
 
+def _sync_appointment_document_links(
+    db: Session, *, person_id: str, appointment_id: str | None, payload: dict
+) -> None:
+    """Attach already-persisted, same-person document evidence to the appointment."""
+    raw_ids = payload.get("attachedEvidenceIds", payload.get("attached_evidence_ids"))
+    if raw_ids is None:
+        return
+    if not isinstance(raw_ids, list) or len(raw_ids) > 25:
+        raise HTTPException(status_code=422, detail="Appointment document references must be a list of at most 25 evidence IDs")
+    evidence_ids = list(dict.fromkeys(
+        value.strip() for value in raw_ids
+        if isinstance(value, str) and value.strip()
+    ))
+    if len(evidence_ids) != len(raw_ids):
+        raise HTTPException(status_code=422, detail="Appointment document references must contain only non-empty evidence IDs")
+    if not evidence_ids:
+        return
+    if appointment_id is None:
+        raise HTTPException(status_code=422, detail="A document can only be linked to an existing appointment record")
+    appointment = db.query(Appointment).filter(
+        Appointment.id == appointment_id,
+        Appointment.person_id == person_id,
+    ).with_for_update().first()
+    if appointment is None:
+        raise HTTPException(status_code=404, detail="Appointment not found for this care record")
+    rows = db.query(Evidence.id).filter(
+        Evidence.person_id == person_id,
+        Evidence.id.in_(evidence_ids),
+        Evidence.type == "document",
+        (Evidence.evidence_status.is_(None)) | (Evidence.evidence_status != "deleted_by_caregiver"),
+    ).all()
+    found = {str(row[0]) for row in rows}
+    if found != set(evidence_ids):
+        raise HTTPException(status_code=422, detail="Every attached document must already exist in this care record")
+    appointment.evidence_ids = list(dict.fromkeys(
+        [str(value) for value in (appointment.evidence_ids or [])] + evidence_ids
+    ))
+
+
 def _record_out(record: AppointmentWorkspaceRecord, db: Session | None = None) -> dict:
     """Serialize a workspace and fail closed when its care context may have changed.
 
@@ -233,6 +272,9 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
     )
     db.add(revision)
     try:
+        _sync_appointment_document_links(
+            db, person_id=person_id, appointment_id=row.appointment_id, payload=payload.payload,
+        )
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
             workspace_id=row.id, payload=payload.payload, appointment_id=row.appointment_id,
@@ -1825,6 +1867,9 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
     )
     db.add(revision)
     try:
+        _sync_appointment_document_links(
+            db, person_id=person_id, appointment_id=row.appointment_id, payload=payload.payload,
+        )
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
             workspace_id=row.id, payload=payload.payload, appointment_id=row.appointment_id,
@@ -1856,6 +1901,9 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
             if prior_revision is not None:
                 raise HTTPException(status_code=409, detail="This save key was already used for different appointment information") from exc
         raise HTTPException(status_code=503, detail="Appointment workspace update could not be persisted") from exc
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Appointment workspace update could not be persisted") from exc
