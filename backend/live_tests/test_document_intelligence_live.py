@@ -598,6 +598,20 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
                 for item in lcr_conflicts
             )
 
+        situation = client.get("/api/situation", headers=headers)
+        assert situation.status_code == 200, situation.text
+        situation_payload = situation.json()
+        situation_document_assertions = situation_payload["document_assertions"]
+        assert set(assertion_ids).issubset({
+            item["assertion_id"] for item in situation_document_assertions
+        })
+        progressive_document_ids = {
+            item.get("document_assertion_id")
+            for item in situation_payload["active_care_situation"]["observations"]
+            if item.get("document_assertion_id")
+        }
+        assert set(assertion_ids).issubset(progressive_document_ids)
+
         companion = client.post(
             "/api/v1/conversation/message",
             headers=headers,
