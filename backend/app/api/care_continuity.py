@@ -5222,6 +5222,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             "outcomes": "care_action_outcomes",
             "caregiver-contexts": "caregiver_contexts",
             "caregiver-perspectives": "caregiver_perspectives",
+            "follow-up-links": "care_follow_up_links",
         }
         if resource in unified_core_revision_targets:
             _append_unified_core_source_revision(
