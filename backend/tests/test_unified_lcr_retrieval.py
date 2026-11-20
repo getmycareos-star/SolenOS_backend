@@ -185,6 +185,10 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
                 db, "fact-lineage-person", caregiver_id="fact-lineage-caregiver",
                 query="sleep", include_all_history=True,
             )
+            from app.services.delta_engine import _resolve_delta_source_refs
+            delta_references = _resolve_delta_source_refs(
+                db, "fact-lineage-person", ["fact-with-source"],
+            )
         fact = next(item for item in context["sources"]["facts"]["items"] if item["id"] == "fact-with-source")
         assert fact["evidence_ids"] == ["fact-source-evidence"]
         assert fact["evidence_link_status"] == "verified_person_scoped_links"
@@ -193,6 +197,13 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
             "evidence_role": "supports",
             "source_span": "Caregiver reported overnight waking.",
             "integrity_status": "verified_person_scoped",
+        }]
+        fact_reference = next(ref for ref in delta_references if ref["record_type"] == "care_fact")
+        assert fact_reference["record_id"] == "fact-with-source"
+        assert fact_reference["source_evidence"] == [{
+            "evidence_id": "fact-source-evidence",
+            "evidence_role": "supports",
+            "source_span": "Caregiver reported overnight waking.",
         }]
     finally:
         _close_postgres_conversation_db(engine, connection, schema)
