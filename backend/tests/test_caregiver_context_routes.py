@@ -472,6 +472,13 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
     assert direct.status_code == 201, direct.text
     assert direct.json()["observation_type"] == "DIRECT"
 
+    context = client.post(
+        "/api/v1/care-continuity/caregiver-contexts",
+        headers=headers,
+        json={"context_type": "daily_routine", "context_payload": {"preferred_time": "morning"}},
+    )
+    assert context.status_code == 201, context.text
+
     db = TestingSessionLocal()
     try:
         revisions = Base.metadata.tables["care_observation_revisions"]
@@ -488,6 +495,30 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
         assert all(row["revision_number"] == 1 for row in saved_revisions)
         assert all(row["previous_payload"] is None for row in saved_revisions)
         assert all(row["current_payload"] for row in saved_revisions)
+
+        unified = Base.metadata.tables["care_state_revisions"]
+        unified_rows = db.execute(
+            select(unified).where(
+                unified.c.person_id == first["person"]["id"],
+                unified.c.target_type.in_([
+                    "caregiver_observations", "caregiver_perspectives", "caregiver_contexts",
+                ]),
+            )
+        ).mappings().all()
+        unified_by_target = {(row["target_type"], row["target_id"]): row for row in unified_rows}
+        expected_targets = {
+            ("caregiver_observations", observation.json()["id"]),
+            ("caregiver_observations", direct.json()["id"]),
+            ("caregiver_perspectives", perspective.json()["id"]),
+            ("caregiver_contexts", context.json()["id"]),
+        }
+        assert expected_targets.issubset(set(unified_by_target))
+        for target in expected_targets:
+            revision = unified_by_target[target]
+            assert revision["revision_number"] == 1
+            assert revision["change_kind"] == "created"
+            assert revision["before_state"] is None
+            assert revision["after_state"]
     finally:
         db.close()
 
