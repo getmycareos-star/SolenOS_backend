@@ -86,7 +86,22 @@ def _care_recipient_profile_json(
     person: SessionPersonModel,
     caregiver_profile: CaregiverProfileModel,
 ) -> dict:
-    contexts = (
+    shared_contexts = (
+        db.query(CaregiverContextModel)
+        .filter(
+            CaregiverContextModel.person_id == str(person.id),
+            CaregiverContextModel.caregiver_id.is_(None),
+        )
+        .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+        .all()
+    )
+    recipient_snapshot = None
+    for context in shared_contexts:
+        metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
+        if metadata.get("record_type") == "care_recipient_profile":
+            recipient_snapshot = metadata
+            break
+    relationship_contexts = (
         db.query(CaregiverContextModel)
         .filter(
             CaregiverContextModel.person_id == str(person.id),
@@ -95,16 +110,16 @@ def _care_recipient_profile_json(
         .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
         .all()
     )
-    profile_snapshot = None
-    for context in contexts:
+    relationship_snapshot = None
+    for context in relationship_contexts:
         metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
-        if metadata.get("record_type") == "care_recipient_profile":
-            profile_snapshot = metadata
+        if metadata.get("record_type") == "caregiver_relationship":
+            relationship_snapshot = metadata
             break
-    condition = profile_snapshot.get("condition") if profile_snapshot else None
+    condition = recipient_snapshot.get("condition") if recipient_snapshot else None
     return {
-        "name": profile_snapshot.get("recipient_name") if profile_snapshot and isinstance(profile_snapshot.get("recipient_name"), str) else person.name,
-        "relationship": profile_snapshot.get("caregiver_relationship") if profile_snapshot and isinstance(profile_snapshot.get("caregiver_relationship"), str) else (caregiver_profile.relationship or ""),
+        "name": person.name,
+        "relationship": caregiver_profile.relationship or "",
         "condition": condition if isinstance(condition, str) and condition.strip() else None,
     }
 
@@ -314,7 +329,29 @@ def update_care_recipient_profile(
         person.name = name
         caregiver_profile.relationship = relationship
 
-        contexts = (
+        shared_contexts = (
+            db.query(CaregiverContextModel)
+            .filter(
+                CaregiverContextModel.person_id == person_id,
+                CaregiverContextModel.caregiver_id.is_(None),
+            )
+            .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+            .with_for_update()
+            .all()
+        )
+        latest_recipient_context = None
+        for context in shared_contexts:
+            metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
+            if metadata.get("record_type") == "care_recipient_profile":
+                latest_recipient_context = context
+                break
+        previous_recipient_snapshot = (
+            latest_recipient_context.context_metadata
+            if latest_recipient_context is not None and isinstance(latest_recipient_context.context_metadata, dict)
+            else {}
+        )
+
+        relationship_contexts = (
             db.query(CaregiverContextModel)
             .filter(
                 CaregiverContextModel.person_id == person_id,
@@ -324,37 +361,44 @@ def update_care_recipient_profile(
             .with_for_update()
             .all()
         )
-        latest_profile_context = None
-        for context in contexts:
+        latest_relationship_context = None
+        for context in relationship_contexts:
             metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
-            if metadata.get("record_type") == "care_recipient_profile":
-                latest_profile_context = context
+            if metadata.get("record_type") == "caregiver_relationship":
+                latest_relationship_context = context
                 break
-        previous_snapshot = (
-            latest_profile_context.context_metadata
-            if latest_profile_context is not None and isinstance(latest_profile_context.context_metadata, dict)
-            else {}
-        )
-        next_snapshot = {
+
+        now = datetime.now(timezone.utc)
+        changed_fields = []
+        recipient_snapshot = {
             "record_type": "care_recipient_profile",
             "recipient_name": name,
-            "caregiver_relationship": relationship,
             "condition": condition,
             "epistemic_status": "caregiver_reported",
             "reported_by_session_caregiver_id": session_caregiver_id,
         }
-        changed_fields = [
-            field for field, previous, current in (
-                ("recipient_name", previous_person_name, name),
-                ("caregiver_relationship", previous_relationship, relationship),
-                ("condition", previous_snapshot.get("condition"), condition),
-            )
-            if previous != current
-        ]
-        if changed_fields:
-            now = datetime.now(timezone.utc)
-            if latest_profile_context is not None and latest_profile_context.effective_end is None:
-                latest_profile_context.effective_end = now
+        recipient_changed = any(
+            previous_recipient_snapshot.get(field) != recipient_snapshot.get(field)
+            for field in ("recipient_name", "condition")
+        )
+        if recipient_changed:
+            if latest_recipient_context is not None and latest_recipient_context.effective_end is None:
+                latest_recipient_context.effective_end = now
+            db.add(CaregiverContextModel(
+                person_id=person_id,
+                caregiver_id=None,
+                proximity_category=None,
+                observation_window_start=None,
+                observation_window_end=None,
+                availability_notes=None,
+                context_metadata=recipient_snapshot,
+                effective_start=now,
+                effective_end=None,
+            ))
+        if previous_relationship != relationship:
+            changed_fields.append("caregiver_relationship")
+            if latest_relationship_context is not None and latest_relationship_context.effective_end is None:
+                latest_relationship_context.effective_end = now
             db.add(CaregiverContextModel(
                 person_id=person_id,
                 caregiver_id=caregiver_profile.id,
@@ -362,10 +406,20 @@ def update_care_recipient_profile(
                 observation_window_start=None,
                 observation_window_end=None,
                 availability_notes=None,
-                context_metadata=next_snapshot,
+                context_metadata={
+                    "record_type": "caregiver_relationship",
+                    "caregiver_relationship": relationship,
+                    "epistemic_status": "caregiver_reported",
+                    "reported_by_session_caregiver_id": session_caregiver_id,
+                },
                 effective_start=now,
                 effective_end=None,
             ))
+        if previous_person_name != name:
+            changed_fields.append("recipient_name")
+        if previous_recipient_snapshot.get("condition") != condition:
+            changed_fields.append("condition")
+        if changed_fields:
             db.add(AuditLogEvent(
                 actor_id=session_caregiver_id,
                 subject_id=person_id,
