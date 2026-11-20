@@ -15,6 +15,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.lcr_context import build_lcr_context
+from app.services.caregiver_permissions import require_caregiver_permission
 
 router = APIRouter(tags=["capture review"])
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ def get_capture_analysis(
 ):
     """Return only the authenticated caregiver's persisted extraction and review state."""
     person_id, caregiver_id = _session_scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
@@ -86,6 +88,7 @@ def review_capture_candidate(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _session_scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     analysis = (
         db.query(CaptureAnalysis)
         .filter(
