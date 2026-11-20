@@ -66,6 +66,126 @@ def _auth_disposition(path: str, method: str) -> str:
     return "outside-v1-session-middleware; inspect route dependencies"
 
 
+# Domain-level routing map. These entries identify the intended product or
+# internal consumer and the persistence family; route-specific table writes
+# still require handler/service review and are never guessed from the URL.
+CONSUMER_DOMAINS = [
+    ("/api/v1/privacy/requests/reviewer", ("internal", "Privacy reviewer workflow", "backend/app/api/privacy_requests.py")),
+    ("/api/v1/security-incidents", ("internal", "Security incident operations", "backend/app/api/security_incidents.py")),
+    ("/api/v1/assistant/evaluate-production", ("internal", "Production inference acceptance workflow", "backend/scripts/run_production_qwen_evaluation.py")),
+    ("/api/v1/assistant", ("frontend", "AI Companion availability and assistance", "src/components/workflows/AICompanion.tsx")),
+    ("/api/v1/sessions", ("frontend", "Anonymous session and identity lifecycle", "src/api/client.ts")),
+    ("/api/v1/accounts", ("frontend", "Optional account and recovery settings", "src/api/client.ts")),
+    ("/api/v1/caregiver-access", ("frontend", "Caregiver invitations and permissions", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/privacy/requests", ("frontend", "Caregiver privacy requests", "src/app/workspace/settings/page.tsx")),
+    ("/api/v1/identity", ("frontend", "Session and device security settings", "src/app/workspace/settings/page.tsx")),
+    ("/api/v1/evidence", ("frontend", "Daily Care and Documents evidence capture and retrieval", "src/components/workflows")),
+    ("/api/v1/upload", ("frontend", "Documents upload and download", "src/components/workflows/DocumentsWorkspace.tsx")),
+    ("/api/v1/documents", ("frontend", "Documents extraction, review and history", "src/components/workflows/DocumentsWorkspace.tsx")),
+    ("/api/v1/document", ("frontend", "Documents extraction and review", "src/components/workflows/DocumentsWorkspace.tsx")),
+    ("/api/v1/capture", ("frontend", "Daily Care capture review", "src/app/workspace/daily-care/page.tsx")),
+    ("/api/v1/daily", ("frontend", "Daily Care capture and intelligence", "src/app/workspace/daily-care/page.tsx")),
+    ("/api/v1/events", ("frontend", "Daily Care event history and LCR projection", "src/app/workspace/daily-care/page.tsx")),
+    ("/api/v1/insights", ("frontend", "Living Care Record current understanding", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx")),
+    ("/api/v1/corrections", ("frontend", "Care Record correction and review history", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx")),
+    ("/api/v1/observations", ("frontend", "Care Record observations and trends", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx")),
+    ("/api/v1/conversation", ("frontend", "AI Companion conversation and historical retrieval", "src/components/workflows/AICompanion.tsx")),
+    ("/api/v1/companion", ("frontend", "AI Companion care-report review", "src/components/workflows/AICompanion.tsx")),
+    ("/api/v1/care-delta", ("frontend", "Persisted LCR change history", "src/components/mvp-workspace/CareChangeHistoryPanel.tsx")),
+    ("/api/v1/change", ("frontend", "Change and situation review", "src/components/mvp-workspace/CareChangeHistoryPanel.tsx")),
+    ("/api/v1/care-continuity", ("frontend", "Canonical Living Care Record and unified retrieval", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx")),
+    ("/api/v1/uncertainty", ("frontend", "Care Record gaps, questions and contradictions", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx")),
+    ("/api/v1/caregiver-profiles", ("frontend", "Caregiver network profiles", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-roles", ("frontend", "Caregiver roles and participation", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-responsibilities", ("frontend", "Care responsibility assignment and history", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-observations", ("frontend", "Caregiver observations", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-perspectives", ("frontend", "Caregiver perspectives and conflicts", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-handoffs", ("frontend", "Caregiver-to-caregiver responsibility handoffs", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-activities", ("frontend", "Caregiver activity history", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-communications", ("frontend", "Caregiver communications", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/care-network", ("frontend", "Care network state and relationships", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-contexts", ("frontend", "Caregiver context", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/responsibility-gaps", ("frontend", "Responsibility gaps and review", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/perspective-conflicts", ("frontend", "Perspective conflict review", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/duplicate-actions", ("frontend", "Duplicate care action review", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/caregiver-summary", ("frontend", "Caregiver network summary", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/multi-caregiver-summary", ("frontend", "Multi-caregiver summary", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/care-network-state", ("frontend", "Care network state", "src/components/mvp-workspace/CaregiverAccessPanel.tsx")),
+    ("/api/v1/appointments", ("frontend", "Appointment records", "src/components/workflows/AppointmentWorkspace.tsx")),
+    ("/api/v1/appointment-workspaces", ("frontend", "Appointment preparation and outcome review", "src/components/workflows/AppointmentWorkspace.tsx")),
+    ("/api/v1/handoff-drafts", ("frontend", "Care handoff draft, approval and sharing", "src/components/workflows/CareHandoffSharing.tsx")),
+    ("/api/v1/handoffs", ("frontend", "Care handoff delivery and acknowledgment", "src/components/workflows/CareHandoffSharing.tsx")),
+    ("/api/v1/open-loops", ("frontend", "Open Loops lifecycle", "src/components/workflows/OpenLoopsWorkspace.tsx")),
+    ("/api/v1/reminders", ("frontend", "Care reminders and completion", "src/components/workflows/RemindersWorkspace.tsx")),
+    ("/api/v1/notifications", ("frontend", "Care notifications and push subscriptions", "src/components/workflows/NotificationsWorkspace.tsx")),
+    ("/api/v1/registered-actions", ("frontend", "Approved and audited care action lifecycle", "src/components/workflows/OpenLoopsWorkspace.tsx")),
+    ("/api/v1/safety", ("internal", "Safety validation and escalation", "backend/app/services/safety.py")),
+    ("/api/v1/causal", ("internal", "Evidence-bounded causal hypothesis analysis", "backend/app/services/causal_reasoning.py")),
+    ("/api/v1/time", ("frontend", "Caregiver time utilities", "src/api/client.ts")),
+    ("/api/v1/share-intake", ("frontend", "Approved care handoff intake", "src/components/workflows/CareHandoffSharing.tsx")),
+    ("/api/v1/temporal", ("internal", "Temporal reasoning and provenance", "backend/app/services/temporal_intelligence.py")),
+    ("/api/v1/timezones", ("frontend", "Caregiver time-zone context", "src/api/client.ts")),
+    ("/api/v1/care-windows", ("frontend", "Daily Care timing and routine context", "src/app/workspace/daily-care/page.tsx")),
+    ("/api/v1/locations", ("frontend", "Care context location records", "src/app/workspace/daily-care/page.tsx")),
+    ("/api/v1/transitions", ("frontend", "Care transition history", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx")),
+    ("/api/v1/persons", ("frontend", "Care-recipient identity and record setup", "src/api/client.ts")),
+    ("/api/v1/caregivers", ("frontend", "Caregiver identity and record setup", "src/api/client.ts")),
+    ("/api/v1/reasoning", ("internal", "Care reasoning and explanation services", "backend/app/services")),
+    ("/api/v1/learning-events", ("internal", "Reviewed feedback and learning records", "backend/app/services/improvement_learning.py")),
+    ("/api/v1/feedback", ("frontend", "Caregiver feedback submission", "src/components")),
+    ("/api/v1/parse-time", ("frontend", "Caregiver time parsing", "src/api/client.ts")),
+    ("/api/v1/situation", ("frontend", "Progressive care understanding and situation review", "src/components/workflows")),
+    ("/api/situation", ("frontend", "Progressive care understanding and situation review", "src/components/workflows")),
+    ("/api/lcr/orientation", ("frontend", "Returning-caregiver Care Record orientation", "src/components/workflows/AICompanion.tsx")),
+]
+
+PERSISTENCE_DOMAINS = [
+    ("/api/v1/sessions", "AnonymousSession; session refresh/revocation and identity audit records"),
+    ("/api/v1/accounts", "CaregiverAccount; account recovery and identity audit records"),
+    ("/api/v1/caregiver-access", "CaregiverAccessGrant; invitation and access audit records"),
+    ("/api/v1/privacy/requests", "PrivacyRequest; PrivacyExport; privacy delivery and audit records"),
+    ("/api/v1/identity", "AnonymousSession; device and identity security records; identity audit records"),
+    ("/api/v1/security-incidents", "Security incident records and audit events"),
+    ("/api/v1/evidence", "Evidence and evidence-lineage records; linked CareEvent/CareAssertion where workflow requires"),
+    ("/api/v1/upload", "Original Evidence/file metadata and durable document storage"),
+    ("/api/v1/documents", "Evidence; CaptureAnalysis; document proposal/review and accepted CareAssertion records"),
+    ("/api/v1/daily", "CareEvent; Evidence; CaptureAnalysis; CareDeltaRun; CareAssertion and reconciliation records"),
+    ("/api/v1/events", "CareEvent and linked Evidence; downstream CareAssertion/reconciliation records"),
+    ("/api/v1/conversation", "ConversationSession; ConversationMessage; Companion proposals only when explicitly persisted"),
+    ("/api/v1/companion", "AIOutputLCRProposal; AIOutputLCRDecision; CareAssertion; CareDeltaRun and reconciliation records"),
+    ("/api/v1/care-continuity", "CareAssertion; EvidenceObservation; CareRecordRelationship; contradiction, question, snapshot and revision records"),
+    ("/api/v1/care-delta", "CareDeltaRun and persisted change/situation/source references"),
+    ("/api/v1/uncertainty", "InformationGap; OpenQuestion; Contradiction and resolution history"),
+    ("/api/v1/change", "Situation; change assessments and source-linked Delta records"),
+    ("/api/v1/caregiver-", "CaregiverProfile; role, responsibility, observation, perspective, activity, communication and handoff records"),
+    ("/api/v1/care-network", "CareNetworkRelationship; ResponsibilityGap; PerspectiveConflict; DuplicateAction"),
+    ("/api/v1/appointments", "Appointment and linked evidence/outcome records"),
+    ("/api/v1/appointment-workspaces", "AppointmentWorkspaceRecord; AppointmentWorkspaceRevision; proposals and linked evidence"),
+    ("/api/v1/handoff-drafts", "HandoffDraft; immutable revisions; source snapshots and delivery records"),
+    ("/api/v1/handoffs", "Care handoff and delivery/acceptance/acknowledgment records"),
+    ("/api/v1/open-loops", "OpenLoop; linked actions, dependencies, outcome and verification history"),
+    ("/api/v1/reminders", "Reminder; reminder delivery receipts and notification records"),
+    ("/api/v1/notifications", "Notification; push subscription and delivery receipt records"),
+    ("/api/v1/registered-actions", "RegisteredAction; approval, execution, status and audit history"),
+    ("/api/v1/safety", "SafetyAuditRecord; SafetyEvent; Escalation; policy and evaluation records"),
+    ("/api/v1/causal", "Causal hypothesis/assessment records and evidence links"),
+    ("/api/v1/temporal", "TemporalFact; TemporalRelationship; TemporalContradiction and reference-frame records"),
+    ("/api/v1/persons", "Person and care-recipient identity"),
+    ("/api/v1/caregivers", "Caregiver identity and care relationship"),
+    ("/api/v1/reasoning", "Reasoning memory and derived analysis records"),
+    ("/api/v1/learning-events", "LearningEvent and reviewed feedback records"),
+    ("/api/v1/feedback", "LearningEvent and feedback records"),
+    ("/api/v1/situation", "Situation and source-linked care understanding records"),
+    ("/api/situation", "Situation and source-linked care understanding records"),
+]
+
+def _domain_match(path: str, mappings: list[tuple[str, Any]]) -> Any:
+    for prefix, value in sorted(mappings, key=lambda item: len(item[0]), reverse=True):
+        if path == prefix or path.startswith(prefix + "/") or path.startswith(prefix):
+            return value
+    return None
+
+
 def build_inventory() -> dict[str, Any]:
     openapi = app.openapi()
     route_index: dict[tuple[str, str], list[APIRoute]] = defaultdict(list)
@@ -137,8 +257,24 @@ def build_inventory() -> dict[str, Any]:
                 "request_body_required": request_body.get("required", False),
                 "request_schemas": request_schemas,
                 "response_schemas": response_schemas,
-                "consumer": "REVIEW_REQUIRED: name the frontend workflow or internal service",
-                "persistence": "REVIEW_REQUIRED: identify tables and transaction boundary",
+                "consumer": (
+                    {
+                        "type": _domain_match(path, CONSUMER_DOMAINS)[0],
+                        "workflow": _domain_match(path, CONSUMER_DOMAINS)[1],
+                        "source": _domain_match(path, CONSUMER_DOMAINS)[2],
+                        "resolution": "domain-prefix mapping; exact callsite/handler verification still required",
+                    }
+                    if _domain_match(path, CONSUMER_DOMAINS)
+                    else "REVIEW_REQUIRED: no consumer domain mapping"
+                ),
+                "persistence": (
+                    {
+                        "domain_tables": _domain_match(path, PERSISTENCE_DOMAINS),
+                        "resolution": "domain-level table family; exact handler write set and transaction boundary still require verification",
+                    }
+                    if _domain_match(path, PERSISTENCE_DOMAINS)
+                    else "REVIEW_REQUIRED: no persistence domain mapping"
+                ),
                 "integration_status": (
                     "registered-handler-match"
                     if len(matches) == 1
