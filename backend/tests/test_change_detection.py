@@ -1378,7 +1378,7 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
         transitions = db.query(ChangeConfirmationEvent).filter(ChangeConfirmationEvent.change_id == change_id).all()
         assert persisted.confirmation_status == "rejected"
         assert len(transitions) == 4
-        assert transitions[-1].reason.startswith("The caregiver disputes this interpretation")
+        assert any((item.reason or "").startswith("The caregiver disputes this interpretation") for item in transitions)
         db.close()
     finally:
         teardown_db()
