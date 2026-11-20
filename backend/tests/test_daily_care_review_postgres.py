@@ -19,6 +19,7 @@ from app.main import app
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion
 from app.schemas.capture_review import CaptureCandidateReview
 from app.services.lcr_context import build_lcr_context
@@ -65,6 +66,11 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres():
             db.add_all([
                 Caregiver(id=caregiver_id, name="Caregiver", relationship="family", person_id=person_id),
                 Caregiver(id=other_caregiver_id, name="Other caregiver", relationship="family", person_id=other_person_id),
+            ])
+            db.flush()
+            db.add_all([
+                CaregiverAccessGrant(person_id=person_id, caregiver_id=caregiver_id, role="primary", access_scope="full_record", status="active", can_manage_members=True, granted_by_caregiver_id=caregiver_id),
+                CaregiverAccessGrant(person_id=other_person_id, caregiver_id=other_caregiver_id, role="primary", access_scope="full_record", status="active", can_manage_members=True, granted_by_caregiver_id=other_caregiver_id),
             ])
             db.flush()
             evidence = Evidence(
