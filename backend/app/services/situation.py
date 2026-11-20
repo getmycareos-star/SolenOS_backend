@@ -141,47 +141,29 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 {"lock_key": lock_key},
             )
 
-        prior_evidence = (
-            db.query(Evidence)
+        prior_event = (
+            db.query(CareEvent)
             .filter(
-                Evidence.person_id == person.id,
-                Evidence.ingestion_key == ingestion_key,
+                CareEvent.person_id == person.id,
+                CareEvent.ingestion_key == ingestion_key,
             )
             .first()
         )
-        if prior_evidence is not None:
+        if prior_event is not None:
             if (
-                prior_evidence.uploaded_by_caregiver_id != caregiver.id
-                or prior_evidence.ingestion_request_sha256 != ingestion_fingerprint
+                prior_event.created_by_caregiver_id != caregiver.id
+                or prior_event.ingestion_request_sha256 != ingestion_fingerprint
             ):
                 raise ValueError(
                     "This care update retry key was already used for different content or ownership."
                 )
-
-            persisted_events = (
-                db.query(CareEvent)
-                .filter(CareEvent.person_id == person.id)
-                .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
-                .all()
-            )
-            prior_event = next(
-                (
-                    event for event in persisted_events
-                    if prior_evidence.id in (event.evidence_ids or [])
-                ),
-                None,
-            )
-            if prior_event is None:
-                raise ValueError(
-                    "The earlier care update is incomplete: its evidence exists but its care event is missing. "
-                    "The retry was not duplicated."
-                )
+            prior_evidence_ids = prior_event.evidence_ids or []
             return SituationResponse(
                 ok=True,
                 situation_id=prior_event.situation_id or prior_event.id,
                 care_key=payload.client_care_key or caregiver.id,
                 person_id=person.id,
-                evidence_id=prior_evidence.id,
+                evidence_id=prior_evidence_ids[0] if prior_evidence_ids else None,
                 care_event_id=prior_event.id,
                 message="This care update was already saved. No duplicate was created.",
                 events=[
@@ -192,7 +174,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                         description=prior_event.description,
                         occurred_at=prior_event.occurred_at,
                         time_provenance=prior_event.time_provenance,
-                        evidence_ids=prior_event.evidence_ids or [],
+                        evidence_ids=prior_evidence_ids,
                     )
                 ],
                 analysis_status="partial",
@@ -201,6 +183,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 ),
                 idempotent_replay=True,
             )
+
 
     target_situation = None
     if payload.target_situation_id:
@@ -352,6 +335,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         evidence_ids=evidence_ids,
         tags=[f"capture_category:{payload.capture_category}"] if payload.capture_category else [],
         created_by_caregiver_id=payload.caregiver_id,
+        ingestion_key=ingestion_key or None,
+        ingestion_request_sha256=ingestion_fingerprint if ingestion_key else None,
         situation_id=target_situation.id if target_situation is not None else None,
     )
     db.add(care_event)
