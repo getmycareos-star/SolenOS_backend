@@ -1573,6 +1573,7 @@ def main():
             and significance_item.get("significance_confidence") == 0.61
             and significance_item.get("confidence_interpretation") == "uncalibrated_score_not_probability"
             and significance_item.get("action_status") == "open"
+            and significance_item.get("linked_follow_up_outcome_status") == "outcome_unknown"
             and significance_item.get("linked_follow_up_id") == linked_follow_up_id
             and significance_item.get("history_completeness") == "partial_or_unknown"
             and significance_item.get("source_record_ids") == [daily_event_id]
@@ -1642,6 +1643,7 @@ def main():
         )
         require(closed_item is not None
                 and closed_item.get("action_status") == "closed"
+                and closed_item.get("linked_follow_up_outcome_status") == "outcome_unknown"
                 and closed_item.get("linked_follow_up_id") == linked_follow_up_id,
                 f"PostgreSQL LCR did not reflect the persisted closed follow-up: {closed_item}")
 
@@ -3014,6 +3016,7 @@ def main():
             and restarted_significance_item is not None
             and restarted_significance_item.get("evidence_confidence") == 0.55
             and restarted_significance_item.get("action_status") == "closed"
+            and restarted_significance_item.get("linked_follow_up_outcome_status") == "outcome_unknown"
             and restarted_significance_item.get("linked_follow_up_id") == linked_follow_up_id,
             f"PostgreSQL significance, follow-up state, or freshness did not survive Uvicorn restart: {restarted_situation_status}: {restarted_significance_item}",
         )
