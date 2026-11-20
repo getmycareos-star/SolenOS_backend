@@ -2799,3 +2799,51 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
         headers=other_headers,
     )
     assert denied_loop.status_code == 404
+
+
+def test_current_care_projection_exposes_persisted_outcomes_outside_attention_limit(client):
+    test_client, owner, other = client
+    with engine.begin() as connection:
+        connection.exec_driver_sql("""
+            CREATE TABLE IF NOT EXISTS decision_outcomes (
+                id VARCHAR(36) PRIMARY KEY,
+                person_id VARCHAR(255) NOT NULL,
+                decision_id VARCHAR(255) NOT NULL,
+                outcome_status VARCHAR(80) NOT NULL,
+                observed_at DATETIME,
+                description TEXT,
+                evidence_ids JSON,
+                is_intended_outcome BOOLEAN,
+                created_at DATETIME
+            )
+        """)
+        connection.execute(text("""
+            INSERT INTO decision_outcomes
+              (id, person_id, decision_id, outcome_status, description, evidence_ids, is_intended_outcome, created_at)
+            VALUES
+              ('owner-decision-outcome', :owner_id, 'owner-decision', 'outcome_reported', 'Caregiver recorded the result', '[]', 0, CURRENT_TIMESTAMP),
+              ('other-decision-outcome', :other_id, 'other-decision', 'outcome_reported', 'PRIVATE OTHER PERSON RESULT', '[]', 0, CURRENT_TIMESTAMP)
+        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
+        connection.execute(text("""
+            INSERT INTO care_action_outcomes
+              (id, person_id, action_id, action_type, outcome_status, notes, correction_text, evidence_ids, created_by_caregiver_id, created_at)
+            VALUES
+              ('owner-action-outcome', :owner_id, 'owner-action', 'care_action', 'outcome_attested', 'Family caregiver recorded what happened', NULL, '[]', :caregiver_id, CURRENT_TIMESTAMP)
+        """), {"owner_id": owner["person"]["id"], "caregiver_id": owner["caregiver"]["id"]})
+
+    response = test_client.get(
+        "/api/v1/care-continuity/current-care?limit_per_source=1",
+        headers={"Authorization": f"Bearer {owner['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    outcomes = body["outcomes"]
+    assert {item["id"] for item in outcomes} == {"owner-decision-outcome", "owner-action-outcome"}
+    decision = next(item for item in outcomes if item["id"] == "owner-decision-outcome")
+    action = next(item for item in outcomes if item["id"] == "owner-action-outcome")
+    assert decision["related_record_type"] == "care_decision"
+    assert decision["related_record_id"] == "owner-decision"
+    assert action["related_record_type"] == "care_action"
+    assert action["related_record_id"] == "owner-action"
+    assert "PRIVATE OTHER PERSON RESULT" not in response.text
+    assert body["outcomes_has_more"] is False
