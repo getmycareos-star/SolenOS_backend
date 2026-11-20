@@ -698,7 +698,7 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     try:
         grant = db.query(CaregiverAccessGrant).filter_by(
             person_id=first["person"]["id"],
-            caregiver_id=accepted.json()["caregiver"]["id"],
+            caregiver_id=accepted.json()["caregiver_id"],
         ).one()
         grant.can_manage_members = False
         grant.permissions = list(grant.permissions or []) + ["correct_records"]
@@ -720,7 +720,7 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     assert reviewed.status_code == 200, reviewed.text
     result = reviewed.json()
     assert result["written_to_lcr"] is True
-    assert result["candidate"]["accepted_by_caregiver_id"] == accepted.json()["caregiver"]["id"]
+    assert result["candidate"]["accepted_by_caregiver_id"] == accepted.json()["caregiver_id"]
 
     db = TestSessionLocal()
     try:
@@ -729,7 +729,7 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
         assertion = db.query(CareAssertion).filter_by(id=result["assertion_id"]).one()
         assert source_event.created_by_caregiver_id == first["caregiver"]["id"]
         assert source_evidence.reported_by_caregiver_id == first["caregiver"]["id"]
-        assert assertion.created_by_caregiver_id == accepted.json()["caregiver"]["id"]
+        assert assertion.created_by_caregiver_id == accepted.json()["caregiver_id"]
         assert assertion.source_event_id == source_event.id
         assert assertion.evidence_ids == [source_evidence.id]
     finally:
