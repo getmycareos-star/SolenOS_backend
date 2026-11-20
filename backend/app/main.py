@@ -543,6 +543,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/responsibility-gaps")
             or path.startswith("/api/v1/perspective-conflicts")
             or path.startswith("/api/v1/duplicate-actions")
+            # These summaries derive the person scope from the authenticated session.
+            # The UI intentionally does not send a caller-selected person_id.
+            or path == "/api/v1/multi-caregiver-summary"
+            or path == "/api/v1/care-network-state"
             or path.startswith("/api/v1/notifications")
             or path.startswith("/api/v1/privacy/requests")
             or path == "/api/v1/consent"
