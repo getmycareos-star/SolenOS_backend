@@ -1812,6 +1812,7 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
         from app.core.change_enums import ChangeType, ChangeDirection, SignificanceVerdict, EvidenceStatus
         from app.models.change import Change
         from app.models.significance import SignificanceAssessment
+        from app.models.open_loop import OpenLoopRecord
 
         app.dependency_overrides[get_db] = override_get_db
         client = TestClient(app)
@@ -1854,6 +1855,31 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
                 confirmation_status="detected",
                 is_active=True,
             ))
+            db.add(OpenLoopRecord(
+                id="freshness-linked-follow-up",
+                person_id=person_id,
+                caregiver_id=created["caregiver"]["id"],
+                assigned_caregiver_id=created["caregiver"]["id"],
+                loop_type="follow_up",
+                title="Review the mobility change",
+                description="The outcome has not yet been confirmed.",
+                status="open",
+                outcome_status="outcome_unknown",
+                source_type="persisted_change",
+                source_id=change_id,
+                source_fingerprint="d" * 64,
+                evidence=[],
+                uncertainty="unknown",
+                missing_information=[],
+                options=[],
+                response_evidence=[],
+                action_evidence=[],
+                outcome_evidence=[],
+                priority="normal",
+                priority_reasons=[],
+                closure_evidence=[],
+                version=1,
+            ))
             db.commit()
 
         initial = client.post(
@@ -1884,6 +1910,27 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
         assert current_after.status_code == 200, current_after.text
         assert current_after.json()["source_freshness"]["status"] == "source_changed_since_assessment"
         assert current_after.json()["source_freshness"]["reassessment_recommended"] is True
+
+        refreshed = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert refreshed.status_code == 200, refreshed.text
+        with TestingSessionLocal() as db:
+            follow_up = db.query(OpenLoopRecord).filter_by(
+                id="freshness-linked-follow-up",
+                person_id=person_id,
+            ).one()
+            follow_up.status = "closed"
+            follow_up.updated_at = datetime.now(timezone.utc)
+            db.commit()
+
+        follow_up_changed = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert follow_up_changed.status_code == 200, follow_up_changed.text
+        assert follow_up_changed.json()["source_freshness"]["status"] == "source_changed_since_assessment"
     finally:
         teardown_db()
 
