@@ -1644,7 +1644,8 @@ def main():
         require(closed_item is not None
                 and closed_item.get("action_status") == "closed"
                 and closed_item.get("linked_follow_up_outcome_status") == "outcome_unknown"
-                and closed_item.get("linked_follow_up_id") == linked_follow_up_id,
+                and closed_item.get("linked_follow_up_id") == linked_follow_up_id
+                and "follow-up was closed, but its outcome was not recorded" in closed_item.get("reason", ""),
                 f"PostgreSQL LCR did not reflect the persisted closed follow-up: {closed_item}")
 
         status, other_person_situation = request(
