@@ -533,6 +533,18 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         )
         assert unsupported_correction.status_code == 409, unsupported_correction.text
 
+        qualifier_dropping_correction = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 0,
+                "decision": "correct",
+                "corrected_subject": "Metformin",
+                "corrected_observation": "Metformin 1000 mg twice daily.",
+            },
+        )
+        assert qualifier_dropping_correction.status_code == 409, qualifier_dropping_correction.text
+
         corrected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
