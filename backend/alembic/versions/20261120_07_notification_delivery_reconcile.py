@@ -24,10 +24,38 @@ def _ensure_index(bind, table_name, column_name):
     columns = {column["name"] for column in inspector.get_columns(table_name)}
     if column_name not in columns:
         raise RuntimeError(f"Cannot add {table_name}.{column_name} index: column is missing")
-    index_name = f"ix_{table_name}_{column_name}"
-    op.execute(sa.text(
-        f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})"
-    ))
+
+    for index in inspector.get_indexes(table_name):
+        if (
+            tuple(index.get("column_names") or ()) == (column_name,)
+            and not bool(index.get("unique", False))
+        ):
+            return
+
+    # PostgreSQL index names are schema-global. A legacy index on a different
+    # table can make CREATE INDEX IF NOT EXISTS silently skip the required
+    # index on this table. Choose a collision-free name and verify by columns.
+    existing_names = {
+        index.get("name")
+        for existing_table in inspector.get_table_names()
+        for index in inspector.get_indexes(existing_table)
+        if index.get("name")
+    }
+    base_name = f"ix_{table_name}_{column_name}"
+    index_name = base_name
+    suffix = 1
+    while index_name in existing_names:
+        index_name = f"{base_name}_repair_{suffix}"
+        suffix += 1
+
+    op.create_index(index_name, table_name, [column_name], unique=False)
+    verified = {
+        tuple(index.get("column_names") or ())
+        for index in inspect(bind).get_indexes(table_name)
+        if not bool(index.get("unique", False))
+    }
+    if (column_name,) not in verified:
+        raise RuntimeError(f"Failed to create {table_name}.{column_name} index")
 
 
 def upgrade():
