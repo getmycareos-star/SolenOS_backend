@@ -572,7 +572,8 @@ def backfill_structured_daily_capture_observations(
                 source_event_id=event.id,
                 source_text=evidence.source_text,
                 detail=detail,
-                reported_at=event.recorded_at,
+                reported_at=getattr(event, "reported_at", None) or event.recorded_at,
+                recorded_at=evidence.ingested_at or event.recorded_at,
             )
 
     return {
