@@ -49,6 +49,10 @@ from app.services.document_candidate_schema import canonical_candidate, candidat
 
 router = APIRouter(prefix="/documents", tags=["document intelligence"])
 logger = logging.getLogger(__name__)
+DUPLICATE_COPY_WARNING = (
+    "This upload is an exact binary duplicate of an earlier evidence file; "
+    "preserve the copy but do not count it as independent corroboration."
+)
 MAX_DOCUMENT_QWEN_PAGES = 25
 MAX_DOCUMENT_QWEN_CHUNKS = 60
 MAX_DOCUMENT_CANDIDATE_BATCH = 60
@@ -177,7 +181,14 @@ def _document_asserted_value(candidate: dict, subject: str, observation: str) ->
         warning_values.extend(str(value) for value in canonical_warnings if value)
     if isinstance(candidate_warnings_list, list):
         warning_values.extend(str(value) for value in candidate_warnings_list if value)
-    warnings = list(dict.fromkeys(warning_values))
+    # Duplicate lineage is provenance, not a change to the care assertion's
+    # clinical meaning. Keep the warning on the review candidate/source metadata,
+    # but exclude it from the canonical assertion payload so an exact duplicate
+    # upload can safely reuse the first caregiver-approved assertion.
+    warnings = list(dict.fromkeys(
+        value for value in warning_values
+        if value != DUPLICATE_COPY_WARNING
+    ))
     warning_text = (
         "\nReview warnings: " + "; ".join(warnings[:5])
         if warnings else ""
@@ -935,9 +946,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         )
         extraction_method = str(metadata.get("extraction_method") or "")
         if duplicate_of_evidence_id:
-            canonical["warnings"].append(
-                "This upload is an exact binary duplicate of an earlier evidence file; preserve the copy but do not count it as independent corroboration."
-            )
+            canonical["warnings"].append(DUPLICATE_COPY_WARNING)
         if "server_pdf_text" in extraction_method:
             canonical["warnings"].append("PDF text extraction may flatten multi-column or table reading order; compare this passage with the original page.")
         if "tesseract" in extraction_method:

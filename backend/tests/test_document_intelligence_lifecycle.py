@@ -71,6 +71,28 @@ def save_original(session_data, source_text):
     return evidence_id
 
 
+def test_duplicate_copy_warning_does_not_change_document_assertion_meaning():
+    original = {
+        "field_type": "observation",
+        "warnings": [],
+        "canonical_candidate": {"warnings": []},
+    }
+    duplicate = {
+        "field_type": "observation",
+        "warnings": [intelligence_module.DUPLICATE_COPY_WARNING],
+        "canonical_candidate": {
+            "warnings": [intelligence_module.DUPLICATE_COPY_WARNING],
+        },
+    }
+    original_value = intelligence_module._document_asserted_value(
+        original, "mobility", "The patient walked with a frame."
+    )
+    duplicate_value = intelligence_module._document_asserted_value(
+        duplicate, "mobility", "The patient walked with a frame."
+    )
+    assert duplicate_value == original_value
+
+
 def test_document_understanding_review_accept_reject_reload_and_cross_person(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
