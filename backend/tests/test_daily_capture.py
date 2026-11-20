@@ -700,7 +700,10 @@ def test_appointment_write_rejects_caregiver_from_another_person():
             },
         )
         assert response.status_code == 403, response.text
-        assert response.json()["detail"] == "Caregiver attribution does not match this session"
+        assert response.json()["detail"] in {
+            "Caregiver is not linked to this care record",
+            "You are not a member of this care circle.",
+        }
     finally:
         teardown_db()
 
@@ -1793,7 +1796,8 @@ def test_medication_authoring_and_review_are_person_scoped():
             headers=foreign_headers,
             json={},
         )
-        assert foreign_review.status_code == 404
+        # Authorization precedes resource lookup, preventing a cross-record ID oracle.
+        assert foreign_review.status_code == 403
         # The foreign caregiver is authorized only for their own record. Their
         # medication projection must remain empty; the owner's subject ID must
         # not cross the session boundary.
