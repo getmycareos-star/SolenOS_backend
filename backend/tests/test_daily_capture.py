@@ -789,6 +789,41 @@ def test_insight_rejects_evidence_from_another_person():
         teardown_db()
 
 
+def test_readiness_rejects_orm_schema_drift(monkeypatch):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    import app.main as main_module
+
+    monkeypatch.setattr(
+        main_module,
+        "database_schema_differences",
+        lambda bind: ["care_events: missing required index"],
+    )
+    app.dependency_overrides[get_db] = override_db
+    try:
+        response = TestClient(app).get("/ready")
+        assert response.status_code == 503, response.text
+        assert response.json()["detail"] == (
+            "Database schema does not match the application contract"
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
 def test_readiness_rejects_incomplete_schema():
     incomplete_engine = create_engine(
         "sqlite:///:memory:",
