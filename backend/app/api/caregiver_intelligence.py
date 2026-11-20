@@ -343,7 +343,6 @@ def update_care_recipient_profile(
             "epistemic_status": "caregiver_reported",
             "reported_by_session_caregiver_id": session_caregiver_id,
         }
-        snapshot_fields = ("recipient_name", "caregiver_relationship", "condition")
         changed_fields = [
             field for field, previous, current in (
                 ("recipient_name", previous_person_name, name),
