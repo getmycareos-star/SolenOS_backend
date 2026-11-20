@@ -184,7 +184,20 @@ def add_complete_comparison_coverage(db, person, caregiver, event_type, oldest_d
 
 
 def issue_session(db, person, caregiver):
+    from app.models.caregiver_access import CaregiverAccessGrant
+
     token = f"benchmark-token-{person.id}"
+    # Match the production anonymous-session contract: a bearer session alone
+    # is not authority. Every test session must have an explicit active grant.
+    db.add(CaregiverAccessGrant(
+        person_id=person.id,
+        caregiver_id=caregiver.id,
+        role="primary",
+        access_scope="full_record",
+        status="active",
+        can_manage_members=True,
+        granted_by_caregiver_id=caregiver.id,
+    ))
     db.add(AnonymousSession(
         id=f"session-{person.id}",
         person_id=person.id,
