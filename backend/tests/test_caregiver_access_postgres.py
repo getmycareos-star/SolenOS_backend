@@ -154,6 +154,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
         )
         assert relogin.status_code == 200, relogin.text
         invited = relogin.json()
+        restored_invited_session_id = invited["session_id"]
         invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
 
         primary_assignable = client.get(
@@ -219,11 +220,13 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
                 person_id=person_id, caregiver_id=invited_caregiver_id
             ).one()
             stored_session = db.query(AnonymousSession).filter_by(id=original_invited_session_id).one()
+            restored_session = db.query(AnonymousSession).filter_by(id=restored_invited_session_id).one()
             assert stored_invitation.status == "accepted"
             assert stored_invitation.accepted_caregiver_id == invited_caregiver_id
             assert stored_grant.status == "revoked"
             assert stored_grant.revoked_at is not None
             assert stored_session.revoked_at is not None
+            assert restored_session.revoked_at is not None
             assert stored_session.expires_at > datetime.now(timezone.utc)
     finally:
         if Session and (person_id or foreign_person_id):
