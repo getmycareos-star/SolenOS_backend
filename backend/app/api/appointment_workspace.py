@@ -664,6 +664,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "status": item.status,
         "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
         "recorded_at": item.recorded_at.isoformat() if item.recorded_at else None,
+        "recorded_by_role": "caregiver" if item.created_by_caregiver_id else "not_recorded",
+        "time_provenance": item.time_provenance,
         "evidence_ids": item.evidence_ids or [],
     } for item in events]
     appointment_items = [{
