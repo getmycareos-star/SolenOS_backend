@@ -529,7 +529,7 @@ class TestSafetyAPI:
         person_id = session.json()["person"]["id"]
         headers = {"Authorization": f"Bearer {session.json()['access_token']}"}
         response = self.client.post(
-            "/api/v1/evaluate",
+            "/api/v1/safety/evaluate",
             headers=headers,
             json={
                 "user_intent": "The blood pressure was 145/90.",
@@ -622,7 +622,7 @@ class TestSafetyAPI:
     def test_adversarial_tests(self, monkeypatch):
         monkeypatch.setenv("SOLENOS_INTERNAL_API_KEY", "test-internal-safety-key")
         response = self.client.post(
-            "/api/v1/adversarial-tests",
+            "/api/v1/safety/adversarial-tests",
             headers={"X-SolenOS-Internal-Key": "test-internal-safety-key"},
         )
         assert response.status_code == 200
