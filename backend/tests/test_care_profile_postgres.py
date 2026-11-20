@@ -104,15 +104,18 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     with Session() as db:
         first_person = db.query(Person).filter_by(id=first_person_id).one()
         first_profile = db.query(CaregiverProfile).filter_by(session_caregiver_id=first_caregiver_id).one()
-        versions = (
-            db.query(CaregiverContext)
-            .filter_by(person_id=first_person_id, caregiver_id=first_profile.id)
-            .all()
-        )
+        versions = db.query(CaregiverContext).filter_by(person_id=first_person_id).all()
         profile_versions = [
             row for row in versions
-            if isinstance(row.context_metadata, dict)
+            if row.caregiver_id is None
+            and isinstance(row.context_metadata, dict)
             and row.context_metadata.get("record_type") == "care_recipient_profile"
+        ]
+        relationship_versions = [
+            row for row in versions
+            if row.caregiver_id == first_profile.id
+            and isinstance(row.context_metadata, dict)
+            and row.context_metadata.get("record_type") == "caregiver_relationship"
         ]
         assert first_person.name == f"Updated recipient {suffix}"
         assert first_profile.relationship == "Daughter"
@@ -123,7 +126,8 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
         assert any(row.context_metadata.get("condition") is None for row in profile_versions)
         assert any(row.effective_end is not None for row in profile_versions)
         assert any(row.context_metadata.get("recipient_name") == f"Updated recipient {suffix}" for row in profile_versions)
-        assert any(row.context_metadata.get("caregiver_relationship") == "Daughter" for row in profile_versions)
+        assert len(relationship_versions) == 1
+        assert relationship_versions[0].context_metadata.get("caregiver_relationship") == "Daughter"
         audit_events = db.query(AuditLogEvent).filter_by(
             person_id=first_person_id,
             caregiver_id=first_caregiver_id,
