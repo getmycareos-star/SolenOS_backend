@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Any
 from app.core.caregiver_enums import (
@@ -294,6 +294,10 @@ class ResponsibilityGap(ResponsibilityGapBase):
     class Config:
         from_attributes = True
 
+class ResponsibilityGapReview(BaseModel):
+    status: CoverageGapStatus
+    resolution: str = Field(min_length=5, max_length=2000)
+
 
 class PerspectiveConflictBase(BaseModel):
     person_id: str
@@ -321,6 +325,9 @@ class PerspectiveConflict(PerspectiveConflictBase):
     class Config:
         from_attributes = True
 
+class PerspectiveConflictReview(BaseModel):
+    resolution: str = Field(min_length=5, max_length=2000)
+
 
 class DuplicateActionBase(BaseModel):
     person_id: str
@@ -345,6 +352,10 @@ class DuplicateAction(DuplicateActionBase):
 
     class Config:
         from_attributes = True
+
+class DuplicateActionReview(BaseModel):
+    status: DuplicateActionStatus
+    resolution: str = Field(min_length=5, max_length=2000)
 
 
 class CaregiverContextBase(BaseModel):
