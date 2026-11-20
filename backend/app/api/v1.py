@@ -167,6 +167,12 @@ def _require_session_scope(request: Request, db: Session, person_id: str, caregi
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     if caregiver_id and str(session.caregiver_id) != str(caregiver_id):
         raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
+    required_permission = (
+        "view_documents"
+        if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
+        else "view_lcr"
+    )
+    require_caregiver_permission(db, str(session.person_id), str(session.caregiver_id), required_permission)
     return session
 
 
