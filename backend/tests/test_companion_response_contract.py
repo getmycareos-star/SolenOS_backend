@@ -2968,6 +2968,74 @@ def test_lcr_prompt_serialization_preserves_source_identity_for_receipts_and_cit
     ]
 
 
+def test_lcr_prompt_references_normalize_every_authoritative_source_collection():
+    expected_record_types = {
+        "living_record": "living_care_record",
+        "events": "care_event",
+        "evidence": "care_evidence",
+        "evidence_reviews": "evidence_review",
+        "claim_assessments": "evidence_claim_assessment",
+        "evidence_freshness_assessments": "evidence_freshness_assessment",
+        "evidence_freshness_policies": "evidence_freshness_policy",
+        "evidence_completeness_policies": "evidence_completeness_policy",
+        "evidence_completeness_assessments": "evidence_completeness_assessment",
+        "evidence_observations": "care_evidence_observation",
+        "facts": "care_fact",
+        "document_extractions": "document_extraction",
+        "assertions": "care_assertion",
+        "decisions": "care_decision",
+        "decision_outcomes": "care_decision_outcome",
+        "handoffs": "caregiver_handoff",
+        "timeline": "care_timeline_entry",
+        "uncertainties": "care_uncertainty",
+        "uncertainty_assessments": "care_uncertainty_assessment",
+        "missing_information": "care_missing_information",
+        "open_questions": "open_question",
+        "open_question_answer_events": "open_question_answer_event",
+        "open_question_review_events": "open_question_review_event",
+        "open_loop_records": "open_loop",
+        "information_gaps": "information_gap",
+        "follow_up_links": "care_follow_up_link",
+        "reconciliations": "care_reconciliation",
+        "conflicts": "care_conflict",
+        "provenance": "record_provenance",
+        "caregiver_observations": "caregiver_observation",
+        "caregiver_contexts": "caregiver_context",
+        "caregiver_perspectives": "caregiver_perspective",
+        "corrections": "care_correction",
+        "appointments": "appointment",
+    }
+    context = {
+        "schema_status": "complete",
+        "history_coverage": "query_scanned_ranked_subset",
+        "retrieval_scan_complete": True,
+        "retrieval_projection_complete": True,
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "sources": {
+            source_type: {
+                "status": "available",
+                "returned_count": 1,
+                "candidate_count": 1,
+                "items": [{"id": f"{source_type}-id"}],
+            }
+            for source_type in expected_record_types
+        },
+    }
+
+    prompt = format_lcr_context_for_prompt(context)
+    record_lines = [line for line in prompt.splitlines() if line.startswith("{")]
+    references = collaboration._context_record_refs(record_lines)
+
+    assert {
+        reference["record_type"]: reference["record_id"]
+        for reference in references
+    } == {
+        record_type: f"{source_type}-id"
+        for source_type, record_type in expected_record_types.items()
+    }
+
+
 def test_retrieval_receipt_distinguishes_retrieval_from_prompt_inclusion():
     build = collaboration._build_retrieval_receipt
     complete = build(
