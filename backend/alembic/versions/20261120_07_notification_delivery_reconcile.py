@@ -151,25 +151,14 @@ def upgrade():
             column["name"]: column for column in inspect(bind).get_columns("data_subject_requests")
         }
         if "subject_id" in request_columns:
+            # A privacy erasure intentionally clears direct subject identifiers.
+            # Backfill only recoverable legacy rows; never force redacted rows
+            # back into a non-null identity field.
             op.execute(sa.text(
                 "UPDATE data_subject_requests "
                 "SET subject_id = person_id "
                 "WHERE subject_id IS NULL AND person_id IS NOT NULL"
             ))
-            remaining_nulls = bind.execute(sa.text(
-                "SELECT COUNT(*) FROM data_subject_requests WHERE subject_id IS NULL"
-            )).scalar_one()
-            if remaining_nulls:
-                raise RuntimeError(
-                    f"Cannot enforce data_subject_requests.subject_id NOT NULL: {remaining_nulls} rows have no subject or person ID."
-                )
-            if request_columns["subject_id"].get("nullable", True):
-                with op.batch_alter_table("data_subject_requests") as batch:
-                    batch.alter_column(
-                        "subject_id",
-                        existing_type=sa.String(length=255),
-                        nullable=False,
-                    )
 
     expected_indexes = (
         ("delivery_failure_events", "delivery_id"),
