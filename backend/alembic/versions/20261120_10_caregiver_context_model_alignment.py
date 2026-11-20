@@ -39,6 +39,16 @@ def upgrade():
             name="caregiverproximitycategory",
         )
         enum_type.create(bind, checkfirst=True)
+        existing_labels = tuple(bind.execute(sa.text(
+            "SELECT e.enumlabel FROM pg_type t "
+            "JOIN pg_enum e ON e.enumtypid = t.oid "
+            "WHERE t.typname = :type_name ORDER BY e.enumsortorder"
+        ), {"type_name": "caregiverproximitycategory"}).scalars())
+        if existing_labels != PROXIMITY_VALUES:
+            raise RuntimeError(
+                "caregiverproximitycategory enum labels differ from the ORM contract: "
+                + repr(existing_labels)
+            )
         proximity_column_type = postgresql.ENUM(
             *PROXIMITY_VALUES,
             name="caregiverproximitycategory",
