@@ -103,6 +103,25 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
 
+      - name: Verify the complete ORM schema contract has zero drift
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import json
+          from app.core.database import database_schema_differences, engine
+
+          if engine.dialect.name != "postgresql":
+              raise SystemExit("PostgreSQL is required for schema-contract verification")
+          with engine.connect() as connection:
+              differences = database_schema_differences(connection)
+          print(json.dumps({"schema_differences": differences}, indent=2, default=str))
+          if differences:
+              raise SystemExit(
+                  f"ORM/PostgreSQL schema contract has {len(differences)} unresolved differences"
+              )
+          print("ORM_POSTGRES_SCHEMA_CONTRACT=PASS")
+          PY
+
       - name: Verify caregiver trajectory enum values were migrated
         run: |
           python - <<'PY'
