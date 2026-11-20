@@ -95,7 +95,7 @@
     },
     {
       "id": "possible-condition",
-      "text": "Possible pneumonia; the clinician suspects an infection.",
+      "text": "The clinician suspects pneumonia.",
       "subject": "pneumonia",
       "expected": {
         "source_attribution": "not_stated",
