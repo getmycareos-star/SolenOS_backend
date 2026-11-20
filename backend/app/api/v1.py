@@ -224,33 +224,14 @@ def _log_and_learn(
 
 @router.post("/persons", response_model=Person)
 def create_person(person: PersonCreate, db: Session = Depends(get_db)):
-    dob = person.date_of_birth
-    if isinstance(dob, str) and dob:
-        try:
-            dob = date.fromisoformat(dob)
-        except ValueError:
-            try:
-                dob = datetime.strptime(dob, "%Y-%m-%d").date()
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="date_of_birth must be an ISO date string (YYYY-MM-DD)",
-                )
-    elif dob is None:
-        dob = None
-    db_person = PersonModel(name=person.name, date_of_birth=dob)
-    db.add(db_person)
-    db.commit()
-    db.refresh(db_person)
-    _log_and_learn(
-        db,
-        db_person.id,
-        "person_created",
-        f"Created person {db_person.name}",
-        "api",
-        caregiver_id=None,
+    # Creating an unlinked person here bypasses the server-issued anonymous
+    # session and leaves an ownerless care record. New records must be created
+    # through /sessions/anonymous, which atomically creates the person,
+    # caregiver and bearer session together.
+    raise HTTPException(
+        status_code=410,
+        detail="This legacy endpoint is disabled. Create a care record through the anonymous-session flow.",
     )
-    return db_person
 
 
 @router.get("/persons/{person_id}", response_model=Person)
@@ -264,7 +245,15 @@ def get_person(person_id: str, request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/caregivers", response_model=CaregiverSchema)
-def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
+def create_caregiver(
+    caregiver: CaregiverCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # A browser-supplied person_id is only a reference. The active server-issued
+    # bearer session must already be linked to this exact care record.
+    _require_session_scope(request, db, caregiver.person_id)
+    _require_full_record_access(request)
     person = db.query(PersonModel).filter(PersonModel.id == caregiver.person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
