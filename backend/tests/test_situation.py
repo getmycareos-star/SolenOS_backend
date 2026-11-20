@@ -2395,23 +2395,6 @@ def test_situation_assessment_uses_linked_significance_and_person_scoped_follow_
         )
         assert follow_up.status_code == 201, follow_up.text
 
-        with TestingSessionLocal() as db:
-            db.execute(text("""
-                CREATE TABLE IF NOT EXISTS care_delta_runs (
-                    id VARCHAR(36) PRIMARY KEY,
-                    person_id VARCHAR(255) NOT NULL,
-                    source VARCHAR(120) NOT NULL,
-                    event_date DATETIME,
-                    source_event_id VARCHAR(255),
-                    evidence_ids TEXT,
-                    delta_json TEXT,
-                    model_name VARCHAR(120),
-                    created_by_caregiver_id VARCHAR(255),
-                    created_at DATETIME
-                )
-            """))
-            db.commit()
-
         response = client.post(
             "/api/v1/care-continuity/situation-understanding/reassess",
             headers=headers,
