@@ -3723,6 +3723,18 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
     if not inspect(db.connection()).has_table("care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
+    try:
+        from app.services.capture_review import backfill_structured_daily_capture_observations
+
+        # Refresh is an explicit caregiver action. Backfill older structured
+        # Daily Care details before composing the new view, without changing
+        # the original event or source record.
+        backfill_structured_daily_capture_observations(db, person_id=person_id, limit=200)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Structured Daily Care backfill failed for session-scoped person %s", person_id)
+        raise HTTPException(status_code=503, detail="Saved care details could not be prepared for review") from exc
     assessment = _build_situation_understanding_assessment(db, person_id)
     latest = db.execute(
         select(table).where(

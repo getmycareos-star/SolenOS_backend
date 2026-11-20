@@ -1345,7 +1345,7 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
 
 
 
-def test_change_reassessment_backfills_older_structured_daily_capture_details_idempotently():
+def test_situation_reassessment_backfills_older_structured_daily_capture_details_idempotently():
     setup_db()
     try:
         from app.core.database import get_db
@@ -1410,7 +1410,7 @@ def test_change_reassessment_backfills_older_structured_daily_capture_details_id
         db.close()
 
         client = TestClient(app)
-        url = f"/api/v1/change/changes/reassess?person_id={person_id}"
+        url = "/api/v1/care-continuity/situation-understanding/reassess"
         headers = {"Authorization": f"Bearer {token}"}
         first = client.post(url, headers=headers)
         assert first.status_code == 200, first.text
