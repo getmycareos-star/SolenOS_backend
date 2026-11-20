@@ -168,6 +168,10 @@ def reassign_reminder(
     if previous_id:
         _resolve_previous_assignee_notifications(db, reminder.id, previous_id)
     reminder.assigned_to_caregiver_id = payload.assigned_to_caregiver_id
+    # A new assignee needs a fresh delivery generation; the previous
+    # recipient's idempotency key must not suppress the new recipient's alert.
+    reminder.delivery_generation = (reminder.delivery_generation or 0) + 1
+    reminder.notification_deferred_until = None
     db.add(_assignment_audit(person_id, actor_id, reminder.id, previous_id, payload.assigned_to_caregiver_id))
     _commit_reminder_update(db)
     db.refresh(reminder)
