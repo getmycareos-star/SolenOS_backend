@@ -439,6 +439,7 @@ def create_claim_assessment(
 ):
     """Append an explicit claim assessment with source passages and server-derived reviewer identity."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     claim = db.query(CareAssertion).filter(
         CareAssertion.id == claim_id,
         CareAssertion.person_id == person_id,
@@ -878,6 +879,7 @@ def create_claim_dependency(
 ):
     """Append a person-scoped claim relationship; dependency edges cannot form cycles."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     claim = db.query(CareAssertion).filter(
         CareAssertion.id == claim_id,
         CareAssertion.person_id == person_id,
@@ -1759,6 +1761,7 @@ def create_medication_record(payload: dict[str, Any], request: Request, db: Sess
     No historical medication event is promoted and no clinical verification is implied.
     """
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to add a medication record")
     name = str(payload.get("name") or "").strip()
@@ -1841,6 +1844,7 @@ def create_medication_record(payload: dict[str, Any], request: Request, db: Sess
 def review_medication_record(subject_id: str, request: Request, db: Session = Depends(get_db)):
     """Explicitly accept the caregiver's own medication report as current, append-only review."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to review a medication record")
     rows = db.query(CareAssertion).filter(
@@ -2388,6 +2392,7 @@ def current_care_projection(
 def create_observation_coverage(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Persist an explicit observation-coverage interval under the authenticated person's identity."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     if not inspect(db.connection()).has_table("observation_coverage"):
         raise HTTPException(status_code=503, detail="Observation coverage storage is not available until schema migration completes")
 
@@ -3931,6 +3936,7 @@ def list_record_revisions(request: Request, limit: int = 50, db: Session = Depen
 @router.post("/record-versions", status_code=201)
 def create_record_version(payload: dict, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     care_record_id = payload.get("care_record_id")
     if not care_record_id:
         raise HTTPException(status_code=422, detail="care_record_id is required")
@@ -4029,6 +4035,7 @@ def _person_scoped_rows(resource: str, person_id: str, request: Request, db: Ses
 @router.patch("/assertions/{assertion_id}/status")
 def review_assertion_status(assertion_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     defer_document_review_commit = bool(db.info.get("defer_document_review_commit"))
     assertions = _table(db, "care_assertions")
     row = db.execute(select(assertions).where(
@@ -4384,6 +4391,7 @@ def update_follow_up_link(
 ):
     """Update a person's follow-up; completion requires evidence and a timestamp."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     table = _table(db, "care_follow_up_links")
     allowed = WRITABLE["follow-up-links"] - {"source_type", "source_id", "target_type", "target_id", "follow_up_kind"}
     changes = {key: value for key, value in payload.items() if key in allowed}
@@ -5298,6 +5306,7 @@ def create_evidence_source_relationship(
 ):
     """Append source-lineage/corroboration metadata; never infer independence from wording."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     source = db.query(Evidence).filter(
         Evidence.id == evidence_id, Evidence.person_id == person_id
     ).first()
@@ -5512,6 +5521,7 @@ def create_evidence_observation(
 ):
     """Persist a typed observation only when its quoted span exists in scoped original evidence."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     evidence = db.query(Evidence).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -5770,6 +5780,7 @@ def _freshness_policy_response(row: EvidenceFreshnessPolicy) -> dict[str, Any]:
 def create_evidence_freshness_policy(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Create an immutable, explicit freshness policy; no domain thresholds are guessed."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to define a freshness policy")
     domain_key = str(payload.get("domain_key") or "").strip().lower()
@@ -5831,6 +5842,7 @@ def list_evidence_freshness_policies(request: Request, db: Session = Depends(get
 def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Persist a freshness assessment against an explicit same-person domain policy."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to assess evidence freshness")
     evidence_id = str(payload.get("evidence_id") or "").strip()
@@ -5969,6 +5981,7 @@ def _completeness_policy_response(row: EvidenceCompletenessPolicy) -> dict[str, 
 def create_evidence_completeness_policy(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Create a versioned checklist for a specific care domain and purpose."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to define a completeness policy")
     domain_key = str(payload.get("domain_key") or "").strip().lower()
@@ -6063,6 +6076,7 @@ def _completeness_assessment_response(row: EvidenceCompletenessAssessment) -> di
 def assess_evidence_completeness(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Persist explicit source-link coverage against a same-person, versioned checklist."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     if not caregiver_id:
         raise HTTPException(status_code=403, detail="A caregiver identity is required to assess completeness")
     policy_id = str(payload.get("policy_id") or "").strip()
