@@ -225,7 +225,7 @@ def reassign_reminder(
     if reminder.version != payload.expected_version:
         raise HTTPException(status_code=409, detail="This reminder changed since it was loaded. Refresh before reassigning.")
     _require_active_full_access(db, person_id, payload.assigned_to_caregiver_id)
-    previous_id = reminder.assigned_to_caregiver_id
+    previous_id = reminder.assigned_to_caregiver_id or reminder.created_by_caregiver_id
     if previous_id == payload.assigned_to_caregiver_id:
         return _reminder_response(db, reminder)
     if previous_id:
