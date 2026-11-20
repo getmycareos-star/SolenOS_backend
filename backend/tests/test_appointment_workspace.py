@@ -3286,3 +3286,37 @@ def test_appointment_workspace_survives_session_refresh_and_logout_revokes_acces
         headers=fresh_headers,
     )
     assert denied.status_code == 401, denied.text
+
+
+def test_overdue_appointment_is_not_assumed_to_have_occurred(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    past = datetime.now(timezone.utc) - timedelta(days=2)
+    appointment = Appointment(
+        id=str(uuid.uuid4()),
+        person_id=owner["person"]["id"],
+        created_by_caregiver_id=owner["caregiver"]["id"],
+        title="Past clinic appointment",
+        scheduled_at=past,
+        status="overdue",
+    )
+    with TestSessionLocal() as db:
+        db.add(appointment)
+        db.commit()
+        appointment_id = appointment.id
+
+    brief = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert brief.status_code == 200, brief.text
+    assert brief.json()["appointment_context_status"]["code"] == "overdue"
+    assert brief.json()["next_appointment"]["source_id"] == appointment_id
+    assert brief.json()["next_appointment"]["status"] == "overdue"
+
+    confirmed = test_client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+        json={"status": "completed"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    refreshed = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["appointment_context_status"]["code"] == "occurred"
