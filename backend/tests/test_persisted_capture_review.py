@@ -167,10 +167,16 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
         mood = next(item for item in details if item.attribute == "mood")
         blood_pressure = next(item for item in details if item.attribute == "blood_pressure_systolic")
         assert mood.units == "score"
-        assert mood.source_passage == json.dumps("she's sad", ensure_ascii=False)
+        assert mood.source_passage == json.dumps({
+            "axis": "mood", "note": "she's sad",
+            "observed_at": "2026-11-11T21:10:00.000Z", "score": 5,
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         assert blood_pressure.value_text == "10"
         assert blood_pressure.units == "mmHg"
-        assert blood_pressure.source_passage == json.dumps("yes", ensure_ascii=False)
+        assert blood_pressure.source_passage == json.dumps({
+            "measured_at": "2026-11-11T21:10:00.000Z", "note": "yes",
+            "unit": "mmHg", "value": 10, "vital_type": "bp_systolic",
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         assert next(item for item in details if item.attribute == "caregiver_note").source_passage == json.dumps("she's loosing weight", ensure_ascii=False)
         assert next(item for item in details if item.attribute == "blood_pressure_systolic").units == "mmHg"
     finally:
