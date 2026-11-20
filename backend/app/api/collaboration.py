@@ -6387,14 +6387,27 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Query verified document analyses from their canonical evidence linkage,
         # not from the recent-evidence display window. This prevents a document
         # from disappearing when many newer evidence rows crowd that window.
+        primary_document_grant = db.query(CaregiverAccessGrant.caregiver_id).filter(
+            CaregiverAccessGrant.person_id == person_id,
+            CaregiverAccessGrant.role == "primary",
+            CaregiverAccessGrant.status == "active",
+            CaregiverAccessGrant.revoked_at.is_(None),
+        ).first()
+        visible_document_uploaders = {str(caregiver_id)}
+        if primary_document_grant and primary_document_grant[0]:
+            visible_document_uploaders.add(str(primary_document_grant[0]))
         document_analysis_rows = (
             db.query(CaptureAnalysis, EvidenceModel)
             .join(EvidenceModel, EvidenceModel.id == CaptureAnalysis.source_evidence_id)
             .filter(
                 CaptureAnalysis.person_id == person_id,
+                CaptureAnalysis.caregiver_id.in_(visible_document_uploaders),
                 CaptureAnalysis.extraction_status == "available",
                 EvidenceModel.person_id == person_id,
                 EvidenceModel.type == "document",
+                EvidenceModel.uploaded_by_caregiver_id == CaptureAnalysis.caregiver_id,
+                EvidenceModel.uploaded_by_caregiver_id.in_(visible_document_uploaders),
+                (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
             )
             .order_by(CaptureAnalysis.created_at.desc())
             .limit(12)
