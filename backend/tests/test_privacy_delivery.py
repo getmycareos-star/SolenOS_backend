@@ -887,10 +887,10 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
         )
         db.add(source_event)
         db.flush()
-        from app.api.handoff_drafts import SOURCES, _fingerprint
+        from app.api.handoff_drafts import SOURCES, _fingerprint, _normalize_reflected_fingerprint_row
         source_fields = list(SOURCES["care_events"]["fields"]) + ["evidence_ids", "source_evidence_id"]
         source_row = {name: getattr(source_event, name) for name in dict.fromkeys(source_fields) if hasattr(source_event, name)}
-        source_fingerprint = _fingerprint(source_row)
+        source_fingerprint = _fingerprint(_normalize_reflected_fingerprint_row(source_row))
         content = {
             "template_sections": [],
             "sections": [],
@@ -912,6 +912,53 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
                 content, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
             ).encode("utf-8")
         ).hexdigest()
+        snapshot_at = datetime.now(timezone.utc)
+        source_snapshot = {
+            "snapshot_id": "draft-share-snapshot-001",
+            "snapshot_at": snapshot_at.isoformat(),
+            "integrity_version": 2,
+            "authority": "living_care_record",
+            "person_scope": owner["person"]["id"],
+            "caregiver_scope": owner["caregiver"]["id"],
+            "source_statuses": {"care_events": {"status": "available", "count": 1}},
+            "source_records": [{
+                "source_type": "care_event",
+                "source_table": "care_events",
+                "source_id": source_id,
+                "source_fingerprint": source_fingerprint,
+                "text": quote,
+                "epistemic_status": "not_recorded",
+                "record_status": "recorded",
+                "evidence_ids": [],
+            }],
+            "evidence_lineage": {},
+            "limitations": [],
+            "retrieval_complete": True,
+            "partial_sources": [],
+            "window": {
+                "days": 30,
+                "from": (snapshot_at - timedelta(days=30)).isoformat(),
+                "to": snapshot_at.isoformat(),
+            },
+            "appointment_id": None,
+            "selected_appointment": None,
+        }
+        source_snapshot["snapshot_sha256"] = _fingerprint({
+            "authority": source_snapshot["authority"],
+            "person_scope": source_snapshot["person_scope"],
+            "source_statuses": source_snapshot["source_statuses"],
+            "source_records": source_snapshot["source_records"],
+            "evidence_lineage": source_snapshot["evidence_lineage"],
+            "limitations": source_snapshot["limitations"],
+            "retrieval_complete": source_snapshot["retrieval_complete"],
+            "partial_sources": source_snapshot["partial_sources"],
+            "window": source_snapshot["window"],
+            "appointment_id": source_snapshot["appointment_id"],
+            "selected_appointment": source_snapshot["selected_appointment"],
+            "snapshot_id": source_snapshot["snapshot_id"],
+            "snapshot_at": source_snapshot["snapshot_at"],
+            "caregiver_scope": source_snapshot["caregiver_scope"],
+        })
         draft = HandoffDraft(
             id="approved-draft-for-share",
             person_id=owner["person"]["id"],
@@ -922,21 +969,7 @@ def test_approved_persisted_draft_is_attached_atomically_by_existing_handoff_cre
             audience="family",
             window_days=30,
             structured_content=content,
-            source_snapshot={
-                "source_statuses": {"care_events": {"status": "available", "count": 1}},
-                "source_records": [{
-                    "source_type": "care_event",
-                    "source_table": "care_events",
-                    "source_id": source_id,
-                    "source_fingerprint": source_fingerprint,
-                    "text": quote,
-                    "epistemic_status": "not_recorded",
-                    "record_status": "recorded",
-                    "evidence_ids": [],
-                }],
-                "evidence_lineage": {},
-                "limitations": [],
-            },
+            source_snapshot=source_snapshot,
             generation_metadata={"provider": "ollama", "model": "qwen-test-fixture"},
             generation_status="generated",
             validation_status="exact_quote_reference_validation_passed",
