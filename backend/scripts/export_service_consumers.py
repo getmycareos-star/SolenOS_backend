@@ -16,6 +16,8 @@ SERVICE_PREFIX = "app.services."
 
 def _module_name(file_path: Path) -> str:
     relative = file_path.relative_to(APP_ROOT.parent).with_suffix("")
+    if relative.name == "__init__":
+        relative = relative.parent
     return ".".join(relative.parts)
 
 
@@ -59,22 +61,27 @@ def build_service_consumer_inventory() -> dict:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            called_module = None
-            called_symbol = None
-            if isinstance(node.func, ast.Name) and node.func.id in aliases:
-                called_module, called_symbol = aliases[node.func.id]
-            elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-                imported = aliases.get(node.func.value.id)
-                if imported:
-                    called_module = imported[0]
-                    called_symbol = node.func.attr
-            if called_module:
-                key = (called_module, called_symbol or "*")
-                consumers[key]["calls"].append({
-                    "consumer_module": _module_name(file_path),
-                    "line": node.lineno,
-                    "call_expression": ast.unparse(node.func),
-                })
+            attribute_parts = []
+            call_root = node.func
+            while isinstance(call_root, ast.Attribute):
+                attribute_parts.append(call_root.attr)
+                call_root = call_root.value
+            if not isinstance(call_root, ast.Name) or call_root.id not in aliases:
+                continue
+            imported_module, imported_symbol = aliases[call_root.id]
+            called_module = imported_module
+            if imported_symbol == "*":
+                called_symbol = attribute_parts[0] if attribute_parts else "*"
+            else:
+                called_symbol = imported_symbol
+                if attribute_parts:
+                    called_symbol += "." + ".".join(reversed(attribute_parts))
+            key = (called_module, called_symbol)
+            consumers[key]["calls"].append({
+                "consumer_module": _module_name(file_path),
+                "line": node.lineno,
+                "call_expression": ast.unparse(node.func),
+            })
 
     service_root = APP_ROOT / "services"
     for file_path in sorted(service_root.rglob("*.py")):
