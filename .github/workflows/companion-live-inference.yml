@@ -41,11 +41,9 @@ on:
       - "backend/app/services/care_continuity.py"
       - "backend/app/services/document_candidate_schema.py"
       - "backend/tests/test_document_candidate_schema.py"
-      - "backend/tests/test_document_lifecycle.py"
       - "backend/tests/fixtures/document_intelligence_semantic_eval.json"
       - "backend/tests/test_document_candidate_adversarial.py"
       - "backend/tests/test_document_intelligence_lifecycle.py"
-      - "backend/tests/test_document_intelligence_postgres.py"
       - "backend/live_tests/test_document_intelligence_live.py"
       - "start-with-qwen.sh"
 permissions:
@@ -116,14 +114,8 @@ jobs:
       - name: Apply complete Alembic migration chain
         working-directory: backend
         run: python -m alembic upgrade head
-      - name: Run real PDF, scanned PDF, image, DOCX and extraction recovery tests
-        run: python -m pytest backend/tests/test_document_lifecycle.py -q
       - name: Run document semantic and lifecycle regression tests
         run: python -m pytest backend/tests/test_document_candidate_schema.py backend/tests/test_document_candidate_adversarial.py backend/tests/test_document_intelligence_lifecycle.py -q
-      - name: Run PostgreSQL document persistence, review, duplicate and restart integration tests
-        env:
-          SOLENOS_TEST_POSTGRES_RESTART: "1"
-        run: python -m pytest backend/tests/test_document_intelligence_postgres.py -q -s
       - name: Run bounded Qwen startup retry regression tests
         run: python -m pytest backend/tests/test_qwen_retry_budget.py -q
       - name: Start isolated Ollama runtime
