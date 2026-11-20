@@ -269,6 +269,98 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
 
 
 
+@router.post("/ensure-upcoming", status_code=200)
+def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depends(get_db)):
+    """Create the preparation workspace for the next already-scheduled visit.
+
+    This is an internal continuity workspace, not an external booking. It is
+    generated from an existing person-scoped appointment and requires no form.
+    Repeated calls return the same workspace.
+    """
+    person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(
+        request, db, person_id, caregiver_id, "view_lcr", read_only=True
+    )
+    now = datetime.now(timezone.utc)
+    appointment = db.query(Appointment).filter(
+        Appointment.person_id == person_id,
+        Appointment.status == "scheduled",
+        Appointment.scheduled_at >= now,
+    ).order_by(Appointment.scheduled_at.asc()).with_for_update().first()
+    if appointment is None:
+        return {
+            "created": False,
+            "reason": "no_upcoming_scheduled_appointment",
+            "workspace": None,
+        }
+
+    existing = db.query(AppointmentWorkspaceRecord).filter(
+        AppointmentWorkspaceRecord.person_id == person_id,
+        AppointmentWorkspaceRecord.appointment_id == appointment.id,
+    ).order_by(AppointmentWorkspaceRecord.created_at.asc()).first()
+    if existing is not None:
+        return {"created": False, "reason": "workspace_already_exists", "workspace": _record_out(existing, db)}
+
+    _require_appointment_permission(
+        request, db, person_id, caregiver_id, "add_evidence", read_only=False
+    )
+    payload = {
+        "captureStage": "prepare",
+        "caregiverReport": "",
+        "generatedBy": "solenos_appointment_continuity",
+        "generationReason": "existing_scheduled_appointment",
+    }
+    row = AppointmentWorkspaceRecord(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        appointment_id=appointment.id,
+        created_by_caregiver_id=caregiver_id,
+        updated_by_caregiver_id=caregiver_id,
+        status="preparation",
+        version_number=1,
+        payload=payload,
+        last_revision_reason="Automatically prepared for an existing scheduled appointment",
+        idempotency_key=f"auto-upcoming:{appointment.id}",
+        idempotency_request_sha256=_request_fingerprint({
+            "appointment_id": appointment.id,
+            "status": "preparation",
+            "payload": payload,
+            "generation": "solenos_appointment_continuity",
+        }),
+    )
+    revision = AppointmentWorkspaceRevision(
+        id=str(uuid.uuid4()),
+        record_id=row.id,
+        person_id=person_id,
+        revision_number=1,
+        payload=payload,
+        change_reason="Automatically prepared for an existing scheduled appointment",
+        changed_by_caregiver_id=caregiver_id,
+        idempotency_key=f"auto-upcoming:{appointment.id}",
+        idempotency_request_sha256=row.idempotency_request_sha256,
+    )
+    try:
+        db.add(row)
+        db.add(revision)
+        db.commit()
+        db.refresh(row)
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(AppointmentWorkspaceRecord).filter(
+            AppointmentWorkspaceRecord.person_id == person_id,
+            AppointmentWorkspaceRecord.appointment_id == appointment.id,
+        ).order_by(AppointmentWorkspaceRecord.created_at.asc()).first()
+        if existing is None:
+            raise HTTPException(status_code=503, detail="Appointment preparation could not be saved")
+        return {"created": False, "reason": "workspace_already_exists", "workspace": _record_out(existing, db)}
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Automatic appointment workspace creation failed")
+        raise HTTPException(status_code=503, detail="Appointment preparation could not be saved") from exc
+
+    return {"created": True, "reason": "prepared_for_existing_appointment", "workspace": _record_out(row, db)}
+
+
 @router.get("/preparation-brief")
 def get_appointment_preparation_brief(request: Request, window_days: int = 90, db: Session = Depends(get_db)):
     """Return a bounded, source-linked LCR preparation view without inferring clinical meaning."""
