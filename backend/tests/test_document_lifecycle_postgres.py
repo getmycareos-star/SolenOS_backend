@@ -326,6 +326,62 @@ def _upload_document_for_lifecycle(db, person_id: str, caregiver_id: str, filena
     ))
 
 
+def test_postgres_document_upload_commits_evidence_and_intake_job_atomically():
+    """The initial document job and immutable upload share one database commit."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-atomic-person-{suffix}"
+    caregiver_id = f"doc-atomic-caregiver-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Atomic document fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Atomic document caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.commit()
+
+        with Session() as db:
+            original_commit = db.commit
+            commit_count = 0
+
+            def counted_commit():
+                nonlocal commit_count
+                commit_count += 1
+                return original_commit()
+
+            db.commit = counted_commit
+            uploaded = _upload_document_for_lifecycle(
+                db,
+                person_id,
+                caregiver_id,
+                "atomic-discharge-note.txt",
+                b"Persist original evidence and its durable processing job together.",
+            )
+
+            assert uploaded["persisted"] is True
+            assert uploaded["processing_status"] == "queued"
+            assert uploaded["document_processing_job_id"]
+            assert commit_count == 1
+            evidence = db.query(Evidence).filter_by(id=uploaded["evidence_id"]).one()
+            binary = db.query(EvidenceUpload).filter_by(evidence_id=evidence.id).one()
+            job = db.query(QwenBackgroundJob).filter_by(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                workflow="document_intake",
+                evidence_ids_json=json.dumps([evidence.id]),
+            ).one()
+            assert binary.sha256 == uploaded["sha256"]
+            assert job.id == uploaded["document_processing_job_id"]
+            assert job.status == "queued"
+    finally:
+        engine.dispose()
+
+
 def test_postgres_document_deletion_erases_original_and_uncommitted_extraction():
     """A caregiver deletion removes the binary and derived text, and stops retries."""
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
