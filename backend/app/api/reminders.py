@@ -9,6 +9,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.reminder import CareReminder
+from app.models.action import Action
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.notifications import CareNotification, CarePushDelivery
@@ -229,6 +230,36 @@ def reassign_reminder(
         return _reminder_response(db, reminder)
     if previous_id:
         _resolve_previous_assignee_notifications(db, reminder.id, previous_id)
+    linked_action = None
+    if reminder.action_id:
+        linked_action = db.query(Action).filter(
+            Action.id == reminder.action_id,
+            Action.person_id == person_id,
+        ).with_for_update().first()
+        if linked_action is None:
+            raise HTTPException(status_code=409, detail="The linked care action could not be verified. No reassignment was made.")
+        if linked_action.status in {"completed", "cancelled"}:
+            raise HTTPException(status_code=409, detail="A reminder linked to a closed care action cannot be reassigned.")
+        previous_action_owner = linked_action.responsible_caregiver_id or linked_action.created_by_caregiver_id
+        if previous_action_owner != payload.assigned_to_caregiver_id:
+            linked_action.responsible_caregiver_id = payload.assigned_to_caregiver_id
+            db.add(AuditLogEvent(
+                actor_id=actor_id,
+                subject_id=person_id,
+                person_id=person_id,
+                caregiver_id=actor_id,
+                action="care.action.responsibility_reassigned",
+                target_type="registered_action",
+                target_id=linked_action.id,
+                occurred_at=datetime.now(timezone.utc),
+                outcome="success",
+                policy_version="registered-action-responsibility-v1",
+                record_metadata={
+                    "previous_responsible_caregiver_id": previous_action_owner,
+                    "responsible_caregiver_id": payload.assigned_to_caregiver_id,
+                    "linked_reminder_id": reminder.id,
+                },
+            ))
     reminder.assigned_to_caregiver_id = payload.assigned_to_caregiver_id
     # A new assignee needs a fresh delivery generation; the previous
     # recipient's idempotency key must not suppress the new recipient's alert.
