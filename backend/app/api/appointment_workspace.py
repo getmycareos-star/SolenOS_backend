@@ -88,10 +88,9 @@ def _require_appointment_permission(
     *,
     read_only: bool = False,
 ) -> None:
-    if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
-        if not read_only:
-            raise HTTPException(status_code=403, detail="Document-only access cannot change appointment care information.")
-        permission = "view_documents"
+    # Appointment workspaces contain care-planning and clinical-context data;
+    # they are not document storage. A documents_only grant must never inherit
+    # appointment read access. Enforce the exact operation permission instead.
     require_caregiver_permission(db, person_id, caregiver_id, permission)
 
 
@@ -944,7 +943,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
 @router.get("/{record_id}/outcome-draft")
 def get_appointment_outcome_draft(record_id: str, request: Request, db: Session = Depends(get_db)):
     """Organize persisted appointment notes into a person-scoped, read-only outcome."""
-    person_id, _ = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     row = db.query(AppointmentWorkspaceRecord).filter(
         AppointmentWorkspaceRecord.id == record_id,
         AppointmentWorkspaceRecord.person_id == person_id,
@@ -1460,7 +1460,8 @@ def review_appointment_outcome_proposal(
 
 @router.get("/{record_id}")
 def get_appointment_workspace(record_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _ = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
     row = db.query(AppointmentWorkspaceRecord).filter(
         AppointmentWorkspaceRecord.id == record_id,
         AppointmentWorkspaceRecord.person_id == person_id,
