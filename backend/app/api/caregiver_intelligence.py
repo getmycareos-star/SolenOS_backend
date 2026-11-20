@@ -402,6 +402,7 @@ def update_care_recipient_profile(
             db.add(CaregiverContextModel(
                 person_id=person_id,
                 caregiver_id=None,
+                reported_by_caregiver_id=session_caregiver_id,
                 proximity_category=None,
                 observation_window_start=None,
                 observation_window_end=None,
@@ -417,6 +418,7 @@ def update_care_recipient_profile(
             db.add(CaregiverContextModel(
                 person_id=person_id,
                 caregiver_id=caregiver_profile.id,
+                reported_by_caregiver_id=session_caregiver_id,
                 proximity_category=None,
                 observation_window_start=None,
                 observation_window_end=None,
