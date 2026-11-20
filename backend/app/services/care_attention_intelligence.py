@@ -12,6 +12,7 @@ from typing import Any
 CLOSED_STATUSES = {"resolved", "closed", "completed", "answered", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "dismissed", "not_applicable", "known"}
 OPEN_STATUSES = {"open", "active", "pending", "unresolved", "needs_review", "not_started", "follow_up_pending", "waiting", "deferred", "blocked", "review_abandoned", "pending_closure_verification"}
 CRITICAL_DELAY_REASON = "Critical consequence of delay was explicitly recorded"
+CARE_ATTENTION_POLICY_VERSION = "care-attention.v2"
 MAX_PATTERN_WINDOW_DAYS = 14
 
 
@@ -334,6 +335,19 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "current_state": change.get("current_state"),
             "category": "important_to_address",
             "care_significance": "attention_candidate" if attention_candidate else "follow_up_candidate",
+            "significance_verdict": verdict,
+            "significance_assessment_id": change.get("significance_assessment_id"),
+            "significance_assessment_status": _text(change.get("significance_assessment_status")) or "not_recorded",
+            "evidence_status": _text(change.get("evidence_status")) or "unknown",
+            "evidence_confidence": change.get("evidence_confidence"),
+            "significance_confidence": change.get("significance_confidence"),
+            "confidence_interpretation": "uncalibrated_score_not_probability",
+            "assessment_dimensions": change.get("assessment_dimensions") if isinstance(change.get("assessment_dimensions"), list) else [],
+            "attention_candidate": attention_candidate,
+            "follow_up_candidate": follow_up_candidate,
+            "action_status": _text(change.get("action_status")) or "not_recorded",
+            "linked_follow_up_outcome_status": _text(change.get("linked_follow_up_outcome_status")) or "not_recorded",
+            "linked_follow_up_id": change.get("linked_follow_up_id"),
             "history_completeness": "complete" if history_complete else "partial_or_unknown",
             "reason": str(change.get("explanation") or "A saved change assessment needs review.")[:2400],
             "evidence_ids": evidence_ids,
