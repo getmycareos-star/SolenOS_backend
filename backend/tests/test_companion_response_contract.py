@@ -3260,12 +3260,6 @@ def test_companion_retrieves_another_authorized_caregivers_lcr_evidence(monkeypa
         db.commit()
         db.close()
 
-        account = client.post(
-            "/api/v1/accounts",
-            headers=first_auth,
-            json={"email": "companion-collaborator@example.com", "password": "another-long-password-789"},
-        )
-        assert account.status_code == 201, account.text
         invitation = client.post(
             "/api/v1/caregiver-access/invitations",
             headers=first_auth,
@@ -3292,7 +3286,8 @@ def test_companion_retrieves_another_authorized_caregivers_lcr_evidence(monkeypa
         assert response.status_code == 200, response.text
         serialized_prompt = json.dumps(captured.get("messages", []), ensure_ascii=False)
         assert "The person prefers a quiet room after lunch." in serialized_prompt
-        assert "shared-companion-event" in serialized_prompt
-        assert "shared-companion-evidence" in serialized_prompt
+        assert "title: Quiet room preference" in serialized_prompt
+        assert "shared-companion-event" not in serialized_prompt
+        assert "shared-companion-evidence" not in serialized_prompt
     finally:
         teardown()
