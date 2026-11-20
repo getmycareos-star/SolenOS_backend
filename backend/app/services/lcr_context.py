@@ -926,7 +926,16 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
     prepared_sources = []
     for source_name, source in context.get("sources", {}).items():
         items = [
-            json.dumps(item, ensure_ascii=False, default=str, separators=(",", ":"))
+            json.dumps(
+                {
+                    "source_type": source_name,
+                    "source_id": item.get("id"),
+                    "record": item,
+                },
+                ensure_ascii=False,
+                default=str,
+                separators=(",", ":"),
+            )
             for item in source.get("items", [])
         ]
         section = (
