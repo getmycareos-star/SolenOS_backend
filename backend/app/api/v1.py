@@ -2118,7 +2118,6 @@ def list_care_windows(person_id: str, request: Request, status: Optional[str] = 
 def create_appointment(appointment: AppointmentCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, appointment.person_id, appointment.created_by_caregiver_id)
 
-    _require_full_record_access(request)
     _require_person_and_linked_caregiver(
         db, appointment.person_id, appointment.created_by_caregiver_id
     )
@@ -2150,7 +2149,6 @@ def create_appointment(appointment: AppointmentCreate, request: Request, db: Ses
 def list_appointments(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
 
-    _require_full_record_access(request)
     return (
         db.query(AppointmentModel)
         .filter(AppointmentModel.person_id == person_id)
@@ -2170,7 +2168,6 @@ def update_appointment_lifecycle_endpoint(
         raise HTTPException(status_code=404, detail="Appointment not found")
     _require_session_scope(request, db, appointment.person_id)
 
-    _require_full_record_access(request)
 
     appt_dict = {
         "id": appointment.id,
