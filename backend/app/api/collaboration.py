@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.epistemic_contract import assertion_information_status
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 from app.models.care import CareEvent, Caregiver, Insight, Person
 from app.models.care import Evidence as EvidenceModel
@@ -776,25 +778,38 @@ class QwenAssistRequest(BaseModel):
 
 
 def _scope(request: Request, db: Session) -> tuple[str, str]:
-    # Prefer middleware-scoped identity. Fallback resolves the same bearer
-    # capability from the database; request-body IDs are never credentials.
+    # Resolve the bearer capability and re-check the current membership grant
+    # on every request, including when middleware has already populated identity.
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if person_id and caregiver_id:
-        return str(person_id), str(caregiver_id)
-    authorization = request.headers.get("authorization", "")
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
-    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
-    session = db.query(AnonymousSession).filter(
-        AnonymousSession.token_hash == token_hash,
-        AnonymousSession.revoked_at.is_(None),
-        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    if not person_id or not caregiver_id:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+        token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+        session = db.query(AnonymousSession).filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        ).first()
+        if session is None:
+            raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+        person_id, caregiver_id = str(session.person_id), str(session.caregiver_id)
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == str(person_id),
+        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
     ).first()
-    if session is None:
-        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
-    return str(session.person_id), str(session.caregiver_id)
+    if grant is None:
+        raise HTTPException(status_code=403, detail="An active caregiver membership is required")
+    required = "view_documents" if grant.access_scope == "documents_only" else "view_lcr"
+    require_caregiver_permission(db, str(person_id), str(caregiver_id), required)
+    request.state.scoped_person_id = str(person_id)
+    request.state.scoped_caregiver_id = str(caregiver_id)
+    request.state.caregiver_access_scope = grant.access_scope
+    return str(person_id), str(caregiver_id)
 
 
 
@@ -1036,6 +1051,12 @@ async def upload_evidence(
     evidence_type = evidence_type.strip().lower()
     if evidence_type not in {"document", "medication_photo", "care_photo"}:
         raise HTTPException(status_code=422, detail="Unsupported evidence type")
+    if evidence_type == "document":
+        require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "view_documents")
+        if getattr(request.state, "caregiver_access_scope", "full_record") != "documents_only":
+            require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "add_evidence")
+    else:
+        require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "add_evidence")
 
     caregiver = db.query(Caregiver).filter_by(id=scoped_caregiver_id, person_id=scoped_person_id).first()
     if not caregiver:
@@ -1177,7 +1198,6 @@ async def upload_evidence(
             .join(EvidenceModel, EvidenceModel.id == EvidenceUpload.evidence_id)
             .filter(
                 EvidenceModel.person_id == scoped_person_id,
-                EvidenceModel.uploaded_by_caregiver_id == scoped_caregiver_id,
                 EvidenceModel.type == "document",
                 (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
             )
@@ -1344,9 +1364,9 @@ def list_document_processing_status(
 ):
     """Return truthful caregiver-facing status for recent uploaded documents."""
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     evidence_rows = db.query(EvidenceModel).filter(
         EvidenceModel.person_id == person_id,
-        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         EvidenceModel.type == "document",
         (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
     ).order_by(EvidenceModel.uploaded_at.desc(), EvidenceModel.id.desc()).limit(limit).all()
@@ -1361,7 +1381,6 @@ def list_document_processing_status(
         ).order_by(CaptureAnalysis.created_at.desc(), CaptureAnalysis.id.desc()).first()
         job = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.person_id == person_id,
-            QwenBackgroundJob.caregiver_id == caregiver_id,
             QwenBackgroundJob.workflow == "document_intake",
             QwenBackgroundJob.evidence_ids_json == json.dumps([evidence.id]),
         ).order_by(QwenBackgroundJob.created_at.desc(), QwenBackgroundJob.id.desc()).first()
@@ -1494,18 +1513,18 @@ def link_corrected_document_version(
 ):
     """Link an explicitly identified corrected upload without replacing its predecessor."""
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     if payload.replacement_evidence_id == evidence_id:
         raise HTTPException(status_code=422, detail="A document cannot be a corrected version of itself")
     original = db.query(EvidenceModel).filter(
         EvidenceModel.id == evidence_id,
         EvidenceModel.person_id == person_id,
-        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         EvidenceModel.type == "document",
     ).with_for_update().first()
     replacement = db.query(EvidenceModel).filter(
         EvidenceModel.id == payload.replacement_evidence_id,
         EvidenceModel.person_id == person_id,
-        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         EvidenceModel.type == "document",
     ).with_for_update().first()
     if original is None or replacement is None:
@@ -1538,8 +1557,7 @@ def link_corrected_document_version(
         cursor = db.query(EvidenceModel).filter(
             EvidenceModel.id == cursor.parent_evidence_id,
             EvidenceModel.person_id == person_id,
-            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
-        ).first()
+            ).first()
     # A document can have one predecessor. The original remains preserved and
     # continues to support its historical interpretation.
     replacement.parent_evidence_id = original.id
@@ -1587,10 +1605,10 @@ def link_corrected_document_version(
 def compare_document_version(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Compare source-grounded candidate statements across an explicitly linked version pair."""
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     replacement = db.query(EvidenceModel).filter(
         EvidenceModel.id == evidence_id,
         EvidenceModel.person_id == person_id,
-        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         EvidenceModel.type == "document",
         (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
     ).first()
@@ -1602,7 +1620,6 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
     predecessor = db.query(EvidenceModel).filter(
         EvidenceModel.id == predecessor_id,
         EvidenceModel.person_id == person_id,
-        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         EvidenceModel.type == "document",
         (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
     ).first()
@@ -1623,7 +1640,6 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
             return None
         analyses = db.query(CaptureAnalysis).filter(
             CaptureAnalysis.person_id == person_id,
-            CaptureAnalysis.caregiver_id == caregiver_id,
             CaptureAnalysis.source_evidence_id == source_id,
         ).order_by(CaptureAnalysis.created_at.desc()).all()
         for analysis in analyses:
@@ -1728,6 +1744,8 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     explicitly resolved through the care-record correction workflow.
     """
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     evidence = db.query(EvidenceModel).filter(
         EvidenceModel.id == evidence_id,
         EvidenceModel.person_id == person_id,
@@ -2003,7 +2021,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
 
 @router.get("/upload/{evidence_id}")
 def download_evidence(evidence_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _ = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
     evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
     if not evidence or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -2012,6 +2030,10 @@ def download_evidence(evidence_id: str, request: Request, db: Session = Depends(
         and str(evidence.type).lower() != "document"
     ):
         raise HTTPException(status_code=404, detail="Document not found")
+    require_caregiver_permission(
+        db, person_id, caregiver_id,
+        "view_documents" if str(evidence.type).lower() == "document" else "view_lcr",
+    )
     blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
     if not blob:
         raise HTTPException(status_code=404, detail="Original upload is unavailable")
