@@ -133,8 +133,9 @@ def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monke
     body = projection.json()
     daily_items = [item for item in body["items"] if item["kind"] == "Daily care entry"]
     assert daily_items, body
-    assert any("disrupted sleep routine" in item["description"] for item in daily_items)
+    assert any(item["description"] == "Caregiver reported a disrupted sleep routine." for item in daily_items)
     assert all(item["source_collection"] == "events" for item in daily_items)
+    assert all(not item["description"].lstrip().startswith("{") for item in daily_items)
 
     # The same saved entry must never appear in another person's projection.
     other_headers = {"Authorization": f"Bearer {client[2]['access_token']}"}
