@@ -297,8 +297,12 @@ class CaregiverIntelligenceService:
             self.db.query(ResponsibilityGap)
             .filter(
                 ResponsibilityGap.person_id == person_id,
-                ResponsibilityGap.status == CoverageGapStatus.OPEN,
+                ResponsibilityGap.status.in_([
+                    CoverageGapStatus.OPEN,
+                    CoverageGapStatus.PARTIALLY_COVERED,
+                ]),
             )
+            .order_by(ResponsibilityGap.detected_at.desc())
             .all()
         )
 
@@ -485,9 +489,23 @@ class CaregiverIntelligenceService:
             caregivers=caregivers,
             active_responsibilities=[{"id": r.id, "caregiver_id": r.caregiver_id, "type": r.responsibility_type, "status": r.status.value} for r in active_responsibilities],
             active_handoffs=[{"id": h.id, "from": h.from_caregiver_id, "to": h.to_caregiver_id, "type": h.responsibility_type, "acceptance": h.acceptance_status.value} for h in active_handoffs],
-            responsibility_gaps=[{"id": g.id, "type": g.responsibility_type, "status": g.status.value} for g in gaps],
-            perspective_conflicts=[{"id": c.id, "caregiver_a": c.caregiver_a_id, "caregiver_b": c.caregiver_b_id, "claim_a": c.claim_a, "claim_b": c.claim_b, "status": c.status.value} for c in conflicts],
-            duplicate_actions=[{"id": d.id, "caregiver_a": d.caregiver_a_id, "caregiver_b": d.caregiver_b_id, "action_type": d.action_type, "status": d.status.value} for d in duplicates],
+            responsibility_gaps=[{
+                "id": g.id, "type": g.responsibility_type, "scope": g.scope,
+                "status": g.status.value, "provenance": g.provenance,
+            } for g in gaps],
+            perspective_conflicts=[{
+                "id": c.id, "caregiver_a": c.caregiver_a_id, "caregiver_b": c.caregiver_b_id,
+                "claim_a": c.claim_a, "claim_b": c.claim_b, "context_a": c.context_a,
+                "context_b": c.context_b, "status": c.status.value,
+            } for c in conflicts],
+            duplicate_actions=[{
+                "id": d.id, "caregiver_a": d.caregiver_a_id, "caregiver_b": d.caregiver_b_id,
+                "action_type": d.action_type, "action_description_a": d.action_description_a,
+                "action_description_b": d.action_description_b,
+                "time_a": d.time_a.isoformat() if d.time_a else None,
+                "time_b": d.time_b.isoformat() if d.time_b else None,
+                "status": d.status.value, "resolution": d.resolution,
+            } for d in duplicates],
             coverage_gaps=[],
         )
 
