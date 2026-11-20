@@ -44,6 +44,15 @@ class SituationInput(BaseModel):
     provenance: Optional[SituationProvenance] = None
     timestamp: Optional[str] = None
     capture_category: Optional[CaptureCategory] = None
+    # Client-generated retry key is scoped to this person and fingerprinted by
+    # the server. It prevents duplicate evidence/events after uncertain network
+    # outcomes; it is never an identity or authorization credential.
+    ingestion_key: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
     # Explicit command for interaction lifecycle only; never resolves or deletes care reality.
     action: Optional[Literal["pause_active_care_situation"]] = None
     care_session_id: Optional[str] = Field(None, max_length=128)
