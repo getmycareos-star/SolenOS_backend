@@ -60,6 +60,7 @@ No new table was added. The implementation reuses the authoritative `persons`, `
 - `Person.name` is the current care-recipient name.
 - `CaregiverProfile.relationship` is the relationship for the authenticated caregiver, not a shared relationship field.
 - `CaregiverContext` rows with `caregiver_id IS NULL` version the shared recipient name/condition context.
+- Each new context version separately stores `reported_by_caregiver_id` from the authenticated server session; the caregiver-profile owner and the actor who reported the change are not conflated.
 - Migration `20261120_10_caregiver_context_model_alignment` adds the active ORM's missing context columns, ownership foreign keys and person/caregiver/effective-time indexes without dropping legacy columns or rewriting existing rows. It refuses to enforce ownership/timestamp constraints if legacy rows have missing or orphaned person/caregiver attribution; those rows require explicit reconciliation, not fabricated ownership.
 - `CaregiverContext` rows linked to a caregiver profile version that caregiver's relationship independently.
 - Condition context is labelled `caregiver_reported`; it is not promoted to an independently verified clinical assertion.
