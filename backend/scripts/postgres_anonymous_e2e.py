@@ -1459,8 +1459,19 @@ def main():
             row for row in reviewed_lcr.get("items", [])
             if row.get("id") == accepted_assertion_id
         ]
-        require(len(reviewed_assertions) == 1,
-                f"Accepted Daily Care assertion was not returned by LCR retrieval: {reviewed_assertions}")
+        require(
+            len(reviewed_assertions) == 1,
+            "Accepted Daily Care assertion was not returned by LCR retrieval: "
+            + json.dumps({
+                "expected_assertion_id": accepted_assertion_id,
+                "returned_item_count": len(reviewed_lcr.get("items", [])),
+                "assertion_items": [
+                    row for row in reviewed_lcr.get("items", [])
+                    if row.get("source_collection") == "assertions"
+                ],
+                "source_statuses": reviewed_lcr.get("source_statuses"),
+            }, default=str),
+        )
 
         status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_a)
         require(status == 200 and refreshed.get("access_token"),
