@@ -22,7 +22,6 @@ from app.models.care import CareEvent, Caregiver, Correction, Person
 def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(monkeypatch):
     from app.services.learning import LearningEngine
 
-    database_url = api_v1.get_settings().database_url if hasattr(api_v1, "get_settings") else None
     # The test runner supplies DATABASE_URL; use the same migrated PostgreSQL
     # database as the other integration checks.
     import os
