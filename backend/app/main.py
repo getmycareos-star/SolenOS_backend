@@ -250,8 +250,15 @@ async def lifespan(app: FastAPI):
     """Own background worker tasks for the complete ASGI application lifespan."""
     tasks = []
     try:
-        app.state.qwen_worker_task = asyncio.create_task(qwen_worker_loop())
-        tasks.append(app.state.qwen_worker_task)
+        qwen_worker_enabled = os.getenv("SOLENOS_QWEN_WORKER_ENABLED", "true").strip().lower() not in {
+            "0", "false", "no", "off",
+        }
+        app.state.qwen_worker_task = None
+        if qwen_worker_enabled:
+            app.state.qwen_worker_task = asyncio.create_task(qwen_worker_loop())
+            tasks.append(app.state.qwen_worker_task)
+        else:
+            logger.info("Qwen background worker disabled by SOLENOS_QWEN_WORKER_ENABLED")
         app.state.open_loop_maintenance_task = asyncio.create_task(open_loop_maintenance_loop())
         tasks.append(app.state.open_loop_maintenance_task)
         app.state.reminder_delivery_task = asyncio.create_task(reminder_delivery_loop())
