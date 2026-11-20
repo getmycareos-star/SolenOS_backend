@@ -170,6 +170,7 @@ from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
 
 from app.models.care import Caregiver, Evidence, Person
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob
@@ -235,6 +236,7 @@ def test_postgres_document_upload_extraction_retry_persistence_and_person_isolat
         # Exercise the actual multipart upload route against PostgreSQL. The
         # endpoint creates Evidence and persists the original EvidenceUpload bytes.
         with Session() as db:
+            _ensure_test_caregiver_access(db, person_a, caregiver_a)
             upload_request = _request(person_a, caregiver_a)
             uploaded = asyncio.run(upload_evidence(
                 upload_request,
@@ -306,7 +308,33 @@ def test_postgres_document_upload_extraction_retry_persistence_and_person_isolat
         engine.dispose()
 
 
+def _ensure_test_caregiver_access(db, person_id: str, caregiver_id: str) -> None:
+    """Give direct-route PostgreSQL fixtures the same explicit grant as a real session."""
+    grant = db.query(CaregiverAccessGrant).filter_by(
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+    ).first()
+    if grant is None:
+        db.add(CaregiverAccessGrant(
+            id=str(uuid.uuid4()),
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+            permissions=[
+                "view_lcr", "add_evidence", "correct_records", "manage_responsibilities",
+                "manage_reminders", "complete_assigned_reminders", "manage_handoffs",
+                "share_summaries", "share_observations", "view_documents", "view_communications",
+            ],
+            granted_by_caregiver_id=caregiver_id,
+        ))
+        db.flush()
+
+
 def _upload_document_for_lifecycle(db, person_id: str, caregiver_id: str, filename: str, content: bytes):
+    _ensure_test_caregiver_access(db, person_id, caregiver_id)
     return asyncio.run(upload_evidence(
         _request(person_id, caregiver_id),
         UploadFile(
@@ -1158,3 +1186,53 @@ def test_postgres_invited_caregiver_can_retrieve_shared_document_and_respects_do
             headers=collaborator_headers,
         )
         assert blocked_events.status_code == 403, blocked_events.text
+
+
+def test_postgres_document_upload_rolls_back_when_binary_storage_fails(monkeypatch):
+    """A failed object-store write must leave no evidence, binary pointer, or intake job."""
+    from app.api import collaboration as collaboration_api
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-storage-failure-person-{suffix}"
+    caregiver_id = f"doc-storage-failure-caregiver-{suffix}"
+
+    def fail_storage(**kwargs):
+        raise ConnectionError("object storage temporarily unavailable")
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document storage failure fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Document storage failure caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            _ensure_test_caregiver_access(db, person_id, caregiver_id)
+            db.commit()
+
+        monkeypatch.setattr(collaboration_api, "store_document_binary", fail_storage)
+        with Session() as db:
+            with pytest.raises(HTTPException) as failure:
+                _upload_document_for_lifecycle(
+                    db,
+                    person_id,
+                    caregiver_id,
+                    "storage-failure-discharge-note.txt",
+                    b"Original file must not be reported as saved when storage is unavailable.",
+                )
+            assert failure.value.status_code == 503
+            assert "Nothing was marked as saved" in failure.value.detail
+
+        with Session() as verify:
+            assert verify.query(Evidence).filter_by(person_id=person_id).count() == 0
+            assert verify.query(EvidenceUpload).join(Evidence).filter(
+                Evidence.person_id == person_id
+            ).count() == 0
+            assert verify.query(QwenBackgroundJob).filter_by(person_id=person_id).count() == 0
+    finally:
+        engine.dispose()
