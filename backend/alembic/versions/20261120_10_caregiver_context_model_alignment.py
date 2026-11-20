@@ -49,10 +49,10 @@ def upgrade():
 
     additions = (
         ("proximity_category", proximity_column_type),
-        ("observation_window_start", sa.String(length=255)),
-        ("observation_window_end", sa.String(length=255)),
+        ("observation_window_start", sa.String()),
+        ("observation_window_end", sa.String()),
         ("availability_notes", sa.Text()),
-        ("context_metadata", sa.JSON()),
+        ("context_metadata", sa.Text()),
         ("effective_start", sa.DateTime(timezone=True)),
         ("effective_end", sa.DateTime(timezone=True)),
     )
