@@ -300,7 +300,9 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             continue
         if _text(change.get("confirmation_status")) in {"rejected", "dismissed", "cancelled", "withdrawn", "superseded"}:
             continue
-        if not (change.get("attention_candidate") or change.get("follow_up_candidate")):
+        attention_candidate = change.get("attention_candidate") is True
+        follow_up_candidate = change.get("follow_up_candidate") is True
+        if not (attention_candidate or follow_up_candidate):
             continue
         records = change.get("records") if isinstance(change.get("records"), list) else []
         evidence_ids = sorted({
@@ -320,6 +322,7 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
         )
         expected_source_record_count = int(change.get("expected_source_record_count") or 0)
         source_complete = bool(source_record_ids) and expected_source_record_count > 0 and len(source_record_ids) == expected_source_record_count
+        history_complete = coverage_complete and source_complete
         item = {
             "id": str(change.get("id") or ""),
             "source": "persisted_change",
@@ -330,6 +333,8 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "previous_state": change.get("previous_state"),
             "current_state": change.get("current_state"),
             "category": "important_to_address",
+            "care_significance": "attention_candidate" if attention_candidate else "follow_up_candidate",
+            "history_completeness": "complete" if history_complete else "partial_or_unknown",
             "reason": str(change.get("explanation") or "A saved change assessment needs review.")[:2400],
             "evidence_ids": evidence_ids,
             "source_record_ids": source_record_ids,
@@ -338,17 +343,17 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "baseline_coverage_status": change.get("baseline_coverage_status"),
             "current_coverage_status": change.get("current_coverage_status"),
         }
-        if verdict == "meaningful_candidate" and coverage_complete and source_complete:
-            item["reason"] += " This is a review prompt based on the recorded history, not a diagnosis or a causal conclusion."
-            important.append(item)
-        else:
-            item["category"] = "needs_clarification"
-            item["reason"] = (
-                "A saved change candidate cannot yet be treated as a meaningful change because "
-                "its source records, baseline, or observation coverage are incomplete. "
-                + str(change.get("explanation") or "Check the linked care records before drawing a conclusion.")[:1800]
+        # A persisted care-attention decision and the completeness of its
+        # supporting history are separate facts. Missing baseline/source
+        # coverage must not silently hide an explicitly saved follow-up need.
+        if not history_complete:
+            item["reason"] += (
+                " The available history is incomplete, so the size and timing of the change remain uncertain. "
+                "This limitation does not cancel the recorded need for follow-up."
             )
-            clarification.append(item)
+        else:
+            item["reason"] += " This is a review prompt based on the recorded history, not a diagnosis or a causal conclusion."
+        important.append(item)
     return important, clarification
 
 def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops: list[dict[str, Any]],
@@ -371,19 +376,15 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
             ),
         })
     if coverage.get("persisted_change_history_bounded"):
-        # A capped query cannot establish that the returned candidates represent
-        # the full active history. Preserve the rows as clarification, not as
-        # apparently complete priority decisions, and make the truncation visible.
+        # Keep individually persisted care-significance candidates visible.
+        # The separate notice prevents this bounded list from being mistaken
+        # for a complete review of every active change.
         for item in persisted_important:
-            persisted_clarification.append({
-                **item,
-                "category": "needs_clarification",
-                "reason": (
-                    "The saved change history exceeds the assessment's retrieval limit. "
-                    "This candidate needs a complete history review before it can be prioritized."
-                ),
-            })
-        persisted_important = []
+            item["history_completeness"] = "bounded"
+            item["reason"] = (
+                str(item.get("reason") or "")
+                + " The overall change list is incomplete; other saved changes may not be shown."
+            ).strip()
         persisted_clarification.append({
             "source": "changes",
             "record_id": "bounded-history",
