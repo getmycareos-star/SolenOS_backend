@@ -576,3 +576,95 @@ def test_paperwork_only_scope_restricts_existing_sessions_without_erasing_histor
         headers=james_headers,
     )
     assert full_access.status_code == 200, full_access.text
+
+
+
+def test_member_operation_permissions_are_enforced_for_reminders():
+    client = TestClient(app)
+    primary = create_primary(client)
+    owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "limited-caregiver@example.com"},
+    ).json()
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite["invitation_token"],
+            "email": "limited-caregiver@example.com",
+            "password": "a-long-test-password-123",
+            "name": "Limited caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    member = accepted.json()
+    member_headers = {"Authorization": f"Bearer {member['access_token']}"}
+
+    changed = client.patch(
+        f"/api/v1/caregiver-access/members/{member['caregiver_id']}/permissions",
+        headers=owner_headers,
+        json={"permissions": ["view_lcr"]},
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["permissions"] == ["view_lcr"]
+
+    reminders = client.get(
+        f"/api/v1/reminders/{primary['person']['id']}",
+        headers=member_headers,
+    )
+    assert reminders.status_code == 200, reminders.text
+
+    denied = client.post(
+        "/api/v1/reminders",
+        headers=member_headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "title": "Permission boundary test",
+            "due_at": "2026-12-01T09:00:00+00:00",
+        },
+    )
+    assert denied.status_code == 403, denied.text
+
+    restored = client.patch(
+        f"/api/v1/caregiver-access/members/{member['caregiver_id']}/permissions",
+        headers=owner_headers,
+        json={"permissions": ["view_lcr", "manage_reminders", "complete_assigned_reminders"]},
+    )
+    assert restored.status_code == 200, restored.text
+    created = client.post(
+        "/api/v1/reminders",
+        headers=member_headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "title": "Permission boundary test",
+            "due_at": "2026-12-01T09:00:00+00:00",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+
+def test_member_permissions_cannot_grant_membership_administration():
+    client = TestClient(app)
+    primary = create_primary(client)
+    owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "limited-admin@example.com"},
+    ).json()
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite["invitation_token"],
+            "email": "limited-admin@example.com",
+            "password": "a-long-test-password-123",
+            "name": "Limited admin",
+        },
+    ).json()
+    denied = client.patch(
+        f"/api/v1/caregiver-access/members/{accepted['caregiver_id']}/permissions",
+        headers=owner_headers,
+        json={"permissions": ["view_lcr", "manage_members"]},
+    )
+    assert denied.status_code == 422, denied.text
