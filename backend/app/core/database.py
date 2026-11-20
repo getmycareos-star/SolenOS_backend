@@ -122,6 +122,23 @@ def _schema_column_types_compatible(expected, actual, dialect_name: str) -> bool
 
     if isinstance(expected, Float) and isinstance(actual, Numeric) and expected.precision is None:
         return True
+
+    # JSONList explicitly accepts native PostgreSQL JSON values on read.
+    if (
+        dialect_name == "postgresql"
+        and type(expected).__name__ == "JSONList"
+        and type(actual).__name__ in {"JSON", "JSONB"}
+    ):
+        return True
+
+    # TEXT and wider VARCHAR columns can safely store values allowed by a
+    # bounded ORM String. A narrower reflected VARCHAR remains a real mismatch.
+    if expected_affinity.__name__ == "String" and actual_affinity.__name__ == "String":
+        expected_length = getattr(expected, "length", None)
+        actual_length = getattr(actual, "length", None)
+        if expected_length is not None and (actual_length is None or actual_length >= expected_length):
+            return True
+
     if expected_affinity != actual_affinity:
         return False
     for attribute in ("length", "precision", "scale"):
