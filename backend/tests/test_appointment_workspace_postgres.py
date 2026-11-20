@@ -853,6 +853,35 @@ def test_postgres_appointment_continuity_is_shared_and_linked_across_authorised_
             assert len(linked) == 1
             assert linked[0]["appointment_id"] == appointment_id
 
+            # The same authorised caregiver must see the follow-up in the
+            # existing Open Loops surface and its persisted source history.
+            shared_loops = client.get("/api/v1/open-loops", headers=shared_headers)
+            assert shared_loops.status_code == 200, shared_loops.text
+            shared_loop = next(
+                item for item in shared_loops.json()["items"]
+                if item.get("source_type") == "appointment_workspace_follow_up"
+                and item.get("source_id", "").startswith(workspace_id + ":")
+            )
+            shared_loop_detail = client.get(
+                f"/api/v1/open-loops/{shared_loop['id']}",
+                headers=shared_headers,
+            )
+            assert shared_loop_detail.status_code == 200, shared_loop_detail.text
+            occurrences = client.get(
+                f"/api/v1/open-loops/{shared_loop['id']}/occurrences",
+                headers=shared_headers,
+            )
+            assert occurrences.status_code == 200, occurrences.text
+            assert occurrences.json()
+            history = client.get(
+                f"/api/v1/open-loops/{shared_loop['id']}/history",
+                headers=shared_headers,
+            )
+            assert history.status_code == 200, history.text
+            history_types = {item["event_type"] for item in history.json()}
+            assert "created_from_appointment_follow_up" in history_types
+            assert "source_reconciled" in history_types
+
             # If a later revision removes the follow-up, the cancellation
             # remains in the same appointment's durable history.
             removed = client.patch(
@@ -879,11 +908,23 @@ def test_postgres_appointment_continuity_is_shared_and_linked_across_authorised_
                 ).one()
                 assert removal_event.evidence[0]["appointment_id"] == appointment_id
 
+            unrelated_headers = {"Authorization": "Bearer " + unrelated.json()["access_token"]}
             denied = client.get(
                 f"/api/v1/appointment-workspaces/{workspace_id}",
-                headers={"Authorization": "Bearer " + unrelated.json()["access_token"]},
+                headers=unrelated_headers,
             )
             assert denied.status_code == 404, denied.text
+            unrelated_loops = client.get("/api/v1/open-loops", headers=unrelated_headers)
+            assert unrelated_loops.status_code == 200, unrelated_loops.text
+            assert all(
+                item.get("source_id", "").split(":", 1)[0] != workspace_id
+                for item in unrelated_loops.json()["items"]
+            )
+            denied_loop = client.get(
+                f"/api/v1/open-loops/{shared_loop['id']}",
+                headers=unrelated_headers,
+            )
+            assert denied_loop.status_code == 404, denied_loop.text
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
