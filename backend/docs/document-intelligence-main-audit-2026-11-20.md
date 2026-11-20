@@ -67,3 +67,13 @@ The live-Qwen workflow now runs candidate-schema, adversarial-candidate and docu
 ## Safety boundary
 
 Unreviewed candidates remain proposals. Rejected candidates must not become canonical assertions. Medication document conflicts remain unresolved until the appropriate professional confirmation; document extraction must never be interpreted as medication-change advice. Synthetic semantic labels are engineering tests, not clinical accuracy claims.
+
+## Deployment boundary observed during this implementation
+
+The Railway project `SolenOS` production backend was inspected read-only:
+- Service: `SolenOS_backend` (`69c367dd-7e01-4327-bb3b-bbb25af60f87`).
+- Latest live deployment at inspection: `SUCCESS`, commit `e0166fe8f99bf12944956f8a5f86d93fa2c1c292`, created 2026-11-19 06:37:26 UTC.
+- The live source configuration was pinned to that older commit.
+- A pre-existing staged Railway patch was present, with five staged changes and target source commit `893913b11edf109138d2541ad5895910ba3fedd1`; it was not created or committed by this implementation.
+- This implementation did not accept staged changes, trigger a Railway deployment, restart the service, or alter production variables.
+- Consequently, the commits in this audit are on GitHub `main`; they are not claimed to be running in the production service.
