@@ -2456,6 +2456,18 @@ def current_care_projection(
         "items": ordered[:12],
         "item_count": min(len(ordered), 12),
         "has_more": len(ordered) > 12,
+        "outcomes": [
+            item for item in ordered
+            if item.get("source_collection") in {
+                "decision_outcomes", "action_outcomes", "follow_up_outcomes",
+            }
+        ][:50],
+        "outcomes_has_more": sum(
+            1 for item in ordered
+            if item.get("source_collection") in {
+                "decision_outcomes", "action_outcomes", "follow_up_outcomes",
+            }
+        ) > 50,
         "source_coverage": {
             name: {"status": value.get("status"), "returned_count": value.get("returned_count", 0), "has_more": value.get("has_more", False)}
             for name, value in sources.items()
