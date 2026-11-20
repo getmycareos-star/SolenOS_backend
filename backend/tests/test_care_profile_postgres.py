@@ -94,6 +94,19 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     assert saved.json()["relationship"] == "Daughter"
     assert saved.json()["condition"] == "Dementia stage reported by caregiver"
 
+    context_write = client.post(
+        "/api/caregiver-contexts",
+        headers=first_headers,
+        json={
+            "caregiver_id": first_caregiver_id,
+            "person_id": first_person_id,
+            "effective_start": "2026-11-20T12:00:00+00:00",
+            "context_metadata": {"record_type": "attribution_test"},
+        },
+    )
+    assert context_write.status_code == 200, context_write.text
+    assert context_write.json()["reported_by_caregiver_id"] == first_caregiver_id
+
     # A fresh login issues a new bearer session. The data must be retrieved
     # from PostgreSQL, not restored from browser state.
     login = client.post(
