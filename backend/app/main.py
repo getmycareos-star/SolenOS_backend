@@ -34,6 +34,7 @@ from app.api.daily_care_intelligence import router as daily_care_intelligence_ro
 from app.api.handoff_drafts import router as handoff_drafts_router
 from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
+from app.models.time_location import Appointment as LegacyAppointmentModel
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.care_continuity import (
@@ -588,6 +589,16 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # the final path segment. Resolve it explicitly before the session
             # scope check when Starlette route matching did not supply path params.
             target_person_id = path.rsplit("/", 1)[-1]
+        if not target_person_id and path.startswith("/api/v1/appointments/") and path.endswith("/lifecycle"):
+            # Appointment lifecycle writes address the appointment child ID,
+            # not the person ID. Resolve its owner before the global session
+            # scope check so the endpoint can then enforce correct_records.
+            appointment_id = path.split("/")[-2]
+            target_person_id = (
+                db.query(LegacyAppointmentModel.person_id)
+                .filter(LegacyAppointmentModel.id == appointment_id)
+                .scalar()
+            )
         if not target_person_id:
             # Legacy read routes carry the care-recipient ID in the path. Nested
             # APIRouter matching is not always available inside middleware, so
