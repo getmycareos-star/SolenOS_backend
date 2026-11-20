@@ -586,6 +586,21 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # the final path segment. Resolve it explicitly before the session
             # scope check when Starlette route matching did not supply path params.
             target_person_id = path.rsplit("/", 1)[-1]
+        if not target_person_id:
+            # Legacy read routes carry the care-recipient ID in the path. Nested
+            # APIRouter matching is not always available inside middleware, so
+            # resolve only these explicitly known person-scoped route shapes.
+            # The extracted ID is still compared with the bearer session below;
+            # this does not grant access based on a caller-selected path value.
+            person_scoped_path_patterns = (
+                r"/api/v1/(?:daily-intelligence|appointments|locations|timezones|care-windows|transitions|temporal-relationships|time-patterns)/([^/]+)(?:/enriched)?",
+                r"/api/v1/temporal/(?:facts|relations|reference-frames|conflicts|view)/([^/]+)",
+            )
+            for pattern in person_scoped_path_patterns:
+                match = re.fullmatch(pattern, path)
+                if match:
+                    target_person_id = match.group(1)
+                    break
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
         # LCR orientation is a session-derived read/response flow. It does
