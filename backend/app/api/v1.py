@@ -84,6 +84,7 @@ from app.schemas.memory import (
 from app.schemas.time_location import (
     CareWindow as CareWindowSchema,
     AppointmentCreate,
+    AppointmentLifecycleUpdate,
     Appointment as AppointmentSchema,
     CareTransitionCreate,
     CareTransition as CareTransitionSchema,
@@ -2324,7 +2325,10 @@ def list_appointments(person_id: str, request: Request, db: Session = Depends(ge
 
 @router.patch("/appointments/{appointment_id}/lifecycle")
 def update_appointment_lifecycle_endpoint(
-    appointment_id: str, request: Request, db: Session = Depends(get_db)
+    appointment_id: str,
+    request: Request,
+    payload: Optional[AppointmentLifecycleUpdate] = None,
+    db: Session = Depends(get_db),
 ):
     appointment = (
         db.query(AppointmentModel).filter(AppointmentModel.id == appointment_id).first()
@@ -2334,23 +2338,45 @@ def update_appointment_lifecycle_endpoint(
     _require_session_scope(request, db, appointment.person_id)
     require_request_caregiver_permission(request, db, "correct_records")
 
-    appt_dict = {
-        "id": appointment.id,
-        "scheduled_at": appointment.scheduled_at,
-        "status": appointment.status,
-    }
-    new_status = update_appointment_lifecycle(appt_dict)
-
-    if new_status != appointment.status:
-        appointment.status = new_status
-        if new_status == "completed":
+    if payload is not None:
+        supplied = payload.model_fields_set
+        if "scheduled_at" in supplied:
+            appointment.scheduled_at = payload.scheduled_at
+            if payload.scheduled_at is None and "status" not in supplied:
+                appointment.status = "date_unknown"
+        if "status" in supplied and payload.status is not None:
+            appointment.status = payload.status
+        if appointment.status == "completed" and appointment.completed_at is None:
             appointment.completed_at = utc_now()
-        elif new_status == "resolved":
+        elif appointment.status == "resolved" and appointment.resolved_at is None:
             appointment.resolved_at = utc_now()
         db.commit()
         db.refresh(appointment)
+    else:
+        # Preserve the existing automatic time-based lifecycle transition.
+        # Cancelled and rescheduled records are never overwritten by inference.
+        appt_dict = {
+            "id": appointment.id,
+            "scheduled_at": appointment.scheduled_at,
+            "status": appointment.status,
+        }
+        new_status = update_appointment_lifecycle(appt_dict)
+        if new_status != appointment.status:
+            appointment.status = new_status
+            if new_status == "completed":
+                appointment.completed_at = utc_now()
+            elif new_status == "resolved":
+                appointment.resolved_at = utc_now()
+            db.commit()
+            db.refresh(appointment)
 
-    return {"id": appointment.id, "status": appointment.status}
+    return {
+        "id": appointment.id,
+        "status": appointment.status,
+        "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
+        "external_booking_confirmed": False,
+        "interpretation_limit": "This is a caregiver-recorded lifecycle state. It does not confirm an external booking.",
+    }
 
 
 @router.post("/transitions", response_model=CareTransitionSchema)
