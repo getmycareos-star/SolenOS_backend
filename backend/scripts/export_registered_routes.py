@@ -18,7 +18,21 @@ from typing import Any
 
 from fastapi.routing import APIRoute
 
+try:
+    # FastAPI >=0.137 preserves included routers as lazy route-tree nodes.
+    # iter_route_contexts expands nested includes and returns effective prefixed paths.
+    from fastapi.routing import iter_route_contexts
+except ImportError:  # FastAPI <0.137 exposes a flattened app.routes list.
+    iter_route_contexts = None
+
 from app.main import app
+
+
+def _registered_route_contexts():
+    if iter_route_contexts is not None:
+        yield from iter_route_contexts(app.routes)
+        return
+    yield from app.routes
 
 
 def _schema_for_operation(operation: dict[str, Any]) -> dict[str, Any]:
@@ -59,22 +73,28 @@ def build_inventory() -> dict[str, Any]:
     entries = []
     duplicates: dict[str, list[str]] = defaultdict(list)
 
-    for route in app.routes:
+    for route_context in _registered_route_contexts():
+        route = getattr(route_context, "route", route_context)
         if not isinstance(route, APIRoute):
             continue
-        for method in sorted(route.methods or []):
+        # RouteContext.path/methods/endpoint include every nested include prefix
+        # and dependency context; route.path alone is only the leaf declaration.
+        effective_path = getattr(route_context, "path", route.path)
+        effective_methods = getattr(route_context, "methods", route.methods)
+        effective_endpoint = getattr(route_context, "endpoint", route.endpoint)
+        for method in sorted(effective_methods or []):
             method = method.upper()
-            operation = paths.get(route.path, {}).get(method.lower())
-            key = f"{method} {route.path}"
+            operation = paths.get(effective_path, {}).get(method.lower())
+            key = f"{method} {effective_path}"
             duplicates[key].append(
-                f"{route.endpoint.__module__}.{route.endpoint.__qualname__}"
+                f"{effective_endpoint.__module__}.{effective_endpoint.__qualname__}"
             )
             entries.append({
-                "endpoint": route.path,
+                "endpoint": effective_path,
                 "method": method,
-                "router_module": route.endpoint.__module__,
-                "handler": route.endpoint.__qualname__,
-                "route_name": route.name,
+                "router_module": effective_endpoint.__module__,
+                "handler": effective_endpoint.__qualname__,
+                "route_name": getattr(route_context, "name", route.name),
                 "registered": True,
                 "included_in_openapi": operation is not None,
                 "contract": _schema_for_operation(operation) if operation else None,
@@ -94,7 +114,13 @@ def build_inventory() -> dict[str, Any]:
     }
     return {
         "title": "SolenOS registered FastAPI route inventory",
-        "source": "runtime app.routes and app.openapi()",
+        "source": (
+            "runtime app.routes expanded with fastapi.routing.iter_route_contexts "
+            "when available, cross-checked against app.openapi()"
+        ),
+        "route_tree_expansion": (
+            "iter_route_contexts" if iter_route_contexts is not None else "legacy_flat_app_routes"
+        ),
         "application": app.title,
         "version": app.version,
         "route_count": len(entries),
