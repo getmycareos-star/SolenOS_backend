@@ -673,6 +673,18 @@ def test_postgres_document_status_reports_queued_upload_without_claiming_process
 
 def test_postgres_document_medication_conflict_creates_professional_question_without_changing_medication():
     """A source-grounded discontinuation candidate creates a question, not a medication change."""
+    # This test deliberately exercises the real Qwen document-intelligence
+    # route. The PostgreSQL lifecycle workflow has no Ollama service; it must
+    # report this case as unverified there rather than treating HTTP 503 as a
+    # successful deterministic extraction. The dedicated live-Qwen workflow
+    # owns actual model-inference acceptance.
+    from app.services.qwen_gateway import get_ollama_config
+    try:
+        get_ollama_config()
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            pytest.skip("Requires configured live Qwen; exercised by the live-Qwen acceptance workflow")
+        raise
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     suffix = uuid.uuid4().hex
