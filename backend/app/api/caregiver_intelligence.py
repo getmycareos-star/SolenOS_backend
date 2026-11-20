@@ -713,6 +713,7 @@ def create_perspective_conflict(conflict: PerspectiveConflictCreate, request: Re
         "person_id": person_id,
         "resolution": None,
         "resolved_at": None,
+        "evidence_ref": "caregiver_shared_conflict_submission",
     })
     service = CaregiverIntelligenceService(db)
     db_conflict = service.create_perspective_conflict(conflict)
