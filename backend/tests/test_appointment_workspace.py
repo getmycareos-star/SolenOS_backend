@@ -2779,7 +2779,7 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
             "status": "follow_up_pending",
             "payload": {
                 "caregiverReport": "Caregiver recorded that the clinic plans to release the result.",
-                "follow_ups": [{
+                "followUps": [{
                     "id": "pending-clinic-result",
                     "action": "Check whether the clinic released the result",
                     "status": "open",
