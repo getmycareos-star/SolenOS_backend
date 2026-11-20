@@ -305,6 +305,18 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     if {r.id for r in recipients} != set(payload.recipient_caregiver_ids):
         raise HTTPException(status_code=404, detail="One or more recipients are not linked to this care record")
 
+    active_recipient_ids = {
+        row[0] for row in db.query(CaregiverAccessGrant.caregiver_id).filter(
+            CaregiverAccessGrant.person_id == person_id,
+            CaregiverAccessGrant.caregiver_id.in_(payload.recipient_caregiver_ids),
+            CaregiverAccessGrant.status == "active",
+            CaregiverAccessGrant.revoked_at.is_(None),
+            CaregiverAccessGrant.access_scope == "full_record",
+        ).all()
+    }
+    if active_recipient_ids != set(payload.recipient_caregiver_ids):
+        raise HTTPException(status_code=403, detail="Every handoff recipient must have active full care-record access")
+
     ineligible_recipients = [
         recipient.id for recipient in recipients
         if not _has_required_consent(db, person_id, recipient.id)
