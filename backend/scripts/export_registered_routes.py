@@ -401,6 +401,26 @@ def build_inventory() -> dict[str, Any]:
         "route_count": len(entries),
         "unique_method_path_count": len(duplicates),
         "duplicate_method_paths": duplicate_routes,
+        "frontend_product_workflow_count": sum(
+            route["disposition"] == "frontend_product_workflow" for route in entries
+        ),
+        "internal_service_or_operations_count": sum(
+            route["disposition"] == "internal_service_or_operations" for route in entries
+        ),
+        "disposition_review_required_count": sum(
+            route["disposition"] == "REVIEW_REQUIRED" for route in entries
+        ),
+        "consumer_review_required_count": sum(
+            isinstance(route["consumer"], str) and route["consumer"].startswith("REVIEW_REQUIRED")
+            for route in entries
+        ),
+        "persistence_review_required_count": sum(
+            isinstance(route["persistence"], str) and route["persistence"].startswith("REVIEW_REQUIRED")
+            for route in entries
+        ),
+        "registered_but_not_in_openapi_count": sum(
+            not route["included_in_openapi"] for route in entries
+        ),
         "classification_policy": (
             "Unclassified entries are explicit work items; this export does not "
             "claim a frontend/internal consumer, persistence behavior, authorization "
@@ -428,6 +448,12 @@ def main() -> None:
             f"Registered route-method entries: {inventory['route_count']}",
             f"Unique method/path pairs: {inventory['unique_method_path_count']}",
             f"Duplicate method/path registrations: {len(inventory['duplicate_method_paths'])}",
+            f"Frontend product workflow dispositions: {inventory['frontend_product_workflow_count']}",
+            f"Internal service/operations dispositions: {inventory['internal_service_or_operations_count']}",
+            f"Disposition review required: {inventory['disposition_review_required_count']}",
+            f"Consumer mapping review required: {inventory['consumer_review_required_count']}",
+            f"Persistence mapping review required: {inventory['persistence_review_required_count']}",
+            f"Registered but excluded from OpenAPI: {inventory['registered_but_not_in_openapi_count']}",
             "",
             "Generated from FastAPI iter_route_contexts/app.routes and cross-checked against app.openapi(). Consumer and persistence entries are domain-level mappings; they do not prove exact handler write sets or end-to-end verification.",
             "",
