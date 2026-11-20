@@ -19,6 +19,13 @@ from typing import Any
 
 from fastapi.routing import APIRoute
 
+try:
+    # FastAPI >=0.137 preserves included routers as lazy route-tree nodes.
+    # Expand them into effective paths before matching OpenAPI operations to handlers.
+    from fastapi.routing import iter_route_contexts
+except ImportError:  # FastAPI <0.137 exposes a flattened route list.
+    iter_route_contexts = None
+
 from app.main import PUBLIC_V1_ENDPOINTS, app
 
 
@@ -200,13 +207,27 @@ def _domain_match(path: str, mappings: list[tuple[str, Any]]) -> Any:
 
 def build_inventory() -> dict[str, Any]:
     openapi = app.openapi()
-    route_index: dict[tuple[str, str], list[APIRoute]] = defaultdict(list)
-    for route in app.routes:
+    route_index: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+    route_contexts = (
+        iter_route_contexts(app.routes)
+        if iter_route_contexts is not None
+        else iter(app.routes)
+    )
+    for route_context in route_contexts:
+        route = getattr(route_context, "route", route_context)
         if not isinstance(route, APIRoute):
             continue
-        for method in route.methods or set():
+        effective_path = getattr(route_context, "path", route.path)
+        effective_methods = getattr(route_context, "methods", route.methods)
+        effective_endpoint = getattr(route_context, "endpoint", route.endpoint)
+        effective_name = getattr(route_context, "name", route.name)
+        for method in effective_methods or set():
             if method.lower() in HTTP_METHODS:
-                route_index[(route.path, method.lower())].append(route)
+                route_index[(effective_path, method.lower())].append({
+                    "module": effective_endpoint.__module__,
+                    "handler": effective_endpoint.__name__,
+                    "route_name": effective_name,
+                })
 
     endpoints: list[dict[str, Any]] = []
     for path, operations in sorted(openapi.get("paths", {}).items()):
@@ -215,14 +236,7 @@ def build_inventory() -> dict[str, Any]:
             if method_lower not in HTTP_METHODS:
                 continue
             matches = route_index.get((path, method_lower), [])
-            owners = [
-                {
-                    "module": route.endpoint.__module__,
-                    "handler": route.endpoint.__name__,
-                    "route_name": route.name,
-                }
-                for route in matches
-            ]
+            owners = list(matches)
             owner_resolution = (
                 "resolved-from-registered-APIRoute"
                 if len(matches) == 1
@@ -303,7 +317,13 @@ def build_inventory() -> dict[str, Any]:
     ]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "FastAPI app.openapi() and registered APIRoute handlers",
+        "source": (
+            "FastAPI app.openapi() cross-checked against effective APIRoute contexts "
+            "expanded with iter_route_contexts when available"
+        ),
+        "route_tree_expansion": (
+            "iter_route_contexts" if iter_route_contexts is not None else "legacy_flat_app_routes"
+        ),
         "application": app.title,
         "version": app.version,
         "endpoint_count": len(endpoints),
