@@ -237,6 +237,11 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
                 person_id=session["person"]["id"],
             ).one()
             assert tentative_assertion.source_context["document_candidate"]["modality"] == "tentative"
+            denial_assertion = db.query(CareAssertion).filter_by(
+                id=denial_assertion_id,
+                person_id=session["person"]["id"],
+            ).one()
+            assert denial_assertion.source_context["document_candidate"]["negation_status"] == "explicitly_negated"
             accepted_assertion_count = db.query(CareAssertion).filter_by(
                 person_id=session["person"]["id"],
             ).count()
