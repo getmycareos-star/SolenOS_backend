@@ -111,6 +111,56 @@ def test_s3_object_can_be_restored_from_the_postgresql_recovery_copy(monkeypatch
     assert storage.read_document_binary(row) == payload
 
 
+def test_s3_missing_object_is_recovered_automatically_from_verified_postgres_copy(monkeypatch):
+    monkeypatch.setenv("DOCUMENT_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("DOCUMENT_S3_BUCKET", "solenos-care-documents")
+    client = FakeS3()
+    monkeypatch.setattr(storage, "_s3_client", lambda: client)
+    payload = b"recover after object deletion"
+    stored = storage.store_document_binary(
+        person_id="person-recovery",
+        evidence_id="evidence-auto-recovery",
+        data=payload,
+        mime_type="application/pdf",
+    )
+    row = SimpleNamespace(
+        evidence_id="evidence-auto-recovery",
+        storage_backend="s3",
+        storage_key=stored["storage_key"],
+        content=stored["content"],
+        mime_type="application/pdf",
+        size_bytes=stored["size_bytes"],
+        sha256=stored["sha256"],
+    )
+
+    storage.delete_document_binary(row)
+    assert storage.read_document_binary(row) == payload
+    assert client.objects[("solenos-care-documents", stored["storage_key"])] == payload
+    assert len(client.put_calls) == 2
+
+
+def test_s3_network_errors_do_not_trigger_database_object_recreation(monkeypatch):
+    monkeypatch.setenv("DOCUMENT_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("DOCUMENT_S3_BUCKET", "solenos-care-documents")
+
+    class UnavailableS3:
+        def get_object(self, **kwargs):
+            raise ConnectionError("object storage temporarily unavailable")
+
+    monkeypatch.setattr(storage, "_s3_client", lambda: UnavailableS3())
+    row = SimpleNamespace(
+        evidence_id="evidence-network-error",
+        storage_backend="s3",
+        storage_key="care-records/person/documents/evidence-network-error",
+        content=b"valid recovery copy",
+        mime_type="application/pdf",
+        size_bytes=len(b"valid recovery copy"),
+        sha256=hashlib.sha256(b"valid recovery copy").hexdigest(),
+    )
+    with pytest.raises(ConnectionError, match="temporarily unavailable"):
+        storage.read_document_binary(row)
+
+
 def test_s3_storage_fails_closed_when_bucket_credentials_are_missing(monkeypatch):
     monkeypatch.setenv("DOCUMENT_STORAGE_BACKEND", "s3")
     for name in (
