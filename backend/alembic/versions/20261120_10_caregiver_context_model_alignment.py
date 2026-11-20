@@ -65,7 +65,7 @@ def upgrade():
         ("context_metadata", sa.Text()),
         ("effective_start", sa.DateTime(timezone=True)),
         ("effective_end", sa.DateTime(timezone=True)),
-        ("reported_by_caregiver_id", sa.String(length=36)),
+        ("reported_by_caregiver_id", sa.String()),
     )
     for name, column_type in additions:
         if name not in columns:
@@ -139,7 +139,7 @@ def upgrade():
                 )
 
     for column_name, column_type in (
-        ("person_id", sa.String(length=36)),
+        ("person_id", sa.String()),
         ("created_at", sa.DateTime(timezone=True)),
     ):
         column = next(item for item in inspect(bind).get_columns(TABLE) if item["name"] == column_name)
