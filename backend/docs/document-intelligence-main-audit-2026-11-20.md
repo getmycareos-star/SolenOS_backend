@@ -132,3 +132,10 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 
 - `ca54866ebfebb10538ae4a18e9ef33ea9a0c87f6` — dedicated live-Qwen workflow now installs Tesseract and runs the real document-format extraction suite (native/scanned PDF, images, DOCX, RTF, retries and page provenance) before model evaluation.
 - `1948726a71d3aef6fc441df8f00b3727ce54a7c8` — changes to document format tests and semantic fixtures now trigger the live document evaluation workflow.
+
+- `3bbe83580f2482818e9f326a32d5b90893a88a5c` — added a second real-Qwen live workflow covering two separately uploaded, conflicting Metformin documents; both accepted assertions must survive in the LCR and Companion must retrieve and explain the unresolved conflict.
+- `8fbcc8929d3cf34af84ea4366a73cb7038af5faf` — live conflict evaluation tolerates the exact source quotation being embedded in a larger verbatim passage.
+- `7f86d1e28c33bd6031a56eeda6cde6792c5ee47f` — deterministic temporal metadata now recognizes the verb "suspects" as tentative language, not only "suspected".
+- `c8378886cbb1fb2502ad490b0e9fffba24cd8bcc` — adversarial regression for "The clinician suspects an infection."
+- `42bfe188d409ce153639a2b0d2b26e738b65c65b` — semantic gold case isolates the suspicion verb without the word "possible".
+- `eae8b0cffcfa29e0544612b898ea3b8db96003fb` — live-Qwen metrics now calculate modality accuracy, source-quotation accuracy and unsupported-candidate rate from observed candidates instead of hardcoding those metrics.
