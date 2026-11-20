@@ -163,6 +163,28 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
         restored_invited_session_id = invited["session_id"]
         invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
 
+        restricted = client.patch(
+            f"/api/v1/caregiver-access/members/{invited_caregiver_id}/access-scope",
+            headers=primary_headers,
+            json={"access_scope": "documents_only"},
+        )
+        assert restricted.status_code == 200, restricted.text
+        assert client.get(
+            f"/api/v1/care-delta/runs/{person_id}", headers=invited_headers
+        ).status_code == 403
+        assert client.get(
+            "/api/v1/handoffs/inbox", headers=invited_headers
+        ).status_code == 403
+        assert client.get(
+            "/api/v1/caregiver-access/assignable-members", headers=invited_headers
+        ).status_code == 403
+        full_access = client.patch(
+            f"/api/v1/caregiver-access/members/{invited_caregiver_id}/access-scope",
+            headers=primary_headers,
+            json={"access_scope": "full_record"},
+        )
+        assert full_access.status_code == 200, full_access.text
+
         primary_assignable = client.get(
             "/api/v1/caregiver-access/assignable-members", headers=primary_headers
         )
