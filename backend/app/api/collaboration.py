@@ -1257,9 +1257,33 @@ async def upload_evidence(
         size_bytes=stored_binary["size_bytes"],
         sha256=stored_binary["sha256"],
     ))
-    # Commit the immutable original and its storage pointer together. If the
-    # PostgreSQL transaction fails after an S3 write, compensate by deleting
-    # the unreferenced object; never report a partially saved document.
+    # Keep the immutable evidence, binary pointer, and initial processing job
+    # in one PostgreSQL transaction. A savepoint lets an unavailable job queue
+    # remain an explicit processing failure without discarding the caregiver's
+    # already-uploaded original. When the job is created, it cannot be lost in
+    # a crash window between the evidence commit and a second queue commit.
+    document_job_id = None
+    document_job_status = "not_applicable"
+    if evidence_type == "document":
+        document_job_status = "queue_unavailable"
+        savepoint = db.begin_nested()
+        try:
+            document_job = _ensure_document_intake_job(
+                db, scoped_person_id, scoped_caregiver_id, persisted_evidence_id
+            )
+            if document_job is not None:
+                document_job_id = str(document_job.id)
+                document_job_status = str(document_job.status)
+            savepoint.commit()
+        except Exception:
+            savepoint.rollback()
+            document_job_id = None
+            document_job_status = "queue_unavailable"
+            logger.exception("Document processing could not be queued for evidence %s", persisted_evidence_id)
+
+    # Commit the immutable original, its storage pointer, and any successfully
+    # enqueued processing job together. If PostgreSQL fails after an S3 write,
+    # compensate by deleting the unreferenced object; never report a partial save.
     try:
         db.commit()
     except Exception:
@@ -1270,20 +1294,6 @@ async def upload_evidence(
             except Exception:
                 logger.exception("Unreferenced document object cleanup failed for evidence %s", persisted_evidence_id)
         raise
-    document_job_id = None
-    document_job_status = "not_applicable"
-    if evidence_type == "document":
-        document_job_status = "queue_unavailable"
-        try:
-            document_job = _ensure_document_intake_job(
-                db, scoped_person_id, scoped_caregiver_id, persisted_evidence_id
-            )
-            db.commit()
-            document_job_id = str(document_job.id)
-            document_job_status = str(document_job.status)
-        except Exception:
-            db.rollback()
-            logger.exception("Document processing could not be queued for saved evidence %s", persisted_evidence_id)
     return {
         "evidence_id": persisted_evidence_id,
         "size_bytes": len(data),
