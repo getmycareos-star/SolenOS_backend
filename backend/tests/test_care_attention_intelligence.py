@@ -401,7 +401,7 @@ def test_persisted_care_significance_remains_visible_when_source_record_link_is_
     }])
     assert len(important) == 1
     assert important[0]["history_completeness"] == "partial_or_unknown"
-    assert "source coverage is incomplete" in important[0]["reason"]
+    assert "available history is incomplete" in important[0]["reason"]
     assert clarification == []
 
 
