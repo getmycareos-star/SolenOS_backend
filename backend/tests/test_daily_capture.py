@@ -119,6 +119,24 @@ def session_headers(person_id: str, caregiver_id: str) -> dict[str, str]:
     token = f"daily-test-token-{person_id}-{caregiver_id}"
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     db = TestingSessionLocal()
+    grant = db.query(CaregiverAccessGrant).filter_by(
+        person_id=person_id, caregiver_id=caregiver_id
+    ).one_or_none()
+    if grant is None:
+        db.add(CaregiverAccessGrant(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+            permissions=[
+                "view_lcr", "add_evidence", "correct_records", "manage_responsibilities",
+                "manage_reminders", "complete_assigned_reminders", "manage_handoffs",
+                "share_summaries", "share_observations", "view_documents", "view_communications",
+            ],
+            granted_by_caregiver_id=caregiver_id,
+        ))
     existing = db.query(AnonymousSession).filter_by(token_hash=token_hash).one_or_none()
     if existing is None:
         db.add(AnonymousSession(
