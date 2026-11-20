@@ -507,8 +507,9 @@ def test_corrected_companion_report_is_versioned_reviewable_and_audited(monkeypa
         )
         assert all_versions.status_code == 200, all_versions.text
         versions = {item["id"]: item for item in all_versions.json()["items"]}
+        assert list(versions) == [original_id]
         assert versions[original_id]["status"] == "corrected"
-        assert versions[corrected_id]["status"] == "pending_authorization"
+        assert corrected_id not in versions
         db = TestingSessionLocal()
         try:
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
