@@ -3233,15 +3233,6 @@ def test_appointment_lifecycle_preserves_reschedule_cancel_and_unknown_date(clie
     assert rescheduled.json()["status"] == "rescheduled"
     assert rescheduled.json()["external_booking_confirmed"] is False
 
-    cancelled = test_client.patch(
-        f"/api/v1/appointments/{appointment_id}/lifecycle",
-        headers=headers,
-        json={"status": "cancelled"},
-    )
-    assert cancelled.status_code == 200, cancelled.text
-    assert cancelled.json()["status"] == "cancelled"
-    assert cancelled.json()["external_booking_confirmed"] is False
-
     restored_unknown = test_client.patch(
         f"/api/v1/appointments/{appointment_id}/lifecycle",
         headers=headers,
@@ -3250,3 +3241,12 @@ def test_appointment_lifecycle_preserves_reschedule_cancel_and_unknown_date(clie
     assert restored_unknown.status_code == 200, restored_unknown.text
     assert restored_unknown.json()["scheduled_at"] is None
     assert restored_unknown.json()["status"] == "date_unknown"
+
+    cancelled = test_client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+        json={"status": "cancelled"},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["external_booking_confirmed"] is False
