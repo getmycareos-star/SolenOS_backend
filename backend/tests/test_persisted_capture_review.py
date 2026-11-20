@@ -11,6 +11,7 @@ import app.api.v1 as api_v1_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.uncertainty import OpenQuestion
@@ -598,3 +599,35 @@ def test_daily_capture_does_not_report_longitudinal_processing_complete_when_del
         assert db.query(Evidence.id).filter_by(person_id=session["person"]["id"]).all() == evidence_ids_before_retry
     finally:
         db.close()
+
+
+
+def test_capture_candidate_review_requires_correct_records_permission():
+    client = TestClient(app)
+    session = create_session(client, "Restricted care recipient")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr"]
+        db.commit()
+    finally:
+        db.close()
+
+    denied_review = client.post(
+        "/api/v1/capture/analyses/nonexistent-analysis/review",
+        headers=headers,
+        json={"candidate_index": 0, "decision": "reject"},
+    )
+    assert denied_review.status_code == 403, denied_review.text
+    assert "correct records" in denied_review.text.lower()
+
+    denied_read = client.get(
+        "/api/v1/capture/analyses/nonexistent-analysis",
+        headers=headers,
+    )
+    assert denied_read.status_code == 404, denied_read.text
