@@ -908,3 +908,60 @@ def test_due_reminder_notification_targets_current_assignee_not_creator():
         assert notification.caregiver_id != primary["caregiver"]["id"]
     finally:
         db.close()
+
+
+def test_due_reminder_is_not_disclosed_to_revoked_assignee_or_silently_reassigned():
+    from app.models.notifications import CareNotification
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    primary = create_session(client, "Reminder owner")
+    headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=headers,
+        json={"email": "revoked-reminder-assignee@example.test"},
+    )
+    assert invitation.status_code == 201, invitation.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": "revoked-reminder-assignee@example.test",
+            "password": "revoked-reminder-password-456",
+            "name": "Revoked assignee",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    assignee_id = accepted.json()["caregiver_id"]
+
+    due_at = datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "title": "Private assigned follow-up",
+            "due_at": due_at,
+            "assigned_to_caregiver_id": assignee_id,
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    revoked = client.delete(f"/api/v1/caregiver-access/members/{assignee_id}", headers=headers)
+    assert revoked.status_code == 200, revoked.text
+
+    db = TestSessionLocal()
+    try:
+        assert deliver_due_reminders(db=db, now=datetime.now(timezone.utc)) == 0
+        reminder = db.query(CareReminder).filter_by(id=created.json()["id"]).one()
+        assert reminder.status == "open"
+        assert reminder.assigned_to_caregiver_id == assignee_id
+        assert reminder.notification_deferred_until is not None
+        assert db.query(CareNotification).filter_by(
+            source_event_id=reminder.id,
+            category="reminder_due",
+        ).count() == 0
+    finally:
+        db.close()
