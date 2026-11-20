@@ -850,6 +850,12 @@ jobs:
           # a fresh SQLAlchemy session for retrieval; they are not mocked.
           python -m pytest tests/test_messy_care_1000_api_postgres.py -q
 
+      - name: Verify correction receipt recovery and idempotency on PostgreSQL
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_messy_care_benchmark
+        working-directory: backend
+        run: python -m pytest tests/test_correction_retry_postgres.py -q
+
       - name: Preserve existing freshness policy and assessment rows during schema reconciliation (partial-schema regression)
         env:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_freshness_existing
