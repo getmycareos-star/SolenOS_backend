@@ -72,11 +72,15 @@ jobs:
         run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace/backend solenos-backend-ci-tests bash /workspace/ci/run-backend-validation.sh
       - name: Export complete runtime-registered endpoint inventory
         run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace/backend solenos-backend-ci-tests python scripts/export_registered_endpoints.py --output /workspace/backend-endpoint-inventory.json
+      - name: Export backend service import and call-site inventory
+        run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace/backend solenos-backend-ci-tests python scripts/export_service_consumers.py --output /workspace/backend-service-consumers.json
       - name: Publish endpoint inventory artifact
         uses: actions/upload-artifact@v4
         with:
           name: backend-endpoint-inventory
-          path: backend-endpoint-inventory.json
+          path: |
+            backend-endpoint-inventory.json
+            backend-service-consumers.json
           if-no-files-found: error
           retention-days: 30
       - name: Export actual registered endpoint inventory
