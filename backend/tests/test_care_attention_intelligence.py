@@ -579,3 +579,78 @@ def test_dementia_observation_without_event_time_or_with_uncertainty_is_not_patt
     )
     clarification_ids = {item["record_id"] for item in result["needs_clarification"]}
     assert "uncertain-observation" in clarification_ids
+
+
+def test_persisted_change_keeps_evidence_significance_and_follow_up_dimensions_separate():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-dimensions",
+        "significance_verdict": "meaningful_candidate",
+        "significance_assessment_id": "assessment-dimensions",
+        "significance_assessment_status": "linked",
+        "evidence_status": "reported",
+        "evidence_confidence": 0.42,
+        "significance_confidence": 0.61,
+        "assessment_dimensions": [{"name": "frequency", "score": 0.61}],
+        "attention_candidate": True,
+        "follow_up_candidate": True,
+        "action_status": "open",
+        "linked_follow_up_outcome_status": "outcome_unknown",
+        "linked_follow_up_id": "loop-dimensions",
+        "baseline_coverage_status": "unknown",
+        "current_coverage_status": "covered",
+        "baseline_is_stable": False,
+        "baseline_history_completeness": "unknown",
+        "expected_source_record_count": 1,
+        "records": [{
+            "source": "events",
+            "record_id": "event-dimensions",
+            "title": "Repeated waking",
+            "evidence_ids": ["evidence-dimensions"],
+        }],
+        "explanation": "A saved sleep change needs review.",
+    }])
+    assert len(important) == 1
+    item = important[0]
+    assert item["care_significance"] == "attention_candidate"
+    assert item["significance_verdict"] == "meaningful_candidate"
+    assert item["significance_assessment_id"] == "assessment-dimensions"
+    assert item["significance_assessment_status"] == "linked"
+    assert item["evidence_status"] == "reported"
+    assert item["evidence_confidence"] == 0.42
+    assert item["significance_confidence"] == 0.61
+    assert item["confidence_interpretation"] == "uncalibrated_score_not_probability"
+    assert item["assessment_dimensions"] == [{"name": "frequency", "score": 0.61}]
+    assert item["action_status"] == "open"
+    assert item["linked_follow_up_outcome_status"] == "outcome_unknown"
+    assert item["linked_follow_up_id"] == "loop-dimensions"
+    assert item["history_completeness"] == "partial_or_unknown"
+    assert clarification == []
+
+
+def test_missing_significance_assessment_is_disclosed_without_hiding_saved_follow_up():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-no-assessment",
+        "significance_verdict": "insufficient_evidence",
+        "significance_assessment_status": "not_recorded",
+        "attention_candidate": False,
+        "follow_up_candidate": True,
+        "action_status": "closed",
+        "linked_follow_up_outcome_status": "outcome_unknown",
+        "linked_follow_up_id": "loop-closed-unknown",
+        "expected_source_record_count": 0,
+        "records": [],
+        "explanation": "A saved follow-up concern remains open.",
+    }])
+    assert len(important) == 1
+    assert important[0]["evidence_status"] == "unknown"
+    assert important[0]["significance_assessment_status"] == "not_recorded"
+    assert "No separate significance assessment is linked" in important[0]["reason"]
+    assert important[0]["action_status"] == "closed"
+    assert important[0]["linked_follow_up_outcome_status"] == "outcome_unknown"
+    assert "follow-up was closed, but its outcome was not recorded" in important[0]["reason"]
+    assert important[0]["history_completeness"] == "partial_or_unknown"
+    assert clarification == []
