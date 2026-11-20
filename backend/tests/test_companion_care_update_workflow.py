@@ -563,3 +563,38 @@ def test_corrected_companion_report_is_versioned_reviewable_and_audited(monkeypa
         assert [item["decision"] for item in corrected_history.json()["items"]] == ["accepted"]
     finally:
         teardown()
+
+
+def test_companion_conversation_history_returns_source_message_ids_and_enforces_scope(monkeypatch):
+    client = setup_client(monkeypatch, lambda text: {"observations": []})
+    try:
+        first = create_session(client, "Conversation owner")
+        source = "The person slept for six hours last night."
+        sent = send(client, first, source)
+        assert sent.status_code == 200, sent.text
+        session_id = sent.json()["session_id"]
+        headers = {"Authorization": f"Bearer {first['access_token']}"}
+
+        history = client.get(f"/api/v1/conversation/{session_id}", headers=headers)
+        assert history.status_code == 200, history.text
+        body = history.json()
+        assert body["session_id"] == session_id
+        assert body["person_id"] == first["person"]["id"]
+        user_messages = [item for item in body["messages"] if item["role"] == "user"]
+        assistant_messages = [item for item in body["messages"] if item["role"] == "assistant"]
+        assert len(user_messages) == 1
+        assert user_messages[0]["text"] == source
+        assert user_messages[0]["id"]
+        assert user_messages[0]["source_message_id"] == user_messages[0]["id"]
+        assert len(assistant_messages) == 1
+        assert assistant_messages[0]["id"]
+        assert assistant_messages[0]["source_message_id"] is None
+
+        second = create_session(client, "Unrelated caregiver")
+        cross_record = client.get(
+            f"/api/v1/conversation/{session_id}",
+            headers={"Authorization": f"Bearer {second['access_token']}"},
+        )
+        assert cross_record.status_code == 404
+    finally:
+        teardown()
