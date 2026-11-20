@@ -20,6 +20,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.services.document_binary_storage import read_document_binary
 from app.api.document_lifecycle import (
     _verify_persisted_extraction,
     _ocr_quality_by_page,
@@ -146,10 +147,10 @@ def _source(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
     if upload is None:
         raise HTTPException(status_code=409, detail="The original uploaded document is unavailable")
-    content = bytes(upload.content)
-    digest = hashlib.sha256(content).hexdigest()
-    if len(content) != upload.size_bytes or digest != upload.sha256:
-        raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
+    try:
+        read_document_binary(upload)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check") from exc
     return evidence, upload
 
 
