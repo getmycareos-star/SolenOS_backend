@@ -3202,3 +3202,97 @@ def test_incomplete_retrieval_deterministically_qualifies_historical_answer():
         {"retrieval_completeness": "partial_or_unknown"},
         historical_question=True,
     ) == already_qualified
+
+
+
+def test_companion_retrieves_another_authorized_caregivers_lcr_evidence(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The person prefers a quiet room after lunch, according to the saved caregiver report."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        first_token, person_id, first_caregiver_id = create_session(client)
+        first_auth = {"Authorization": f"Bearer {first_token}"}
+        named = client.patch(
+            "/api/situation",
+            headers=first_auth,
+            json={"person_id": person_id, "caregiver_id": first_caregiver_id, "display_name": "Care recipient"},
+        )
+        assert named.status_code == 200, named.text
+
+        db = TestingSessionLocal()
+        event = CareEvent(
+            id="shared-companion-event",
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime(2026, 11, 19, 12, 0, tzinfo=timezone.utc),
+            title="Quiet room preference",
+            description="The person prefers a quiet room after lunch.",
+            evidence_ids=["shared-companion-evidence"],
+            created_by_caregiver_id=first_caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        evidence = Evidence(
+            id="shared-companion-evidence",
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="The person prefers a quiet room after lunch.",
+            source_type="caregiver_report",
+            uploaded_by_caregiver_id=first_caregiver_id,
+            reported_by_caregiver_id=first_caregiver_id,
+            occurred_at=datetime(2026, 11, 19, 12, 0, tzinfo=timezone.utc),
+            occurred_at_timezone="UTC",
+            reported_at=datetime(2026, 11, 19, 12, 5, tzinfo=timezone.utc),
+            collected_at=datetime(2026, 11, 19, 12, 6, tzinfo=timezone.utc),
+            reported_by_label="Family caregiver",
+            original_author="Family caregiver",
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([event, evidence])
+        db.commit()
+        db.close()
+
+        account = client.post(
+            "/api/v1/accounts",
+            headers=first_auth,
+            json={"email": "companion-collaborator@example.com", "password": "another-long-password-789"},
+        )
+        assert account.status_code == 201, account.text
+        invitation = client.post(
+            "/api/v1/caregiver-access/invitations",
+            headers=first_auth,
+            json={"email": "companion-collaborator@example.com", "expires_in_days": 7},
+        )
+        assert invitation.status_code == 201, invitation.text
+        accepted = client.post(
+            "/api/v1/caregiver-access/invitations/accept",
+            json={
+                "token": invitation.json()["invitation_token"],
+                "email": "companion-collaborator@example.com",
+                "password": "another-long-password-789",
+                "name": "Second caregiver",
+            },
+        )
+        assert accepted.status_code == 201, accepted.text
+        second_auth = {"Authorization": f"Bearer {accepted.json()['access_token']}"}
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers=second_auth,
+            json={"person_id": person_id, "text": "What preference was recorded?"},
+        )
+        assert response.status_code == 200, response.text
+        serialized_prompt = json.dumps(captured.get("messages", []), ensure_ascii=False)
+        assert "The person prefers a quiet room after lunch." in serialized_prompt
+        assert "shared-companion-event" in serialized_prompt
+        assert "shared-companion-evidence" in serialized_prompt
+    finally:
+        teardown()
