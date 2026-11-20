@@ -371,6 +371,13 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             item["reason"] += (
                 " No separate significance assessment is linked; this item reflects the persisted change flags."
             )
+        if (
+            item["action_status"] == "closed"
+            and item["linked_follow_up_outcome_status"] in {"outcome_unknown", "unknown", "not_recorded"}
+        ):
+            item["reason"] += (
+                " The follow-up was closed, but its outcome was not recorded."
+            )
         # A persisted care-attention decision and the completeness of its
         # supporting history are separate facts. Missing baseline/source
         # coverage must not silently hide an explicitly saved follow-up need.
