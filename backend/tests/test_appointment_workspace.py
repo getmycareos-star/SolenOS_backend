@@ -3210,3 +3210,43 @@ def test_appointment_document_links_are_same_person_and_durable(client):
     with TestSessionLocal() as db:
         appointment = db.query(Appointment).filter_by(id=appointment_id).one()
         assert appointment.evidence_ids == [own_document_id]
+
+
+def test_appointment_lifecycle_preserves_reschedule_cancel_and_unknown_date(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/appointments", headers=headers, json={
+        "person_id": owner["person"]["id"],
+        "title": "Community care review",
+        "created_by_caregiver_id": owner["caregiver"]["id"],
+    })
+    assert created.status_code == 200, created.text
+    appointment_id = created.json()["id"]
+
+    future = (datetime.now(timezone.utc) + timedelta(days=21)).isoformat()
+    rescheduled = test_client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+        json={"status": "rescheduled", "scheduled_at": future},
+    )
+    assert rescheduled.status_code == 200, rescheduled.text
+    assert rescheduled.json()["status"] == "rescheduled"
+    assert rescheduled.json()["external_booking_confirmed"] is False
+
+    cancelled = test_client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+        json={"status": "cancelled"},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["external_booking_confirmed"] is False
+
+    restored_unknown = test_client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+        json={"scheduled_at": None},
+    )
+    assert restored_unknown.status_code == 200, restored_unknown.text
+    assert restored_unknown.json()["scheduled_at"] is None
+    assert restored_unknown.json()["status"] == "date_unknown"
