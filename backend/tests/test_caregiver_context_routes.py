@@ -1085,3 +1085,71 @@ def test_lcr_context_api_applies_explicit_previous_calendar_year_window():
     assert "lcr-temporal-2024-event" not in event_ids
     assert body["retrieval_contract"]["caregiver_scope_applied"] is True
     assert body["sources"]["companion_conversation"]["is_evidence"] is False
+
+def test_decision_and_outcome_history_support_stable_offset_pagination():
+    client = TestClient(app)
+    first = _session(client, "Decision history caregiver")
+    second = _session(client, "Other decision history caregiver")
+    db = TestingSessionLocal()
+    decision_ids = [f"decision-history-page-{index}" for index in range(3)]
+    outcome_ids = [f"outcome-history-page-{index}" for index in range(3)]
+    try:
+        decisions = Base.metadata.tables["care_decisions"]
+        outcomes = Base.metadata.tables["care_action_outcomes"]
+        for index, decision_id in enumerate(decision_ids):
+            db.execute(decisions.insert().values(
+                id=decision_id,
+                person_id=first["person"]["id"],
+                title=f"Care decision {index}",
+                decision_text=f"Persisted decision history record {index}",
+                decision_status="recorded",
+                created_at=datetime(2026, 11, 20, 10 + index, tzinfo=timezone.utc),
+                created_by_caregiver_id=first["caregiver"]["id"],
+            ))
+        for index, outcome_id in enumerate(outcome_ids):
+            db.execute(outcomes.insert().values(
+                id=outcome_id,
+                person_id=first["person"]["id"],
+                action_id=f"decision-action-{index}",
+                action_type="care_decision",
+                outcome_status="recorded",
+                notes=f"Persisted outcome history record {index}",
+                evidence_ids=[],
+                created_at=datetime(2026, 11, 20, 13 + index, tzinfo=timezone.utc),
+                created_by_caregiver_id=first["caregiver"]["id"],
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {first['access_token']}"}
+    decision_first = client.get(
+        "/api/v1/care-continuity/decisions?limit=2&offset=0",
+        headers=headers,
+    )
+    decision_second = client.get(
+        "/api/v1/care-continuity/decisions?limit=2&offset=2",
+        headers=headers,
+    )
+    outcome_first = client.get(
+        f"/api/v1/care-continuity/outcomes/{first['person']['id']}?limit=2&offset=0",
+        headers=headers,
+    )
+    outcome_second = client.get(
+        f"/api/v1/care-continuity/outcomes/{first['person']['id']}?limit=2&offset=2",
+        headers=headers,
+    )
+    for response in (decision_first, decision_second, outcome_first, outcome_second):
+        assert response.status_code == 200, response.text
+        assert isinstance(response.json(), list)
+    assert {row["id"] for row in decision_first.json() + decision_second.json()} == set(decision_ids)
+    assert {row["id"] for row in outcome_first.json() + outcome_second.json()} == set(outcome_ids)
+    assert len(decision_first.json() + decision_second.json()) == 3
+    assert len(outcome_first.json() + outcome_second.json()) == 3
+
+    foreign = client.get(
+        f"/api/v1/care-continuity/outcomes/{first['person']['id']}?limit=2&offset=0",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert foreign.status_code == 403
+
