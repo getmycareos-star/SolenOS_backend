@@ -345,6 +345,25 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     ).order_by(Appointment.scheduled_at.desc()).limit(16).all()
     appointments_has_more = len(fetched_appointments) > 15
     appointments = fetched_appointments[:15]
+    # History is displayed newest-first, but preparation must target the nearest
+    # upcoming scheduled visit rather than the furthest future appointment.
+    next_appointment_row = db.query(Appointment).filter(
+        Appointment.person_id == person_id,
+        Appointment.status == "scheduled",
+        Appointment.scheduled_at >= now,
+    ).order_by(Appointment.scheduled_at.asc()).first()
+    next_appointment = ({
+        "source_table": "appointments",
+        "source_id": str(next_appointment_row.id),
+        "title": next_appointment_row.title,
+        "scheduled_at": _iso(next_appointment_row.scheduled_at),
+        "provider": next_appointment_row.provider,
+        "healthcare_org": next_appointment_row.healthcare_org,
+        "location": next_appointment_row.location,
+        "status": next_appointment_row.status,
+        "preparation_notes": next_appointment_row.preparation_notes,
+        "evidence_ids": next_appointment_row.evidence_ids or [],
+    } if next_appointment_row is not None else None)
 
     # Open loops are the existing system-owned continuity queue. Include every
     # unresolved item for this person, regardless of which authorised caregiver
@@ -963,6 +982,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "facts": facts,
         "events": event_items,
         "appointments": appointment_items,
+        "next_appointment": next_appointment,
         "open_loops": open_loops,
         "prior_decisions": prior_decisions,
         "decision_outcomes": decision_outcomes,
