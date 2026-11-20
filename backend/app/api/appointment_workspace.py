@@ -652,7 +652,12 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             for item in documents if item.get("source_evidence_id")
         }
         uploaded_rows = (
-            db.query(Evidence, EvidenceUpload)
+            db.query(
+                Evidence,
+                EvidenceUpload.filename,
+                EvidenceUpload.sha256,
+                EvidenceUpload.created_at,
+            )
             .join(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
             .filter(
                 Evidence.person_id == person_id,
@@ -664,7 +669,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             .all()
         )
         uploads_has_more = len(uploaded_rows) > 50
-        for source_evidence, upload in uploaded_rows[:50]:
+        for source_evidence, upload_filename, upload_sha256, upload_created_at in uploaded_rows[:50]:
             evidence_id = str(source_evidence.id)
             if evidence_id in extracted_evidence_ids:
                 continue
@@ -672,12 +677,12 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "source_table": "evidence_uploads",
                 "source_id": evidence_id,
                 "source_evidence_id": evidence_id,
-                "filename": upload.filename,
+                "filename": upload_filename,
                 "extraction_method": None,
                 "extraction_status": "not_started",
                 "extracted_text": None,
-                "source_text_sha256": upload.sha256,
-                "recorded_at": _iso(upload.created_at),
+                "source_text_sha256": upload_sha256,
+                "recorded_at": _iso(upload_created_at),
                 "uploaded_at": _iso(source_evidence.uploaded_at),
                 "uploaded_by_caregiver_id": source_evidence.uploaded_by_caregiver_id,
                 "epistemic_status": source_evidence.epistemic_status or "unknown",
