@@ -107,8 +107,8 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         assert quote in text
         return {
             "observations": [{
-                "subject": "diagnosis" if source_evidence_id == conflicting_evidence_id else "mobility",
-                "observation": quote,
+                "subject": "Patient",
+                "observation": "Patient walked 20 metres" if source_evidence_id == conflicting_evidence_id else quote,
                 "source_quote": quote,
                 "extraction_method": "test_verbatim",
             }],
