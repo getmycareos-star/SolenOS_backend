@@ -2316,3 +2316,104 @@ def test_care_source_excerpt_extracts_original_daily_capture_without_storage_jso
     assert excerpt == "Caregiver reports restless sleep and three overnight awakenings."
     assert "original_capture" not in excerpt
     assert "internal-only-key" not in excerpt
+
+
+@pytest.mark.session_security
+def test_situation_assessment_uses_linked_significance_and_person_scoped_follow_up():
+    from app.models.significance import SignificanceAssessment
+    from app.core.change_enums import EvidenceStatus
+
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Significance linkage recipient")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+
+        with TestingSessionLocal() as db:
+            change = Change(
+                id="linked-significance-change",
+                person_id=person_id,
+                subject_type="sleep",
+                subject_id=person_id,
+                change_type=ChangeType.RECURRENCE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state="Previously recorded sleep pattern",
+                current_state="Repeated waking reported",
+                evidence_ids=[],
+                explanation="A saved change assessment requires review.",
+                significance_verdict=SignificanceVerdict.INSUFFICIENT_EVIDENCE,
+                attention_candidate=False,
+                follow_up_candidate=False,
+                confirmation_status="detected",
+                is_active=True,
+                baseline_coverage_status="covered",
+                current_coverage_status="covered",
+            )
+            db.add(change)
+            db.flush()
+            assessment = SignificanceAssessment(
+                person_id=person_id,
+                subject_type="sleep",
+                subject_id=person_id,
+                target_type="change",
+                target_id=change.id,
+                verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                evidence_status=EvidenceStatus.REPORTED,
+                evidence_confidence=0.42,
+                significance_confidence=0.61,
+                dimensions=[{"name": "frequency", "score": 0.61}],
+                attention_candidate=True,
+                follow_up_candidate=True,
+                explanation="Repeated caregiver reports need review.",
+                evidence_ids=[],
+                is_active=True,
+                version=1,
+            )
+            db.add(assessment)
+            db.flush()
+            change.significance_assessment_id = assessment.id
+            db.commit()
+            change_id = change.id
+            assessment_id = assessment.id
+
+        follow_up = client.post(
+            "/api/v1/open-loops",
+            headers=headers,
+            json={
+                "loop_type": "follow_up",
+                "title": "Review the repeated sleep reports",
+                "description": "A caregiver follow-up is linked to the saved change.",
+                "source_type": "persisted_change",
+                "source_id": change_id,
+                "evidence": [],
+                "uncertainty": "unknown",
+                "idempotency_key": "situation-significance-follow-up",
+            },
+        )
+        assert follow_up.status_code == 201, follow_up.text
+
+        response = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        care_attention = response.json()["assessment"]["care_attention"]
+        item = next(
+            item for item in care_attention["important_to_address"]
+            if item["record_id"] == change_id
+        )
+        assert item["significance_assessment_id"] == assessment_id
+        assert item["significance_assessment_status"] == "linked"
+        assert item["significance_verdict"] == "meaningful_candidate"
+        assert item["evidence_status"] == "reported"
+        assert item["evidence_confidence"] == 0.42
+        assert item["significance_confidence"] == 0.61
+        assert item["action_status"] == "open"
+        assert item["linked_follow_up_outcome_status"] == "outcome_unknown"
+        assert item["linked_follow_up_id"] == follow_up.json()["id"]
+    finally:
+        teardown_db()
+
