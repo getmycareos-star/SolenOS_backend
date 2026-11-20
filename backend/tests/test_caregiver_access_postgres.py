@@ -290,6 +290,8 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             assert [event.action for event in access_events] == [
                 "caregiver.access.suspended",
                 "caregiver.access.restored",
+                "caregiver.access_scope.updated",
+                "caregiver.access_scope.updated",
                 "caregiver.access.revoked",
             ]
             assert all(event.actor_id == primary_caregiver_id for event in access_events)
