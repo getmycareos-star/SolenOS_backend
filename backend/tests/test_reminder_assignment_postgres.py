@@ -54,6 +54,54 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
     recipient_id = recipient["caregiver_id"]
     recipient_headers = {"Authorization": f"Bearer {recipient['access_token']}"}
 
+    evidence = client.post(
+        "/api/v1/evidence",
+        headers=primary_headers,
+        json={
+            "person_id": person_id,
+            "type": "caregiver_report",
+            "source_text": "The clinic asked the family caregiver to call and confirm the appointment details.",
+            "uploaded_by_caregiver_id": primary_id,
+        },
+    )
+    assert evidence.status_code == 200, evidence.text
+    action_due_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    approved_action = client.post(
+        f"/api/v1/registered-actions/{person_id}/approve",
+        headers=primary_headers,
+        json={
+            "explicit_approval": True,
+            "idempotency_key": f"shared-action-{suffix}",
+            "suggestion_id": f"open-loop:shared-action-{suffix}",
+            "title": "Call the clinic to confirm the appointment details",
+            "action_type": "call",
+            "rationale": "The saved caregiver report records a request for a follow-up call.",
+            "limitations": "The record does not establish clinical urgency.",
+            "evidence_ids": [evidence.json()["id"]],
+            "responsible_caregiver_id": recipient_id,
+            "create_reminder": True,
+            "reminder_due_at": action_due_at,
+        },
+    )
+    assert approved_action.status_code == 201, approved_action.text
+    assert approved_action.json()["created_by_caregiver_id"] == primary_id
+    assert approved_action.json()["responsible_caregiver_id"] == recipient_id
+
+    with SessionLocal() as db:
+        from app.models.action import Action
+        action = db.query(Action).filter_by(id=approved_action.json()["id"]).one()
+        linked = db.query(CareReminder).filter_by(action_id=action.id).one()
+        assert action.responsible_caregiver_id == recipient_id
+        assert linked.created_by_caregiver_id == primary_id
+        assert linked.assigned_to_caregiver_id == recipient_id
+        assignment_audit = db.query(AuditLogEvent).filter_by(
+            action="care.action.responsibility_assigned",
+            target_type="registered_action",
+            target_id=action.id,
+        ).one()
+        assert assignment_audit.actor_id == primary_id
+        assert assignment_audit.record_metadata["responsible_caregiver_id"] == recipient_id
+
     due_at = datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat()
     created = client.post(
         "/api/v1/reminders",
