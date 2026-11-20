@@ -117,7 +117,7 @@ def _evidence_ids_from_row(row) -> list[str]:
 
 
 def _sync_appointment_document_links(
-    db: Session, *, person_id: str, appointment_id: str | None, payload: dict
+    db: Session, *, person_id: str, caregiver_id: str, appointment_id: str | None, payload: dict
 ) -> None:
     """Attach already-persisted, same-person document evidence to the appointment."""
     raw_ids = payload.get("attachedEvidenceIds", payload.get("attached_evidence_ids"))
@@ -133,6 +133,7 @@ def _sync_appointment_document_links(
         raise HTTPException(status_code=422, detail="Appointment document references must contain only non-empty evidence IDs")
     if not evidence_ids:
         return
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     if appointment_id is None:
         raise HTTPException(status_code=422, detail="A document can only be linked to an existing appointment record")
     appointment = db.query(Appointment).filter(
@@ -274,7 +275,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
     db.add(revision)
     try:
         _sync_appointment_document_links(
-            db, person_id=person_id, appointment_id=row.appointment_id, payload=payload.payload,
+            db, person_id=person_id, caregiver_id=caregiver_id, appointment_id=row.appointment_id, payload=payload.payload,
         )
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
@@ -605,6 +606,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     document_source_status = "empty"
     documents_has_more = None
     try:
+        require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
         fetched_extraction_rows = (
             db.query(CaptureAnalysis)
             .filter(CaptureAnalysis.person_id == person_id)
@@ -690,6 +692,15 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             })
         documents_has_more = bool(documents_has_more or uploads_has_more)
         document_source_status = "available" if documents else "empty"
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            documents = []
+            documents_has_more = False
+            document_source_status = "restricted"
+        else:
+            db.rollback()
+            documents = []
+            document_source_status = "failed"
     except Exception:
         db.rollback()
         documents = []
