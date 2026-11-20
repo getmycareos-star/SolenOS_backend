@@ -127,23 +127,62 @@ def database_schema_differences(bind=None):
         if missing_columns:
             differences.append(f"{table_name}: missing columns {', '.join(missing_columns)}")
 
-        def type_contract(value):
-            affinity = getattr(value, "_type_affinity", type(value))
-            return (
-                getattr(affinity, "__name__", str(affinity)),
-                getattr(value, "length", None),
-                getattr(value, "precision", None),
-                getattr(value, "scale", None),
-                getattr(value, "timezone", None)
-                if target.dialect.name in {"postgresql", "oracle"}
-                else None,
-            )
+        def type_compatible(expected, actual):
+            """Compare persisted storage contracts without rejecting equivalent SQL types.
+
+            PostgreSQL reflects legacy VARCHAR-backed enum columns as String, while
+            SQLAlchemy's ORM Enum is a constrained textual value. Likewise, a
+            database may reflect Float columns with a dialect-selected precision.
+            Enforce only precision/scale/length explicitly declared by the ORM.
+            """
+            expected_enum = getattr(expected, "enums", None)
+            actual_enum = getattr(actual, "enums", None)
+            expected_affinity = getattr(expected, "_type_affinity", type(expected))
+            actual_affinity = getattr(actual, "_type_affinity", type(actual))
+
+            if expected_enum is not None:
+                string_affinities = {"String", "Enum"}
+                if expected_affinity.__name__ not in string_affinities or actual_affinity.__name__ not in string_affinities:
+                    return False
+                # Native enum-to-enum comparisons must preserve the accepted label
+                # set. VARCHAR-backed enums are accepted for legacy schemas.
+                if actual_enum is not None and set(expected_enum) != set(actual_enum):
+                    return False
+                return True
+
+            if expected_affinity != actual_affinity:
+                return False
+
+            expected_length = getattr(expected, "length", None)
+            actual_length = getattr(actual, "length", None)
+            if expected_length is not None and expected_length != actual_length:
+                return False
+
+            expected_precision = getattr(expected, "precision", None)
+            actual_precision = getattr(actual, "precision", None)
+            if expected_precision is not None and expected_precision != actual_precision:
+                return False
+
+            expected_scale = getattr(expected, "scale", None)
+            actual_scale = getattr(actual, "scale", None)
+            if expected_scale is not None and expected_scale != actual_scale:
+                return False
+
+            expected_timezone = getattr(expected, "timezone", None)
+            actual_timezone = getattr(actual, "timezone", None)
+            if (
+                target.dialect.name in {"postgresql", "oracle"}
+                and expected_timezone is not None
+                and expected_timezone != actual_timezone
+            ):
+                return False
+            return True
 
         type_mismatches = sorted(
             column.name
             for column in table.columns
             if column.name in reflected_columns
-            and type_contract(column.type) != type_contract(reflected_columns[column.name]["type"])
+            and not type_compatible(column.type, reflected_columns[column.name]["type"])
         )
         if type_mismatches:
             differences.append(
