@@ -2431,7 +2431,7 @@ def test_appointment_workspace_reports_unknown_when_revision_history_is_unavaila
 
 
 
-def test_documents_only_member_can_read_appointment_workspace_list_but_cannot_write(client):
+def test_documents_only_member_cannot_read_or_write_appointment_workspace(client):
     test_client, session, _ = client
     headers = {"Authorization": f"Bearer {session['access_token']}"}
     db = TestSessionLocal()
@@ -2448,7 +2448,7 @@ def test_documents_only_member_can_read_appointment_workspace_list_but_cannot_wr
         db.close()
 
     listed = test_client.get("/api/v1/appointment-workspaces", headers=headers)
-    assert listed.status_code == 200, listed.text
+    assert listed.status_code == 403, listed.text
 
     denied_write = test_client.post(
         "/api/v1/appointment-workspaces",
