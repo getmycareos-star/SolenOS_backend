@@ -1315,6 +1315,7 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
     assert body["person_scope_verified"] is True
     assert body["read_only"] is True
     assert body["updates_lcr"] is False
+    assert body["appointment_needs"] == []
     shared_lcr = body["living_care_record_context"]
     assert shared_lcr["person_id"] == owner["person"]["id"]
     assert shared_lcr["read_only"] is True
