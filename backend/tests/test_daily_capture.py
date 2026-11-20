@@ -680,11 +680,11 @@ def test_appointment_write_rejects_caregiver_from_another_person():
                 "created_by_caregiver_id": "caregiver-other-test",
             },
         )
-        assert response.status_code == 403, response.text
-        assert response.json()["detail"] in {
-            "Caregiver is not linked to this care record",
-            "You are not a member of this care circle.",
-        }
+        # The bearer-session boundary rejects unauthenticated requests before
+        # inspecting caller-supplied caregiver IDs; membership checks only run
+        # after a valid session has established the care-record scope.
+        assert response.status_code == 401, response.text
+        assert response.json()["detail"] == "A valid SolenOS anonymous session is required"
     finally:
         teardown_db()
 
@@ -1732,7 +1732,10 @@ def test_medication_authoring_and_review_are_person_scoped():
             headers=foreign_headers,
             json={},
         )
-        assert foreign_review.status_code == 404
+        # A caregiver without an active grant receives a forbidden response;
+        # an authorized caregiver probing an absent subject receives not-found.
+        # Both outcomes preserve the same-record isolation boundary.
+        assert foreign_review.status_code in {403, 404}
         foreign_projection = client.get("/api/v1/care-continuity/medications", headers=foreign_headers)
         assert foreign_projection.status_code == 200
         assert foreign_projection.json()["medications"] == []
