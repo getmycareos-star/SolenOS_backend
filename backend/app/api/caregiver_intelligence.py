@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
+from app.models.privacy_delivery import AuditLogEvent
 from app.models.care import Caregiver as SessionCaregiverModel
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.caregiver_intelligence import (
@@ -17,6 +18,9 @@ from app.models.caregiver_intelligence import (
     CaregiverActivity as CaregiverActivityModel,
     CaregiverCommunication as CaregiverCommunicationModel,
     CareNetworkRelationship as CareNetworkRelationshipModel,
+    ResponsibilityGap as ResponsibilityGapModel,
+    PerspectiveConflict as PerspectiveConflictModel,
+    DuplicateAction as DuplicateActionModel,
 )
 from app.schemas.caregiver_intelligence import (
     CaregiverProfileCreate,
@@ -47,6 +51,9 @@ from app.schemas.caregiver_intelligence import (
     CaregiverContext,
     CaregiverSummary,
     MultiCaregiverSummary,
+    ResponsibilityGapReview,
+    PerspectiveConflictReview,
+    DuplicateActionReview,
 )
 from app.services.caregiver_intelligence import CaregiverIntelligenceService
 from app.core.caregiver_enums import (
@@ -56,6 +63,9 @@ from app.core.caregiver_enums import (
     InformationVisibility,
     IdentityMatchConfidence,
     ResponsibilityStatus,
+    CoverageGapStatus,
+    PerspectiveConflictStatus,
+    DuplicateActionStatus,
 )
 
 router = APIRouter()
@@ -690,6 +700,49 @@ def list_responsibility_gaps(person_id: str, request: Request, db: Session = Dep
     service = CaregiverIntelligenceService(db)
     return service.get_open_gaps(person_id)
 
+@router.post("/responsibility-gaps/{gap_id}/review", response_model=ResponsibilityGap)
+def review_responsibility_gap(gap_id: str, review: ResponsibilityGapReview, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, _current_profile = _session_profile(request, db)
+    gap = db.query(ResponsibilityGapModel).filter(
+        ResponsibilityGapModel.id == str(gap_id),
+        ResponsibilityGapModel.person_id == person_id,
+    ).with_for_update().first()
+    if gap is None:
+        raise HTTPException(status_code=404, detail="Responsibility gap not found")
+    if gap.status not in {CoverageGapStatus.OPEN, CoverageGapStatus.PARTIALLY_COVERED}:
+        raise HTTPException(status_code=409, detail="This responsibility gap has already been closed")
+    if review.status not in {
+        CoverageGapStatus.COVERED,
+        CoverageGapStatus.PARTIALLY_COVERED,
+        CoverageGapStatus.RESOLVED,
+    }:
+        raise HTTPException(status_code=422, detail="Choose a reviewed coverage outcome")
+    resolution = review.resolution.strip()
+    if len(resolution) < 5:
+        raise HTTPException(status_code=422, detail="Add a brief explanation of the coverage decision")
+    previous_status = getattr(gap.status, "value", gap.status)
+    gap.status = review.status
+    gap.resolution = resolution
+    gap.resolved_at = datetime.now(timezone.utc) if review.status in {
+        CoverageGapStatus.COVERED,
+        CoverageGapStatus.RESOLVED,
+    } else None
+    db.add(AuditLogEvent(
+        actor_id=session_caregiver_id, subject_id=person_id, person_id=person_id,
+        caregiver_id=session_caregiver_id, action="caregiver_responsibility_gap_reviewed",
+        target_type="responsibility_gap", target_id=gap.id, outcome="success",
+        request_id=request.headers.get("x-request-id"),
+        policy_version="caregiver-intelligence-review-v1",
+        record_metadata={
+            "previous_status": previous_status,
+            "new_status": review.status.value,
+            "resolution_sha256": hashlib.sha256(resolution.encode("utf-8")).hexdigest(),
+        },
+    ))
+    db.commit()
+    db.refresh(gap)
+    return gap
+
 
 @router.post("/perspective-conflicts", response_model=PerspectiveConflict)
 def create_perspective_conflict(conflict: PerspectiveConflictCreate, request: Request, db: Session = Depends(get_db)):
@@ -726,6 +779,43 @@ def list_perspective_conflicts(person_id: str, request: Request, db: Session = D
     service = CaregiverIntelligenceService(db)
     return service.get_conflicts(person_id)
 
+@router.post("/perspective-conflicts/{conflict_id}/resolve", response_model=PerspectiveConflict)
+def resolve_perspective_conflict(conflict_id: str, review: PerspectiveConflictReview, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, _current_profile = _session_profile(request, db)
+    conflict = db.query(PerspectiveConflictModel).filter(
+        PerspectiveConflictModel.id == str(conflict_id),
+        PerspectiveConflictModel.person_id == person_id,
+    ).with_for_update().first()
+    if conflict is None:
+        raise HTTPException(status_code=404, detail="Perspective difference not found")
+    service = CaregiverIntelligenceService(db)
+    if not any(item.id == conflict.id for item in service.get_conflicts(person_id)):
+        raise HTTPException(status_code=404, detail="Perspective difference is not shared with this care circle")
+    if conflict.status == PerspectiveConflictStatus.RESOLVED:
+        raise HTTPException(status_code=409, detail="This perspective difference has already been reviewed")
+    resolution = review.resolution.strip()
+    if len(resolution) < 5:
+        raise HTTPException(status_code=422, detail="Add a brief explanation of the review outcome")
+    previous_status = getattr(conflict.status, "value", conflict.status)
+    conflict.status = PerspectiveConflictStatus.RESOLVED
+    conflict.resolution = resolution
+    conflict.resolved_at = datetime.now(timezone.utc)
+    db.add(AuditLogEvent(
+        actor_id=session_caregiver_id, subject_id=person_id, person_id=person_id,
+        caregiver_id=session_caregiver_id, action="caregiver_perspective_conflict_resolved",
+        target_type="perspective_conflict", target_id=conflict.id, outcome="success",
+        request_id=request.headers.get("x-request-id"),
+        policy_version="caregiver-intelligence-review-v1",
+        record_metadata={
+            "previous_status": previous_status,
+            "new_status": "resolved",
+            "resolution_sha256": hashlib.sha256(resolution.encode("utf-8")).hexdigest(),
+        },
+    ))
+    db.commit()
+    db.refresh(conflict)
+    return conflict
+
 
 @router.post("/duplicate-actions", response_model=DuplicateAction)
 def create_duplicate_action(duplicate: DuplicateActionCreate, request: Request, db: Session = Depends(get_db)):
@@ -750,6 +840,43 @@ def list_duplicate_actions(person_id: str, request: Request, db: Session = Depen
     _assert_person_scope(request, db, person_id)
     service = CaregiverIntelligenceService(db)
     return service.get_duplicate_actions(person_id)
+
+@router.post("/duplicate-actions/{duplicate_id}/review", response_model=DuplicateAction)
+def review_duplicate_action(duplicate_id: str, review: DuplicateActionReview, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, _current_profile = _session_profile(request, db)
+    duplicate = db.query(DuplicateActionModel).filter(
+        DuplicateActionModel.id == str(duplicate_id),
+        DuplicateActionModel.person_id == person_id,
+    ).with_for_update().first()
+    if duplicate is None:
+        raise HTTPException(status_code=404, detail="Possible duplicate action not found")
+    if duplicate.status != DuplicateActionStatus.POTENTIAL_DUPLICATE:
+        raise HTTPException(status_code=409, detail="This possible duplicate has already been reviewed")
+    if review.status not in {
+        DuplicateActionStatus.CONFIRMED_DUPLICATE,
+        DuplicateActionStatus.APPROPRIATE_PARALLEL,
+    }:
+        raise HTTPException(status_code=422, detail="Choose a reviewed action outcome")
+    resolution = review.resolution.strip()
+    if len(resolution) < 5:
+        raise HTTPException(status_code=422, detail="Add a brief explanation of the review outcome")
+    duplicate.status = review.status
+    duplicate.resolution = resolution
+    db.add(AuditLogEvent(
+        actor_id=session_caregiver_id, subject_id=person_id, person_id=person_id,
+        caregiver_id=session_caregiver_id, action="caregiver_duplicate_action_reviewed",
+        target_type="duplicate_action", target_id=duplicate.id, outcome="success",
+        request_id=request.headers.get("x-request-id"),
+        policy_version="caregiver-intelligence-review-v1",
+        record_metadata={
+            "previous_status": "potential_duplicate",
+            "new_status": review.status.value,
+            "resolution_sha256": hashlib.sha256(resolution.encode("utf-8")).hexdigest(),
+        },
+    ))
+    db.commit()
+    db.refresh(duplicate)
+    return duplicate
 
 
 @router.get("/caregiver-summary/{person_id}/{caregiver_id}", response_model=CaregiverSummary)
