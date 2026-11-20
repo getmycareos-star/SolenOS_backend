@@ -152,6 +152,7 @@ PERSISTENCE_DOMAINS = [
 ]
 
 MODULE_CONSUMERS = {
+    "app.main": ("internal", "Health and readiness operations", "backend/app/main.py"),
     "app.api.v1": ("frontend", "Core care-record and Daily Care API workflows", "src/components/workflows and src/components/mvp-workspace"),
     "app.api.accounts": ("frontend", "Optional caregiver account and recovery", "src/api/client.ts"),
     "app.api.anonymous_sessions": ("frontend", "Anonymous session lifecycle", "src/api/client.ts"),
@@ -182,6 +183,7 @@ MODULE_CONSUMERS = {
 }
 
 MODULE_PERSISTENCE = {
+    "app.main": "No care-record persistence for health/readiness probes; situation and LCR routes are mapped by path",
     "app.api.v1": "Person; Caregiver; Evidence; CareEvent; Insight; Correction; Observation; Appointment; CareTransition; CareWindow; temporal fact/relationship records",
     "app.api.accounts": "CaregiverAccount and account recovery audit records",
     "app.api.anonymous_sessions": "AnonymousSession and identity audit records",
