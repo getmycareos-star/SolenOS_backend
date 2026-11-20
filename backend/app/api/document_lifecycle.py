@@ -849,7 +849,6 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
-        Evidence.uploaded_by_caregiver_id == caregiver_id,
         Evidence.type == "document",
     ).with_for_update().first()
     if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
@@ -863,7 +862,6 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     content = _verified_content(upload)
     existing = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
         CaptureAnalysis.source_evidence_id == evidence_id,
     ).order_by(CaptureAnalysis.created_at.desc()).all()
     for row in existing:
@@ -913,9 +911,10 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 has_review_history = bool(row.review_history)
                 if has_intelligence or has_review_history:
                     retry_metadata["retry_of_analysis_id"] = row.id
+                    retry_metadata["retry_requested_by_caregiver_id"] = caregiver_id
                     replacement = CaptureAnalysis(
                         person_id=person_id,
-                        caregiver_id=caregiver_id,
+                        caregiver_id=row.caregiver_id,
                         source_event_id=None,
                         source_evidence_id=evidence_id,
                         source_text=retry_text,
@@ -983,7 +982,6 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document extraction not found")
@@ -993,7 +991,6 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
     evidence = db.query(Evidence).filter(
         Evidence.id == analysis.source_evidence_id,
         Evidence.person_id == person_id,
-        Evidence.uploaded_by_caregiver_id == caregiver_id,
         Evidence.type == "document",
     ).first()
     if evidence is None:
