@@ -349,6 +349,9 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "attention_candidate": attention_candidate,
             "follow_up_candidate": follow_up_candidate,
             "action_status": _text(change.get("action_status")) or "not_recorded",
+            "linked_follow_up_outcome_status": (
+                _text(change.get("linked_follow_up_outcome_status")) or "not_recorded"
+            ),
             "linked_follow_up_id": change.get("linked_follow_up_id"),
             "history_completeness": "complete" if history_complete else "partial_or_unknown",
             "reason": str(change.get("explanation") or "A saved change assessment needs review.")[:2400],
