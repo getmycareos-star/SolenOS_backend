@@ -329,7 +329,7 @@ app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
-app.include_router(safety_router, prefix="/api/v1")
+app.include_router(safety_router, prefix="/api/v1/safety")
 app.include_router(causal_router, prefix="/api/v1")
 # Community is intentionally suspended, not deleted. Keep its implementation and data
 # in the repository, but do not register any Community endpoint on the public API.
