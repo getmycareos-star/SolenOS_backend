@@ -2168,6 +2168,7 @@ def list_care_windows(person_id: str, request: Request, status: Optional[str] = 
 @router.post("/appointments", response_model=AppointmentSchema)
 def create_appointment(appointment: AppointmentCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, appointment.person_id, appointment.created_by_caregiver_id)
+    require_request_caregiver_permission(request, db, "correct_records")
 
     _require_person_and_linked_caregiver(
         db, appointment.person_id, appointment.created_by_caregiver_id
@@ -2199,6 +2200,7 @@ def create_appointment(appointment: AppointmentCreate, request: Request, db: Ses
 @router.get("/appointments/{person_id}", response_model=List[AppointmentSchema])
 def list_appointments(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
+    require_request_caregiver_permission(request, db, "view_lcr")
 
     return (
         db.query(AppointmentModel)
@@ -2218,7 +2220,7 @@ def update_appointment_lifecycle_endpoint(
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
     _require_session_scope(request, db, appointment.person_id)
-
+    require_request_caregiver_permission(request, db, "correct_records")
 
     appt_dict = {
         "id": appointment.id,
