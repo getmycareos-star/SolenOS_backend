@@ -1031,7 +1031,7 @@ def get_situation(
                 "supersedes_observation_id": None,
                 "correction_rationale": None,
                 "superseded_by_observation_ids": [],
-                "speaker_label": "Document source",
+                "speaker_label": None,
                 "speaker_attribution_status": "explicit" if candidate_context.get("source_attribution") not in (None, "not_stated") else "unknown",
                 "reporter_caregiver_id": assertion.created_by_caregiver_id,
                 "observer_caregiver_id": None,
