@@ -60,15 +60,32 @@ def _postgres_conversation_db():
         )
     if "situations" not in metadata.tables:
         Table("situations", metadata, Column("id", String, primary_key=True))
+    if "evidence" not in metadata.tables:
+        Table(
+            "evidence", metadata,
+            Column("id", String, primary_key=True),
+            Column("person_id", String, nullable=False),
+        )
+    if "care_fact_evidence" not in metadata.tables:
+        Table(
+            "care_fact_evidence", metadata,
+            Column("person_id", String, nullable=False),
+            Column("fact_id", String, nullable=False),
+            Column("evidence_id", String, nullable=False),
+            Column("evidence_role", String, nullable=False),
+            Column("source_span", Text),
+            Column("created_at", DateTime(timezone=True)),
+        )
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
     metadata.create_all(
         connection,
         tables=[
             Person.__table__, Caregiver.__table__, CareEvent.__table__,
-            CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
+            CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
             CaregiverProfile.__table__, CaregiverHandoff.__table__,
-            metadata.tables["care_facts"],
+            metadata.tables["care_facts"], metadata.tables["evidence"],
+            metadata.tables["care_fact_evidence"],
             QwenBackgroundJob.__table__, QwenModelOutput.__table__,
             AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
         ],
@@ -99,6 +116,60 @@ def _close_postgres_conversation_db(engine, connection, schema):
     with engine.begin() as cleanup:
         cleanup.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     engine.dispose()
+
+
+def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            db.add(Person(id="fact-lineage-person", name="Care recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id="fact-lineage-caregiver", name="Caregiver",
+                relationship="family", person_id="fact-lineage-person",
+            ))
+            db.flush()
+            now = datetime.now(UTC)
+            facts = db.get_bind()
+            db.execute(
+                facts.dialect.statement_compiler(facts.dialect, None).statement
+                if False else metadata.tables["care_facts"].insert(),
+                [{
+                    "id": "fact-with-source", "person_id": "fact-lineage-person",
+                    "subject_type": "person", "subject_id": "fact-lineage-person",
+                    "fact_type": "sleep_pattern", "fact_value": "Caregiver reported overnight waking.",
+                    "epistemic_status": "reported", "effective_at": now,
+                    "recorded_at": now, "created_at": now,
+                    "superseded_by_fact_id": None, "created_by_caregiver_id": "fact-lineage-caregiver",
+                    "review_notes": None,
+                }],
+            )
+            db.execute(metadata.tables["evidence"].insert(), {
+                "id": "fact-source-evidence", "person_id": "fact-lineage-person",
+            })
+            db.execute(metadata.tables["care_fact_evidence"].insert(), {
+                "person_id": "fact-lineage-person", "fact_id": "fact-with-source",
+                "evidence_id": "fact-source-evidence", "evidence_role": "supports",
+                "source_span": "Caregiver reported overnight waking.", "created_at": now,
+            })
+            db.commit()
+            from app.services.lcr_context import _load_source_schema
+            _load_source_schema.cache_clear()
+            context = build_lcr_context(
+                db, "fact-lineage-person", caregiver_id="fact-lineage-caregiver",
+                query="sleep", include_all_history=True,
+            )
+        fact = next(item for item in context["sources"]["facts"]["items"] if item["id"] == "fact-with-source")
+        assert fact["evidence_ids"] == ["fact-source-evidence"]
+        assert fact["evidence_link_status"] == "verified_person_scoped_links"
+        assert fact["evidence_links"] == [{
+            "evidence_id": "fact-source-evidence",
+            "evidence_role": "supports",
+            "source_span": "Caregiver reported overnight waking.",
+            "integrity_status": "verified_person_scoped",
+        }]
+    finally:
+        _close_postgres_conversation_db(engine, connection, schema)
 
 
 def test_full_history_projection_returns_more_than_fifty_matches_in_one_scan():
