@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care import CareEvent, Evidence
+from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.care_continuity import EvidenceObservation
 
 
@@ -519,6 +519,23 @@ def backfill_structured_daily_capture_observations(
         if evidence_ids else []
     )
     evidence_by_id = {str(row.id): row for row in evidence_rows}
+    candidate_caregiver_ids = {
+        str(caregiver_id)
+        for event in events
+        for caregiver_id in [event.created_by_caregiver_id]
+        if caregiver_id
+    } | {
+        str(row.uploaded_by_caregiver_id)
+        for row in evidence_rows
+        if row.uploaded_by_caregiver_id
+    }
+    valid_caregiver_ids = {
+        row[0]
+        for row in db.query(Caregiver.id).filter(
+            Caregiver.person_id == person_id,
+            Caregiver.id.in_(candidate_caregiver_ids),
+        ).all()
+    } if candidate_caregiver_ids else set()
     observations_available = 0
     evidence_missing = 0
 
@@ -536,7 +553,12 @@ def backfill_structured_daily_capture_observations(
             if evidence is None or not evidence.source_text:
                 evidence_missing += 1
                 continue
-            source_caregiver_id = caregiver_id or evidence.uploaded_by_caregiver_id
+            source_caregiver_id = (
+                caregiver_id if caregiver_id in valid_caregiver_ids
+                else evidence.uploaded_by_caregiver_id
+                if evidence.uploaded_by_caregiver_id in valid_caregiver_ids
+                else None
+            )
             if not source_caregiver_id:
                 continue
             observations_available += persist_structured_daily_capture_observations(
