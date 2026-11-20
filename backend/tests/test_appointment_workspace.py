@@ -2496,6 +2496,7 @@ def test_appointment_preparation_brief_includes_person_scoped_unresolved_follow_
                 title="Call clinic about pending result",
                 description="Check whether the test result is available",
                 status="open",
+                priority="high",
                 source_fingerprint="a" * 64,
                 owner_role="unassigned",
                 owner_label=None,
@@ -2539,6 +2540,7 @@ def test_appointment_preparation_brief_includes_person_scoped_unresolved_follow_
     titles = [item["title"] for item in body["open_loops"]]
     assert "Call clinic about pending result" in titles
     assert "Clarify transport arrangement" in titles
+    assert titles.index("Call clinic about pending result") < titles.index("Clarify transport arrangement")
     assert "Already completed follow-up" not in titles
     assert "Other person's private follow-up" not in titles
     assert body["source_coverage"]["open_loops"] == "available"
