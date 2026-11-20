@@ -2308,16 +2308,39 @@ def get_daily_intelligence(person_id: str, request: Request, db: Session = Depen
         for w in windows
     ]
     result = generate_daily_intelligence(person_id, event_dicts, appointment_dicts, window_dicts)
-    db_intel = DailyIntelligenceModel(
-        person_id=person_id,
-        intelligence_date=datetime.fromisoformat(result["intelligence_date"]),
-        overdue_items=result["overdue_items"],
-        upcoming_items=result["upcoming_items"],
-        active_windows=result["active_windows"],
-        expired_windows=result["expired_windows"],
-        daily_summary=result["daily_summary"],
+    intelligence_at = datetime.fromisoformat(result["intelligence_date"].replace("Z", "+00:00"))
+    if intelligence_at.tzinfo is None or intelligence_at.utcoffset() is None:
+        intelligence_at = intelligence_at.replace(tzinfo=timezone.utc)
+
+    # A GET refreshes the existing daily projection instead of appending a new
+    # row on every page load. Serialize same-person/same-day refreshes in
+    # PostgreSQL so concurrent readers cannot create duplicate snapshots.
+    if db.get_bind().dialect.name == "postgresql":
+        lock_material = f"solenos-daily-intelligence:{person_id}:{intelligence_at.date().isoformat()}"
+        lock_key = int.from_bytes(hashlib.sha256(lock_material.encode("utf-8")).digest()[:8], "big", signed=True)
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+    db_intel = (
+        db.query(DailyIntelligenceModel)
+        .filter(
+            DailyIntelligenceModel.person_id == person_id,
+            DailyIntelligenceModel.intelligence_date == intelligence_at,
+        )
+        .order_by(DailyIntelligenceModel.generated_at.desc(), DailyIntelligenceModel.id.asc())
+        .first()
     )
-    db.add(db_intel)
+    if db_intel is None:
+        db_intel = DailyIntelligenceModel(person_id=person_id, intelligence_date=intelligence_at)
+        db.add(db_intel)
+
+    db_intel.overdue_items = result["overdue_items"]
+    db_intel.upcoming_items = result["upcoming_items"]
+    db_intel.active_windows = result["active_windows"]
+    db_intel.expired_windows = result["expired_windows"]
+    db_intel.daily_summary = result["daily_summary"]
+    db_intel.source_event_ids = [item["id"] for item in event_dicts]
+    db_intel.source_appointment_ids = [item["id"] for item in appointment_dicts]
+    db_intel.source_care_window_ids = [item["id"] for item in window_dicts]
     db.commit()
     db.refresh(db_intel)
     return db_intel
@@ -2325,7 +2348,7 @@ def get_daily_intelligence(person_id: str, request: Request, db: Session = Depen
 
 @router.post("/timezones", response_model=TimezoneContextSchema)
 def create_timezone_context(
-    person_id: str, caregiver_id: Optional[str] = None, timezone_id: str = "UTC", is_primary: bool = False, request: Request = None, db: Session = Depends(get_db)
+    request: Request, person_id: str, caregiver_id: Optional[str] = None, timezone_id: str = "UTC", is_primary: bool = False, db: Session = Depends(get_db)
 ):
     if request is None:
         raise HTTPException(status_code=401, detail="A valid care session is required")
@@ -2507,7 +2530,12 @@ def resolve_relative_time_endpoint(person_id: str, expression: str, request: Req
 
 
 @router.post("/temporal/infer-relation")
-def infer_relation_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db)):
+def infer_relation_endpoint(fact_a_id: str, fact_b_id: str, request: Request, db: Session = Depends(get_db)):
+    fact_a = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_a_id).first()
+    fact_b = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_b_id).first()
+    if fact_a is None or fact_b is None or fact_a.person_id != fact_b.person_id:
+        raise HTTPException(status_code=404, detail="Temporal facts not found")
+    _require_session_scope(request, db, fact_a.person_id)
     result = infer_temporal_relation(db, fact_a_id, fact_b_id)
     if not result:
         raise HTTPException(status_code=404, detail="Unable to infer relation")
@@ -2521,12 +2549,17 @@ def list_temporal_conflicts(person_id: str, request: Request, subject_type: Opti
 
 
 @router.post("/temporal/contradictions", response_model=TemporalContradictionSchema)
-def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionCreate, db: Session = Depends(get_db)):
+def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, contradiction.person_id)
     return create_temporal_contradiction(db, contradiction)
 
 
 @router.patch("/temporal/contradictions/{contradiction_id}", response_model=TemporalContradictionSchema)
-def update_temporal_contradiction_endpoint(contradiction_id: str, update: TemporalContradictionUpdate, db: Session = Depends(get_db)):
+def update_temporal_contradiction_endpoint(contradiction_id: str, update: TemporalContradictionUpdate, request: Request, db: Session = Depends(get_db)):
+    existing = db.query(TemporalContradictionModel).filter(TemporalContradictionModel.id == contradiction_id).first()
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Temporal contradiction not found")
+    _require_session_scope(request, db, existing.person_id)
     result = update_temporal_contradiction(db, contradiction_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
@@ -2534,7 +2567,12 @@ def update_temporal_contradiction_endpoint(contradiction_id: str, update: Tempor
 
 
 @router.get("/temporal/check-conflict")
-def check_temporal_conflict_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db)):
+def check_temporal_conflict_endpoint(fact_a_id: str, fact_b_id: str, request: Request, db: Session = Depends(get_db)):
+    fact_a = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_a_id).first()
+    fact_b = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_b_id).first()
+    if fact_a is None or fact_b is None or fact_a.person_id != fact_b.person_id:
+        raise HTTPException(status_code=404, detail="Temporal facts not found")
+    _require_session_scope(request, db, fact_a.person_id)
     result = check_temporal_conflict(db, fact_a_id, fact_b_id)
     if not result:
         return {"has_conflict": False}
