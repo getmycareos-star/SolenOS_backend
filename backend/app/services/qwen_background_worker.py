@@ -1119,9 +1119,59 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     return True
 
 
+def _refresh_qwen_job_lease_once(
+    job_id: str,
+    person_id: str,
+    caregiver_id: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Extend a running job's lease without holding its processing transaction."""
+    lease_db = SessionLocal()
+    try:
+        updated = lease_db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.id == job_id,
+            QwenBackgroundJob.person_id == person_id,
+            QwenBackgroundJob.caregiver_id == caregiver_id,
+            QwenBackgroundJob.status == "processing",
+        ).update(
+            {QwenBackgroundJob.locked_at: now or datetime.now(timezone.utc)},
+            synchronize_session=False,
+        )
+        lease_db.commit()
+        return updated == 1
+    except Exception:
+        lease_db.rollback()
+        logger.exception("Could not refresh durable worker lease for job %s", job_id)
+        return False
+    finally:
+        lease_db.close()
+
+
+async def _maintain_qwen_job_lease(
+    job_id: str,
+    person_id: str,
+    caregiver_id: str,
+    *,
+    interval_seconds: float = 60,
+) -> None:
+    """Keep long OCR/model work leased; stop if the job is cancelled or reclaimed."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        lease_alive = await asyncio.to_thread(
+            _refresh_qwen_job_lease_once,
+            job_id,
+            person_id,
+            caregiver_id,
+        )
+        if not lease_alive:
+            return
+
+
 async def process_one_qwen_job(job_id: str | None = None) -> bool:
     db = SessionLocal()
     job = None
+    lease_task: asyncio.Task | None = None
     try:
         # The API container can start while the deployment migration command is
         # still creating the queue table. Avoid querying it before its DDL commits;
@@ -1157,6 +1207,13 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         db.add(QwenJobEvent(job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id, event_type="job_claimed", from_status=previous_status, to_status="processing", metadata_json={"attempt": job.attempt_count}))
         db.commit()
         db.refresh(job)
+        lease_task = asyncio.create_task(
+            _maintain_qwen_job_lease(
+                str(job.id),
+                str(job.person_id),
+                str(job.caregiver_id),
+            )
+        )
 
         if job.workflow == "daily_capture_extraction":
             return await _process_daily_capture_extraction(db, job)
@@ -1505,6 +1562,12 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         # backs off. A claimed job that was safely requeued/failed is work handled.
         return job is not None
     finally:
+        if lease_task is not None:
+            lease_task.cancel()
+            try:
+                await lease_task
+            except asyncio.CancelledError:
+                pass
         db.close()
 
 
