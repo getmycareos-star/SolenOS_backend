@@ -2474,6 +2474,6 @@ def test_documents_only_member_cannot_read_or_write_appointment_workspace(client
     denied_update = test_client.patch(
         f"/api/v1/appointment-workspaces/{record_id}",
         headers=headers,
-        json={"payload": {"visit_purpose": "Unauthorized edit"}},
+        json={"expected_version": 1, "payload": {"visit_purpose": "Unauthorized edit"}, "change_reason": "Unauthorized edit attempt"},
     )
     assert denied_update.status_code == 403, denied_update.text
