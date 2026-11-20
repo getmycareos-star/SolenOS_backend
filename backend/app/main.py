@@ -47,6 +47,7 @@ from app.core.database import Base, database_schema_differences, get_db, Session
 from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
 from app.request_metrics import RequestMetricsMiddleware
 from app.models.anonymous_session import AnonymousSession
+from app.models.capture_analysis import DocumentReviewEvent
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.change import Situation as SituationModel
@@ -998,6 +999,74 @@ def get_situation(
             "epistemic_status": statement.epistemic_status.value if hasattr(statement.epistemic_status, "value") else statement.epistemic_status,
             "observation_kind": statement.observation_kind,
         })
+
+    # Project accepted document assertions into the existing situation/Progressive
+    # Understanding response without treating candidates as EvidenceObservation rows.
+    # CareAssertion remains authoritative; this is a source-linked read projection.
+    evidence_models_by_id = {str(row.id): row for row in evidence_rows}
+    document_assertions_by_evidence = {}
+    document_assertion_payloads = []
+    for assertion in care_assertion_rows:
+        if (
+            assertion.assertion_kind != "document_reviewed_observation"
+            or assertion.assertion_status != "accepted"
+        ):
+            continue
+        source_context = assertion.source_context if isinstance(assertion.source_context, dict) else {}
+        candidate_context = source_context.get("document_candidate")
+        candidate_context = candidate_context if isinstance(candidate_context, dict) else {}
+        for source_evidence_id in dict.fromkeys(assertion.evidence_ids or []):
+            source_evidence_id = str(source_evidence_id)
+            evidence_model = evidence_models_by_id.get(source_evidence_id)
+            if evidence_model is None:
+                continue
+            payload = {
+                "id": str(assertion.id),
+                "assertion_id": str(assertion.id),
+                "evidence_id": source_evidence_id,
+                "source_evidence_id": source_evidence_id,
+                "source_document_id": source_evidence_id,
+                "source_type": "document_intelligence",
+                "source_passage": assertion.source_text or "",
+                "source_quote": assertion.source_text or "",
+                "source_span_start": candidate_context.get("source_span_start"),
+                "source_span_end": candidate_context.get("source_span_end"),
+                "source_span_unit": candidate_context.get("source_span_unit"),
+                "source_page": candidate_context.get("page_number"),
+                "review_status": "accepted",
+                "assertion_status": assertion.assertion_status,
+                "epistemic_status": assertion.epistemic_state,
+                "field": assertion.field,
+                "asserted_value": assertion.asserted_value,
+                "subject_type": assertion.subject_type,
+                "subject_id": assertion.subject_id,
+                "source_attribution": candidate_context.get("source_attribution", "not_stated"),
+                "negation_status": candidate_context.get("negation_status", "not_explicitly_marked"),
+                "temporal_context": candidate_context.get("temporal_context", "not_established"),
+                "modality": candidate_context.get("modality", "not_explicitly_marked"),
+                "conditionality": candidate_context.get("conditionality", "not_explicitly_marked"),
+                "statement_kind": candidate_context.get("statement_kind", "observation"),
+                "event_date": candidate_context.get("event_date"),
+                "recorded_date": candidate_context.get("recorded_date"),
+                "event_time_text": assertion.event_time_text,
+                "observed_at": assertion.observed_at.isoformat() if assertion.observed_at else None,
+                "reported_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                "reviewer_caregiver_id": assertion.created_by_caregiver_id,
+                "document_name": (
+                    (evidence_model.extra_metadata or {}).get("filename")
+                    if isinstance(evidence_model.extra_metadata, dict)
+                    else None
+                ),
+            }
+            document_assertions_by_evidence.setdefault(source_evidence_id, []).append(payload)
+            document_assertion_payloads.append(payload)
+
+    for observation in observations:
+        observation["document_assertions"] = list(
+            document_assertions_by_evidence.get(str(observation["id"]), [])
+        )
+    for evidence_id, assertions in document_assertions_by_evidence.items():
+        source_statements_by_evidence.setdefault(evidence_id, []).extend(assertions)
     situation_ui_rows = []
     for saved_situation in persisted_situations:
         signal_ids = set(saved_situation.signal_ids or [])
@@ -1154,6 +1223,7 @@ def get_situation(
             "subject_label": person.name,
             "theme": "mixed",
             "observations": observations,
+            "document_assertions": list(document_assertion_payloads),
             "open_questions": [],
             "asked_questions": [],
             "understanding_stage": "gathering",
@@ -1190,6 +1260,11 @@ def get_situation(
             ]
             active_situation["id"] = latest_ui["id"]
             active_situation["observations"] = situation_observations
+            active_situation["document_assertions"] = [
+                assertion
+                for evidence_id in latest_evidence_ids
+                for assertion in document_assertions_by_evidence.get(evidence_id, [])
+            ]
             active_situation["open_questions"] = list(latest_ui.get("openQuestions") or [])
             active_situation["contradictions"] = list(latest_ui.get("conflicts") or [])
             active_situation["information_gaps"] = list(latest_ui.get("informationGaps") or [])
@@ -1212,6 +1287,7 @@ def get_situation(
         "care_recipient_display_name": person.name,
         "total_events": len(events),
         "events": event_payload,
+        "document_assertions": document_assertion_payloads,
         "situations": [{
             "id": item["id"],
             "persisted_thread": item.get("persisted_thread") is True,
