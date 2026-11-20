@@ -9,6 +9,12 @@ class CareReminderCreate(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     note: Optional[str] = Field(default=None, max_length=2000)
     due_at: datetime
+    assigned_to_caregiver_id: Optional[str] = None
+
+
+class CareReminderAssign(BaseModel):
+    assigned_to_caregiver_id: str = Field(min_length=1, max_length=160)
+    expected_version: int = Field(ge=1)
 
 
 class CareReminderComplete(BaseModel):
@@ -26,7 +32,9 @@ class CareReminderRead(BaseModel):
     person_id: str
     action_id: Optional[str] = None
     created_by_caregiver_id: str
-    title: str
+    assigned_to_caregiver_id: Optional[str] = None
+    version: int = 1
+    title
     note: Optional[str] = None
     due_at: datetime
     status: Literal["open", "completed", "cancelled"]
