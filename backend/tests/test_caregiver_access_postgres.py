@@ -22,7 +22,7 @@ from app.models.care import Caregiver, Evidence, Person
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
 from app.models.caregiver_account import CaregiverAccount
 from app.models.privacy_delivery import AuditLogEvent
-from app.models.care_continuity import CareDeltaRun, CareStateRevision
+from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation, EvidenceSourceRelationship
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility, CaregiverHandoff
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 
@@ -428,6 +428,8 @@ def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution
                 db.query(CareDeltaRun).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(AuditLogEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(EvidenceObservation).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(EvidenceSourceRelationship).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Evidence).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
