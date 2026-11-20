@@ -1630,7 +1630,7 @@ def review_appointment_outcome_proposal(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
-    _require_appointment_permission(request, db, person_id, caregiver_id, "correct_records", read_only=False)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "add_evidence", read_only=False)
     decision = (payload.decision or "").strip().lower()
     if decision not in {"accept", "correct", "reject"}:
         raise HTTPException(status_code=422, detail="Decision must be accept, correct, or reject")
