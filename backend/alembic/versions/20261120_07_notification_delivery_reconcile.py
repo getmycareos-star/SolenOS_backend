@@ -96,14 +96,95 @@ def upgrade():
         raise RuntimeError(
             "Care notification delivery-attempt table is incomplete: " + ", ".join(missing)
         )
+    # Preserve historical attempts while repairing nullable legacy columns.
+    # Unknown historical results remain explicitly unknown; never relabel them
+    # as delivered or failed. Missing attempt numbers are assigned after the
+    # highest known attempt for that notification in deterministic time order.
+    null_created_at = bind.execute(sa.text(
+        "SELECT count(*) FROM notification_delivery_attempts WHERE created_at IS NULL"
+    )).scalar_one()
+    if null_created_at:
+        raise RuntimeError(
+            f"Cannot repair notification attempts: {null_created_at} rows have no created_at timestamp"
+        )
+
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET attempted_at = created_at WHERE attempted_at IS NULL"
+    ))
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET updated_at = created_at WHERE updated_at IS NULL"
+    ))
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET result = 'unknown_legacy' WHERE result IS NULL"
+    ))
+    bind.execute(sa.text(
+        "UPDATE notification_delivery_attempts "
+        "SET metadata = '{}' WHERE metadata IS NULL"
+    ))
+    bind.execute(sa.text("""
+        WITH missing_attempts AS (
+            SELECT candidate.id,
+                   COALESCE((
+                       SELECT MAX(existing.attempt_number)
+                       FROM notification_delivery_attempts AS existing
+                       WHERE existing.notification_id = candidate.notification_id
+                   ), 0)
+                   + ROW_NUMBER() OVER (
+                       PARTITION BY candidate.notification_id
+                       ORDER BY COALESCE(candidate.attempted_at, candidate.created_at), candidate.id
+                   ) AS repaired_attempt_number
+            FROM notification_delivery_attempts AS candidate
+            WHERE candidate.attempt_number IS NULL
+        )
+        UPDATE notification_delivery_attempts AS target
+        SET attempt_number = missing_attempts.repaired_attempt_number
+        FROM missing_attempts
+        WHERE target.id = missing_attempts.id
+    """))
+
+    attempt_columns = {
+        column["name"]: column
+        for column in inspect(bind).get_columns(live_name)
+    }
     required_non_null = (
         "id", "notification_id", "attempt_number", "channel", "attempted_at",
         "result", "metadata", "created_at", "updated_at",
     )
+    for column_name, existing_type in (
+        ("attempt_number", sa.Integer()),
+        ("attempted_at", sa.DateTime(timezone=True)),
+        ("result", sa.Text()),
+        ("metadata", sa.JSON()),
+        ("updated_at", sa.DateTime(timezone=True)),
+    ):
+        if attempt_columns[column_name].get("nullable", True):
+            if bind.dialect.name == "sqlite":
+                with op.batch_alter_table(live_name) as batch:
+                    batch.alter_column(
+                        column_name,
+                        existing_type=existing_type,
+                        nullable=False,
+                    )
+            else:
+                op.alter_column(
+                    live_name,
+                    column_name,
+                    existing_type=existing_type,
+                    nullable=False,
+                )
+
+    attempt_columns = {
+        column["name"]: column
+        for column in inspect(bind).get_columns(live_name)
+    }
     nullable = [name for name in required_non_null if attempt_columns[name].get("nullable", True)]
     if nullable:
         raise RuntimeError(
-            "Care notification delivery-attempt columns must be non-null: " + ", ".join(nullable)
+            "Care notification delivery-attempt columns remain nullable after repair: "
+            + ", ".join(nullable)
         )
     attempt_foreign_keys = inspector.get_foreign_keys(live_name)
     if not any(
