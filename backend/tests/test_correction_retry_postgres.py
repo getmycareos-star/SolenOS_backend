@@ -19,6 +19,7 @@ import pytest
 from app.api import v1 as api_v1
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Caregiver, Correction, Person
 
 pytestmark = pytest.mark.skipif(
@@ -191,7 +192,9 @@ def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(
             db.query(CareEvent).filter(CareEvent.id == event_id).delete(synchronize_session=False)
             db.query(AnonymousSession).filter(AnonymousSession.person_id.in_([person_id, foreign_person_id])).delete(synchronize_session=False)
             db.query(Caregiver).filter(Caregiver.person_id.in_([person_id, foreign_person_id])).delete(synchronize_session=False)
-            db.query(Person).filter(Person.id.in_([person_id, foreign_person_id])).delete(synchronize_session=False)
+            # CareStateRevision is an append-only audit ledger with a restrictive
+            # person FK. Keep these uniquely named CI fixture parents rather than
+            # deleting a person and violating the immutable history contract.
             db.commit()
         engine.dispose()
 
@@ -229,6 +232,14 @@ def test_postgres_delta_replay_is_invalidated_by_a_later_correction():
             person_id=person_id,
         ))
         db.flush()
+        db.add(CaregiverAccessGrant(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            role="family",
+            access_scope="full_record",
+            status="active",
+            permissions=["view_lcr", "add_evidence"],
+        ))
         event = CareEvent(
             id=event_id,
             person_id=person_id,
