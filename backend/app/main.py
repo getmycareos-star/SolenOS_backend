@@ -2092,7 +2092,7 @@ async def post_situation(
     response_payload["qwen_job_id"] = queued_job_ids[0] if queued_job_ids else None
     response_payload["qwen_job_ids"] = queued_job_ids
     response_payload["qwen_review_required"] = review_required
-    response_payload["qwen_written_to_lcr"] = False
+    response_payload["qwen_written_to_lcr"] = bool(response_payload.get("qwen_written_to_lcr", False))
 
     execution = {
         "contract_version": "1.0",
