@@ -1,7 +1,46 @@
 from sqlalchemy import Column, MetaData, String, Table, create_engine, event, insert
 from sqlalchemy.orm import Session
+from types import SimpleNamespace
 
 from app.api import care_continuity
+
+
+
+def test_change_source_refs_resolve_events_assertions_and_observations():
+    change = SimpleNamespace(evidence_ids=["event-1", "assertion-1", "observation-1", "missing-1"])
+    events = {
+        "event-1": SimpleNamespace(
+            id="event-1", title="Daily care update", event_type="daily_care",
+            occurred_at="2026-11-11T21:10:00Z", recorded_at="2026-11-11T22:13:16Z",
+            created_at=None, evidence_ids=["source-evidence-1"],
+        )
+    }
+    assertions = {
+        "assertion-1": SimpleNamespace(
+            id="assertion-1", field="mood", observed_at="2026-11-11T21:10:00Z",
+            recorded_at="2026-11-11T22:13:16Z", evidence_ids=["source-evidence-2"],
+        )
+    }
+    observations = {
+        "observation-1": SimpleNamespace(
+            id="observation-1", attribute="weight", value_text="possible weight loss",
+            occurred_at=None, observed_at="2026-11-11T21:10:00Z",
+            recorded_at="2026-11-11T22:13:16Z", evidence_id="source-evidence-3",
+        )
+    }
+
+    refs = care_continuity._change_source_refs(
+        change,
+        event_by_id=events,
+        assertion_by_id=assertions,
+        observation_by_id=observations,
+    )
+
+    assert [item["record_id"] for item in refs] == ["event-1", "assertion-1", "observation-1"]
+    assert [item["source"] for item in refs] == ["events", "care_assertions", "evidence_observations"]
+    assert refs[0]["evidence_ids"] == ["source-evidence-1"]
+    assert refs[1]["evidence_ids"] == ["source-evidence-2"]
+    assert refs[2]["evidence_ids"] == ["source-evidence-3"]
 
 
 def test_continuity_summary_counts_are_aggregated_and_person_scoped(monkeypatch):
