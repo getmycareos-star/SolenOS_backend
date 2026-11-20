@@ -2093,15 +2093,23 @@ def create_appointment(appointment: AppointmentCreate, request: Request, db: Ses
     db.add(db_appt)
     db.commit()
     db.refresh(db_appt)
-    _log_and_learn(
-        db,
-        db_appt.person_id,
-        "appointment_scheduled",
-        f"Scheduled: {appointment.title}",
-        "appointment",
-        source_id=db_appt.id,
-        caregiver_id=appointment.created_by_caregiver_id,
-    )
+    # The appointment commit is the caregiver's requested write. Learning
+    # is secondary work; it must not turn a durable save into an HTTP failure
+    # that encourages the client to submit the same appointment again.
+    try:
+        _log_and_learn(
+            db,
+            db_appt.person_id,
+            "appointment_scheduled",
+            f"Scheduled: {appointment.title}",
+            "appointment",
+            source_id=db_appt.id,
+            caregiver_id=appointment.created_by_caregiver_id,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Learning pipeline failed after durable appointment %s", db_appt.id)
+    db.refresh(db_appt)
     return db_appt
 
 
@@ -2160,14 +2168,21 @@ def create_care_transition(transition: CareTransitionCreate, request: Request, d
     db.add(db_transition)
     db.commit()
     db.refresh(db_transition)
-    _log_and_learn(
-        db,
-        db_transition.person_id,
-        "transition_recorded",
-        f"{transition.from_location or 'Unknown'} -> {transition.to_location}",
-        "transition",
-        source_id=db_transition.id,
-    )
+    # Keep the committed transition visible even if optional learning fails.
+    try:
+        _log_and_learn(
+            db,
+            db_transition.person_id,
+            "transition_recorded",
+            f"{transition.from_location or 'Unknown'} -> {transition.to_location}",
+            "transition",
+            source_id=db_transition.id,
+            caregiver_id=transition.created_by_caregiver_id,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Learning pipeline failed after durable care transition %s", db_transition.id)
+    db.refresh(db_transition)
     return db_transition
 
 
