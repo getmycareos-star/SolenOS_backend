@@ -18,6 +18,7 @@ from app.models.time_location import Appointment
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
+from app.models.open_loop import OpenLoopRecord
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -1325,6 +1326,9 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
         "care_events": "empty",
         "appointments": "empty",
         "care_assertions": "empty",
+        "decisions": "unavailable_schema",
+        "decision_outcomes": "unavailable_schema",
+        "open_loops": "empty",
         "open_questions": "empty",
         "contradictions": "empty",
         "evidence_freshness_assessments": "empty",
