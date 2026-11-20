@@ -8274,28 +8274,37 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{
-        "id": row.id,
-        "source_message_id": row.id if row.role == "user" else None,
-        "role": row.role,
-        "text": row.content,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "guard_verdict": row.guard_verdict,
-        "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
-        "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
-        "source_event_ids": _stored_response_metadata(row).get("source_event_ids", []),
-        "source_evidence_ids": _stored_response_metadata(row).get("source_evidence_ids", []),
-        "source_appointment_ids": _stored_response_metadata(row).get("source_appointment_ids", []),
-        "source_assertion_ids": _stored_response_metadata(row).get("source_assertion_ids", []),
-        "source_lcr_context_ids": _stored_response_metadata(row).get("source_lcr_context_ids", []),
-        "source_freshness_assessment_ids": _stored_response_metadata(row).get("source_freshness_assessment_ids", []),
-        "freshness_source_status": _stored_response_metadata(row).get("freshness_source_status"),
-        "lcr_context_coverage": _stored_response_metadata(row).get("lcr_context_coverage"),
-        "ai_generated": _stored_response_metadata(row).get("ai_generated"),
-        "response_mode": _stored_response_metadata(row).get("response_mode"),
-        "safety_note": row.safety_note,
-        "claim_provenance": _stored_claim_provenance(row),
-    } for row in rows]}
+
+    def serialize_history_message(row: ConversationMessage) -> dict:
+        metadata = _stored_response_metadata(row)
+        return {
+            "id": row.id,
+            "source_message_id": row.id if row.role == "user" else None,
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
+            "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
+            "source_event_ids": metadata.get("source_event_ids", []),
+            "source_evidence_ids": metadata.get("source_evidence_ids", []),
+            "source_appointment_ids": metadata.get("source_appointment_ids", []),
+            "source_assertion_ids": metadata.get("source_assertion_ids", []),
+            "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+            "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
+            "freshness_source_status": metadata.get("freshness_source_status"),
+            "lcr_context_coverage": metadata.get("lcr_context_coverage"),
+            "ai_generated": metadata.get("ai_generated"),
+            "response_mode": metadata.get("response_mode"),
+            "safety_note": row.safety_note,
+            "claim_provenance": _stored_claim_provenance(row),
+        }
+
+    return {
+        "session_id": session.id,
+        "person_id": person_id,
+        "messages": [serialize_history_message(row) for row in rows],
+    }
 
 
 class NotificationPreferenceUpdate(BaseModel):
