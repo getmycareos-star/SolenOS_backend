@@ -143,10 +143,14 @@ def download_binary(evidence_id: str, token: str):
 def start_server():
     log_path = Path("/tmp/solenos-postgres-e2e-uvicorn.log")
     log = log_path.open("ab")
+    server_env = os.environ.copy()
+    # This PostgreSQL E2E verifies durable caregiver review and recovery, not
+    # optional model inference. Keep the production worker default unchanged.
+    server_env["SOLENOS_QWEN_WORKER_ENABLED"] = "false"
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8012"],
         cwd=Path(__file__).resolve().parents[1],
-        env=os.environ.copy(),
+        env=server_env,
         stdout=log,
         stderr=subprocess.STDOUT,
     )
@@ -1306,27 +1310,14 @@ def main():
             source_event = source_db.query(CareEvent).filter_by(id=daily_event_id, person_id=person_a).one()
             original_event_description = source_event.description
             original_event_occurred_at = source_event.occurred_at
-            # Keep the review-lifecycle fixture isolated from the asynchronous
-            # extraction worker, which may still finish a job for the original
-            # Daily Care event after the queue cancellation attempt above.
-            review_event = CareEvent(
-                person_id=person_a,
-                event_type=source_event.event_type,
-                status="recorded",
-                occurred_at=original_event_occurred_at,
-                occurred_at_timezone=source_event.occurred_at_timezone,
-                title=source_event.title,
-                description=original_event_description,
-                evidence_ids=[daily_evidence_id],
-                created_by_caregiver_id=caregiver_a,
-            )
-            source_db.add(review_event)
-            source_db.flush()
-            review_event_id = review_event.id
+            # Review the original Daily Care event. The E2E server disables
+            # only the optional Qwen worker so model unavailability cannot race
+            # with or overwrite the caregiver's persisted review decisions.
+            review_event_id = daily_event_id
             analysis = CaptureAnalysis(
                 person_id=person_a,
                 caregiver_id=caregiver_a,
-                source_event_id=review_event_id,
+                source_event_id=daily_event_id,
                 source_evidence_id=daily_evidence_id,
                 source_text=original_event_description or daily_capture_payload["notes"],
                 extraction_status="available",
@@ -1440,12 +1431,10 @@ def main():
             require(persisted_candidate["observation"] == "Generated suggestion: interrupted sleep."
                     and persisted_candidate["corrected_observation"] == "Caregiver corrected the report: sleep was interrupted twice overnight.",
                     "Caregiver correction overwrote the original Daily Care candidate instead of preserving both values")
-            persisted_event = source_db.query(CareEvent).filter_by(id=review_event_id).one()
-            original_event = source_db.query(CareEvent).filter_by(id=daily_event_id).one()
+            persisted_event = source_db.query(CareEvent).filter_by(id=daily_event_id).one()
             require(
-                persisted_event.description == original_event_description
-                and original_event.description == original_event_description,
-                "Caregiver review mutated the original Daily Care observation or its isolated review source",
+                persisted_event.description == original_event_description,
+                "Caregiver review mutated the original Daily Care observation",
             )
         finally:
             source_db.close()
@@ -1527,12 +1516,11 @@ def main():
                 and daily_replay.get("id") == daily_event_id
                 and daily_replay.get("evidence_ids") == [daily_evidence_id]
                 and daily_replay.get("idempotent_replay") is True
-                and daily_replay.get("qwen_analysis_id")
-                and daily_replay.get("qwen_analysis_id") != daily_analysis_id
-                and daily_replay.get("qwen_processing_status") == "cancelled"
+                and daily_replay.get("qwen_analysis_id") == daily_analysis_id
                 and daily_replay.get("qwen_review_required") is False
-                and daily_replay.get("qwen_candidates", {}).get("observations", []) == [],
-                f"Unchanged Daily Care retry must restore only the original event's extraction state and source IDs: {status}: {daily_replay}")
+                and [item.get("review_status") for item in daily_replay.get("qwen_candidates", {}).get("observations", [])]
+                    == ["accepted_by_caregiver", "rejected_by_caregiver"],
+                f"Unchanged Daily Care retry must restore the persisted candidate analysis and original IDs: {status}: {daily_replay}")
 
         retry_db = SessionLocal()
         try:
