@@ -12,6 +12,7 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.appointment_workspace import AppointmentWorkspaceRecord
 from app.models.care import CareEvent, Evidence
+from app.models.time_location import Appointment
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
@@ -2077,7 +2078,6 @@ def test_appointment_follow_up_removal_cancels_not_completes_and_reappearance_re
 
 def test_blocked_appointment_follow_up_creates_and_reassesses_one_evidence_backed_question(client):
     from app.models.open_loop import OpenLoopRecord
-from app.models.time_location import Appointment
     from app.models.uncertainty import OpenQuestion
 
     test_client, owner, _ = client
