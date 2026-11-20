@@ -13,6 +13,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.appointment_workspace import AppointmentWorkspaceRecord
+from app.models.open_loop import OpenLoopRecord
 from app.models.care import Caregiver, CareEvent, Evidence
 from app.models.time_location import Appointment
 from app.models.caregiver_access import CaregiverAccessGrant
