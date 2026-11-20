@@ -15,6 +15,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion, EvidenceObservation
+from app.services.capture_review import persist_source_grounded_daily_observations
 from app.models.uncertainty import OpenQuestion
 
 pytestmark = pytest.mark.session_security
@@ -141,7 +142,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
     saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
     assert saved.status_code == 200, saved.text
     body = saved.json()
-    assert body["structured_detail_count"] == 3
+    assert body["structured_detail_count"] == 4
     assert body["execution_status"]["structured_details"] == "verified"
 
     db = TestSessionLocal()
@@ -159,12 +160,28 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
             extraction_method="structured_daily_capture",
         ).all()
         assert {item.attribute for item in details} == {
-            "caregiver_note", "mood", "blood_pressure_systolic",
+            "caregiver_note", "mood", "blood_pressure_systolic", "reported_weight_change",
         }
         assert all(item.epistemic_status == "reported" for item in details)
         assert all(item.recorded_at is not None for item in details)
         caregiver_note = next(item for item in details if item.attribute == "caregiver_note")
+        weight_change = next(item for item in details if item.attribute == "reported_weight_change")
         assert caregiver_note.observed_at is None and caregiver_note.occurred_at is None
+        assert weight_change.value_text == "she's loosing weight"
+        assert weight_change.normalized_value == "possible weight loss"
+        assert weight_change.epistemic_status == "reported"
+        assert weight_change.observation_kind == "caregiver_report"
+        assert weight_change.observed_at is None and weight_change.occurred_at is None
+        assert weight_change.source_passage == json.dumps("she's loosing weight", ensure_ascii=False)
+        assert evidence.source_text[weight_change.source_span_start:weight_change.source_span_end] == weight_change.source_passage
+        assert "not independently confirmed" in weight_change.context
+        assert "No amount was stated" in weight_change.context
+        assert "No timeframe was stated" in weight_change.context
+        assert "No previous weight measurement was found" in weight_change.context
+        assert "Clinical interpretation has not been established" in weight_change.context
+        assert "amount" in weight_change.ambiguity_note
+        assert "timeframe" in weight_change.ambiguity_note
+        assert "previous weight measurement" in weight_change.ambiguity_note
         assert next(item for item in details if item.attribute == "mood").observed_at is not None
         assert next(item for item in details if item.attribute == "blood_pressure_systolic").observed_at is not None
         assert all(evidence.source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
@@ -184,13 +201,35 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
         }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         assert next(item for item in details if item.attribute == "caregiver_note").source_passage == json.dumps("she's loosing weight", ensure_ascii=False)
         assert next(item for item in details if item.attribute == "blood_pressure_systolic").units == "mmHg"
+        # A later source-grounded extraction of the same note must reuse the
+        # deterministic normalized detail rather than create a duplicate.
+        duplicate_projection = persist_source_grounded_daily_observations(
+            db,
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+            evidence_id=evidence.id,
+            source_event_id=body["events"][0]["id"],
+            source_text=evidence.source_text,
+            candidates={"observations": [{
+                "subject": "she",
+                "observation": "loosing weight",
+                "source_quote": json.dumps("she's loosing weight", ensure_ascii=False),
+            }]},
+            reported_at=evidence.created_at,
+        )
+        assert duplicate_projection == 0
+        assert db.query(EvidenceObservation).filter_by(
+            person_id=session["person"]["id"],
+            evidence_id=evidence.id,
+            attribute="reported_weight_change",
+        ).count() == 1
     finally:
         db.close()
 
     replay = client.post("/api/v1/daily/log", headers=auth, json=payload)
     assert replay.status_code == 200, replay.text
     assert replay.json()["idempotent_replay"] is True
-    assert replay.json()["structured_detail_count"] == 3
+    assert replay.json()["structured_detail_count"] == 4
 
     db = TestSessionLocal()
     try:
@@ -198,7 +237,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
             person_id=session["person"]["id"],
             evidence_id=body["evidence_ids"][0],
             extraction_method="structured_daily_capture",
-        ).count() == 3
+        ).count() == 4
     finally:
         db.close()
 
