@@ -389,12 +389,6 @@ def persist_source_grounded_daily_observations(
             source_passage=quote,
             source_span_start=start,
             source_span_end=end,
-            hedge_marker=hedge.group(0) if hedge else None,
-            ambiguity_note=(
-                "The caregiver used tentative wording. Keep this as an uncertain report; "
-                "this is not a diagnosis or a confirmed specific symptom."
-                if hedge else None
-            ),
             extraction_method="qwen_source_grounded",
             extraction_version="daily-capture-source-span-v1",
             extraction_run_id=source_event_id,
