@@ -1032,14 +1032,24 @@ def add_dependency(loop_id: str, payload: DependencyInput, request: Request, db:
 
 
 @router.get("/{loop_id}/occurrences")
-def list_occurrences(loop_id: str, request: Request, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+def list_occurrences(
+    loop_id: str,
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id)
     rows = db.query(OpenLoopOccurrence).filter(
         OpenLoopOccurrence.loop_id == loop.id,
         OpenLoopOccurrence.person_id == person_id,
-    ).order_by(OpenLoopOccurrence.occurred_at.asc()).limit(limit).all()
+    ).order_by(
+        OpenLoopOccurrence.occurred_at.asc(),
+        OpenLoopOccurrence.created_at.asc(),
+        OpenLoopOccurrence.id.asc(),
+    ).offset(offset).limit(limit).all()
     return [{
         "id": row.id, "loop_id": row.loop_id, "source_type": row.source_type,
         "source_id": row.source_id, "source_fingerprint": row.source_fingerprint,
@@ -1049,13 +1059,22 @@ def list_occurrences(loop_id: str, request: Request, limit: int = Query(100, ge=
 
 
 @router.get("/{loop_id}/history")
-def loop_history(loop_id: str, request: Request, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+def loop_history(
+    loop_id: str,
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id)
     events = db.query(OpenLoopEvent).filter(
         OpenLoopEvent.loop_id == loop.id, OpenLoopEvent.person_id == person_id,
-    ).order_by(OpenLoopEvent.created_at.asc()).limit(limit).all()
+    ).order_by(
+        OpenLoopEvent.created_at.asc(),
+        OpenLoopEvent.id.asc(),
+    ).offset(offset).limit(limit).all()
     return [{"id": e.id, "event_type": e.event_type, "before_state": e.before_state, "after_state": e.after_state,
              "evidence": e.evidence, "actor": e.actor, "created_at": e.created_at} for e in events]
 
