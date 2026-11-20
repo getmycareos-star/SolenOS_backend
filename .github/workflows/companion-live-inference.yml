@@ -50,9 +50,9 @@ permissions:
   contents: read
   statuses: write
 
-# Preserve real-model acceptance evidence for each exact main revision.
+# Let an active live-model run finish; keep only the newest pending main run.
 concurrency:
-  group: companion-live-qwen-${{ github.ref }}-${{ github.sha }}
+  group: companion-live-qwen-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
