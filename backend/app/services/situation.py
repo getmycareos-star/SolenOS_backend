@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import hashlib
 from typing import List, Optional
 import json
 import re
@@ -82,6 +83,124 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     if caregiver.person_id != person.id:
         raise ValueError("Caregiver is not linked to this person")
 
+    ingestion_key = (payload.ingestion_key or "").strip()
+    ingestion_fingerprint = None
+    if ingestion_key:
+        # Fingerprint the complete capture intent, not just its text. A retry
+        # with the same key but changed documents, category, time, or target
+        # thread is a conflict and must never silently return another write.
+        document_fingerprints = [
+            {
+                "id": document.id,
+                "evidence_id": document.evidence_id,
+                "name": document.name,
+                "mime_type": document.mime_type,
+                "extracted_text_sha256": hashlib.sha256(
+                    (document.extracted_text or "").encode("utf-8")
+                ).hexdigest(),
+                "ocr_confidence": document.ocr_confidence,
+                "extraction_source": document.extraction_source,
+            }
+            for document in (payload.documents or [])
+        ]
+        fingerprint_payload = {
+            "raw_input": (payload.raw_input or "").strip(),
+            "documents": document_fingerprints,
+            "capture_category": payload.capture_category,
+            "timestamp": payload.timestamp,
+            "target_situation_id": payload.target_situation_id,
+            "provenance": (
+                payload.provenance.model_dump(mode="json")
+                if payload.provenance is not None
+                else None
+            ),
+        }
+        ingestion_fingerprint = hashlib.sha256(
+            json.dumps(
+                fingerprint_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+        # Serialize concurrent retries for this person/key before checking the
+        # unique evidence key. The lock is transaction-scoped and only needed
+        # on PostgreSQL; SQLite test/dev remains compatible.
+        if db.get_bind().dialect.name == "postgresql":
+            from sqlalchemy import text
+            lock_key = int.from_bytes(
+                hashlib.sha256(
+                    f"situation-ingestion:{person.id}:{ingestion_key}".encode("utf-8")
+                ).digest()[:8],
+                byteorder="big",
+                signed=True,
+            )
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                {"lock_key": lock_key},
+            )
+
+        prior_evidence = (
+            db.query(Evidence)
+            .filter(
+                Evidence.person_id == person.id,
+                Evidence.ingestion_key == ingestion_key,
+            )
+            .first()
+        )
+        if prior_evidence is not None:
+            if (
+                prior_evidence.uploaded_by_caregiver_id != caregiver.id
+                or prior_evidence.ingestion_request_sha256 != ingestion_fingerprint
+            ):
+                raise ValueError(
+                    "This care update retry key was already used for different content or ownership."
+                )
+
+            persisted_events = (
+                db.query(CareEvent)
+                .filter(CareEvent.person_id == person.id)
+                .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
+                .all()
+            )
+            prior_event = next(
+                (
+                    event for event in persisted_events
+                    if prior_evidence.id in (event.evidence_ids or [])
+                ),
+                None,
+            )
+            if prior_event is None:
+                raise ValueError(
+                    "The earlier care update is incomplete: its evidence exists but its care event is missing. "
+                    "The retry was not duplicated."
+                )
+            return SituationResponse(
+                ok=True,
+                situation_id=prior_event.situation_id or prior_event.id,
+                care_key=payload.client_care_key or caregiver.id,
+                person_id=person.id,
+                evidence_id=prior_evidence.id,
+                care_event_id=prior_event.id,
+                message="This care update was already saved. No duplicate was created.",
+                events=[
+                    SituationEvent(
+                        id=prior_event.id,
+                        event_type=prior_event.event_type,
+                        title=prior_event.title,
+                        description=prior_event.description,
+                        occurred_at=prior_event.occurred_at,
+                        time_provenance=prior_event.time_provenance,
+                        evidence_ids=prior_event.evidence_ids or [],
+                    )
+                ],
+                analysis_status="partial",
+                analysis_warning=(
+                    "The original save was found. Derived analysis was not rerun during this retry."
+                ),
+            )
+
     target_situation = None
     if payload.target_situation_id:
         # Explicit thread recovery is person-scoped and row-locked. Similarity
@@ -142,6 +261,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
             confidence=doc.ocr_confidence if doc else None,
+            ingestion_key=ingestion_key or None,
+            ingestion_request_sha256=ingestion_fingerprint if ingestion_key else None,
             evidence_status="reported",
             source_type=(
                 "caregiver_observation"
