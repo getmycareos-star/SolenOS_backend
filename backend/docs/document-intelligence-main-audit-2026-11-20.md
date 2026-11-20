@@ -148,3 +148,6 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 - `54e01b84ef09866d333d21d8dea770e7dc17cdf8` — the same accepted LCR assertions are projected into the existing `SituationObservation` shape (`kind=document`, source reference, reported epistemic state) consumed by the frontend Progressive Understanding Engine; no new evidence table or write path was added.
 - `8d2d1a005ceef70f683af3caffe6961c6fb97765` — regression coverage proves pending candidates do not appear in Progressive Understanding, while caregiver-approved assertions do.
 - `fbbb7127d6f4dff6c98d2877cab2a3cea82cb5d2` — aligns document source statement attribution values with the existing Progressive Understanding observation contract.
+
+- `2d85850740d0be375275b7015e55187f48be76a9` and `1fd788b055bcf78d0e8648e57b99c6902a389c93` — document source projections do not invent a speaker identity; speaker attribution remains unknown unless the source actually names one.
+- `922ccca9dfa0f9bf59c30e79d9a071e3bf6d73bf` — regression coverage asserts the Progressive Understanding observation preserves unknown speaker attribution and source evidence identity.
