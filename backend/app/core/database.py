@@ -200,9 +200,18 @@ def database_schema_differences(bind=None):
             if constraint.__class__.__name__ == "UniqueConstraint"
         }
         actual_unique_constraints = {
-            tuple(item.get("column_names") or [])
+            tuple(sorted(item.get("column_names") or []))
             for item in inspector.get_unique_constraints(table_name)
         }
+        # PostgreSQL may expose a UNIQUE constraint through its backing unique
+        # index, and migrations may create an equivalent standalone unique
+        # index. Both enforce the same relational invariant; readiness should
+        # not report drift when the required uniqueness is already enforced.
+        actual_unique_constraints.update(
+            tuple(sorted(item.get("column_names") or []))
+            for item in inspector.get_indexes(table_name)
+            if item.get("unique") and item.get("column_names")
+        )
         missing_unique_constraints = expected_unique_constraints - actual_unique_constraints
         if missing_unique_constraints:
             differences.append(
