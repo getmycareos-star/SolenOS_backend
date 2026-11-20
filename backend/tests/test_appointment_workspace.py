@@ -3372,3 +3372,21 @@ def test_caregiver_recorded_visit_event_is_recognised_without_fabricating_a_book
     assert body["appointment_recorded_events"][0]["source_id"] == event_id
     assert body["appointment_recorded_events"][0]["recorded_by_role"] == "caregiver"
     assert body["appointment_recorded_events"][0]["occurred_at"]
+
+
+def test_appointment_brief_does_not_leak_documents_without_document_permission(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    with TestSessionLocal() as db:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=owner["person"]["id"],
+            caregiver_id=owner["caregiver"]["id"],
+        ).one()
+        grant.permissions = ["view_lcr", "add_evidence"]
+        grant.can_manage_members = False
+        db.commit()
+
+    brief = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert brief.status_code == 200, brief.text
+    assert brief.json()["documents"] == []
+    assert brief.json()["source_coverage"]["documents"] == "restricted"
