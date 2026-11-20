@@ -8,7 +8,7 @@ from app.api import care_continuity
 
 
 def test_change_source_refs_resolve_events_assertions_and_observations():
-    change = SimpleNamespace(evidence_ids=["event-1", "assertion-1", "observation-1", "missing-1"])
+    change = SimpleNamespace(evidence_ids=["event-1", "assertion-1", "observation-1", "evidence-1", "missing-1"])
     events = {
         "event-1": SimpleNamespace(
             id="event-1", title="Daily care update", event_type="daily_care",
@@ -30,15 +30,23 @@ def test_change_source_refs_resolve_events_assertions_and_observations():
         )
     }
 
+    evidence = {
+        "evidence-1": SimpleNamespace(
+            id="evidence-1", title=None, type="note",
+            occurred_at="2026-11-11T21:10:00Z", ingested_at="2026-11-11T22:13:16Z",
+            uploaded_at=None,
+        )
+    }
     refs = care_continuity._change_source_refs(
         change,
         event_by_id=events,
         assertion_by_id=assertions,
         observation_by_id=observations,
+        evidence_by_id=evidence,
     )
 
-    assert [item["record_id"] for item in refs] == ["event-1", "assertion-1", "observation-1"]
-    assert [item["source"] for item in refs] == ["events", "care_assertions", "evidence_observations"]
+    assert [item["record_id"] for item in refs] == ["event-1", "assertion-1", "observation-1", "evidence-1"]
+    assert [item["source"] for item in refs] == ["events", "care_assertions", "evidence_observations", "evidence"]
     assert refs[0]["evidence_ids"] == ["source-evidence-1"]
     assert refs[1]["evidence_ids"] == ["source-evidence-2"]
     assert refs[2]["evidence_ids"] == ["source-evidence-3"]

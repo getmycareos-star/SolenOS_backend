@@ -67,6 +67,7 @@ def _change_source_refs(
     event_by_id: dict[str, Any],
     assertion_by_id: dict[str, Any],
     observation_by_id: dict[str, Any],
+    evidence_by_id: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Resolve change source IDs across every supported persisted source type.
 
@@ -110,6 +111,17 @@ def _change_source_refs(
                 "occurred_at": observation.occurred_at or observation.observed_at,
                 "recorded_at": observation.recorded_at,
                 "evidence_ids": [str(observation.evidence_id)] if observation.evidence_id else [],
+            })
+            continue
+        evidence = evidence_by_id.get(source_id)
+        if evidence is not None:
+            refs.append({
+                "source": "evidence",
+                "record_id": str(evidence.id),
+                "title": str(getattr(evidence, "title", None) or getattr(evidence, "type", None) or "Care note or document")[:240],
+                "occurred_at": getattr(evidence, "occurred_at", None),
+                "recorded_at": getattr(evidence, "ingested_at", None) or getattr(evidence, "uploaded_at", None),
+                "evidence_ids": [str(evidence.id)],
             })
     return refs
 
@@ -3410,6 +3422,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         event_by_id = {}
         assertion_by_id = {}
         observation_by_id = {}
+        evidence_by_id = {}
         if source_record_ids:
             event_by_id = {
                 str(row.id): row for row in db.query(CareEvent).filter(
@@ -3426,6 +3439,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                     EvidenceObservation.person_id == person_id, EvidenceObservation.id.in_(source_record_ids)
                 ).all()
             }
+            evidence_by_id = {
+                str(row.id): row for row in db.query(Evidence).filter(
+                    Evidence.person_id == person_id, Evidence.id.in_(source_record_ids)
+                ).all()
+            }
         for change in relevant_changes:
             baseline = baseline_by_id.get(str(change.baseline_id)) if change.baseline_id else None
             source_refs = _change_source_refs(
@@ -3433,6 +3451,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 event_by_id=event_by_id,
                 assertion_by_id=assertion_by_id,
                 observation_by_id=observation_by_id,
+                evidence_by_id=evidence_by_id,
             )
             persisted_change_items.append({
                 "id": str(change.id),
