@@ -3273,6 +3273,14 @@ def test_appointment_lifecycle_preserves_reschedule_cancel_and_unknown_date(clie
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     assert cancelled.json()["external_booking_confirmed"] is False
+    with TestSessionLocal() as db:
+        status_events = db.query(CareEvent).filter(
+            CareEvent.person_id == owner["person"]["id"],
+            CareEvent.event_type == "appointment_status_change",
+            CareEvent.title.contains("Community care review"),
+        ).all()
+        assert len(status_events) >= 3
+        assert all(event.created_by_caregiver_id == owner["caregiver"]["id"] for event in status_events)
 
 
 def test_appointment_workspace_survives_session_refresh_and_logout_revokes_access(client):
