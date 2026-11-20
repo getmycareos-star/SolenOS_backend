@@ -21,6 +21,7 @@ from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
+from app.models.collaboration import EvidenceUpload
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
@@ -643,6 +644,46 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "epistemic_status": source_evidence.epistemic_status or "unknown",
                 "interpretation_limit": "Extracted document text is source material, not an accepted LCR fact or clinical verification.",
             })
+        # Include original uploaded files even when extraction has not started
+        # or failed. Their metadata is useful context, but never substitute it
+        # for extracted text or a confirmed care fact.
+        extracted_evidence_ids = {
+            str(item.get("source_evidence_id"))
+            for item in documents if item.get("source_evidence_id")
+        }
+        uploaded_rows = (
+            db.query(Evidence, EvidenceUpload)
+            .join(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
+            .filter(
+                Evidence.person_id == person_id,
+                Evidence.type == "document",
+                (Evidence.evidence_status.is_(None)) | (Evidence.evidence_status != "deleted_by_caregiver"),
+            )
+            .order_by(EvidenceUpload.created_at.desc())
+            .limit(51)
+            .all()
+        )
+        uploads_has_more = len(uploaded_rows) > 50
+        for source_evidence, upload in uploaded_rows[:50]:
+            evidence_id = str(source_evidence.id)
+            if evidence_id in extracted_evidence_ids:
+                continue
+            documents.append({
+                "source_table": "evidence_uploads",
+                "source_id": evidence_id,
+                "source_evidence_id": evidence_id,
+                "filename": upload.filename,
+                "extraction_method": None,
+                "extraction_status": "not_started",
+                "extracted_text": None,
+                "source_text_sha256": upload.sha256,
+                "recorded_at": _iso(upload.created_at),
+                "uploaded_at": _iso(source_evidence.uploaded_at),
+                "uploaded_by_caregiver_id": source_evidence.uploaded_by_caregiver_id,
+                "epistemic_status": source_evidence.epistemic_status or "unknown",
+                "interpretation_limit": "The original file is saved, but extracted text is not available. File metadata is not treated as clinical content or a confirmed care fact.",
+            })
+        documents_has_more = bool(documents_has_more or uploads_has_more)
         document_source_status = "available" if documents else "empty"
     except Exception:
         db.rollback()
