@@ -89,7 +89,7 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
             VALUES
               ('owner-fact', :owner_id, 'person', :owner_id, 'sleep_pattern', 'Caregiver-reported sleep changes', 'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
               ('other-fact', :other_id, 'person', :other_id, 'private_detail', 'Other person private care detail', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"], "decision_outcome_id": decision_outcome_id, "other_outcome_id": other_outcome_id})
+        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
     response = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
