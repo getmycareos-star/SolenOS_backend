@@ -119,7 +119,13 @@ def _schema_column_types_compatible(expected, actual, dialect_name: str) -> bool
         return actual_affinity.__name__ == "String"
 
     if expected_affinity != actual_affinity:
-        return False
+        # PostgreSQL may reflect a legacy floating-point column as NUMERIC
+        # (or vice versa). Treat both SQLAlchemy numeric storage families as
+        # compatible when the ORM contract does not declare precision; any
+        # explicitly declared precision/scale is still checked below.
+        from sqlalchemy import Numeric
+        if not (isinstance(expected, Numeric) and isinstance(actual, Numeric)):
+            return False
     for attribute in ("length", "precision", "scale"):
         expected_value = getattr(expected, attribute, None)
         actual_value = getattr(actual, attribute, None)
