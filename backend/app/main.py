@@ -599,7 +599,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 db.query(LegacyAppointmentModel.person_id)
                 .filter(LegacyAppointmentModel.id == appointment_id)
                 .scalar()
-            )
+            ) or scoped_person_id
+            # If the appointment is absent, bind the middleware to the bearer
+            # session's own record and let the endpoint return 404. If it exists,
+            # its owner is resolved above and compared against this same session.
+            # The route still performs its own _require_session_scope check.
+
         if not target_person_id:
             # Legacy read routes carry the care-recipient ID in the path. Nested
             # APIRouter matching is not always available inside middleware, so
