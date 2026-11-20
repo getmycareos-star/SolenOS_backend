@@ -16,7 +16,7 @@ from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.services.capture_review import (
-    _source_grounded_weight_loss_detail,
+    normalize_source_grounded_care_detail,
     persist_source_grounded_daily_observations,
 )
 from app.models.uncertainty import OpenQuestion
@@ -118,32 +118,21 @@ def create_session(client, name):
 
 
 def test_weight_loss_normalization_preserves_negation_and_hedging():
-    client = TestClient(app)
-    session = create_session(client, "Weight normalization recipient")
-    db = TestSessionLocal()
-    try:
-        negated = _source_grounded_weight_loss_detail(
-            db,
-            person_id=session["person"]["id"],
-            evidence_id="not-yet-persisted",
-            source_text="She is not losing weight.",
-            observation_text="not losing weight",
-        )
-        assert negated is None
+    negated = normalize_source_grounded_care_detail(
+        source_text="She is not losing weight.",
+        observation_text="not losing weight",
+    )
+    assert negated is None
 
-        hedged = _source_grounded_weight_loss_detail(
-            db,
-            person_id=session["person"]["id"],
-            evidence_id="not-yet-persisted",
-            source_text="She may be losing weight.",
-            observation_text="losing weight",
-        )
-        assert hedged is not None
-        assert hedged["normalized_value"] == "possible weight loss"
-        assert hedged["epistemic_status"] == "uncertain"
-        assert hedged["hedge_marker"].casefold() == "may be"
-    finally:
-        db.close()
+    hedged = normalize_source_grounded_care_detail(
+        source_text="She may be losing weight.",
+        observation_text="losing weight",
+    )
+    assert hedged is not None
+    assert hedged["normalized_value"] == "possible weight loss"
+    assert hedged["epistemic_status"] == "uncertain"
+    assert hedged["hedge_marker"].casefold() == "may be"
+
 
 
 def test_structured_daily_capture_persists_source_linked_details_without_model_extraction(monkeypatch):
