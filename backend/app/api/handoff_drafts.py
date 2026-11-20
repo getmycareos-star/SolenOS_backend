@@ -2256,6 +2256,21 @@ def prepare_handoff_draft(
     bind = db.get_bind()
     inspector = inspect(bind)
     metadata = MetaData()
+    # Reflect the fixed source allowlist in one metadata pass. Per-table
+    # has_table + autoload calls caused dozens of catalog round trips for each
+    # briefing request. Keep a per-table fallback so one malformed optional
+    # source cannot make the entire source projection unavailable.
+    available_table_names = set(inspector.get_table_names())
+    reflect_names = sorted(
+        {name for name in SOURCES if name in available_table_names}
+        | ({"evidence"} if "evidence" in available_table_names else set())
+    )
+    try:
+        if reflect_names:
+            metadata.reflect(bind=bind, only=reflect_names, resolve_fks=False)
+    except Exception:
+        logger.exception("Handoff bulk source reflection failed; using isolated per-table reflection")
+        metadata = MetaData()
     statuses = {}
     records = []
     source_scan_started = monotonic()
@@ -2264,7 +2279,7 @@ def prepare_handoff_draft(
         source_record_start = len(records)
         source_started = monotonic()
         try:
-            if not inspector.has_table(table_name):
+            if table_name not in available_table_names:
                 statuses[table_name] = {
                     "status": "unavailable",
                     "reason": "source_schema_unavailable",
@@ -2272,7 +2287,9 @@ def prepare_handoff_draft(
                     "count": 0,
                 }
                 continue
-            table = Table(table_name, metadata, autoload_with=bind)
+            table = metadata.tables.get(table_name)
+            if table is None:
+                table = Table(table_name, metadata, autoload_with=bind)
             # Refuse to query tables without server-side person scoping.
             if "person_id" not in table.c or "id" not in table.c:
                 statuses[table_name] = {
@@ -2284,7 +2301,7 @@ def prepare_handoff_draft(
                 continue
 
             if spec.get("require_caregiver_owned_evidence"):
-                if not inspector.has_table("evidence"):
+                if "evidence" not in available_table_names:
                     statuses[table_name] = {
                         "status": "unavailable",
                         "reason": "evidence_scope_adapter_unavailable",
@@ -2292,7 +2309,9 @@ def prepare_handoff_draft(
                         "count": 0,
                     }
                     continue
-                evidence_table = Table("evidence", metadata, autoload_with=bind)
+                evidence_table = metadata.tables.get("evidence")
+                if evidence_table is None:
+                    evidence_table = Table("evidence", metadata, autoload_with=bind)
                 evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
                 if not {"id", "person_id", "uploaded_by_caregiver_id"}.issubset(set(evidence_table.c.keys())) or evidence_link_column not in table.c:
                     statuses[table_name] = {
