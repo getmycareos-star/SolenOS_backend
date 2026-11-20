@@ -3273,6 +3273,21 @@ def test_appointment_lifecycle_preserves_reschedule_cancel_and_unknown_date(clie
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     assert cancelled.json()["external_booking_confirmed"] is False
+    cancelled_brief = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert cancelled_brief.status_code == 200, cancelled_brief.text
+    assert cancelled_brief.json()["appointment_context_status"]["code"] == "cancelled"
+
+    rescheduled_without_date = test_client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+        json={"status": "rescheduled"},
+    )
+    assert rescheduled_without_date.status_code == 200, rescheduled_without_date.text
+    assert rescheduled_without_date.json()["scheduled_at"] is None
+    rescheduled_brief = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert rescheduled_brief.status_code == 200, rescheduled_brief.text
+    assert rescheduled_brief.json()["appointment_context_status"]["code"] == "rescheduled"
+
     with TestSessionLocal() as db:
         status_events = db.query(CareEvent).filter(
             CareEvent.person_id == owner["person"]["id"],
