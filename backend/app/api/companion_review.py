@@ -316,6 +316,7 @@ def create_companion_care_update_from_message(
 def list_companion_care_updates(
     request: Request,
     session_id: str | None = None,
+    include_reviewed: bool = False,
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
@@ -323,8 +324,9 @@ def list_companion_care_updates(
         AIOutputLCRProposal.person_id == person_id,
         AIOutputLCRProposal.caregiver_id == caregiver_id,
         AIOutputLCRProposal.proposal_type == "companion_care_observation",
-        AIOutputLCRProposal.status == "pending_authorization",
     )
+    if not include_reviewed:
+        query = query.filter(AIOutputLCRProposal.status == "pending_authorization")
     if session_id:
         session = db.query(ConversationSession).filter_by(
             id=session_id, person_id=person_id, caregiver_id=caregiver_id
