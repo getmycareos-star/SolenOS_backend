@@ -691,7 +691,7 @@ def test_postgres_appointment_continuity_is_shared_and_linked_across_authorised_
     from app.models.appointment_workspace import AppointmentWorkspaceRecord
     from app.models.care import Caregiver
     from app.models.caregiver_access import CaregiverAccessGrant
-    from app.models.open_loop import OpenLoopRecord
+    from app.models.open_loop import OpenLoopEvent, OpenLoopRecord
     from app.models.time_location import Appointment
 
     database_url = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
@@ -852,6 +852,32 @@ def test_postgres_appointment_continuity_is_shared_and_linked_across_authorised_
             ]
             assert len(linked) == 1
             assert linked[0]["appointment_id"] == appointment_id
+
+            # If a later revision removes the follow-up, the cancellation
+            # remains in the same appointment's durable history.
+            removed = client.patch(
+                f"/api/v1/appointment-workspaces/{workspace_id}",
+                headers=shared_headers,
+                json={
+                    "expected_version": 2,
+                    "status": "follow_up_pending",
+                    "payload": {"caregiverReport": payload["caregiverReport"]},
+                    "change_reason": "The clinic follow-up was removed from the latest appointment revision",
+                },
+            )
+            assert removed.status_code == 200, removed.text
+            with test_session_local() as db:
+                loop = db.query(OpenLoopRecord).filter(
+                    OpenLoopRecord.person_id == person_id,
+                    OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+                    OpenLoopRecord.source_id.like(f"{workspace_id}:%"),
+                ).one()
+                assert loop.status == "cancelled"
+                removal_event = db.query(OpenLoopEvent).filter(
+                    OpenLoopEvent.loop_id == loop.id,
+                    OpenLoopEvent.event_type == "source_follow_up_removed",
+                ).one()
+                assert removal_event.evidence[0]["appointment_id"] == appointment_id
 
             denied = client.get(
                 f"/api/v1/appointment-workspaces/{workspace_id}",
