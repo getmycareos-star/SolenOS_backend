@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -6,11 +7,12 @@ import hashlib
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
-from app.models.care import Caregiver as SessionCaregiverModel
+from app.models.care import Caregiver as SessionCaregiverModel, Person as SessionPersonModel
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.caregiver_intelligence import (
     CaregiverProfile as CaregiverProfileModel,
+    CaregiverContext as CaregiverContextModel,
     CaregiverRole as CaregiverRoleModel,
     CaregiverResponsibility as CaregiverResponsibilityModel,
     CaregiverObservation as CaregiverObservationModel,
@@ -70,6 +72,40 @@ from app.core.caregiver_enums import (
 )
 
 router = APIRouter()
+
+
+class CareRecipientProfileUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    relationship: str = Field(default="", max_length=120)
+    condition: Optional[str] = Field(default=None, max_length=500)
+
+
+def _care_recipient_profile_json(
+    db: Session,
+    *,
+    person: SessionPersonModel,
+    caregiver_profile: CaregiverProfileModel,
+) -> dict:
+    contexts = (
+        db.query(CaregiverContextModel)
+        .filter(
+            CaregiverContextModel.person_id == str(person.id),
+            CaregiverContextModel.caregiver_id == str(caregiver_profile.id),
+        )
+        .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+        .all()
+    )
+    condition = None
+    for context in contexts:
+        metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
+        if metadata.get("record_type") == "care_recipient_profile":
+            condition = metadata.get("condition")
+            break
+    return {
+        "name": person.name,
+        "relationship": caregiver_profile.relationship or "",
+        "condition": condition if isinstance(condition, str) and condition.strip() else None,
+    }
 
 
 def _resolve_scoped_session(request: Request, db: Session) -> tuple[str, str]:
@@ -226,6 +262,102 @@ def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, 
 def get_current_caregiver_profile(request: Request, db: Session = Depends(get_db)):
     _person_id, _session_caregiver_id, profile = _session_profile(request, db)
     return profile
+
+
+@router.get("/care-profile")
+def get_care_recipient_profile(request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, caregiver_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, _session_caregiver_id, "view_lcr")
+    person = db.query(SessionPersonModel).filter(SessionPersonModel.id == person_id).first()
+    if person is None:
+        raise HTTPException(status_code=404, detail="Care record not found")
+    return _care_recipient_profile_json(db, person=person, caregiver_profile=caregiver_profile)
+
+
+@router.put("/care-profile")
+def update_care_recipient_profile(
+    payload: CareRecipientProfileUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, session_caregiver_id, caregiver_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "add_evidence")
+    person = (
+        db.query(SessionPersonModel)
+        .filter(SessionPersonModel.id == person_id)
+        .with_for_update()
+        .first()
+    )
+    caregiver_profile = (
+        db.query(CaregiverProfileModel)
+        .filter(
+            CaregiverProfileModel.id == caregiver_profile.id,
+            CaregiverProfileModel.person_id == person_id,
+            CaregiverProfileModel.session_caregiver_id == session_caregiver_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if person is None or caregiver_profile is None:
+        raise HTTPException(status_code=404, detail="Care record profile not found")
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Enter a care recipient name.")
+    relationship = payload.relationship.strip()
+    condition = payload.condition.strip() if payload.condition and payload.condition.strip() else None
+
+    try:
+        person.name = name
+        caregiver_profile.relationship = relationship
+
+        contexts = (
+            db.query(CaregiverContextModel)
+            .filter(
+                CaregiverContextModel.person_id == person_id,
+                CaregiverContextModel.caregiver_id == caregiver_profile.id,
+            )
+            .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+            .with_for_update()
+            .all()
+        )
+        latest_profile_context = None
+        for context in contexts:
+            metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
+            if metadata.get("record_type") == "care_recipient_profile":
+                latest_profile_context = context
+                break
+        previous_condition = None
+        if latest_profile_context is not None:
+            metadata = latest_profile_context.context_metadata if isinstance(latest_profile_context.context_metadata, dict) else {}
+            previous_condition = metadata.get("condition")
+        if previous_condition != condition:
+            now = datetime.now(timezone.utc)
+            if latest_profile_context is not None and latest_profile_context.effective_end is None:
+                latest_profile_context.effective_end = now
+            db.add(CaregiverContextModel(
+                person_id=person_id,
+                caregiver_id=caregiver_profile.id,
+                proximity_category=None,
+                observation_window_start=None,
+                observation_window_end=None,
+                availability_notes=None,
+                context_metadata={
+                    "record_type": "care_recipient_profile",
+                    "condition": condition,
+                    "epistemic_status": "caregiver_reported",
+                    "reported_by_session_caregiver_id": session_caregiver_id,
+                },
+                effective_start=now,
+                effective_end=None,
+            ))
+        db.commit()
+        db.refresh(person)
+        db.refresh(caregiver_profile)
+        return _care_recipient_profile_json(db, person=person, caregiver_profile=caregiver_profile)
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/caregiver-profiles/{person_id}", response_model=List[CaregiverProfile])
