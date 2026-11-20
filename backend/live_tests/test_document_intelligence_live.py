@@ -371,6 +371,27 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             canonical["source_attribution"] == case["expected"]["source_attribution"]
             for case, canonical in matched_gold
         )
+        modality_cases = [
+            (case, canonical) for case, canonical in matched_gold
+            if "modality" in case["expected"]
+        ]
+        modality_correct = sum(
+            canonical["modality"] == case["expected"]["modality"]
+            for case, canonical in modality_cases
+        )
+        source_quote_accuracy = (
+            sum(candidate["source_quote"] in source for candidate in candidates)
+            / len(candidates)
+            if candidates else 0.0
+        )
+        unsupported_candidate_rate = (
+            sum(
+                candidate["source_quote"] not in source
+                or candidate["observation"] not in candidate["source_quote"]
+                for candidate in candidates
+            ) / len(candidates)
+            if candidates else 0.0
+        )
         print(
             "DOCUMENT_INTELLIGENCE_LIVE_EVALUATION="
             + json.dumps(
@@ -382,8 +403,12 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
                     "temporal_classification_accuracy": round(temporal_correct / total_gold, 4),
                     "negation_preservation_accuracy": round(negation_correct / total_gold, 4),
                     "source_attribution_accuracy": round(attribution_correct / total_gold, 4),
-                    "source_quote_accuracy": 1.0,
-                    "unsupported_candidate_rate": 0.0,
+                    "modality_classification_accuracy": (
+                        round(modality_correct / len(modality_cases), 4)
+                        if modality_cases else None
+                    ),
+                    "source_quote_accuracy": round(source_quote_accuracy, 4),
+                    "unsupported_candidate_rate": round(unsupported_candidate_rate, 4),
                     "companion_lcr_assertion_retrieval": True,
                     "accepted_assertion_count": accepted_assertion_count,
                     "duplicate_assertion_count": duplicate_assertion_count,
