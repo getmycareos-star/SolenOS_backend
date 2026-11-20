@@ -172,11 +172,12 @@ def deliver_due_reminders(db=None, now=None):
             .all()
         )
         for reminder in due:
+            recipient_caregiver_id = reminder.assigned_to_caregiver_id or reminder.created_by_caregiver_id
             preference = (
                 session.query(CareNotificationPreference)
                 .filter(
                     CareNotificationPreference.person_id == reminder.person_id,
-                    CareNotificationPreference.caregiver_id == reminder.created_by_caregiver_id,
+                    CareNotificationPreference.caregiver_id == recipient_caregiver_id,
                 )
                 .first()
             )
@@ -192,7 +193,7 @@ def deliver_due_reminders(db=None, now=None):
             session.add(CareNotification(
                 id=_notification_id(reminder),
                 person_id=reminder.person_id,
-                caregiver_id=reminder.created_by_caregiver_id,
+                caregiver_id=recipient_caregiver_id,
                 title=reminder.title,
                 body=reminder.note or "This care reminder is due.",
                 category="reminder_due",
