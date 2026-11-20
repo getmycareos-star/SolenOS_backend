@@ -665,7 +665,20 @@ def list_contexts(person_id: str, request: Request, db: Session = Depends(get_db
 def create_responsibility_gap(gap: ResponsibilityGapCreate, request: Request, db: Session = Depends(get_db)):
     person_id, _session_caregiver_id, _current_profile = _session_profile(request, db)
     _assert_person_scope(request, db, gap.person_id)
-    gap = ResponsibilityGapCreate(**{**gap.model_dump(), "person_id": person_id})
+    if gap.status != CoverageGapStatus.OPEN or gap.resolution or gap.resolved_at:
+        raise HTTPException(
+            status_code=422,
+            detail="A new responsibility gap must start open; review and resolution require a separate decision.",
+        )
+    if gap.last_known_caregiver_id:
+        _require_profile_in_person(db, gap.last_known_caregiver_id, person_id)
+    gap = ResponsibilityGapCreate(**{
+        **gap.model_dump(),
+        "person_id": person_id,
+        "status": CoverageGapStatus.OPEN,
+        "resolution": None,
+        "resolved_at": None,
+    })
     service = CaregiverIntelligenceService(db)
     db_gap = service.create_responsibility_gap(gap)
     return db_gap
@@ -682,7 +695,25 @@ def list_responsibility_gaps(person_id: str, request: Request, db: Session = Dep
 def create_perspective_conflict(conflict: PerspectiveConflictCreate, request: Request, db: Session = Depends(get_db)):
     person_id, _session_caregiver_id, _current_profile = _session_profile(request, db)
     _assert_person_scope(request, db, conflict.person_id)
-    conflict = PerspectiveConflictCreate(**{**conflict.model_dump(), "person_id": person_id})
+    if str(conflict.caregiver_a_id) == str(conflict.caregiver_b_id):
+        raise HTTPException(status_code=422, detail="A perspective comparison requires two different caregivers.")
+    _require_profile_in_person(db, conflict.caregiver_a_id, person_id)
+    _require_profile_in_person(db, conflict.caregiver_b_id, person_id)
+    if (
+        conflict.status in {PerspectiveConflictStatus.ALIGNED, PerspectiveConflictStatus.RESOLVED}
+        or conflict.resolution
+        or conflict.resolved_at
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="A new perspective difference cannot be pre-resolved; preserve both reports for separate review.",
+        )
+    conflict = PerspectiveConflictCreate(**{
+        **conflict.model_dump(),
+        "person_id": person_id,
+        "resolution": None,
+        "resolved_at": None,
+    })
     service = CaregiverIntelligenceService(db)
     db_conflict = service.create_perspective_conflict(conflict)
     return db_conflict
