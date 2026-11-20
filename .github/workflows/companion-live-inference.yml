@@ -90,6 +90,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Mark document and live-Qwen validation pending
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: "pending",
+              context: "document-intelligence-live-validation",
+              description: "Document OCR, PostgreSQL restart, review, LCR and real-Qwen suites are running",
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
       - name: Install local OCR engine for real document extraction tests
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - name: Set up Python
