@@ -1228,3 +1228,95 @@ def test_situation_display_name_update_persists_for_the_authenticated_owner():
     finally:
         db.close()
 
+def test_legacy_care_timeline_reads_require_a_scoped_session():
+    client = TestClient(app)
+    created = create_session(client, "Protected timeline recipient")
+    person_id = created["person"]["id"]
+
+    paths = [
+        f"/api/v1/daily-intelligence/{person_id}",
+        f"/api/v1/appointments/{person_id}",
+        f"/api/v1/locations/{person_id}",
+        f"/api/v1/locations/{person_id}/enriched",
+        f"/api/v1/timezones/{person_id}",
+        f"/api/v1/care-windows/{person_id}",
+        f"/api/v1/transitions/{person_id}",
+        f"/api/v1/temporal-relationships/{person_id}",
+        f"/api/v1/time-patterns/{person_id}",
+        f"/api/v1/temporal/facts/{person_id}",
+        f"/api/v1/temporal/relations/{person_id}",
+        f"/api/v1/temporal/reference-frames/{person_id}",
+        f"/api/v1/temporal/conflicts/{person_id}",
+        f"/api/v1/temporal/view/{person_id}?point_in_time=2026-11-20T00:00:00Z",
+    ]
+    for path in paths:
+        response = client.get(path)
+        assert response.status_code == 401, f"{path}: {response.status_code} {response.text}"
+
+
+def test_legacy_care_timeline_rejects_cross_person_session_access():
+    client = TestClient(app)
+    owner = create_session(client, "Timeline owner")
+    other = create_session(client, "Timeline other person")
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    for path in [
+        f"/api/v1/daily-intelligence/{other['person']['id']}",
+        f"/api/v1/appointments/{other['person']['id']}",
+        f"/api/v1/locations/{other['person']['id']}",
+        f"/api/v1/timezones/{other['person']['id']}",
+        f"/api/v1/temporal/facts/{other['person']['id']}",
+    ]:
+        response = client.get(path, headers=headers)
+        assert response.status_code == 403, f"{path}: {response.status_code} {response.text}"
+
+
+def test_timezone_context_write_requires_session_and_binds_caregiver():
+    client = TestClient(app)
+    created = create_session(client, "Timezone owner")
+    params = {
+        "person_id": created["person"]["id"],
+        "caregiver_id": created["caregiver"]["id"],
+        "timezone_id": "America/New_York",
+        "is_primary": "true",
+    }
+    unauthenticated = client.post("/api/v1/timezones", params=params)
+    assert unauthenticated.status_code == 401, unauthenticated.text
+
+    wrong_caregiver = client.post(
+        "/api/v1/timezones",
+        params={**params, "caregiver_id": "caregiver-from-another-record"},
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert wrong_caregiver.status_code == 403, wrong_caregiver.text
+
+    accepted = client.post(
+        "/api/v1/timezones",
+        params=params,
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["person_id"] == created["person"]["id"]
+    assert accepted.json()["caregiver_id"] == created["caregiver"]["id"]
+
+
+def test_daily_intelligence_refresh_updates_one_persisted_projection():
+    client = TestClient(app)
+    created = create_session(client, "Daily intelligence owner")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    path = f"/api/v1/daily-intelligence/{created['person']['id']}"
+
+    first = client.get(path, headers=headers)
+    second = client.get(path, headers=headers)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["id"] == second.json()["id"]
+
+    from app.models.time_location import DailyIntelligence
+    db = TestSessionLocal()
+    try:
+        rows = db.query(DailyIntelligence).filter_by(person_id=created["person"]["id"]).all()
+        assert len(rows) == 1
+    finally:
+        db.close()
+
