@@ -100,14 +100,37 @@ def store_document_binary(
     }
 
 
+def _is_missing_s3_object_error(exc: Exception) -> bool:
+    """Return true only for an explicit object-not-found response, never a network error."""
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        error = response.get("Error") or {}
+        metadata = response.get("ResponseMetadata") or {}
+        code = str(error.get("Code") or "").strip().lower()
+        status = metadata.get("HTTPStatusCode")
+        return code in {"nosuchkey", "notfound", "404"} or status == 404
+    # Keep the storage unit tests independent of botocore while matching the
+    # missing-key behavior of an S3-compatible SDK response.
+    return isinstance(exc, KeyError)
+
+
 def read_document_binary(upload: Any) -> bytes:
-    """Read and integrity-check an original binary from its recorded storage."""
+    """Read and integrity-check an original binary from its recorded storage.
+
+    When an S3 object is explicitly missing, recover it from the checksum-verified
+    PostgreSQL recovery copy. Network, permission, and integrity errors fail closed.
+    """
     backend = (getattr(upload, "storage_backend", None) or "postgres").strip().lower()
     if backend == "s3":
         key = getattr(upload, "storage_key", None)
         if not key:
             raise RuntimeError("S3-backed document is missing its storage key")
-        response = _s3_client().get_object(Bucket=_bucket_name(), Key=key)
+        try:
+            response = _s3_client().get_object(Bucket=_bucket_name(), Key=key)
+        except Exception as exc:
+            if not _is_missing_s3_object_error(exc):
+                raise
+            return restore_document_binary_from_database(upload)
         body = response["Body"]
         try:
             payload = body.read()
