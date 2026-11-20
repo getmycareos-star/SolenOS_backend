@@ -37,6 +37,10 @@ class AccessScopeUpdate(BaseModel):
     access_scope: str = Field(pattern="^(full_record|documents_only)$")
 
 
+class MembershipStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(active|suspended)$")
+
+
 def _audit_event(actor_id: str | None, person_id: str, action: str, target_type: str, target_id: str, metadata: dict | None = None):
     return AuditLogEvent(
         actor_id=actor_id or "unknown_actor",
@@ -304,6 +308,56 @@ def update_member_access_scope(
     db.commit()
     return {"updated": True, "caregiver_id": caregiver_id, "access_scope": grant.access_scope}
 
+@router.patch("/members/{caregiver_id}/status")
+def update_member_status(
+    caregiver_id: str,
+    payload: MembershipStatusUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, actor_id = _actor_scope(request)
+    if str(caregiver_id) == actor_id:
+        raise HTTPException(status_code=409, detail="An administrator cannot suspend or restore their own access here.")
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status.in_(("active", "suspended")),
+    ).with_for_update().first()
+    if grant is None:
+        raise HTTPException(status_code=404, detail="Caregiver membership was not found.")
+    if grant.role == "primary" and payload.status != "active":
+        raise HTTPException(status_code=409, detail="Transfer primary caregiver authority before suspending this member.")
+    if grant.status == payload.status:
+        return {"updated": False, "caregiver_id": caregiver_id, "status": grant.status, "sessions_revoked": False}
+    now = datetime.now(timezone.utc)
+    grant.status = payload.status
+    grant.updated_at = now
+    sessions_revoked = False
+    if payload.status == "suspended":
+        db.query(AnonymousSession).filter(
+            AnonymousSession.person_id == person_id,
+            AnonymousSession.caregiver_id == caregiver_id,
+            AnonymousSession.revoked_at.is_(None),
+        ).update({AnonymousSession.revoked_at: now}, synchronize_session=False)
+        sessions_revoked = True
+    db.add(_audit_event(
+        actor_id,
+        person_id,
+        "caregiver.access.suspended" if payload.status == "suspended" else "caregiver.access.restored",
+        "caregiver_access_grant",
+        grant.id,
+        {"caregiver_id": caregiver_id, "status": payload.status, "sessions_revoked": sessions_revoked},
+    ))
+    db.commit()
+    return {
+        "updated": True,
+        "caregiver_id": caregiver_id,
+        "status": grant.status,
+        "sessions_revoked": sessions_revoked,
+        "reauthentication_required": payload.status == "active",
+    }
+
+
 @router.delete("/members/{caregiver_id}")
 def revoke_member_access(caregiver_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, actor_id = _actor_scope(request)
@@ -312,7 +366,7 @@ def revoke_member_access(caregiver_id: str, request: Request, db: Session = Depe
     grant = db.query(CaregiverAccessGrant).filter(
         CaregiverAccessGrant.person_id == person_id,
         CaregiverAccessGrant.caregiver_id == caregiver_id,
-        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.status.in_(("active", "suspended")),
     ).with_for_update().first()
     if grant is None:
         raise HTTPException(status_code=404, detail="Active caregiver access was not found.")
