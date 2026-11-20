@@ -1138,7 +1138,9 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
 @router.get("/appointments")
 def list_briefing_appointments(request: Request, db: Session = Depends(get_db)):
     """Return only this caregiver session's person's appointments for explicit briefing selection."""
-    person_id, _ = _scoped_identity(request, db)
+    person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     rows = db.query(Appointment).filter(
         Appointment.person_id == person_id,
     ).order_by(Appointment.scheduled_at.asc().nullslast(), Appointment.id.asc()).limit(100).all()
@@ -1162,6 +1164,8 @@ def list_handoff_drafts(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     drafts = db.query(HandoffDraft).filter(
         HandoffDraft.person_id == person_id,
         HandoffDraft.caregiver_id == caregiver_id,
@@ -1181,6 +1185,8 @@ def list_handoff_drafts(
 @router.get("/{draft_id}")
 def get_handoff_draft(draft_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     draft = db.query(HandoffDraft).filter(
         HandoffDraft.id == draft_id,
         HandoffDraft.person_id == person_id,
