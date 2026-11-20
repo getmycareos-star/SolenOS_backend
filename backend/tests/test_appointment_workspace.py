@@ -14,6 +14,7 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.appointment_workspace import AppointmentWorkspaceRecord
 from app.models.care import Caregiver, CareEvent, Evidence
+from app.models.collaboration import EvidenceUpload
 from app.models.time_location import Appointment
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
@@ -3177,6 +3178,13 @@ def test_appointment_document_links_are_same_person_and_durable(client):
             uploaded_by_caregiver_id=owner["caregiver"]["id"],
             uploaded_at=now,
         ))
+        db.add(EvidenceUpload(
+            evidence_id=own_document_id,
+            filename="clinic-letter.pdf",
+            mime_type="application/pdf",
+            size_bytes=1234,
+            sha256="a" * 64,
+        ))
         db.add(Evidence(
             id=other_document_id,
             person_id=other["person"]["id"],
@@ -3198,6 +3206,13 @@ def test_appointment_document_links_are_same_person_and_durable(client):
     with TestSessionLocal() as db:
         appointment = db.query(Appointment).filter_by(id=appointment_id).one()
         assert appointment.evidence_ids == [own_document_id]
+
+    brief = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=owner_headers)
+    assert brief.status_code == 200, brief.text
+    saved_document = next(item for item in brief.json()["documents"] if item["source_evidence_id"] == own_document_id)
+    assert saved_document["filename"] == "clinic-letter.pdf"
+    assert saved_document["extraction_status"] == "not_started"
+    assert saved_document["extracted_text"] is None
 
     denied = test_client.post("/api/v1/appointment-workspaces", headers=owner_headers, json={
         "appointment_id": appointment_id,
