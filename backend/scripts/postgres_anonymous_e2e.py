@@ -1154,6 +1154,29 @@ def main():
                 and lcr_matches[0].get("source_type") == "caregiver_report",
                 f"LCR did not reconcile the same authorized caregiver source: {lcr_matches}")
 
+        # A failed category can be retried without replacing other successful
+        # categories or widening the caller's person scope.
+        status, event_source_retry = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50&source=events",
+            token=token_a,
+        )
+        require(
+            status == 200
+            and event_source_retry.get("requested_sources") == ["events"]
+            and set((event_source_retry.get("source_coverage") or {}).keys()) == {"events"}
+            and any(row.get("id") == daily_event_id for row in event_source_retry.get("items", [])),
+            f"Scoped Daily Care history retry failed: {status}: {event_source_retry}",
+        )
+        status, foreign_event_source_retry = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50&source=events",
+            token=token_b,
+        )
+        require(
+            status == 200
+            and all(row.get("id") != daily_event_id for row in foreign_event_source_retry.get("items", [])),
+            f"Scoped history retry exposed another person's Daily Care record: {foreign_event_source_retry}",
+        )
+
         # Scenario 01: four natural-language reports across one day must become
         # four durable, separately attributed sources in the same PostgreSQL LCR.
         scenario_reports = [
