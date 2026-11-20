@@ -107,7 +107,7 @@ def list_members(request: Request, db: Session = Depends(get_db)):
         "access_scope": grant.access_scope or "full_record",
         "status": grant.status,
         "can_manage_members": bool(grant.can_manage_members),
-        "permissions": sorted(grant.permissions if grant.permissions is not None else DEFAULT_FAMILY_PERMISSIONS),
+        "permissions": sorted(grant.permissions or []),
         "granted_at": grant.granted_at.isoformat() if grant.granted_at else None,
         "revoked_at": grant.revoked_at.isoformat() if grant.revoked_at else None,
     } for grant, profile in grants]
