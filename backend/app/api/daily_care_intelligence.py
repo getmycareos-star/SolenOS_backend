@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence as EvidenceModel, Correction
 from app.models.time_location import Appointment
@@ -40,6 +41,7 @@ def _identity(request: Request, db: Session) -> tuple[str, str]:
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if person_id and caregiver_id:
+        require_caregiver_permission(db, str(person_id), str(caregiver_id), "view_lcr")
         return str(person_id), str(caregiver_id)
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
@@ -52,6 +54,7 @@ def _identity(request: Request, db: Session) -> tuple[str, str]:
     ).first()
     if session is None:
         raise HTTPException(status_code=401, detail="Care session is invalid or expired")
+    require_caregiver_permission(db, str(session.person_id), str(session.caregiver_id), "view_lcr")
     return str(session.person_id), str(session.caregiver_id)
 
 
