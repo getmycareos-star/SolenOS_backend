@@ -716,6 +716,61 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
     evidence_by_id = {str(item.id): item for item in evidence_rows}
     assertion_by_id = {str(item.id): item for item in assertions}
     observation_by_id = {str(item.id): item for item in observations}
+
+    # A normalized LCR fact can itself be the evidence reference carried by a
+    # Change. Resolve it through the same person-scoped path as events and
+    # assertions, then include its explicit source evidence where available.
+    from sqlalchemy import MetaData, Table, and_, inspect, select
+    connection = db.connection()
+    inspector = inspect(connection)
+    metadata = MetaData()
+    fact_by_id: dict[str, Any] = {}
+    fact_evidence_by_id: dict[str, list[dict[str, Any]]] = {}
+    if "care_facts" in inspector.get_table_names():
+        facts_table = Table("care_facts", metadata, autoload_with=connection)
+        fact_rows = db.execute(
+            select(facts_table).where(
+                facts_table.c.person_id == str(person_id),
+                facts_table.c.id.in_(ids),
+            )
+        ).mappings().all()
+        fact_by_id = {str(row["id"]): row for row in fact_rows}
+        if fact_by_id and "care_fact_evidence" in inspector.get_table_names() and "evidence" in inspector.get_table_names():
+            links_table = Table("care_fact_evidence", metadata, autoload_with=connection)
+            source_evidence_table = Table("evidence", metadata, autoload_with=connection)
+            if {"person_id", "fact_id", "evidence_id"}.issubset(links_table.c.keys()):
+                linked_rows = db.execute(
+                    select(
+                        links_table.c.fact_id,
+                        source_evidence_table.c.id.label("evidence_id"),
+                        *(
+                            [links_table.c.evidence_role]
+                            if "evidence_role" in links_table.c else []
+                        ),
+                        *(
+                            [links_table.c.source_span]
+                            if "source_span" in links_table.c else []
+                        ),
+                    ).select_from(
+                        links_table.join(
+                            source_evidence_table,
+                            and_(
+                                links_table.c.evidence_id == source_evidence_table.c.id,
+                                source_evidence_table.c.person_id == str(person_id),
+                            ),
+                        )
+                    ).where(
+                        links_table.c.person_id == str(person_id),
+                        links_table.c.fact_id.in_(list(fact_by_id)),
+                    )
+                ).mappings().all()
+                for linked in linked_rows:
+                    fact_evidence_by_id.setdefault(str(linked["fact_id"]), []).append({
+                        "evidence_id": str(linked["evidence_id"]),
+                        "evidence_role": linked.get("evidence_role"),
+                        "source_span": linked.get("source_span"),
+                    })
+
     references: list[dict[str, Any]] = []
     for record_id in ids:
         if record_id in event_by_id:
@@ -756,6 +811,23 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
                 "source_excerpt": _delta_excerpt(item.source_passage),
                 "occurred_at": _delta_iso(item.occurred_at),
                 "recorded_at": _delta_iso(item.recorded_at),
+            })
+        elif record_id in fact_by_id:
+            item = fact_by_id[record_id]
+            references.append({
+                "record_type": "care_fact",
+                "record_id": record_id,
+                "label": str(item.get("fact_type") or "Care record fact"),
+                "source_excerpt": _delta_excerpt(item.get("fact_value")),
+                "occurred_at": _delta_iso(item.get("effective_at")),
+                "recorded_at": _delta_iso(item.get("recorded_at")),
+                "epistemic_status": str(item.get("epistemic_status") or "not_recorded"),
+                "source_evidence": fact_evidence_by_id.get(record_id, []),
+                "source_evidence_status": (
+                    "verified_person_scoped_links"
+                    if fact_evidence_by_id.get(record_id)
+                    else "no_verified_linked_evidence"
+                ),
             })
     return references
 
