@@ -1081,7 +1081,7 @@ async def upload_evidence(
             if prior_blob is None or prior_blob.sha256 != digest:
                 raise HTTPException(status_code=409, detail="The original upload linked to this retry key is unavailable or failed integrity validation.")
             try:
-                read_document_binary(prior_blob)
+                await asyncio.to_thread(read_document_binary, prior_blob)
             except Exception as exc:
                 raise HTTPException(status_code=409, detail="The original upload linked to this retry key is unavailable or failed integrity validation.") from exc
             prior_meta = {}
@@ -1222,7 +1222,8 @@ async def upload_evidence(
     db.flush()
     persisted_evidence_id = str(evidence.id)
     try:
-        stored_binary = store_document_binary(
+        stored_binary = await asyncio.to_thread(
+            store_document_binary,
             person_id=scoped_person_id,
             evidence_id=persisted_evidence_id,
             data=data,
@@ -1251,7 +1252,7 @@ async def upload_evidence(
         db.rollback()
         if stored_binary["storage_backend"] == "s3":
             try:
-                delete_document_object("s3", stored_binary["storage_key"])
+                await asyncio.to_thread(delete_document_object, "s3", stored_binary["storage_key"])
             except Exception:
                 logger.exception("Unreferenced document object cleanup failed for evidence %s", persisted_evidence_id)
         raise
