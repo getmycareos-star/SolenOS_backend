@@ -995,7 +995,14 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         "projection": projection_status,
         "source_observations_expected": len(persisted_observation_ids),
         "source_observations_retrieved": len(persisted_observation_ids & projected_observation_ids),
-        "reconciliation_run_id": reconciliation.get("run_id"),
+        # This coordinator returns a transaction receipt, not a persisted run ID.
+        # Persist its actual contract/stage evidence rather than a nullable fake ID.
+        "reconciliation_receipt": {
+            "contract_version": reconciliation.get("contract_version"),
+            "workflow": reconciliation.get("workflow"),
+            "transaction_owner": reconciliation.get("transaction_owner"),
+            "stages": reconciliation.get("stages") if isinstance(reconciliation.get("stages"), dict) else {},
+        },
         "delta_reconciliation": delta_status,
         "delta_run_id": delta_reconciliation.get("run_id"),
         "delta_reconciliation_error_code": delta_reconciliation.get("error_code"),
