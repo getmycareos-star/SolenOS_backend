@@ -1769,7 +1769,10 @@ def review_document_candidate(
                 db,
                 person_id,
                 workflow="document_candidate_review",
-                source_caregiver_id=caregiver_id,
+                # Review permission belongs to the current caregiver, but the
+                # uploaded evidence may have been created by another member.
+                # The route already verifies document access, immutable bytes,
+                # extraction provenance and the assertion's evidence lineage.
                 source_evidence_id=reconciliation_evidence_id,
                 source_assertion_id=assertion_id,
             )
