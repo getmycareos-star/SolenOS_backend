@@ -301,9 +301,8 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
     if existing is not None:
         return {"created": False, "reason": "workspace_already_exists", "workspace": _record_out(existing, db)}
 
-    _require_appointment_permission(
-        request, db, person_id, caregiver_id, "add_evidence", read_only=False
-    )
+    # This creates an empty system-managed preparation workspace, not an LCR
+    # evidence record or caregiver report. view_lcr is sufficient.
     payload = {
         "captureStage": "prepare",
         "caregiverReport": "",
