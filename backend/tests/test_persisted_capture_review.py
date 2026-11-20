@@ -80,7 +80,7 @@ def teardown_function():
     Base.metadata.drop_all(bind=engine)
 
 
-def process_daily_capture_job(job_id, monkeypatch):
+def process_daily_capture_job(job_id, monkeypatch, *, extractor=None):
     from datetime import datetime, timedelta, timezone
     from app.models.qwen_background_job import QwenBackgroundJob
     from app.services import qwen_background_worker
@@ -89,7 +89,7 @@ def process_daily_capture_job(job_id, monkeypatch):
     monkeypatch.setattr(
         qwen_background_worker,
         "extract_review_candidates",
-        api_v1_module.extract_review_candidates,
+        extractor if extractor is not None else api_v1_module.extract_review_candidates,
     )
     db = TestSessionLocal()
     try:
@@ -639,24 +639,19 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     first = create_session(client, "Shared care recipient")
     first_auth = {"Authorization": f"Bearer {first['access_token']}"}
     source = "Caregiver report: the person prefers a quiet room after lunch."
-    from app.services import qwen_background_worker
-
-    monkeypatch.setattr(
-        qwen_background_worker,
-        "extract_review_candidates",
-        lambda source_text, *, source_event_id, source_evidence_id=None: {
+    def deterministic_extraction(source_text, *, source_event_id, source_evidence_id=None):
+        return {
             "observations": [{
                 "subject": "environment",
                 "observation": "The person prefers a quiet room after lunch.",
-                "source_quote": source_text,
+                "source_quote": source,
                 "source_event_id": source_event_id,
                 "source_evidence_id": source_evidence_id,
                 "review_status": "pending_review",
             }],
             "open_questions": [],
             "possible_safety_flags": [],
-        },
-    )
+        }
     saved = client.post(
         "/api/v1/daily/log",
         headers=first_auth,
@@ -671,7 +666,7 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     )
     assert saved.status_code == 200, saved.text
     body = saved.json()
-    process_daily_capture_job(body["qwen_job_id"], monkeypatch)
+    process_daily_capture_job(body["qwen_job_id"], monkeypatch, extractor=deterministic_extraction)
 
     invitation = client.post(
         "/api/v1/caregiver-access/invitations",
