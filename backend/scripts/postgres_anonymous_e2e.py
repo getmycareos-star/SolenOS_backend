@@ -1995,17 +1995,20 @@ def main():
                 and post_restart_lcr_matches[0].get("source_label") == "Caregiver",
                 f"LCR did not restore the original source record after restart/login: {post_restart_lcr_matches}")
 
+        status, post_restart_assertion_rows = request(
+            "GET", f"/api/v1/care-continuity/assertions/{person_a}?limit=100", token=token_a,
+        )
         post_restart_accepted_assertions = [
-            row for row in post_restart_lcr.get("items", [])
+            row for row in post_restart_assertion_rows
             if row.get("id") == accepted_assertion_id
         ]
-        require(len(post_restart_accepted_assertions) == 1
+        require(status == 200 and len(post_restart_accepted_assertions) == 1
                 and post_restart_accepted_assertions[0].get("evidence_ids") == [daily_evidence_id],
-                "Accepted Daily Care assertion did not survive PostgreSQL restart and a new authenticated account session")
+                f"Accepted Daily Care assertion did not survive PostgreSQL restart and a new authenticated account session: {status}: {post_restart_assertion_rows}")
         require(not any(
-            row.get("description") == "Generated suggestion that the caregiver did not confirm."
-            for row in post_restart_lcr.get("items", [])
-        ), "Rejected Daily Care candidate appeared in LCR after restart/login")
+            row.get("asserted_value") == "Generated suggestion that the caregiver did not confirm."
+            for row in post_restart_assertion_rows
+        ), "Rejected Daily Care candidate appeared as an LCR assertion after restart/login")
 
         status, post_restart_assessment = request(
             "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
