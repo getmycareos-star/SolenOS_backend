@@ -481,13 +481,13 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
         )
     documents = [
         (
-            "discharge-medications-old-scan.pdf",
+            "discharge-medications-document-a-scan.pdf",
             scanned_pdf_buffer.getvalue(),
             "application/pdf",
             "Metformin 500 mg",
         ),
         (
-            "discharge-medications-new.docx",
+            "discharge-medications-document-b.docx",
             docx_buffer.getvalue(),
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "Metformin 1000 mg",
