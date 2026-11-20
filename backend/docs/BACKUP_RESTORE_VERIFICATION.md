@@ -22,6 +22,7 @@ A backup file, a successful `pg_dump`, or a successful `pg_restore` command alon
 - Both databases are reachable by the same operator.
 - The restore database is empty/disposable and the operator has permission to create/replace schema objects.
 - Both databases use the same supported PostgreSQL major version for this first recovery exercise.
+- If `DOCUMENT_STORAGE_BACKEND=s3`, the runner also needs the configured `DOCUMENT_S3_*` variables and access to the synthetic document bucket.
 
 ## Execute
 
@@ -60,7 +61,8 @@ This second test creates additional synthetic records in the restored target and
 - It does not connect to or restore the live production database.
 - It does not verify a provider-managed automated backup schedule, retention policy, point-in-time recovery, WAL archiving, or cross-region copies.
 - The SQL verifier's cross-caregiver check is a relational ownership assertion; the separate PostgreSQL HTTP E2E suite is required to prove application authorization against the restored database.
-- It does not verify object storage outside PostgreSQL. Current `EvidenceUpload` records store binary content in the `evidence_uploads.content` database column, and this runner verifies that binary payload. If any document path uses external object storage, add a separate synthetic object-store backup/restore test before claiming document recovery.
+- When `DOCUMENT_STORAGE_BACKEND=s3` is enabled, the runner also creates a synthetic object, takes the PostgreSQL backup, removes that synthetic object, restores the database, and rebuilds the exact object key from the PostgreSQL recovery copy before checksum verification. With the default `postgres` backend, it verifies the existing database-backed binary path.
+- This does not verify an independent object-store backup bucket, provider versioning, point-in-time object recovery, retention, or cross-region replication. Those remain separate recovery controls and must not be claimed from this synthetic same-bucket object-loss test.
 - It does not establish a production RPO or RTO target. The report records observed backup/restore duration only. Define approved targets from the real backup cadence, data-loss tolerance and recovery operations, then test against those targets.
 
 ## Release gate and evidence record
