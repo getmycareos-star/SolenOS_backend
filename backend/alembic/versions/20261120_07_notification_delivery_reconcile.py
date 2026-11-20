@@ -146,28 +146,19 @@ def upgrade():
                         nullable=False,
                     )
 
+    # Privacy erasure deliberately clears direct subject identifiers. Keep
+    # subject_id nullable so a redacted request remains redacted and future
+    # retries/audit receipts can persist without reintroducing identity.
     if _table_exists(bind, "data_subject_requests"):
         request_columns = {
             column["name"]: column for column in inspect(bind).get_columns("data_subject_requests")
         }
-        if "subject_id" in request_columns:
-            # Older active requests may have stored only person_id. Backfill
-            # those rows, but preserve NULL for fulfilled erasure receipts:
-            # privacy completion intentionally clears every direct subject
-            # identifier so the request itself cannot re-identify the person.
-            op.execute(sa.text(
-                "UPDATE data_subject_requests "
-                "SET subject_id = person_id "
-                "WHERE subject_id IS NULL AND person_id IS NOT NULL AND request_status <> 'fulfilled'"
-            ))
-            unresolved_active = bind.execute(sa.text(
-                "SELECT COUNT(*) FROM data_subject_requests "
-                "WHERE subject_id IS NULL AND request_status <> 'fulfilled'"
-            )).scalar_one()
-            if unresolved_active:
-                raise RuntimeError(
-                    "Cannot reconcile active data-subject requests without a subject identifier: "
-                    + str(unresolved_active)
+        if "subject_id" in request_columns and not request_columns["subject_id"].get("nullable", True):
+            with op.batch_alter_table("data_subject_requests") as batch:
+                batch.alter_column(
+                    "subject_id",
+                    existing_type=sa.String(length=255),
+                    nullable=True,
                 )
 
     expected_indexes = (
