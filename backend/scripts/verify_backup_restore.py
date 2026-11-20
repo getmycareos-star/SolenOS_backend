@@ -22,9 +22,16 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
+
+from app.services.document_binary_storage import (
+    store_document_binary,
+    delete_document_binary,
+    restore_document_binary_from_database,
+)
 
 
 def _database_name(url: str) -> str:
@@ -64,6 +71,12 @@ def _run(command: list[str], *, env: dict[str, str] | None = None) -> None:
 
 def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> None:
     digest = hashlib.sha256(document).hexdigest()
+    stored_binary = store_document_binary(
+        person_id=ids["person"],
+        evidence_id=ids["evidence"],
+        data=document,
+        mime_type="text/plain",
+    )
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.begin() as connection:
@@ -146,12 +159,17 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
             })
             connection.execute(text("""
                 INSERT INTO evidence_uploads
-                    (evidence_id, filename, mime_type, content, size_bytes, sha256)
+                    (evidence_id, filename, mime_type, content, storage_backend,
+                     storage_key, size_bytes, sha256)
                 VALUES (:evidence_id, 'synthetic-care-note.txt', 'text/plain',
-                        :content, :size_bytes, :sha256)
+                        :content, :storage_backend, :storage_key, :size_bytes, :sha256)
             """), {
-                "evidence_id": ids["evidence"], "content": document,
-                "size_bytes": len(document), "sha256": digest,
+                "evidence_id": ids["evidence"],
+                "content": stored_binary["content"],
+                "storage_backend": stored_binary["storage_backend"],
+                "storage_key": stored_binary["storage_key"],
+                "size_bytes": stored_binary["size_bytes"],
+                "sha256": stored_binary["sha256"],
             })
             connection.execute(text("""
                 INSERT INTO corrections
@@ -178,6 +196,46 @@ def _seed_fixture(database_url: str, ids: dict[str, str], document: bytes) -> No
                 "evidence_ids": json.dumps([ids["evidence"]]),
                 "caregiver_id": ids["caregiver"],
             })
+    except Exception:
+        if stored_binary["storage_backend"] == "s3":
+            try:
+                delete_document_binary(SimpleNamespace(
+                    storage_backend="s3",
+                    storage_key=stored_binary["storage_key"],
+                ))
+            except Exception:
+                pass
+        raise
+    finally:
+        engine.dispose()
+
+
+def _delete_source_object_for_restore_test(database_url: str, evidence_id: str) -> None:
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(text("""
+                SELECT evidence_id, storage_backend, storage_key
+                FROM evidence_uploads WHERE evidence_id = :evidence_id
+            """), {"evidence_id": evidence_id}).mappings().first()
+        if row and row["storage_backend"] == "s3":
+            delete_document_binary(SimpleNamespace(**dict(row)))
+    finally:
+        engine.dispose()
+
+
+def _restore_source_document_object(database_url: str, evidence_id: str) -> None:
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(text("""
+                SELECT evidence_id, filename, mime_type, content, storage_backend,
+                       storage_key, size_bytes, sha256
+                FROM evidence_uploads WHERE evidence_id = :evidence_id
+            """), {"evidence_id": evidence_id}).mappings().first()
+        if row is None:
+            return
+        restore_document_binary_from_database(SimpleNamespace(**dict(row)))
     finally:
         engine.dispose()
 
@@ -233,10 +291,13 @@ def _assert_restored(database_url: str, ids: dict[str, str], document: bytes) ->
             assert ids["evidence"] in (event["evidence_ids"] or [])
 
             upload = connection.execute(text("""
-                SELECT filename, mime_type, content, size_bytes, sha256
+                SELECT evidence_id, filename, mime_type, content, storage_backend,
+                       storage_key, size_bytes, sha256
                 FROM evidence_uploads WHERE evidence_id = :id
             """), {"id": ids["evidence"]}).mappings().one()
-            assert bytes(upload["content"]) == document
+            upload_record = SimpleNamespace(**dict(upload))
+            restored_binary = restore_document_binary_from_database(upload_record)
+            assert restored_binary == document
             assert upload["size_bytes"] == len(document)
             assert upload["sha256"] == hashlib.sha256(document).hexdigest()
 
@@ -318,6 +379,9 @@ def main() -> int:
             _run(["pg_dump", "--format=custom", "--no-owner", "--no-acl", "--file", dump_path, _libpq_url(source_url)])
             backup_seconds = time.monotonic() - seeded_at
             backup_bytes = Path(dump_path).stat().st_size
+            # Simulate loss of the object-store copy after the database backup.
+            # The restored PostgreSQL recovery copy must rebuild the exact key.
+            _delete_source_object_for_restore_test(source_url, ids["evidence"])
             _run(["pg_restore", "--clean", "--if-exists", "--no-owner", "--no-acl", "--exit-on-error", "--dbname", _libpq_url(restore_url), dump_path])
             restore_seconds = time.monotonic() - seeded_at - backup_seconds
         counts = _assert_restored(restore_url, ids, document)
@@ -361,6 +425,16 @@ def main() -> int:
         if report_path:
             Path(report_path).write_text(rendered + "\n", encoding="utf-8")
         return 1
+    finally:
+        if source_url:
+            try:
+                _restore_source_document_object(source_url, ids["evidence"])
+            except Exception as restore_exc:
+                print(
+                    json.dumps({"status": "SOURCE_OBJECT_RESTORE_FAILED", "error": str(restore_exc)[:500]}),
+                    file=sys.stderr,
+                )
+                raise
 
 
 if __name__ == "__main__":
