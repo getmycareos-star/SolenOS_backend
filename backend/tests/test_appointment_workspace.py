@@ -1339,6 +1339,9 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
         "medications_and_allergies": "unavailable",
         "documents": "empty",
         "community": "not_authorized",
+        "open_loops": "empty",
+        "decisions": "unavailable_schema",
+        "decision_outcomes": "unavailable_schema",
     }
 
     # The preparation brief must never disclose another person's care data.
