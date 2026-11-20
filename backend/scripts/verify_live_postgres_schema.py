@@ -72,14 +72,17 @@ def _orm_inventory() -> dict:
             ],
             "primary_key": [column.name for column in table.primary_key.columns],
             "foreign_keys": sorted(
-                (
-                    element.parent.name,
-                    element.column.table.name,
-                    element.column.name,
-                    element.ondelete,
-                )
-                for constraint in table.foreign_key_constraints
-                for element in constraint.elements
+                [
+                    (
+                        element.parent.name,
+                        element.column.table.name,
+                        element.column.name,
+                        element.ondelete,
+                    )
+                    for constraint in table.foreign_key_constraints
+                    for element in constraint.elements
+                ],
+                key=lambda item: tuple(str(value) for value in item),
             ),
             "unique_constraints": sorted(
                 sorted(column.name for column in constraint.columns)
@@ -106,6 +109,7 @@ def _orm_inventory() -> dict:
             ),
         }
     return result
+
 
 def main() -> int:
     if engine.dialect.name != "postgresql":
