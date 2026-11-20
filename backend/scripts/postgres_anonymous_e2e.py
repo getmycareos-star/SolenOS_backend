@@ -1314,6 +1314,7 @@ def main():
             # only the optional Qwen worker so model unavailability cannot race
             # with or overwrite the caregiver's persisted review decisions.
             review_event_id = daily_event_id
+            require(review_event_id == daily_event_id, "Caregiver review must remain attached to the original Daily Care event")
             analysis = CaptureAnalysis(
                 person_id=person_a,
                 caregiver_id=caregiver_a,
