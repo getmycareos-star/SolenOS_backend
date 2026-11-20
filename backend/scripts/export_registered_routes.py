@@ -151,6 +151,70 @@ PERSISTENCE_DOMAINS = [
     ("/api/situation", "Situation and source-linked care understanding records"),
 ]
 
+MODULE_CONSUMERS = {
+    "app.api.v1": ("frontend", "Core care-record and Daily Care API workflows", "src/components/workflows and src/components/mvp-workspace"),
+    "app.api.accounts": ("frontend", "Optional caregiver account and recovery", "src/api/client.ts"),
+    "app.api.anonymous_sessions": ("frontend", "Anonymous session lifecycle", "src/api/client.ts"),
+    "app.api.caregiver_access": ("frontend", "Caregiver invitations and permissions", "src/components/mvp-workspace/CaregiverAccessPanel.tsx"),
+    "app.api.privacy_requests": ("frontend", "Caregiver privacy requests and reviewer operations", "src/app/workspace/settings/page.tsx and internal privacy reviewer"),
+    "app.api.identity_security": ("frontend", "Session and device security settings", "src/app/workspace/settings/page.tsx"),
+    "app.api.security_incidents": ("internal", "Security incident operations", "backend/app/services/security_incidents.py"),
+    "app.api.caregiver_intelligence": ("frontend", "Caregiver network, responsibilities and perspectives", "src/components/mvp-workspace/CaregiverAccessPanel.tsx"),
+    "app.api.safety": ("internal", "Safety validation, escalation and audit", "backend/app/services/safety.py"),
+    "app.api.causal": ("internal", "Evidence-bounded causal hypothesis analysis", "backend/app/services/causal_reasoning.py"),
+    "app.api.change": ("frontend", "Progressive understanding and change review", "src/components/mvp-workspace/CareChangeHistoryPanel.tsx"),
+    "app.api.collaboration": ("frontend", "AI Companion and collaboration; Community remains disabled", "src/components/workflows/AICompanion.tsx"),
+    "app.api.companion_review": ("frontend", "AI Companion care-report review", "src/components/workflows/AICompanion.tsx"),
+    "app.api.daily_care_intelligence": ("frontend", "Daily Care intelligence", "src/app/workspace/daily-care/page.tsx"),
+    "app.api.document_extract": ("frontend", "Document upload and extraction", "src/components/workflows/DocumentsWorkspace.tsx"),
+    "app.api.document_intelligence": ("frontend", "Document intelligence and review", "src/components/workflows/DocumentsWorkspace.tsx"),
+    "app.api.document_lifecycle": ("frontend", "Document lifecycle, versioning and review history", "src/components/workflows/DocumentsWorkspace.tsx"),
+    "app.api.handoff_drafts": ("frontend", "Care handoff drafting and sharing", "src/components/workflows/CareHandoffSharing.tsx"),
+    "app.api.handoffs": ("frontend", "Care handoff delivery and acknowledgment", "src/components/workflows/CareHandoffSharing.tsx"),
+    "app.api.open_loops": ("frontend", "Open Loops lifecycle", "src/components/workflows/OpenLoopsWorkspace.tsx"),
+    "app.api.registered_actions": ("frontend", "Approved care action lifecycle", "src/components/workflows/OpenLoopsWorkspace.tsx"),
+    "app.api.reminders": ("frontend", "Care reminders and delivery", "src/components/workflows/RemindersWorkspace.tsx"),
+    "app.api.push_notifications": ("frontend", "Notifications and push subscriptions", "src/components/workflows/NotificationsWorkspace.tsx"),
+    "app.api.appointment_workspace": ("frontend", "Appointment preparation and outcome review", "src/components/workflows/AppointmentWorkspace.tsx"),
+    "app.api.care_continuity": ("frontend", "Canonical Living Care Record and retrieval", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx"),
+    "app.api.care_delta": ("frontend", "Persisted change detection and LCR reconciliation", "src/components/mvp-workspace/CareChangeHistoryPanel.tsx"),
+    "app.api.uncertainty": ("frontend", "Care Record gaps, questions and contradictions", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx"),
+}
+
+MODULE_PERSISTENCE = {
+    "app.api.v1": "Person; Caregiver; Evidence; CareEvent; Insight; Correction; Observation; Appointment; CareTransition; CareWindow; temporal fact/relationship records",
+    "app.api.accounts": "CaregiverAccount and account recovery audit records",
+    "app.api.anonymous_sessions": "AnonymousSession and identity audit records",
+    "app.api.caregiver_access": "CaregiverAccessGrant; invitation and access audit records",
+    "app.api.privacy_requests": "PrivacyRequest; PrivacyExport; privacy delivery and audit records",
+    "app.api.identity_security": "AnonymousSession; device and identity audit records",
+    "app.api.security_incidents": "Security incident records and audit events",
+    "app.api.caregiver_intelligence": "CaregiverProfile; CaregiverRole; CaregiverResponsibility; CaregiverObservation; CaregiverPerspective; CaregiverActivity; CaregiverCommunication; CaregiverContext; CareNetworkRelationship; ResponsibilityGap; PerspectiveConflict; DuplicateAction; CaregiverHandoff",
+    "app.api.safety": "SafetyAuditRecord; SafetyEvent; Escalation; policy and evaluation records",
+    "app.api.causal": "Causal hypothesis/assessment records and evidence links",
+    "app.api.change": "Situation; change assessments and source-linked Delta records",
+    "app.api.collaboration": "ConversationSession; ConversationMessage; Qwen job/output and audit records",
+    "app.api.companion_review": "AIOutputLCRProposal; AIOutputLCRDecision; CareAssertion; CareDeltaRun and reconciliation records",
+    "app.api.daily_care_intelligence": "CareDeltaRun; daily intelligence and linked CareAssertion records",
+    "app.api.document_extract": "Evidence and durable document metadata/blob storage",
+    "app.api.document_intelligence": "CaptureAnalysis; document assertions/proposals and review decisions",
+    "app.api.document_lifecycle": "Document version, review and audit history",
+    "app.api.handoff_drafts": "HandoffDraft; immutable revisions; source snapshots and delivery records",
+    "app.api.handoffs": "Care handoff and delivery/acceptance/acknowledgment records",
+    "app.api.open_loops": "OpenLoop; linked actions, dependencies, outcome and verification history",
+    "app.api.registered_actions": "RegisteredAction; approval, execution, status and audit history",
+    "app.api.reminders": "Reminder; delivery receipts and notification records",
+    "app.api.push_notifications": "Notification; push subscription and delivery receipt records",
+    "app.api.appointment_workspace": "AppointmentWorkspaceRecord; AppointmentWorkspaceRevision; proposals and linked evidence",
+    "app.api.care_continuity": "CareAssertion; EvidenceObservation; CareRecordRelationship; contradictions, questions, snapshots and revisions",
+    "app.api.care_delta": "CareDeltaRun and persisted change/situation/source references",
+    "app.api.uncertainty": "InformationGap; OpenQuestion; Contradiction and resolution history",
+}
+
+def _module_match(module: str, mappings: dict[str, Any]) -> Any:
+    return mappings.get(module)
+
+
 def _domain_match(path: str, mappings: list[tuple[str, Any]]) -> Any:
     for prefix, value in sorted(mappings, key=lambda item: len(item[0]), reverse=True):
         if path.startswith(prefix):
@@ -265,6 +329,12 @@ def build_inventory() -> dict[str, Any]:
             duplicates[key].append(
                 f"{effective_endpoint.__module__}.{effective_endpoint.__qualname__}"
             )
+            consumer_domain = _domain_match(effective_path, CONSUMER_DOMAINS) or _module_match(
+                effective_endpoint.__module__, MODULE_CONSUMERS
+            )
+            persistence_domain = _domain_match(effective_path, PERSISTENCE_DOMAINS) or _module_match(
+                effective_endpoint.__module__, MODULE_PERSISTENCE
+            )
             entries.append({
                 "endpoint": effective_path,
                 "method": method,
@@ -283,28 +353,27 @@ def build_inventory() -> dict[str, Any]:
                 },
                 "persistence": (
                     {
-                        "domain_tables": _domain_match(effective_path, PERSISTENCE_DOMAINS),
+                        "domain_tables": persistence_domain,
                         "resolution": "domain-level table family; exact handler write set and transaction boundary still require verification",
                     }
-                    if _domain_match(effective_path, PERSISTENCE_DOMAINS)
+                    if persistence_domain
                     else "REVIEW_REQUIRED: no persistence domain mapping"
                 ),
                 "consumer": (
                     {
-                        "type": _domain_match(effective_path, CONSUMER_DOMAINS)[0],
-                        "workflow": _domain_match(effective_path, CONSUMER_DOMAINS)[1],
-                        "source": _domain_match(effective_path, CONSUMER_DOMAINS)[2],
-                        "resolution": "domain-prefix mapping; exact callsite/handler verification still required",
+                        "type": consumer_domain[0],
+                        "workflow": consumer_domain[1],
+                        "source": consumer_domain[2],
+                        "resolution": "domain-prefix or owning-router mapping; exact callsite/handler verification still required",
                     }
-                    if _domain_match(effective_path, CONSUMER_DOMAINS)
+                    if consumer_domain
                     else "REVIEW_REQUIRED: no consumer domain mapping"
                 ),
                 "disposition": (
                     "frontend_product_workflow"
-                    if _domain_match(effective_path, CONSUMER_DOMAINS)
-                    and _domain_match(effective_path, CONSUMER_DOMAINS)[0] == "frontend"
+                    if consumer_domain and consumer_domain[0] == "frontend"
                     else "internal_service_or_operations"
-                    if _domain_match(effective_path, CONSUMER_DOMAINS)
+                    if consumer_domain
                     else "REVIEW_REQUIRED"
                 ),
                 "verification": "runtime registration and OpenAPI contract cross-check only; workflow, persistence and authorization tests must be linked separately",
