@@ -37,7 +37,7 @@ from app.services.observation_coverage import assess_observation_coverage
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from pydantic import ValidationError
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, EvidenceObservation
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, TRACKED_TABLES, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, EvidenceObservation
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
@@ -1461,6 +1461,75 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         ),
         evidence_ids=evidence_ids,
         changed_by_caregiver_id=caregiver_id,
+        changed_at=datetime.now(timezone.utc),
+    ))
+
+
+
+def _append_unified_core_source_revision(
+    db: Session,
+    person_id: str,
+    caregiver_id: str,
+    table_name: str,
+    row: dict[str, Any],
+    *,
+    change_kind: str = "created",
+    before_state: dict[str, Any] | None = None,
+) -> None:
+    """Version a SQLAlchemy-Core source write in the canonical LCR revision ledger.
+
+    Core inserts/updates bypass the ORM before_flush listener. This helper keeps
+    their revision and Delta invalidation semantics aligned with ORM-backed
+    sources, in the same transaction as the source write.
+    """
+    if table_name not in TRACKED_TABLES:
+        raise HTTPException(status_code=422, detail="This care source is not configured for longitudinal revision tracking")
+    target_id = str(row.get("id") or "").strip()
+    if not target_id:
+        raise HTTPException(status_code=422, detail="A persisted care source ID is required for revision tracking")
+
+    if db.get_bind().dialect.name == "postgresql":
+        lock_key = f"care-state-revision:{table_name}:{person_id}:{target_id}"
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": lock_key},
+        )
+
+    db.flush()
+    latest = db.query(CareStateRevision.revision_number).filter(
+        CareStateRevision.person_id == str(person_id),
+        CareStateRevision.target_type == table_name,
+        CareStateRevision.target_id == target_id,
+    ).order_by(desc(CareStateRevision.revision_number)).first()
+    evidence_ids = row.get("evidence_ids") or []
+    if isinstance(evidence_ids, str):
+        try:
+            evidence_ids = json.loads(evidence_ids)
+        except (TypeError, json.JSONDecodeError):
+            evidence_ids = []
+    if not isinstance(evidence_ids, list):
+        evidence_ids = []
+
+    db.add(CareStateRevision(
+        id=str(uuid.uuid4()),
+        person_id=str(person_id),
+        target_type=table_name,
+        target_id=target_id,
+        revision_number=int(latest[0] if latest else 0) + 1,
+        change_kind=change_kind,
+        before_state=(
+            json.dumps(_jsonable(before_state), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+            if before_state is not None else None
+        ),
+        after_state=(
+            json.dumps(_jsonable(dict(row)), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+            if change_kind != "deleted" else None
+        ),
+        evidence_ids=sorted({
+            str(value).strip() for value in evidence_ids
+            if isinstance(value, (str, int)) and str(value).strip()
+        }),
+        changed_by_caregiver_id=str(caregiver_id) if caregiver_id else None,
         changed_at=datetime.now(timezone.utc),
     ))
 
@@ -4476,6 +4545,10 @@ def update_care_continuity_resource(
                 "after_value": _jsonable(dict(updated_row)),
             },
         )
+        _append_unified_core_source_revision(
+            db, person_id, caregiver_id, "care_decisions",
+            dict(updated_row), change_kind="updated", before_state=before,
+        )
         db.commit()
         return _jsonable(dict(updated_row))
     except HTTPException:
@@ -5134,6 +5207,21 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                     "after_value": _jsonable(dict(row)),
                     "evidence_ids": row.get("evidence_ids") or [],
                 },
+            )
+        # These additional LCR sources are also written through SQLAlchemy
+        # Core. They have no dedicated legacy revision table, so write their
+        # first version directly to the shared CareStateRevision ledger.
+        unified_core_revision_targets = {
+            "decision-outcomes": "decision_outcomes",
+            "action-outcomes": "care_action_outcomes",
+            "outcomes": "care_action_outcomes",
+            "caregiver-contexts": "caregiver_contexts",
+            "caregiver-perspectives": "caregiver_perspectives",
+        }
+        if resource in unified_core_revision_targets:
+            _append_unified_core_source_revision(
+                db, person_id, caregiver_id,
+                unified_core_revision_targets[resource], dict(row),
             )
         if resource == "assertions":
             # Assertions are inputs to change detection and must be reconciled
