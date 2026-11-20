@@ -65,6 +65,7 @@ def upgrade():
         ("context_metadata", sa.Text()),
         ("effective_start", sa.DateTime(timezone=True)),
         ("effective_end", sa.DateTime(timezone=True)),
+        ("reported_by_caregiver_id", sa.String(length=36)),
     )
     for name, column_type in additions:
         if name not in columns:
@@ -114,6 +115,7 @@ def upgrade():
     for local_column, remote_table, remote_column, constraint_name in (
         ("person_id", "persons", "id", "fk_caregiver_contexts_person_id_persons"),
         ("caregiver_id", "caregiver_profiles", "id", "fk_caregiver_contexts_caregiver_id_profiles"),
+        ("reported_by_caregiver_id", "caregivers", "id", "fk_caregiver_contexts_reported_by_caregiver_id"),
     ):
         key = ((local_column,), remote_table, (remote_column,))
         if key not in actual_foreign_keys:
@@ -124,7 +126,7 @@ def upgrade():
                         remote_table,
                         [local_column],
                         [remote_column],
-                        ondelete="CASCADE",
+                        ondelete=("SET NULL" if local_column == "reported_by_caregiver_id" else None),
                     )
             else:
                 op.create_foreign_key(
@@ -133,7 +135,7 @@ def upgrade():
                     remote_table,
                     [local_column],
                     [remote_column],
-                    ondelete="CASCADE",
+                    ondelete=("SET NULL" if local_column == "reported_by_caregiver_id" else None),
                 )
 
     for column_name, column_type in (
@@ -194,6 +196,7 @@ def upgrade():
         "context_metadata",
         "effective_start",
         "effective_end",
+        "reported_by_caregiver_id",
         "created_at",
     }
     missing = sorted(required - _column_names(bind))
