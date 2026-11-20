@@ -141,7 +141,7 @@ def test_weight_loss_normalization_preserves_negation_and_hedging():
         assert hedged is not None
         assert hedged["normalized_value"] == "possible weight loss"
         assert hedged["epistemic_status"] == "uncertain"
-        assert hedged["hedge_marker"].casefold() == "may"
+        assert hedged["hedge_marker"].casefold() == "may be"
     finally:
         db.close()
 
