@@ -19,7 +19,9 @@ def test_schema_type_contract_accepts_json_and_wider_string_storage():
 
     from app.core.database import _schema_column_types_compatible
     from app.core.types import JSONList
+    from app.models.privacy_request import DataSubjectRequest
 
+    assert DataSubjectRequest.__table__.c.subject_id.nullable is True
     assert _schema_column_types_compatible(JSONList(), PostgreSQLJSON(), "postgresql")
     assert _schema_column_types_compatible(JSONList(), JSONB(), "postgresql")
     assert _schema_column_types_compatible(String(64), Text(), "postgresql")
