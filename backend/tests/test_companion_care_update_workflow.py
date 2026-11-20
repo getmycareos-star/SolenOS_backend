@@ -104,6 +104,7 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
         rotated = client.post("/api/v1/sessions/refresh", headers=headers)
         assert rotated.status_code == 200, rotated.text
         rotated_headers = {"Authorization": "Bearer " + rotated.json()["access_token"]}
+        headers = rotated_headers
         restored_listing = client.get("/api/v1/conversations?limit=10", headers=rotated_headers)
         assert restored_listing.status_code == 200, restored_listing.text
         assert restored_listing.json()["items"][0]["session_id"] == body["session_id"]
