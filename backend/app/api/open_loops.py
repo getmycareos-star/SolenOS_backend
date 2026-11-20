@@ -66,6 +66,13 @@ class LoopCreate(BaseModel):
             raise ValueError("Unsupported open-loop type")
         return value
 
+    @field_validator("source_type")
+    @classmethod
+    def normalize_persisted_change_source_type(cls, value):
+        if value is not None and str(value).strip().casefold() == "persisted_change":
+            return "persisted_change"
+        return value
+
     @field_validator("deadline_source")
     @classmethod
     def valid_deadline_source(cls, value):
@@ -170,6 +177,29 @@ def _validate_source_evidence_references(db: Session, person_id: str, evidence: 
         if found != evidence_ids:
             raise HTTPException(status_code=404, detail="Referenced source evidence was not found in this care record")
     return evidence_ids
+
+
+def _validate_source_record_reference(
+    db: Session,
+    person_id: str,
+    source_type: str | None,
+    source_id: str | None,
+) -> None:
+    """Reject persisted change references outside the authenticated care record."""
+    if not source_type or str(source_type).strip().casefold() != "persisted_change":
+        return
+    if not source_id or not str(source_id).strip():
+        raise HTTPException(status_code=422, detail="A persisted care change link requires a source identifier")
+    from app.models.change import Change
+
+    exists = db.query(Change.id).filter(
+        Change.id == str(source_id).strip(),
+        Change.person_id == str(person_id),
+        Change.is_active.is_(True),
+        Change.superseded_by_change_id.is_(None),
+    ).first()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="Referenced care change was not found in this care record")
 
 
 def _scope(request: Request, db: Session) -> tuple[str, str]:
@@ -340,6 +370,7 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     _validate_source_evidence_references(db, person_id, payload.evidence)
+    _validate_source_record_reference(db, person_id, payload.source_type, payload.source_id)
     deadline = _utc(payload.deadline_at)
     if deadline and not payload.deadline_source:
         raise HTTPException(status_code=422, detail="A deadline requires an explicit source")
