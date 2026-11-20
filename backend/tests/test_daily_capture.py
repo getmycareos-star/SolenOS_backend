@@ -679,11 +679,10 @@ def test_appointment_write_rejects_caregiver_from_another_person():
 
 
 
-def test_caregiver_creation_requires_a_session_scoped_to_the_target_person():
+def test_legacy_caregiver_creation_is_disabled_outside_verified_access_grants():
     setup_db()
     try:
         seed_person_and_caregiver()
-        seed_second_person_and_caregiver()
         client = TestClient(app)
         payload = {
             "name": "Unlinked Caregiver",
@@ -693,42 +692,15 @@ def test_caregiver_creation_requires_a_session_scoped_to_the_target_person():
         }
 
         unauthenticated = client.post("/api/v1/caregivers", json=payload)
-        assert unauthenticated.status_code == 401, unauthenticated.text
+        assert unauthenticated.status_code == 410, unauthenticated.text
 
-        foreign_headers = session_headers("person-other-test", "caregiver-other-test")
-        spoofed = client.post("/api/v1/caregivers", headers=foreign_headers, json=payload)
-        assert spoofed.status_code == 403, spoofed.text
+        authorized_headers = session_headers("person-daily-test", "caregiver-daily-test")
+        authorized = client.post("/api/v1/caregivers", headers=authorized_headers, json=payload)
+        assert authorized.status_code == 410, authorized.text
 
         db = TestingSessionLocal()
         try:
             assert db.query(Caregiver).filter_by(email="unknown-person@example.invalid").count() == 0
-        finally:
-            db.close()
-    finally:
-        teardown_db()
-
-
-def test_caregiver_creation_persists_for_the_authenticated_record_owner():
-    setup_db()
-    try:
-        seed_person_and_caregiver()
-        client = TestClient(app)
-        headers = session_headers("person-daily-test", "caregiver-daily-test")
-        response = client.post(
-            "/api/v1/caregivers",
-            headers=headers,
-            json={
-                "name": "Second Family Caregiver",
-                "email": "second-caregiver@example.invalid",
-                "relationship": "Family",
-                "person_id": "person-daily-test",
-            },
-        )
-        assert response.status_code == 200, response.text
-        assert response.json()["person_id"] == "person-daily-test"
-        db = TestingSessionLocal()
-        try:
-            assert db.query(Caregiver).filter_by(email="second-caregiver@example.invalid").count() == 1
         finally:
             db.close()
     finally:
