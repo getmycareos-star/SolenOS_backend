@@ -26,6 +26,7 @@ def test_schema_verifier_reports_missing_columns():
         assert "name" in caregiver_difference or "person_id" in caregiver_difference
         assert any(item.startswith("caregivers: missing foreign keys") for item in differences)
         assert any(item.startswith("caregivers: missing unique constraints") for item in differences)
+        assert any(item.startswith("caregivers: missing indexes") for item in differences)
     finally:
         engine.dispose()
 
@@ -77,6 +78,22 @@ def test_schema_verifier_reports_missing_tables():
         assert any("(table missing)" in item for item in differences)
     finally:
         engine.dispose()
+
+
+def test_schema_type_contract_accepts_json_and_wider_string_storage():
+    from sqlalchemy import String, Text
+    from sqlalchemy.dialects.postgresql import JSON as PostgreSQLJSON, JSONB
+
+    from app.core.database import _schema_column_types_compatible
+    from app.core.types import JSONList
+    from app.models.privacy_request import DataSubjectRequest
+
+    assert DataSubjectRequest.__table__.c.subject_id.nullable is True
+    assert _schema_column_types_compatible(JSONList(), PostgreSQLJSON(), "postgresql")
+    assert _schema_column_types_compatible(JSONList(), JSONB(), "postgresql")
+    assert _schema_column_types_compatible(String(64), Text(), "postgresql")
+    assert _schema_column_types_compatible(String(64), String(128), "postgresql")
+    assert not _schema_column_types_compatible(String(128), String(64), "postgresql")
 
 
 def test_committed_care_record_survives_engine_recreation(tmp_path):
