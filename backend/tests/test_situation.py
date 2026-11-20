@@ -205,6 +205,8 @@ def test_post_situation_idempotency_replays_same_capture_without_duplicate_evide
             ).all()
             assert len(evidence_rows) == 1
             assert len(event_rows) == 1
+            assert event_rows[0].ingestion_key == payload["ingestion_key"]
+            assert event_rows[0].ingestion_request_sha256
             assert len(analysis_rows) == 1
             assert len(job_rows) == 1
             assert evidence_rows[0].ingestion_request_sha256
