@@ -93,6 +93,18 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
         assert invited["person_id"] == person_id
         assert invited_caregiver_id != primary_caregiver_id
 
+        primary_assignable = client.get(
+            "/api/v1/caregiver-access/assignable-members", headers=primary_headers
+        )
+        invited_assignable = client.get(
+            "/api/v1/caregiver-access/assignable-members", headers=invited_headers
+        )
+        assert primary_assignable.status_code == 200, primary_assignable.text
+        assert invited_assignable.status_code == 200, invited_assignable.text
+        assert {row["caregiver_id"] for row in primary_assignable.json()} == {
+            primary_caregiver_id, invited_caregiver_id
+        }
+
         # Both identities can access this one authorised record before revocation.
         primary_record = client.get(
             f"/api/v1/evidence/{person_id}", headers=primary_headers
