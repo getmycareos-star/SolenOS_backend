@@ -516,7 +516,8 @@ def create_handoff(handoff: CaregiverHandoffCreate, request: Request, db: Sessio
 
 @router.post("/caregiver-handoffs/{handoff_id}/accept")
 def accept_handoff(handoff_id: str, request: Request, acceptance_evidence: Optional[str] = None, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    require_caregiver_permission(db, person_id, session_caregiver_id, "manage_handoffs")
     service = CaregiverIntelligenceService(db)
     handoff = service.accept_handoff(handoff_id, acceptance_evidence, person_id=person_id, accepting_caregiver_id=current_profile.id)
     if not handoff:
