@@ -121,6 +121,14 @@ class CareEventBase(BaseModel):
     follow_up_candidate: Optional[bool] = False
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     situation_id: Optional[str] = None
+    # Stable client retry key. The backend fingerprints the complete payload;
+    # this key is not identity or authorization evidence.
+    ingestion_key: Optional[str] = Field(
+        None,
+        min_length=8,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
 
 
 class CareEventCreate(CareEventBase):
