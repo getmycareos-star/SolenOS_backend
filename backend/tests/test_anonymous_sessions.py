@@ -1387,3 +1387,28 @@ def test_care_transition_remains_successful_after_secondary_learning_failure(mon
     finally:
         db.close()
 
+def test_location_write_uses_the_authenticated_caregiver_as_author():
+    client = TestClient(app)
+    created = create_session(client, "Location ownership recipient")
+    response = client.post(
+        "/api/v1/locations",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "person_id": created["person"]["id"],
+            "name": "Primary home",
+            "location_type": "home",
+            "city": "Lagos",
+            "country": "NG",
+            "is_primary": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    from app.models.time_location import Location
+    db = TestSessionLocal()
+    try:
+        location = db.query(Location).filter_by(id=response.json()["id"]).one()
+        assert location.person_id == created["person"]["id"]
+        assert location.created_by_caregiver_id == created["caregiver"]["id"]
+    finally:
+        db.close()
+
