@@ -482,7 +482,7 @@ def test_corrected_companion_report_is_versioned_reviewable_and_audited(monkeypa
         original_id = original["id"]
 
         corrected_text = "She had trouble sleeping for two nights."
-        correction_context = "Correction from caregiver: the duration was two nights, not three."
+        correction_context = "The corrected report is: She had trouble sleeping for two nights. The earlier duration of three nights was incorrect."
         corrected = review(client, first, original_id, {
             "decision": "correct",
             "corrected_text": corrected_text,
