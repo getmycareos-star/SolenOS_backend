@@ -1145,3 +1145,86 @@ def test_revoked_anonymous_session_cannot_be_refreshed():
     assert refreshed.status_code == 401, refreshed.text
     assert refreshed.json()["detail"] == "Anonymous session is invalid or expired"
     assert refreshed.headers.get("www-authenticate") == "Bearer"
+
+def test_situation_display_name_update_requires_server_issued_session():
+    client = TestClient(app)
+    created = create_session(client, "Original recipient name")
+    response = client.patch(
+        "/api/situation",
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "display_name": "Unauthenticated change",
+        },
+    )
+    assert response.status_code == 401, response.text
+
+    from app.models.care import Person
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(Person).filter_by(id=created["person"]["id"]).one()
+        assert persisted.name == "Original recipient name"
+    finally:
+        db.close()
+
+
+def test_situation_display_name_update_rejects_spoofed_record_and_caregiver():
+    client = TestClient(app)
+    owner = create_session(client, "Owner recipient")
+    other = create_session(client, "Other recipient")
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    wrong_person = client.patch(
+        "/api/situation",
+        headers=headers,
+        json={
+            "person_id": other["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+            "display_name": "Spoofed recipient",
+        },
+    )
+    assert wrong_person.status_code == 403, wrong_person.text
+
+    wrong_caregiver = client.patch(
+        "/api/situation",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "caregiver_id": other["caregiver"]["id"],
+            "display_name": "Spoofed caregiver",
+        },
+    )
+    assert wrong_caregiver.status_code == 403, wrong_caregiver.text
+
+    from app.models.care import Person
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(Person).filter_by(id=owner["person"]["id"]).one()
+        assert persisted.name == "Owner recipient"
+    finally:
+        db.close()
+
+
+def test_situation_display_name_update_persists_for_the_authenticated_owner():
+    client = TestClient(app)
+    created = create_session(client, "Original recipient name")
+    response = client.patch(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "display_name": "Updated recipient name",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["care_recipient_display_name"] == "Updated recipient name"
+
+    from app.models.care import Person
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(Person).filter_by(id=created["person"]["id"]).one()
+        assert persisted.name == "Updated recipient name"
+    finally:
+        db.close()
+
