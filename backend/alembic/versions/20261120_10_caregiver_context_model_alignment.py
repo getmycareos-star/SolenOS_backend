@@ -108,6 +108,16 @@ def upgrade():
             f"Cannot add caregiver_contexts.caregiver_id foreign key: {orphan_caregivers} orphan rows exist"
         )
 
+    orphan_reporters = bind.execute(sa.text(
+        "SELECT count(*) FROM caregiver_contexts c "
+        "LEFT JOIN caregivers g ON g.id = c.reported_by_caregiver_id "
+        "WHERE c.reported_by_caregiver_id IS NOT NULL AND g.id IS NULL"
+    )).scalar_one()
+    if orphan_reporters:
+        raise RuntimeError(
+            f"Cannot add caregiver_contexts.reported_by_caregiver_id foreign key: {orphan_reporters} orphan rows exist"
+        )
+
     actual_foreign_keys = {
         (tuple(item.get("constrained_columns") or ()), item.get("referred_table"), tuple(item.get("referred_columns") or ()))
         for item in inspect(bind).get_foreign_keys(TABLE)
