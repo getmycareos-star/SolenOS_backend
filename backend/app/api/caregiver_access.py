@@ -93,12 +93,37 @@ def list_members(request: Request, db: Session = Depends(get_db)):
 
 
 
-@router.get("/assignable-members")
-def list_assignable_members(request: Request, db: Session = Depends(get_db)):
+def _full_access_scope(request: Request, db: Session) -> tuple[str, str]:
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if not person_id or not caregiver_id:
-        raise HTTPException(status_code=401, detail="A valid care-record session is required")
+        scheme, _, token = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="A valid care-record session is required")
+        token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+        session = db.query(AnonymousSession).filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        ).first()
+        if session is None:
+            raise HTTPException(status_code=401, detail="Caregiver session is invalid or expired")
+        person_id, caregiver_id = session.person_id, session.caregiver_id
+    grant = db.query(CaregiverAccessGrant.id).filter(
+        CaregiverAccessGrant.person_id == str(person_id),
+        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.access_scope == "full_record",
+    ).first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="Full care-record access is required")
+    return str(person_id), str(caregiver_id)
+
+
+@router.get("/assignable-members")
+def list_assignable_members(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _full_access_scope(request, db)
     own_grant = db.query(CaregiverAccessGrant).filter(
         CaregiverAccessGrant.person_id == str(person_id),
         CaregiverAccessGrant.caregiver_id == str(caregiver_id),
