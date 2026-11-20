@@ -118,6 +118,23 @@ def _schema_column_types_compatible(expected, actual, dialect_name: str) -> bool
             return set(expected_enum) == set(actual_enum)
         return actual_affinity.__name__ == "String"
 
+    # Float and Numeric are both valid SQL numeric storage for a
+    # floating-point ORM field. Only enforce precision/scale when the ORM
+    # explicitly declares a Numeric contract; an unspecified Float precision
+    # must not reject a database NUMERIC column merely because it is more exact.
+    numeric_affinities = {"Numeric", "Float"}
+    expected_numeric = getattr(expected_affinity, "__name__", "") in numeric_affinities
+    actual_numeric = getattr(actual_affinity, "__name__", "") in numeric_affinities
+    if expected_numeric and actual_numeric:
+        expected_precision = getattr(expected, "precision", None)
+        if expected.__class__.__name__ == "Numeric" and expected_precision is not None:
+            return (
+                actual.__class__.__name__ == "Numeric"
+                and expected_precision == getattr(actual, "precision", None)
+                and getattr(expected, "scale", None) == getattr(actual, "scale", None)
+            )
+        return True
+
     if expected_affinity != actual_affinity:
         return False
     for attribute in ("length", "precision", "scale"):
