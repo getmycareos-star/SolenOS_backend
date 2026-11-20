@@ -331,7 +331,7 @@ app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
-app.include_router(safety_router, prefix="/api/v1")
+app.include_router(safety_router, prefix="/api/v1/safety")
 app.include_router(causal_router, prefix="/api/v1")
 # Community is intentionally suspended, not deleted. Keep its implementation and data
 # in the repository, but do not register any Community endpoint on the public API.
@@ -591,9 +591,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # scope check when Starlette route matching did not supply path params.
             target_person_id = path.rsplit("/", 1)[-1]
         if not target_person_id and path.startswith("/api/v1/appointments/") and path.endswith("/lifecycle"):
-            # Appointment lifecycle writes address an appointment child ID,
-            # not the person ID. Resolve its owner before the session scope
-            # check so the endpoint can enforce its operation permission.
+            # Appointment lifecycle writes address the appointment child ID,
+            # not the person ID. Resolve its owner before the global session
+            # scope check so the endpoint can then enforce correct_records.
             appointment_id = path.split("/")[-2]
             target_person_id = (
                 db.query(LegacyAppointmentModel.person_id)
