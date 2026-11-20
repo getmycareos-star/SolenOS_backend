@@ -198,11 +198,8 @@ def supplement_source_grounded_daily_observations(
     return result
 
 
-def _source_grounded_weight_loss_detail(
-    db: Session,
+def normalize_source_grounded_care_detail(
     *,
-    person_id: str,
-    evidence_id: str,
     source_text: str,
     observation_text: str,
 ) -> dict[str, Any] | None:
@@ -244,20 +241,21 @@ def _source_grounded_weight_loss_detail(
         text_to_check,
         re.IGNORECASE,
     ))
-    previous_weight = db.query(EvidenceObservation.id).filter(
-        EvidenceObservation.person_id == person_id,
-        EvidenceObservation.evidence_id != evidence_id,
-        EvidenceObservation.attribute == "weight",
-    ).first() is not None
+    previous_measurement_recorded = bool(re.search(
+        r"\b(?:previous|prior|last)\s+(?:recorded\s+)?weight\b"
+        r"|\b(?:previously|before)\s+weighed\b",
+        text_to_check,
+        re.IGNORECASE,
+    ))
 
     context_parts = [
         "Caregiver report; not independently confirmed.",
         "No amount was stated in this report." if not amount_recorded else "An amount was included in the caregiver report.",
         "No timeframe was stated in this report." if not timeframe_recorded else "A timeframe was included in the caregiver report.",
         (
-            "A previous weight entry is available in saved care history; it has not been treated as confirmation of this report."
-            if previous_weight
-            else "No previous weight measurement was found in the saved care history."
+            "A previous weight measurement was mentioned in this report."
+            if previous_measurement_recorded
+            else "A previous weight measurement was not included in this report."
         ),
         "Clinical interpretation has not been established.",
     ]
@@ -266,7 +264,7 @@ def _source_grounded_weight_loss_detail(
         missing.append("amount")
     if not timeframe_recorded:
         missing.append("timeframe")
-    if not previous_weight:
+    if not previous_measurement_recorded:
         missing.append("previous weight measurement")
     hedge = _source_hedge_for_observation(source_text, observation_text)
     return {
@@ -347,10 +345,7 @@ def persist_source_grounded_daily_observations(
         if existing:
             continue
 
-        normalized_detail = _source_grounded_weight_loss_detail(
-            db,
-            person_id=person_id,
-            evidence_id=evidence_id,
+        normalized_detail = normalize_source_grounded_care_detail(
             source_text=quote,
             observation_text=observation_text,
         )
@@ -464,10 +459,7 @@ def persist_structured_daily_capture_observations(
                 "source_span_end": note_end,
                 "observed_at": None,
             })
-            normalized_detail = _source_grounded_weight_loss_detail(
-                db,
-                person_id=person_id,
-                evidence_id=evidence_id,
+            normalized_detail = normalize_source_grounded_care_detail(
                 source_text=note,
                 observation_text=note,
             )
