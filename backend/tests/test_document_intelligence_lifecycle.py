@@ -375,6 +375,27 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         assert accepted.json()["candidate"]["longitudinal_retrieval_status"] == "verified"
         assert accepted.json()["delta_reconciliation_status"] == "failed"
         assert accepted.json()["delta_run_id"] is None
+
+        # A later correction request cannot rewrite an already approved assertion.
+        attempted_overwrite = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 1,
+                "decision": "correct",
+                "corrected_subject": "The patient",
+                "corrected_observation": quotes[1],
+            },
+        )
+        assert attempted_overwrite.status_code == 409, attempted_overwrite.text
+        with Session() as db:
+            approved = db.query(CareAssertion).filter_by(
+                id=accepted.json()["source_record_ref"]["record_id"],
+                person_id=first["person"]["id"],
+            ).one()
+            assert approved.source_text == quotes[1]
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 1
+
         assert len(execution_calls) == 1
         assert execution_calls[0]["source_caregiver_id"] == first["caregiver"]["id"]
         assert execution_calls[0]["source_evidence_id"] == evidence_id
