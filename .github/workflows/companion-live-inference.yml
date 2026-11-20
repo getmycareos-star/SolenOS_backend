@@ -50,6 +50,7 @@ on:
       - "start-with-qwen.sh"
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: companion-live-qwen-${{ github.ref }}
@@ -172,3 +173,20 @@ jobs:
       - name: Stop isolated Ollama runtime
         if: always()
         run: docker rm -f solenos-live-ollama || true
+      - name: Publish document and live-Qwen validation status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const state = `${{ job.status }}` === "success" ? "success" : "failure";
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state,
+              context: "document-intelligence-live-validation",
+              description: state === "success"
+                ? "Document OCR, PostgreSQL restart, review, LCR and real-Qwen suites passed"
+                : "One or more document or real-Qwen validation gates failed",
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
