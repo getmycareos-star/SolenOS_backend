@@ -4,12 +4,15 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.reminder import CareReminder
+from app.models.caregiver_access import CaregiverAccessGrant
+from app.models.privacy_delivery import AuditLogEvent
 from app.models.notifications import CareNotification, CarePushDelivery
-from app.schemas.reminder import CareReminderComplete, CareReminderCreate, CareReminderRead, CareReminderSnooze
+from app.schemas.reminder import CareReminderAssign, CareReminderComplete, CareReminderCreate, CareReminderRead, CareReminderSnooze
 
 router = APIRouter(tags=["care reminders"])
 
@@ -50,6 +53,37 @@ def _session_scope(request: Request, db: Session) -> tuple[str, str]:
     return str(session.person_id), str(session.caregiver_id)
 
 
+def _require_active_full_access(db: Session, person_id: str, caregiver_id: str) -> None:
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.access_scope == "full_record",
+    ).first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="The assigned caregiver does not have active full-record access")
+
+
+def _assignment_audit(person_id: str, actor_id: str, reminder_id: str, previous_id: str | None, next_id: str):
+    return AuditLogEvent(
+        actor_id=actor_id,
+        subject_id=person_id,
+        person_id=person_id,
+        caregiver_id=actor_id,
+        action="care.reminder.assigned" if previous_id is None else "care.reminder.reassigned",
+        target_type="care_reminder",
+        target_id=reminder_id,
+        occurred_at=datetime.now(timezone.utc),
+        outcome="success",
+        policy_version="care-reminder-assignment-v1",
+        record_metadata={
+            "previous_assignee_caregiver_id": previous_id,
+            "assigned_to_caregiver_id": next_id,
+        },
+    )
+
+
 @router.post("/reminders", response_model=CareReminderRead, status_code=201)
 def create_reminder(payload: CareReminderCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _session_scope(request, db)
@@ -61,16 +95,54 @@ def create_reminder(payload: CareReminderCreate, request: Request, db: Session =
     if not title:
         raise HTTPException(status_code=422, detail="Reminder title cannot be blank")
 
+    assignee_id = payload.assigned_to_caregiver_id or caregiver_id
+    _require_active_full_access(db, person_id, assignee_id)
     reminder = CareReminder(
         person_id=person_id,
         created_by_caregiver_id=caregiver_id,
+        assigned_to_caregiver_id=assignee_id,
         title=title,
         note=payload.note.strip() if payload.note and payload.note.strip() else None,
         due_at=payload.due_at.astimezone(timezone.utc),
         status="open",
     )
     db.add(reminder)
+    db.flush()
+    db.add(_assignment_audit(person_id, caregiver_id, reminder.id, None, assignee_id))
     db.commit()
+    db.refresh(reminder)
+    return reminder
+
+
+@router.patch("/reminders/{reminder_id}/assignment", response_model=CareReminderRead)
+def reassign_reminder(
+    reminder_id: str,
+    payload: CareReminderAssign,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, actor_id = _session_scope(request, db)
+    reminder = db.query(CareReminder).filter(
+        CareReminder.id == reminder_id,
+        CareReminder.person_id == person_id,
+    ).with_for_update().first()
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if reminder.status != "open":
+        raise HTTPException(status_code=409, detail="Only an open reminder can be reassigned")
+    if reminder.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="This reminder changed since it was loaded. Refresh before reassigning.")
+    _require_active_full_access(db, person_id, payload.assigned_to_caregiver_id)
+    previous_id = reminder.assigned_to_caregiver_id
+    if previous_id == payload.assigned_to_caregiver_id:
+        return reminder
+    reminder.assigned_to_caregiver_id = payload.assigned_to_caregiver_id
+    db.add(_assignment_audit(person_id, actor_id, reminder.id, previous_id, payload.assigned_to_caregiver_id))
+    try:
+        db.commit()
+    except StaleDataError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This reminder changed concurrently. Refresh before retrying.")
     db.refresh(reminder)
     return reminder
 
