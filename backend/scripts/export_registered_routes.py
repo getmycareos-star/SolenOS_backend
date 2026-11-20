@@ -270,6 +270,7 @@ def build_inventory() -> dict[str, Any]:
                 "handler": effective_endpoint.__qualname__,
                 "route_name": getattr(route_context, "name", route.name),
                 "registered": True,
+                "include_in_schema": bool(getattr(route_context, "include_in_schema", route.include_in_schema)),
                 "included_in_openapi": operation is not None,
                 "contract": _schema_for_operation(operation) if operation else None,
                 "authentication": {
