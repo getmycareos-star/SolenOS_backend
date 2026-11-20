@@ -9,6 +9,7 @@ import uuid
 import hashlib
 import json
 import logging
+from time import monotonic
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
@@ -2257,9 +2258,11 @@ def prepare_handoff_draft(
     metadata = MetaData()
     statuses = {}
     records = []
+    source_scan_started = monotonic()
 
     for table_name, spec in SOURCES.items():
         source_record_start = len(records)
+        source_started = monotonic()
         try:
             if not inspector.has_table(table_name):
                 statuses[table_name] = {
@@ -2568,6 +2571,18 @@ def prepare_handoff_draft(
                 "label": spec["label"],
                 "count": 0,
             }
+        finally:
+            elapsed_ms = round((monotonic() - source_started) * 1000, 1)
+            if elapsed_ms >= 250:
+                logger.warning(
+                    "handoff_lcr_source_scan_slow table=%s elapsed_ms=%s person_scope_present=%s",
+                    table_name, elapsed_ms, bool(person_id),
+                )
+
+    logger.info(
+        "handoff_lcr_source_scan_complete elapsed_ms=%s source_tables=%s source_records=%s",
+        round((monotonic() - source_scan_started) * 1000, 1), len(SOURCES), len(records),
+    )
 
     # These modules are intentionally not represented as read when no verified
     # persistent, person-scoped adapter is available.
