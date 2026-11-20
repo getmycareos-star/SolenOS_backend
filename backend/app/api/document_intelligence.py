@@ -142,7 +142,6 @@ def _source(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
-        Evidence.uploaded_by_caregiver_id == caregiver_id,
         Evidence.type == "document",
     ).with_for_update().first()
     if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
@@ -578,7 +577,6 @@ def _persist_medication_document_conflict_question(
 def _analysis_for_evidence(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
         CaptureAnalysis.source_evidence_id == evidence_id,
     ).order_by(CaptureAnalysis.created_at.desc()).with_for_update().all()
     for row in rows:
@@ -681,7 +679,6 @@ def list_document_intelligence(
     require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).order_by(CaptureAnalysis.created_at.desc()).limit(500).all()
     items = []
     seen_evidence_ids = set()
@@ -695,7 +692,6 @@ def list_document_intelligence(
         evidence = db.query(Evidence).filter(
             Evidence.id == analysis.source_evidence_id,
             Evidence.person_id == person_id,
-            Evidence.uploaded_by_caregiver_id == caregiver_id,
             Evidence.type == "document",
             (Evidence.evidence_status.is_(None)) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).first()
@@ -711,7 +707,6 @@ def list_document_intelligence(
     if inspect(db.get_bind()).has_table("qwen_background_jobs"):
         jobs = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.person_id == person_id,
-            QwenBackgroundJob.caregiver_id == caregiver_id,
             QwenBackgroundJob.workflow == "document_intake",
             QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
         ).order_by(QwenBackgroundJob.created_at.desc()).limit(500).all()
@@ -731,7 +726,6 @@ def list_document_intelligence(
             owned = db.query(Evidence.id).filter(
                 Evidence.id == evidence_id,
                 Evidence.person_id == person_id,
-                Evidence.uploaded_by_caregiver_id == caregiver_id,
                 Evidence.type == "document",
             ).first()
             if owned is None:
@@ -747,7 +741,7 @@ def list_document_intelligence(
         "items": items,
         "count": len(items),
         "processing_jobs": processing_jobs,
-        "identity_scope": "server_session_person_and_caregiver",
+        "identity_scope": "server_session_person_and_document_permission",
     }
 
 
@@ -760,7 +754,6 @@ def queue_document_intake(evidence_id: str, request: Request, db: Session = Depe
 
     job = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.person_id == person_id,
-        QwenBackgroundJob.caregiver_id == caregiver_id,
         QwenBackgroundJob.workflow == "document_intake",
         QwenBackgroundJob.evidence_ids_json == json.dumps([evidence_id]),
     ).order_by(QwenBackgroundJob.created_at.desc()).first()
@@ -1224,14 +1217,12 @@ def list_document_review_history(
     analysis = db.query(CaptureAnalysis.id).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document analysis not found")
     rows = db.query(DocumentReviewEvent).filter(
         DocumentReviewEvent.analysis_id == analysis_id,
         DocumentReviewEvent.person_id == person_id,
-        DocumentReviewEvent.caregiver_id == caregiver_id,
     ).order_by(
         DocumentReviewEvent.candidate_index.asc(),
         DocumentReviewEvent.decision_version.asc(),
@@ -1304,7 +1295,6 @@ def review_document_candidate(
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).with_for_update().first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document analysis not found")
@@ -1352,7 +1342,6 @@ def review_document_candidate(
                     accepted_assertion = db.query(CareAssertion).filter(
                         CareAssertion.id == accepted_assertion_id,
                         CareAssertion.person_id == person_id,
-                        CareAssertion.created_by_caregiver_id == caregiver_id,
                     ).first()
             active_assertion = (
                 accepted_assertion is not None
