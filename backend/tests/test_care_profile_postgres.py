@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -24,6 +24,22 @@ Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if 
 
 
 def test_care_profile_write_read_new_session_history_and_record_isolation():
+    schema_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("caregiver_contexts")
+    }
+    required_context_columns = {
+        "proximity_category",
+        "observation_window_start",
+        "observation_window_end",
+        "availability_notes",
+        "context_metadata",
+        "effective_start",
+        "effective_end",
+    }
+    assert required_context_columns <= set(schema_columns)
+    assert schema_columns["effective_start"]["nullable"] is True
+
     suffix = uuid.uuid4().hex[:12]
     email = f"care-profile-{suffix}@example.test"
     password = f"care-profile-password-{suffix}"
