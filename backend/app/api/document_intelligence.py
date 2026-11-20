@@ -1769,10 +1769,14 @@ def review_document_candidate(
                 db,
                 person_id,
                 workflow="document_candidate_review",
-                # Review permission belongs to the current caregiver, but the
-                # uploaded evidence may have been created by another member.
-                # The route already verifies document access, immutable bytes,
-                # extraction provenance and the assertion's evidence lineage.
+                # Attribute the evidence to its persisted uploader, not the
+                # caregiver currently reviewing it. A different authorized
+                # caregiver may review a shared document without becoming its
+                # source author.
+                source_caregiver_id=(
+                    str(evidence.uploaded_by_caregiver_id)
+                    if evidence.uploaded_by_caregiver_id else None
+                ),
                 source_evidence_id=reconciliation_evidence_id,
                 source_assertion_id=assertion_id,
             )
