@@ -200,6 +200,8 @@ def _validate_source_record_reference(
         exists = db.query(Change.id).filter(
             Change.id == str(source_id).strip(),
             Change.person_id == str(person_id),
+            Change.is_active.is_(True),
+            Change.superseded_by_change_id.is_(None),
         ).first()
         if exists is None:
             raise HTTPException(
