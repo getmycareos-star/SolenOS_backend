@@ -163,6 +163,34 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
         restored_invited_session_id = invited["session_id"]
         invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
 
+        recovery = client.post("/api/v1/accounts/recovery-code", headers=invited_headers)
+        assert recovery.status_code == 200, recovery.text
+        recovery_code = recovery.json()["recovery_code"]
+        recovered = client.post(
+            "/api/v1/accounts/recover",
+            json={
+                "email": invite_email,
+                "recovery_code": recovery_code,
+                "new_password": "invited-after-recovery-password-456",
+            },
+        )
+        assert recovered.status_code == 200, recovered.text
+        stale_before_recovery = client.get(
+            f"/api/v1/evidence/{person_id}", headers=invited_headers
+        )
+        assert stale_before_recovery.status_code == 401, stale_before_recovery.text
+        recovered_login = client.post(
+            "/api/v1/accounts/login",
+            json={
+                "email": invite_email,
+                "password": "invited-after-recovery-password-456",
+            },
+        )
+        assert recovered_login.status_code == 200, recovered_login.text
+        invited = recovered_login.json()
+        recovery_session_id = invited["session_id"]
+        invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
+
         restricted = client.patch(
             f"/api/v1/caregiver-access/members/{invited_caregiver_id}/access-scope",
             headers=primary_headers,
@@ -249,6 +277,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             ).one()
             stored_session = db.query(AnonymousSession).filter_by(id=original_invited_session_id).one()
             restored_session = db.query(AnonymousSession).filter_by(id=restored_invited_session_id).one()
+            recovered_session = db.query(AnonymousSession).filter_by(id=recovery_session_id).one()
             assert stored_invitation.status == "accepted"
             assert stored_invitation.accepted_caregiver_id == invited_caregiver_id
             assert stored_grant.status == "revoked"
@@ -266,6 +295,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             assert all(event.actor_id == primary_caregiver_id for event in access_events)
             assert stored_session.revoked_at is not None
             assert restored_session.revoked_at is not None
+            assert recovered_session.revoked_at is not None
             assert stored_session.expires_at > datetime.now(timezone.utc)
     finally:
         if Session and (person_id or foreign_person_id):
