@@ -50,9 +50,10 @@ permissions:
   contents: read
   statuses: write
 
+# Preserve real-model acceptance evidence for each exact main revision.
 concurrency:
-  group: companion-live-qwen-${{ github.ref }}
-  cancel-in-progress: true
+  group: companion-live-qwen-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   live-qwen-evaluation:
