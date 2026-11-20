@@ -1,0 +1,43 @@
+"""Server-side caregiver operation permissions."""
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from app.models.caregiver_access import CaregiverAccessGrant
+
+CAREGIVER_PERMISSION_KEYS = frozenset({
+    "view_lcr", "add_evidence", "correct_records", "manage_responsibilities",
+    "manage_reminders", "complete_assigned_reminders", "manage_handoffs",
+    "share_summaries", "share_observations", "view_documents", "view_communications",
+})
+DEFAULT_FAMILY_PERMISSIONS = frozenset({
+    "view_lcr", "add_evidence", "manage_responsibilities", "manage_reminders",
+    "complete_assigned_reminders", "manage_handoffs", "share_summaries",
+    "share_observations", "view_documents", "view_communications",
+})
+
+
+def caregiver_has_permission(grant: CaregiverAccessGrant | None, permission: str) -> bool:
+    if grant is None or permission not in CAREGIVER_PERMISSION_KEYS:
+        return False
+    if grant.status != "active" or grant.revoked_at is not None:
+        return False
+    if grant.access_scope == "documents_only":
+        return permission == "view_documents"
+    if grant.access_scope != "full_record":
+        return False
+    if bool(grant.can_manage_members):
+        return True
+    permissions = grant.permissions or list(DEFAULT_FAMILY_PERMISSIONS)
+    return permission in set(permissions)
+
+
+def require_caregiver_permission(db: Session, person_id: str, caregiver_id: str, permission: str) -> CaregiverAccessGrant:
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == str(person_id),
+        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).first()
+    if not caregiver_has_permission(grant, permission):
+        raise HTTPException(status_code=403, detail=f"This caregiver does not have permission to {permission.replace('_', ' ')}.")
+    return grant
