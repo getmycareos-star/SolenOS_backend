@@ -185,10 +185,12 @@ def test_post_situation_idempotency_replays_same_capture_without_duplicate_evide
                 Evidence.person_id == person_id,
                 Evidence.ingestion_key == payload["ingestion_key"],
             ).all()
-            event_rows = db.query(CareEvent).filter(
-                CareEvent.person_id == person_id,
-                CareEvent.evidence_ids.contains([first_data["evidence_id"]]),
-            ).all()
+            event_rows = [
+                event for event in db.query(CareEvent).filter(
+                    CareEvent.person_id == person_id
+                ).all()
+                if first_data["evidence_id"] in (event.evidence_ids or [])
+            ]
             assert len(evidence_rows) == 1
             assert len(event_rows) == 1
             assert evidence_rows[0].ingestion_request_sha256
