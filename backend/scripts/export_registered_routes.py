@@ -4,9 +4,10 @@
 Run from backend/ after installing the backend package:
     python scripts/export_registered_routes.py --output ../artifacts/registered-routes.json
 
-This is a runtime inventory, not a source-code grep. The generated file deliberately
-marks consumer, persistence and disposition as unclassified until each route has
-been reviewed against its real service and workflow.
+This is a runtime inventory, not a source-code grep. Consumer and persistence
+fields use explicit path/module domain mappings; unresolved entries remain marked
+REVIEW_REQUIRED. A domain mapping does not prove the exact frontend callsite,
+handler write set, transaction boundary, authorization test or end-to-end evidence.
 """
 from __future__ import annotations
 
