@@ -10,6 +10,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.core.causal_enums import (
     EvidenceStrength,
     CausalConfidence,
@@ -62,6 +63,16 @@ def seed_person(db, person_id="person-1", name="Test Person"):
         person_id=person_id,
     )
     db.add_all([person, caregiver])
+    db.flush()
+    db.add(CaregiverAccessGrant(
+        person_id=person_id,
+        caregiver_id=caregiver.id,
+        role="primary",
+        access_scope="full_record",
+        status="active",
+        can_manage_members=True,
+        granted_by_caregiver_id=caregiver.id,
+    ))
     db.commit()
     db.close()
 
