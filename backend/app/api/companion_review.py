@@ -334,8 +334,13 @@ def list_companion_care_updates(
         if session is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         query = query.filter(AIOutputLCRProposal.source_conversation_id == session.id)
-    proposals = query.order_by(AIOutputLCRProposal.created_at.asc()).limit(100).all()
-    return {"items": [_proposal_json(item) for item in proposals]}
+    ordering = AIOutputLCRProposal.created_at.desc() if include_reviewed else AIOutputLCRProposal.created_at.asc()
+    proposals = query.order_by(ordering, AIOutputLCRProposal.id.asc()).limit(100).all()
+    return {
+        "items": [_proposal_json(item) for item in proposals],
+        "limit": 100,
+        "ordering": "newest_first" if include_reviewed else "oldest_first",
+    }
 
 
 @router.get("/{proposal_id}/history")
