@@ -896,17 +896,32 @@ def get_multi_caregiver_summary(person_id: str, request: Request, db: Session = 
     return service.get_multi_caregiver_summary(person_id)
 
 @router.get("/multi-caregiver-summary", response_model=MultiCaregiverSummary)
-def get_scoped_multi_caregiver_summary(request: Request, db: Session = Depends(get_db)):
-    person_id, _caregiver_id = _resolve_scoped_session(request, db)
+def get_scoped_multi_caregiver_summary(
+    request: Request,
+    person_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    scoped_person_id, _caregiver_id = _resolve_scoped_session(request, db)
+    # The bearer session is authoritative. If a caller supplies a person_id,
+    # treat it only as an assertion about the requested scope; never silently
+    # ignore a mismatch and return another record under HTTP 200.
+    if person_id is not None and str(person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="Care record access is not permitted")
     service = CaregiverIntelligenceService(db)
-    return service.get_multi_caregiver_summary(person_id)
+    return service.get_multi_caregiver_summary(scoped_person_id)
 
 
 @router.get("/care-network-state")
-def get_scoped_care_network_state(request: Request, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id = _resolve_scoped_session(request, db)
+def get_scoped_care_network_state(
+    request: Request,
+    person_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    scoped_person_id, _session_caregiver_id = _resolve_scoped_session(request, db)
+    if person_id is not None and str(person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="Care record access is not permitted")
     service = CaregiverIntelligenceService(db)
-    return service.get_care_network_state(person_id)
+    return service.get_care_network_state(scoped_person_id)
 
 
 @router.get("/care-network-state/{person_id}")
