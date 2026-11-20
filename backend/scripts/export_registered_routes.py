@@ -35,6 +35,29 @@ def _registered_route_contexts():
     yield from app.routes
 
 
+def _dependency_names(dependant: Any) -> list[str]:
+    """List declared FastAPI dependency callables without pretending middleware is a Depends."""
+    names: list[str] = []
+    visited: set[int] = set()
+
+    def visit(node: Any) -> None:
+        if node is None or id(node) in visited:
+            return
+        visited.add(id(node))
+        call = getattr(node, "call", None)
+        if call is not None:
+            module = getattr(call, "__module__", type(call).__module__)
+            qualified = getattr(call, "__qualname__", getattr(call, "__name__", type(call).__name__))
+            label = f"{module}.{qualified}"
+            if label not in names:
+                names.append(label)
+        for child in getattr(node, "dependencies", []) or []:
+            visit(child)
+
+    visit(dependant)
+    return sorted(names)
+
+
 def _schema_for_operation(operation: dict[str, Any]) -> dict[str, Any]:
     parameters = []
     for parameter in operation.get("parameters", []):
@@ -82,6 +105,8 @@ def build_inventory() -> dict[str, Any]:
         effective_path = getattr(route_context, "path", route.path)
         effective_methods = getattr(route_context, "methods", route.methods)
         effective_endpoint = getattr(route_context, "endpoint", route.endpoint)
+        effective_dependant = getattr(route_context, "dependant", None) or route.dependant
+        declared_dependencies = _dependency_names(effective_dependant)
         for method in sorted(effective_methods or []):
             method = method.upper()
             operation = paths.get(effective_path, {}).get(method.lower())
@@ -100,7 +125,8 @@ def build_inventory() -> dict[str, Any]:
                 "contract": _schema_for_operation(operation) if operation else None,
                 "authentication": {
                     "openapi_security": (operation or {}).get("security", []),
-                    "runtime_middleware_and_dependencies": "requires_review",
+                    "declared_fastapi_dependencies": declared_dependencies,
+                    "runtime_middleware": "must be reviewed in app middleware; bearer-session scope is not necessarily represented in OpenAPI",
                 },
                 "persistence": "requires_service_and_model_trace",
                 "consumer": "unclassified",
