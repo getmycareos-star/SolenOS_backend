@@ -1272,3 +1272,22 @@ def test_duplicate_action_review_is_persisted_and_audited():
     finally:
         teardown_db()
 
+def test_session_derived_caregiver_network_reads_use_bearer_scope():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+        client = get_test_client()
+        summary = client.get("/api/v1/multi-caregiver-summary")
+        assert summary.status_code == 200, summary.text
+        state = client.get("/api/v1/care-network-state")
+        assert state.status_code == 200, state.text
+        cross_record = client.get(
+            "/api/v1/multi-caregiver-summary",
+            params={"person_id": "another-person"},
+        )
+        assert cross_record.status_code == 403, cross_record.text
+    finally:
+        teardown_db()
+
