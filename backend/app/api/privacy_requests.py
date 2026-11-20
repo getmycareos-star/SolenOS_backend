@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import Base, get_db
+from app.services.document_binary_storage import read_document_binary
 from app.models.anonymous_session import AnonymousSession
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
@@ -578,9 +579,10 @@ def _build_caregiver_export(db: Session, person_id: str, caregiver_id: str) -> t
             raw_name = os.path.basename(upload.filename or f"{evidence.id}.bin")
             safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", raw_name)[:180] or f"{evidence.id}.bin"
             path = f"documents/{evidence.id}_{safe_name}"
-            content = bytes(upload.content)
-            if len(content) != upload.size_bytes or hashlib.sha256(content).hexdigest() != upload.sha256:
-                raise HTTPException(status_code=500, detail="A stored document failed its integrity check; export was not completed")
+            try:
+                content = read_document_binary(upload)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail="A stored document failed its integrity check; export was not completed") from exc
             archive.writestr(path, content)
             if archive_buffer.tell() > MAX_PRIVACY_EXPORT_BYTES:
                 raise HTTPException(status_code=413, detail="Privacy export exceeds the 100 MiB archive limit")
