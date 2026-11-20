@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.document_binary_storage import read_document_binary
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.api.document_lifecycle import (
     _verify_persisted_extraction,
     _ocr_quality_by_page,
@@ -675,6 +676,7 @@ def list_document_intelligence(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
         CaptureAnalysis.caregiver_id == caregiver_id,
@@ -751,6 +753,7 @@ def list_document_intelligence(
 def queue_document_intake(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Queue or resume document OCR and understanding without blocking the caregiver."""
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     _evidence, _upload = _source(evidence_id, person_id, caregiver_id, db)
 
     job = db.query(QwenBackgroundJob).filter(
@@ -812,6 +815,7 @@ def queue_document_intake(evidence_id: str, request: Request, db: Session = Depe
 @router.post("/{evidence_id}/intelligence", status_code=201)
 def analyze_saved_document(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     evidence, upload = _source(evidence_id, person_id, caregiver_id, db)
     analysis = _analysis_for_evidence(evidence_id, person_id, caregiver_id, db)
     metadata = _metadata(analysis)
@@ -1214,6 +1218,7 @@ def list_document_review_history(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     analysis = db.query(CaptureAnalysis.id).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
@@ -1292,6 +1297,8 @@ def review_document_candidate(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
