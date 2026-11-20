@@ -350,27 +350,45 @@ def persist_structured_daily_capture_observations(
         if not isinstance(items, list):
             return
         cursor = 0
-        for raw in items:
+        for raw in items[:12]:
             if not isinstance(raw, dict):
                 continue
-            passage = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-            start = source_text.find(passage, cursor)
-            if start < 0:
+            fragment = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+            fragment_start = source_text.find(fragment, cursor)
+            if fragment_start < 0:
                 # Do not invent a source span when the exact submitted fragment
                 # cannot be found in the immutable evidence text.
                 continue
-            end = start + len(passage)
-            cursor = end
+            fragment_end = fragment_start + len(fragment)
+            cursor = fragment_end
             attribute = attribute_for(raw)
             value_text = value_for(raw)
             if not isinstance(attribute, str) or not attribute.strip():
                 continue
             if value_text is None or not str(value_text).strip():
                 continue
+
+            # Prefer the caregiver's exact note when one was entered. Keep the
+            # structured value separately, so the UI can show both without
+            # exposing a serialized JSON object.
+            note = raw.get("note")
+            if isinstance(note, str) and note.strip():
+                passage = json.dumps(note, ensure_ascii=False)
+                note_marker = json.dumps("note") + ":" + passage
+                relative_start = fragment.find(note_marker)
+                if relative_start >= 0:
+                    start = fragment_start + relative_start + len(json.dumps("note") + ":")
+                    end = start + len(passage)
+                else:
+                    passage, start, end = fragment, fragment_start, fragment_end
+            else:
+                passage, start, end = fragment, fragment_start, fragment_end
+
+            units = units_for(raw)
             candidates.append({
                 "attribute": attribute[:160],
                 "value_text": str(value_text)[:2000],
-                "units": units_for(raw),
+                "units": str(units)[:80] if units not in (None, "") else None,
                 "context": context_for(raw),
                 "source_passage": passage,
                 "source_span_start": start,
