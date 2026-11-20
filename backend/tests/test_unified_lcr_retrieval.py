@@ -1194,6 +1194,7 @@ def test_one_failed_care_source_does_not_hide_successful_source_reads():
                     db,
                     "person-source-failure",
                     caregiver_id="caregiver-source-failure",
+                    include_all_history=True,
                 )
 
         assert context["sources"]["events"]["status"] == "failed"
