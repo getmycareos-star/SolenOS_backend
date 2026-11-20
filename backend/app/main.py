@@ -1912,7 +1912,8 @@ async def post_situation(
     extraction_status = "not_applicable"
     review_required = False
     queue_available = False
-    if source_text:
+    qwen_candidates = None
+    if source_text and not result.idempotent_replay:
         try:
             queue_available = (
                 inspect(db.get_bind()).has_table("qwen_background_jobs")
@@ -2013,8 +2014,80 @@ async def post_situation(
         else:
             extraction_status = "unavailable"
 
+    elif source_text and result.idempotent_replay:
+        # A transport retry must not enqueue another extraction for the same
+        # persisted event. Rehydrate the original job and analysis receipts.
+        try:
+            existing_analyses = (
+                db.query(CaptureAnalysisModel)
+                .filter(
+                    CaptureAnalysisModel.person_id == scoped_person_id,
+                    CaptureAnalysisModel.caregiver_id == scoped_caregiver_id,
+                    CaptureAnalysisModel.source_event_id == result.care_event_id,
+                )
+                .order_by(CaptureAnalysisModel.created_at.desc(), CaptureAnalysisModel.id.desc())
+                .all()
+            )
+            existing_jobs = (
+                db.query(QwenBackgroundJob)
+                .filter(
+                    QwenBackgroundJob.person_id == scoped_person_id,
+                    QwenBackgroundJob.caregiver_id == scoped_caregiver_id,
+                    QwenBackgroundJob.workflow == "daily_capture_extraction",
+                )
+                .order_by(QwenBackgroundJob.created_at.asc(), QwenBackgroundJob.id.asc())
+                .all()
+            )
+            existing_jobs = [
+                job for job in existing_jobs
+                if result.care_event_id in (
+                    json.loads(job.source_event_ids_json or "[]")
+                    if isinstance(job.source_event_ids_json, str)
+                    else (job.source_event_ids_json or [])
+                )
+            ]
+            analysis_ids = [str(item.id) for item in existing_analyses]
+            queued_job_ids = [str(item.id) for item in existing_jobs]
+            latest_analysis = existing_analyses[0] if existing_analyses else None
+            if any(item.status in {"queued", "processing"} for item in existing_jobs):
+                extraction_status = "queued"
+            elif latest_analysis and latest_analysis.extraction_status == "available":
+                extraction_status = "available"
+            elif existing_analyses or existing_jobs:
+                extraction_status = "unavailable"
+            else:
+                extraction_status = "unavailable"
+
+            if latest_analysis and isinstance(latest_analysis.candidates, dict):
+                qwen_candidates = latest_analysis.candidates
+                observations = qwen_candidates.get("observations")
+                observations = observations if isinstance(observations, list) else []
+                review_required = any(
+                    isinstance(item, dict)
+                    and item.get("review_status", "pending_review") in {
+                        "pending_review", "corrected_pending_approval", "corrected_by_caregiver"
+                    }
+                    for item in observations
+                )
+                response_payload["qwen_written_to_lcr"] = any(
+                    isinstance(item, dict)
+                    and item.get("review_status") == "accepted_by_caregiver"
+                    for item in observations
+                )
+        except Exception:
+            db.rollback()
+            extraction_status = "unavailable"
+            analysis_ids = []
+            queued_job_ids = []
+            qwen_candidates = None
+            review_required = False
+            logger.exception(
+                "Could not rehydrate existing extraction receipts for idempotent care capture %s",
+                result.care_event_id,
+            )
+
     response_payload["qwen_extraction_status"] = extraction_status
-    response_payload["qwen_candidates"] = None
+    response_payload["qwen_candidates"] = qwen_candidates
     response_payload["qwen_analysis_id"] = analysis_ids[0] if analysis_ids else None
     response_payload["qwen_job_id"] = queued_job_ids[0] if queued_job_ids else None
     response_payload["qwen_job_ids"] = queued_job_ids
