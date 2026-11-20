@@ -13,6 +13,8 @@ from app.api.care_continuity import _build_situation_understanding_assessment
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Evidence
+from app.models.change import Change
+from app.core.change_enums import ChangeType
 
 pytestmark = pytest.mark.session_security
 
@@ -948,3 +950,105 @@ def test_open_loop_event_and_occurrence_history_support_offset_pagination():
     assert len(occurrence_ids) == 3
     assert len(set(occurrence_ids)) == 3
 
+
+
+def test_persisted_change_can_be_linked_to_person_scoped_follow_up():
+    client = TestClient(app)
+    first, first_headers = session(client, "Change follow-up recipient")
+    second, second_headers = session(client, "Unrelated care recipient")
+    db = TestSessionLocal()
+    try:
+        change = Change(
+            person_id=first["person"]["id"],
+            subject_type="sleep",
+            subject_id=first["person"]["id"],
+            change_type=ChangeType.EMERGENCE,
+            evidence_ids=[],
+            explanation="Persisted change source for follow-up isolation.",
+            attention_candidate=True,
+            follow_up_candidate=True,
+        )
+        db.add(change)
+        db.commit()
+        db.refresh(change)
+        change_id = change.id
+    finally:
+        db.close()
+
+    created = client.post(
+        "/api/v1/open-loops",
+        headers=first_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Review the saved change",
+            "description": "A persisted change needs a caregiver follow-up.",
+            "source_type": "persisted_change",
+            "source_id": change_id,
+            "evidence": [],
+            "uncertainty": "unknown",
+            "idempotency_key": "persisted-change-follow-up",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["source_type"] == "persisted_change"
+    assert body["source_id"] == change_id
+
+    missing_source = client.post(
+        "/api/v1/open-loops",
+        headers=first_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Missing persisted source",
+            "description": "A persisted change follow-up must identify its source.",
+            "source_type": "persisted_change",
+            "evidence": [],
+            "uncertainty": "unknown",
+        },
+    )
+    assert missing_source.status_code == 422, missing_source.text
+
+    foreign_link = client.post(
+        "/api/v1/open-loops",
+        headers=second_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Try to link another person's change",
+            "description": "This must not cross care-record boundaries.",
+            "source_type": "persisted_change",
+            "source_id": change_id,
+            "evidence": [],
+            "uncertainty": "unknown",
+        },
+    )
+    assert foreign_link.status_code == 404, foreign_link.text
+
+    listed = client.get("/api/v1/open-loops?limit=100", headers=first_headers)
+    assert listed.status_code == 200, listed.text
+    linked = next(item for item in listed.json()["items"] if item["id"] == body["id"])
+    assert linked["source_type"] == "persisted_change"
+    assert linked["source_id"] == change_id
+
+    with TestSessionLocal() as db:
+        persisted_change = db.query(Change).filter(Change.id == change_id).one()
+        persisted_change.is_active = False
+        db.commit()
+    inactive_link = client.post(
+        "/api/v1/open-loops",
+        headers=first_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Link an inactive change",
+            "description": "Inactive change references must not create new follow-ups.",
+            "source_type": "persisted_change",
+            "source_id": change_id,
+            "evidence": [],
+            "uncertainty": "unknown",
+            "idempotency_key": "inactive-persisted-change-follow-up",
+        },
+    )
+    assert inactive_link.status_code == 404, inactive_link.text
+
+    isolated = client.get("/api/v1/open-loops?limit=100", headers=second_headers)
+    assert isolated.status_code == 200, isolated.text
+    assert isolated.json()["items"] == []
