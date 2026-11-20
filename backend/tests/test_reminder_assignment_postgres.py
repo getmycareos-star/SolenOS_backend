@@ -155,6 +155,14 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
         assert stored.created_by_caregiver_id == primary_id
         assert stored.assigned_to_caregiver_id == primary_id
         assert stored.version == 2
+        previous_notification = db.query(CareNotification).filter_by(
+            person_id=person_id,
+            source_event_id=reminder_id,
+            category="reminder_due",
+        ).one()
+        assert previous_notification.caregiver_id == recipient_id
+        assert previous_notification.status == "resolved"
+        assert previous_notification.resolution_reason == "reminder_reassigned"
         events = db.query(AuditLogEvent).filter(
             AuditLogEvent.person_id == person_id,
             AuditLogEvent.target_type == "care_reminder",
