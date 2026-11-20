@@ -12,6 +12,7 @@ from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.action import Action
 from app.models.care_continuity import CareAssertion, EvidenceReviewRecord
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.collaboration import ConversationSession, ConversationMessage
 from app.models.uncertainty import OpenQuestion, InformationGap, Contradiction
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
@@ -43,6 +44,19 @@ def authorized_client(person_id: str) -> TestClient:
         caregiver = db.query(Caregiver).filter(Caregiver.person_id == person_id).first()
         assert caregiver is not None, f"test caregiver missing for {person_id}"
         token = f"test-token-for-{person_id}"
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=person_id, caregiver_id=caregiver.id
+        ).one_or_none()
+        if grant is None:
+            db.add(CaregiverAccessGrant(
+                person_id=person_id,
+                caregiver_id=caregiver.id,
+                role="primary",
+                access_scope="full_record",
+                status="active",
+                can_manage_members=True,
+                granted_by_caregiver_id=caregiver.id,
+            ))
         db.add(AnonymousSession(
             person_id=person_id,
             caregiver_id=caregiver.id,
@@ -2927,7 +2941,18 @@ def test_companion_conversation_is_private_to_its_authenticated_caregiver():
         ))
 
         tokens = {}
+        db.flush()
         for caregiver in (caregiver_a, caregiver_b, other_caregiver):
+            grant_role = "primary" if caregiver in (caregiver_a, other_caregiver) else "family"
+            db.add(CaregiverAccessGrant(
+                person_id=caregiver.person_id,
+                caregiver_id=caregiver.id,
+                role=grant_role,
+                access_scope="full_record",
+                status="active",
+                can_manage_members=grant_role == "primary",
+                granted_by_caregiver_id=caregiver.id if grant_role == "primary" else caregiver_a.id,
+            ))
             token = f"private-conversation-token-{caregiver.id}"
             tokens[caregiver.id] = token
             db.add(AnonymousSession(
