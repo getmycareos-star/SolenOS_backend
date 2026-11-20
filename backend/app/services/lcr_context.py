@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import MetaData, String, Table, and_, cast, desc, false, func, inspect, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.epistemic_contract import assertion_information_status
 
@@ -767,32 +768,60 @@ def build_lcr_context(
         ranked_items: list[tuple[int, int, dict[str, Any]]] = []
         ranked_limit = source_offset + limit
         scan_statement = statement if query_scan else statement.limit(limit + 1)
-        result = db.execute(
-            scan_statement.execution_options(stream_results=True)
-        ).mappings().yield_per(500)
+        source_query_failed = False
         expanded_only = [term for term in terms if term not in direct_terms]
-        for row in result:
-            candidate_count += 1
-            if not query_scan and candidate_count > limit:
-                continue
-            item = {key: _safe_value(value, key) for key, value in dict(row).items()}
-            information_status, interpretation_limit = _information_status(source_name, item)
-            item["information_status"] = information_status
-            item["interpretation_limit"] = interpretation_limit
-            score = (
-                _retrieval_score(item, query or "", direct_terms, expanded_only)
-                if direct_terms else 0
-            )
-            # The SQL ordering is deterministic. Python's stable sort retains
-            # that order for ties while prioritising exact/direct query matches.
-            ranked_items.append((score, candidate_count, item))
-            if len(ranked_items) > ranked_limit:
-                ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
-                del ranked_items[ranked_limit:]
+        try:
+            # Isolate each source query in a savepoint. A missing table, bad
+            # source-specific column, or transient query failure must not turn
+            # every other successfully retrieved care category into a failure.
+            with db.begin_nested():
+                result = db.execute(
+                    scan_statement.execution_options(stream_results=True)
+                ).mappings().yield_per(500)
+                for row in result:
+                    candidate_count += 1
+                    if not query_scan and candidate_count > limit:
+                        continue
+                    item = {key: _safe_value(value, key) for key, value in dict(row).items()}
+                    information_status, interpretation_limit = _information_status(source_name, item)
+                    item["information_status"] = information_status
+                    item["interpretation_limit"] = interpretation_limit
+                    score = (
+                        _retrieval_score(item, query or "", direct_terms, expanded_only)
+                        if direct_terms else 0
+                    )
+                    # The SQL ordering is deterministic. Python's stable sort retains
+                    # that order for ties while prioritising exact/direct query matches.
+                    ranked_items.append((score, candidate_count, item))
+                    if len(ranked_items) > ranked_limit:
+                        ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+                        del ranked_items[ranked_limit:]
+        except SQLAlchemyError:
+            source_query_failed = True
+
         ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
         items = [
             entry[2] for entry in ranked_items[source_offset:source_offset + limit]
         ]
+        if source_query_failed:
+            sources[source_name] = {
+                "status": "partial" if items else "failed",
+                "table": table_name,
+                "items": items,
+                "returned_count": len(items),
+                "candidate_count": candidate_count,
+                "candidate_scan_complete": False,
+                "returned_history_complete": False,
+                "has_more": True,
+                "limit": limit,
+                "offset": source_offset,
+                "next_offset": source_offset + len(items),
+                "error_code": "source_query_failed",
+                "selection": "incomplete_source_read",
+                "interpretation_limit": "This care-information source could not be fully retrieved. An incomplete result must not be treated as an empty or complete history.",
+            }
+            continue
+
         has_more = candidate_count > source_offset + len(items)
         next_offset = source_offset + len(items) if has_more else None
         sources[source_name] = {
