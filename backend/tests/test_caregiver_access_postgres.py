@@ -20,6 +20,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Person
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation
 from app.models.caregiver_account import CaregiverAccount
+from app.models.privacy_delivery import AuditLogEvent
 from app.models.caregiver_intelligence import CaregiverProfile
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
@@ -230,6 +231,17 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             assert stored_invitation.accepted_caregiver_id == invited_caregiver_id
             assert stored_grant.status == "revoked"
             assert stored_grant.revoked_at is not None
+            access_events = db.query(AuditLogEvent).filter_by(
+                person_id=person_id,
+                target_type="caregiver_access_grant",
+                target_id=stored_grant.id,
+            ).order_by(AuditLogEvent.occurred_at.asc(), AuditLogEvent.id.asc()).all()
+            assert [event.action for event in access_events] == [
+                "caregiver.access.suspended",
+                "caregiver.access.restored",
+                "caregiver.access.revoked",
+            ]
+            assert all(event.actor_id == primary_caregiver_id for event in access_events)
             assert stored_session.revoked_at is not None
             assert restored_session.revoked_at is not None
             assert stored_session.expires_at > datetime.now(timezone.utc)
