@@ -624,6 +624,10 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     body = response.json()
     assert body["read_only"] is True
     assert body["updates_lcr"] is False
+    assert isinstance(body["prior_decisions"], list)
+    assert isinstance(body["decision_outcomes"], list)
+    assert "decisions" in body["source_completeness"]
+    assert "decision_outcomes" in body["source_completeness"]
     assert any(item["source_id"] == "appointment-fact-owned" for item in body["facts"])
     assert "DO NOT LEAK THIS" not in response.text
     assert body["source_coverage"]["community"] == "not_authorized"
