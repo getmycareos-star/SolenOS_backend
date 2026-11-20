@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db, SessionLocal
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence, OpenLoopDependency
 
