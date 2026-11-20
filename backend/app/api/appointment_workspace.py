@@ -479,17 +479,25 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         db.rollback()
         fact_rows = None
 
+    fetched_appointments = db.query(Appointment).filter(
+        Appointment.person_id == person_id,
+    ).order_by(Appointment.scheduled_at.desc().nullslast(), Appointment.created_at.desc()).limit(31).all()
+    appointments_has_more = len(fetched_appointments) > 30
+    appointments = fetched_appointments[:30]
+    previous_appointment_row = db.query(Appointment).filter(
+        Appointment.person_id == person_id,
+        Appointment.status.in_(["completed", "resolved", "historical"]),
+        Appointment.scheduled_at.is_not(None),
+        Appointment.scheduled_at <= now,
+    ).order_by(Appointment.scheduled_at.desc()).first()
+    change_window_start = previous_appointment_row.scheduled_at if previous_appointment_row else cutoff
+    change_window_basis = "since_previous_recorded_appointment" if previous_appointment_row else "bounded_recent_fallback"
     fetched_events = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
-        CareEvent.occurred_at >= cutoff,
+        CareEvent.occurred_at >= change_window_start,
     ).order_by(CareEvent.occurred_at.desc()).limit(31).all()
     events_has_more = len(fetched_events) > 30
     events = fetched_events[:30]
-    fetched_appointments = db.query(Appointment).filter(
-        Appointment.person_id == person_id,
-    ).order_by(Appointment.scheduled_at.desc()).limit(16).all()
-    appointments_has_more = len(fetched_appointments) > 15
-    appointments = fetched_appointments[:15]
     # History is displayed newest-first, but preparation must target the nearest
     # upcoming scheduled visit rather than the furthest future appointment.
     next_appointment_row = db.query(Appointment).filter(
@@ -1214,6 +1222,18 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "events": event_items,
         "appointments": appointment_items,
         "next_appointment": next_appointment,
+        "previous_appointment": ({
+            "source_id": str(previous_appointment_row.id),
+            "title": previous_appointment_row.title,
+            "scheduled_at": _iso(previous_appointment_row.scheduled_at),
+            "provider": previous_appointment_row.provider,
+            "status": previous_appointment_row.status,
+        } if previous_appointment_row is not None else None),
+        "change_window": {
+            "starts_at": _iso(change_window_start),
+            "basis": change_window_basis,
+            "interpretation_limit": "Recent changes start at the most recent recorded completed appointment when its date is known; otherwise the requested bounded recent window is used.",
+        },
         "appointment_context_status": appointment_context_status,
         "appointment_related_open_loops": appointment_related_open_loops,
         "lcr_retrieval_status": lcr_retrieval_status,
