@@ -2030,6 +2030,7 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
 def current_care_projection(
     request: Request,
     limit_per_source: int = Query(default=10, ge=1, le=50),
+    source: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """Return a bounded caregiver-facing projection from existing scoped LCR sources.
@@ -2039,7 +2040,14 @@ def current_care_projection(
     the newest report is necessarily correct.
     """
     person_id, _ = _scoped_identity(request, db)
-    context = build_lcr_context(db, person_id, limit_per_source=limit_per_source)
+    if source is not None and source not in SOURCE_SPECS:
+        raise HTTPException(status_code=422, detail="Unknown care-history source")
+    context = build_lcr_context(
+        db,
+        person_id,
+        limit_per_source=limit_per_source,
+        only_sources={source} if source else None,
+    )
     sources = context.get("sources") or {}
     candidate_evidence_ids: set[str] = set()
     for source_name, source_value in sources.items():
@@ -2480,8 +2488,24 @@ def current_care_projection(
                 for source_name in ("decision_outcomes", "action_outcomes", "follow_up_links")
             )
         ),
+        "requested_sources": context.get("requested_sources", sorted(SOURCE_SPECS)),
+        "failed_sources": sorted(
+            name for name, value in sources.items()
+            if value.get("status") in {"failed", "partial", "unavailable_schema", "unavailable_scope"}
+        ),
         "source_coverage": {
-            name: {"status": value.get("status"), "returned_count": value.get("returned_count", 0), "has_more": value.get("has_more", False)}
+            name: {
+                "status": value.get("status"),
+                "returned_count": value.get("returned_count", 0),
+                "candidate_count": value.get("candidate_count"),
+                "has_more": value.get("has_more", False),
+                "limit": value.get("limit", limit_per_source),
+                "offset": value.get("offset", 0),
+                "next_offset": value.get("next_offset"),
+                "returned_history_complete": value.get("returned_history_complete", False),
+                "error_code": value.get("error_code"),
+                "required": SOURCE_SPECS.get(name, {}).get("required", False),
+            }
             for name, value in sources.items()
         },
         "notice": "This summary uses the care information currently available. Different reports are kept separate when they do not agree. It is not a diagnosis or medical advice.",
