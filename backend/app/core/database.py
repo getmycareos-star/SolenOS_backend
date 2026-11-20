@@ -134,7 +134,9 @@ def database_schema_differences(bind=None):
                 getattr(value, "length", None),
                 getattr(value, "precision", None),
                 getattr(value, "scale", None),
-                getattr(value, "timezone", None),
+                getattr(value, "timezone", None)
+                if target.dialect.name in {"postgresql", "oracle"}
+                else None,
             )
 
         type_mismatches = sorted(
