@@ -2268,8 +2268,10 @@ def create_appointment(appointment: AppointmentCreate, request: Request, db: Ses
     appointment_values = appointment.model_dump()
     if appointment_values.get("scheduled_at") is None:
         # An appointment may be known to exist before its date is confirmed.
-        # Preserve that state explicitly; never manufacture a timestamp.
-        appointment_values["status"] = "date_unknown"
+        # Preserve terminal caregiver-recorded states; otherwise keep the date
+        # unknown explicitly and never manufacture a timestamp.
+        if appointment_values.get("status") not in {"completed", "cancelled", "resolved", "historical"}:
+            appointment_values["status"] = "date_unknown"
         appointment_values["time_provenance"] = appointment_values.get("time_provenance") or "not_recorded"
     db_appt = AppointmentModel(**appointment_values)
     db.add(db_appt)
@@ -2342,7 +2344,7 @@ def update_appointment_lifecycle_endpoint(
         supplied = payload.model_fields_set
         if "scheduled_at" in supplied:
             appointment.scheduled_at = payload.scheduled_at
-            if payload.scheduled_at is None and "status" not in supplied:
+            if payload.scheduled_at is None and "status" not in supplied and appointment.status not in {"completed", "cancelled", "resolved", "historical"}:
                 appointment.status = "date_unknown"
         if "status" in supplied and payload.status is not None:
             appointment.status = payload.status
