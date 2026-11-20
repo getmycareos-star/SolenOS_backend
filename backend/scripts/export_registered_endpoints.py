@@ -23,6 +23,25 @@ def _model_name(value: Any) -> str | None:
     return getattr(value, "__name__", str(value))
 
 
+def _parameter_fields(fields: list[Any]) -> list[dict[str, Any]]:
+    output = []
+    for field in fields or []:
+        annotation = getattr(field, "annotation", None) or getattr(field, "outer_type_", None) or getattr(field, "type_", None)
+        required_value = getattr(field, "is_required", None)
+        required = required_value() if callable(required_value) else bool(getattr(field, "required", False))
+        default = getattr(field, "default", None)
+        if default is not None and not isinstance(default, (str, int, float, bool)):
+            default = None
+        output.append({
+            "name": getattr(field, "name", None),
+            "alias": getattr(field, "alias", None),
+            "type": str(annotation) if annotation is not None else None,
+            "required": required,
+            "default": default,
+        })
+    return output
+
+
 def _dependency_names(route: APIRoute) -> list[str]:
     names: set[str] = set()
 
@@ -42,6 +61,7 @@ def _dependency_names(route: APIRoute) -> list[str]:
 def build_inventory(application: FastAPI) -> dict[str, Any]:
     """Return a deterministic inventory of every registered HTTP API route."""
     entries: list[dict[str, Any]] = []
+    registration_counts: dict[tuple[str, str], int] = {}
     for route in application.routes:
         if not isinstance(route, APIRoute):
             continue
@@ -49,9 +69,14 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
         module = getattr(endpoint, "__module__", "unknown")
         handler = getattr(endpoint, "__qualname__", getattr(endpoint, "__name__", "unknown"))
         for method in sorted(route.methods or []):
+            key = (method, route.path)
+            registration_counts[key] = registration_counts.get(key, 0) + 1
             entries.append(
                 {
                     "method": method,
+                    "operation_id": route.operation_id,
+                    "include_in_schema": route.include_in_schema,
+                    "deprecated": bool(route.deprecated),
                     "path": route.path,
                     "name": route.name,
                     "router_module": module,
@@ -60,6 +85,13 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
                     "request_model": _model_name(
                         getattr(getattr(route, "body_field", None), "type_", None)
                     ),
+                    "request_parameters": {
+                        "path": _parameter_fields(route.dependant.path_params),
+                        "query": _parameter_fields(route.dependant.query_params),
+                        "headers": _parameter_fields(route.dependant.header_params),
+                        "cookies": _parameter_fields(route.dependant.cookie_params),
+                        "body": _parameter_fields(route.dependant.body_params),
+                    },
                     "response_model": _model_name(route.response_model),
                     "dependencies": _dependency_names(route),
                     "authentication_disposition": (
@@ -70,13 +102,11 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
                     "consumer_disposition": "unmapped_review_required",
                     "persistence_disposition": "unmapped_review_required",
                     "verification_disposition": "not_yet_assessed",
+                    "duplicate_registration": registration_counts[key] > 1,
+                    "duplicate_registration_count": registration_counts[key],
                 }
             )
     entries.sort(key=lambda item: (item["path"], item["method"], item["router_module"], item["handler"]))
-    keys = [(item["method"], item["path"]) for item in entries]
-    if len(keys) != len(set(keys)):
-        duplicates = sorted(key for key in set(keys) if keys.count(key) > 1)
-        raise RuntimeError(f"Duplicate registered method/path pairs: {duplicates}")
     return {
         "format_version": 1,
         "source": "app.main:app runtime route registry",
