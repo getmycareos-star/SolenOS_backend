@@ -1172,6 +1172,11 @@ def test_situation_display_name_update_rejects_spoofed_record_and_caregiver():
     client = TestClient(app)
     owner = create_session(client, "Owner recipient")
     other = create_session(client, "Other recipient")
+    assert owner["person"]["id"] != other["person"]["id"]
+    assert owner["caregiver"]["id"] != other["caregiver"]["id"], (
+        "Separate anonymous care records must not share a caregiver identity"
+    )
+    assert owner["access_token"] != other["access_token"]
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
 
     wrong_person = client.patch(
