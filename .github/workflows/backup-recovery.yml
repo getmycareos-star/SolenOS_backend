@@ -25,8 +25,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: solenos-backup-recovery-${{ github.ref }}
-  cancel-in-progress: true
+  # Preserve backup and restore verification evidence for each exact main commit.
+  group: solenos-backup-recovery-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   restore-and-verify:
