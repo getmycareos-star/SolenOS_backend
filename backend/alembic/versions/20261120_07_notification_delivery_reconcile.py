@@ -146,19 +146,20 @@ def upgrade():
                         nullable=False,
                     )
 
+    # Privacy erasure deliberately clears direct subject identifiers. Keep
+    # subject_id nullable so a redacted request remains redacted and future
+    # retries/audit receipts can persist without reintroducing identity.
     if _table_exists(bind, "data_subject_requests"):
         request_columns = {
             column["name"]: column for column in inspect(bind).get_columns("data_subject_requests")
         }
-        if "subject_id" in request_columns:
-            # A privacy erasure intentionally clears direct subject identifiers.
-            # Backfill only recoverable legacy rows; never force redacted rows
-            # back into a non-null identity field.
-            op.execute(sa.text(
-                "UPDATE data_subject_requests "
-                "SET subject_id = person_id "
-                "WHERE subject_id IS NULL AND person_id IS NOT NULL"
-            ))
+        if "subject_id" in request_columns and not request_columns["subject_id"].get("nullable", True):
+            with op.batch_alter_table("data_subject_requests") as batch:
+                batch.alter_column(
+                    "subject_id",
+                    existing_type=sa.String(length=255),
+                    nullable=True,
+                )
 
     expected_indexes = (
         ("delivery_failure_events", "delivery_id"),
