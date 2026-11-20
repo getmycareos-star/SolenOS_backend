@@ -93,6 +93,116 @@ def test_duplicate_copy_warning_does_not_change_document_assertion_meaning():
     assert duplicate_value == original_value
 
 
+
+def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    source = "[Page 1]\\nDischarge summary: Patient walked 20 metres with a frame."
+    quote = "Patient walked 20 metres with a frame."
+
+    def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
+        assert quote in text
+        return {
+            "observations": [{
+                "subject": "mobility",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", deterministic_candidates)
+    try:
+        caregiver = create_record(client, "Duplicate document review caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        first_evidence_id = save_original(caregiver, source)
+        binary = source.encode("utf-8")
+        digest = hashlib.sha256(binary).hexdigest()
+        second_evidence_id = "document-copy-" + hashlib.sha256(
+            binary + caregiver["person"]["id"].encode("utf-8") + b"second-copy"
+        ).hexdigest()[:24]
+
+        # Persist a second evidence identity with the exact same original bytes.
+        # This exercises the duplicate-document assertion guard, not just upload UI metadata.
+        with Session() as db:
+            db.add(Evidence(
+                id=second_evidence_id,
+                person_id=caregiver["person"]["id"],
+                type="document",
+                source_text="",
+                uploaded_by_caregiver_id=caregiver["caregiver"]["id"],
+                extra_metadata=json.dumps({
+                    "filename": "duplicate-discharge-summary.txt",
+                    "duplicate_of_evidence_id": first_evidence_id,
+                }),
+                source_type="caregiver_upload",
+                evidence_status="recorded",
+            ))
+            db.add(EvidenceUpload(
+                evidence_id=second_evidence_id,
+                filename="duplicate-discharge-summary.txt",
+                mime_type="text/plain",
+                content=binary,
+                size_bytes=len(binary),
+                sha256=digest,
+            ))
+            db.commit()
+
+        analysis_ids = []
+        for evidence_id in (first_evidence_id, second_evidence_id):
+            extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+            assert extracted.status_code == 201, extracted.text
+            understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+            assert understood.status_code == 201, understood.text
+            assert understood.json()["written_to_lcr"] is False
+            assert len(understood.json()["observations"]) == 1
+            analysis_ids.append(understood.json()["analysis_id"])
+
+        first_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_ids[0]}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert first_review.status_code == 200, first_review.text
+        first_assertion_id = first_review.json()["source_record_ref"]["record_id"]
+        assert first_review.json()["written_to_lcr"] is True
+
+        duplicate_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_ids[1]}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert duplicate_review.status_code == 200, duplicate_review.text
+        assert duplicate_review.json()["source_record_ref"]["record_id"] == first_assertion_id
+        assert duplicate_review.json()["written_to_lcr"] is True
+
+        with Session() as db:
+            assertions = db.query(CareAssertion).filter_by(
+                person_id=caregiver["person"]["id"],
+                field="observation",
+            ).all()
+            assert len(assertions) == 1
+            assert assertions[0].id == first_assertion_id
+            assert assertions[0].source_text == quote
+            assert assertions[0].evidence_ids == [first_evidence_id]
+            events = db.query(DocumentReviewEvent).filter(
+                DocumentReviewEvent.person_id == caregiver["person"]["id"],
+                DocumentReviewEvent.decision == "accept",
+            ).all()
+            assert len(events) == 2
+            assert {event.source_evidence_id for event in events} == {
+                first_evidence_id, second_evidence_id
+            }
+            assert {event.resulting_assertion_id for event in events} == {first_assertion_id}
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+
+
 def test_document_understanding_review_accept_reject_reload_and_cross_person(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
