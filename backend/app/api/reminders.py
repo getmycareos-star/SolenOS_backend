@@ -68,6 +68,14 @@ def _require_active_full_access(db: Session, person_id: str, caregiver_id: str) 
     if grant is None:
         raise HTTPException(status_code=403, detail="The assigned caregiver does not have active full-record access")
 
+ 
+def _require_assignable_caregiver(db: Session, person_id: str, caregiver_id: str) -> None:
+    """Only assign work to a caregiver who can actually complete it."""
+    _require_active_full_access(db, person_id, caregiver_id)
+    require_caregiver_permission(
+        db, person_id, caregiver_id, "complete_assigned_reminders"
+    )
+
 
 def _resolve_previous_assignee_notifications(db: Session, reminder_id: str, previous_assignee_id: str) -> None:
     now = datetime.now(timezone.utc)
@@ -190,7 +198,7 @@ def create_reminder(payload: CareReminderCreate, request: Request, db: Session =
         raise HTTPException(status_code=422, detail="Reminder title cannot be blank")
 
     assignee_id = payload.assigned_to_caregiver_id or caregiver_id
-    _require_active_full_access(db, person_id, assignee_id)
+    _require_assignable_caregiver(db, person_id, assignee_id)
     reminder = CareReminder(
         person_id=person_id,
         created_by_caregiver_id=caregiver_id,
@@ -227,7 +235,7 @@ def reassign_reminder(
         raise HTTPException(status_code=409, detail="Only an open reminder can be reassigned")
     if reminder.version != payload.expected_version:
         raise HTTPException(status_code=409, detail="This reminder changed since it was loaded. Refresh before reassigning.")
-    _require_active_full_access(db, person_id, payload.assigned_to_caregiver_id)
+    _require_assignable_caregiver(db, person_id, payload.assigned_to_caregiver_id)
     previous_id = reminder.assigned_to_caregiver_id or reminder.created_by_caregiver_id
     if previous_id == payload.assigned_to_caregiver_id:
         return _reminder_response(db, reminder)
