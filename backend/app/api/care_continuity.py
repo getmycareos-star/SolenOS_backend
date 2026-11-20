@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.services.document_binary_storage import read_document_binary
 from app.api.care_delta import _scoped_identity
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
@@ -4479,6 +4480,7 @@ def update_care_continuity_resource(
     if resource != "decisions":
         raise HTTPException(status_code=404, detail="This care-continuity resource has no update workflow")
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     allowed = WRITABLE["decisions"]
     changes = {key: value for key, value in payload.items() if key in allowed}
     if not changes:
@@ -4702,6 +4704,8 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     if resource not in WRITABLE:
         raise HTTPException(status_code=404, detail="Unknown or read-only care-continuity resource")
     person_id, caregiver_id = _scoped_identity(request, db)
+    permission = "correct_records" if resource in {"corrections", "amendments", "record-retractions", "record-restorations", "integrity-resolutions", "review-decisions"} else "add_evidence"
+    require_caregiver_permission(db, person_id, caregiver_id, permission)
     allowed = WRITABLE[resource]
     data = {key: value for key, value in payload.items() if key in allowed}
     if not data:
