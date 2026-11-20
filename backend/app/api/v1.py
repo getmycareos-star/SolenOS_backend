@@ -2264,7 +2264,13 @@ def create_appointment(appointment: AppointmentCreate, request: Request, db: Ses
     _require_person_and_linked_caregiver(
         db, appointment.person_id, appointment.created_by_caregiver_id
     )
-    db_appt = AppointmentModel(**appointment.model_dump())
+    appointment_values = appointment.model_dump()
+    if appointment_values.get("scheduled_at") is None:
+        # An appointment may be known to exist before its date is confirmed.
+        # Preserve that state explicitly; never manufacture a timestamp.
+        appointment_values["status"] = "date_unknown"
+        appointment_values["time_provenance"] = appointment_values.get("time_provenance") or "not_recorded"
+    db_appt = AppointmentModel(**appointment_values)
     db.add(db_appt)
     db.commit()
     db.refresh(db_appt)
@@ -2275,8 +2281,8 @@ def create_appointment(appointment: AppointmentCreate, request: Request, db: Ses
         _log_and_learn(
             db,
             db_appt.person_id,
-            "appointment_scheduled",
-            f"Scheduled: {appointment.title}",
+            "appointment_recorded" if db_appt.scheduled_at is None else "appointment_scheduled",
+            (f"Appointment recorded; date not yet known: {appointment.title}" if db_appt.scheduled_at is None else f"Scheduled: {appointment.title}"),
             "appointment",
             source_id=db_appt.id,
             caregiver_id=appointment.created_by_caregiver_id,
@@ -2311,7 +2317,7 @@ def list_appointments(person_id: str, request: Request, db: Session = Depends(ge
     return (
         db.query(AppointmentModel)
         .filter(AppointmentModel.person_id == person_id)
-        .order_by(AppointmentModel.scheduled_at.asc())
+        .order_by(AppointmentModel.scheduled_at.asc().nullslast())
         .all()
     )
 
