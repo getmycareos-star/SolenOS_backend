@@ -1,0 +1,158 @@
+name: Reminder assignment repair PostgreSQL regression
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/alembic/versions/20261120_01_reminder_assignment_version.py"
+      - "backend/alembic/versions/20261120_05_repair_reminder_assignment_backfill.py"
+      - "backend/app/models/reminder.py"
+      - ".github/workflows/reminder-assignment-repair-postgres.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/alembic/versions/20261120_01_reminder_assignment_version.py"
+      - "backend/alembic/versions/20261120_05_repair_reminder_assignment_backfill.py"
+      - "backend/app/models/reminder.py"
+      - ".github/workflows/reminder-assignment-repair-postgres.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reminder-assignment-repair-postgres-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migration-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: solenos_reminder_repair
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d solenos_reminder_repair"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/solenos_reminder_repair
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and PostgreSQL test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary
+      - name: Apply canonical migrations
+        working-directory: backend
+        run: python -m alembic upgrade head
+      - name: Seed a persisted reminder and simulate a partially bootstrapped legacy schema
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(text(
+                  "INSERT INTO persons (id, name) VALUES "
+                  "('reminder-repair-person', 'Migration regression person')"
+              ))
+              connection.execute(text("""
+                  INSERT INTO caregivers (id, name, relationship, person_id, timezone)
+                  VALUES ('reminder-repair-caregiver', 'Regression caregiver',
+                          'family', 'reminder-repair-person', 'UTC')
+              """))
+              connection.execute(text("""
+                  INSERT INTO care_reminders
+                    (id, person_id, created_by_caregiver_id,
+                     assigned_to_caregiver_id, version, title, due_at)
+                  VALUES
+                    ('reminder-repair-row', 'reminder-repair-person',
+                     'reminder-repair-caregiver', 'reminder-repair-caregiver',
+                     7, 'Preserve this reminder', CURRENT_TIMESTAMP)
+              """))
+
+          # Rewind only the Alembic marker so revision 05 can be exercised again.
+          # The next step deliberately recreates the partially bootstrapped state.
+          PY
+          python -m alembic stamp 20261120_04_caregiver_operation_permissions
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              inspector = inspect(connection)
+              for foreign_key in inspector.get_foreign_keys("care_reminders"):
+                  if "assigned_to_caregiver_id" in (foreign_key.get("constrained_columns") or []):
+                      name = foreign_key.get("name")
+                      if name:
+                          connection.exec_driver_sql(
+                              f'ALTER TABLE care_reminders DROP CONSTRAINT "{name}"'
+                          )
+              connection.exec_driver_sql(
+                  "DROP INDEX IF EXISTS ix_care_reminders_assigned_to_caregiver_id"
+              )
+              connection.exec_driver_sql(
+                  "ALTER TABLE care_reminders ALTER COLUMN version DROP NOT NULL"
+              )
+              connection.execute(text("""
+                  UPDATE care_reminders
+                  SET assigned_to_caregiver_id = NULL, version = NULL
+                  WHERE id = 'reminder-repair-row'
+              """))
+          PY
+      - name: Reapply repair migration
+        working-directory: backend
+        run: python -m alembic upgrade head
+      - name: Assert ownership, version, foreign key and index were repaired without data loss
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          with engine.connect() as connection:
+              row = connection.execute(text("""
+                  SELECT id, created_by_caregiver_id, assigned_to_caregiver_id, version, title
+                  FROM care_reminders WHERE id = 'reminder-repair-row'
+              """)).mappings().one()
+              assert row["assigned_to_caregiver_id"] == row["created_by_caregiver_id"], row
+              assert row["version"] == 1, row
+              assert row["title"] == "Preserve this reminder", row
+
+          columns = {
+              item["name"]: item
+              for item in inspector.get_columns("care_reminders")
+          }
+          assert columns["version"]["nullable"] is False, columns["version"]
+          assert columns["version"]["default"] is not None, columns["version"]
+
+          foreign_keys = inspector.get_foreign_keys("care_reminders")
+          assert any(
+              item.get("constrained_columns") == ["assigned_to_caregiver_id"]
+              and item.get("referred_table") == "caregivers"
+              and item.get("referred_columns") == ["id"]
+              for item in foreign_keys
+          ), foreign_keys
+
+          indexes = {item["name"] for item in inspector.get_indexes("care_reminders")}
+          assert "ix_care_reminders_assigned_to_caregiver_id" in indexes, indexes
+
+          with engine.connect() as connection:
+              current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+          assert current == "20261120_05_reminder_assignment_repair", current
+          print("PASS: existing reminder preserved; owner backfilled; version, FK, index and Alembic head verified.")
+          PY
