@@ -27,7 +27,7 @@ from app.services.caregiver_permissions import require_caregiver_permission
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
-from app.services.care_attention_intelligence import build_care_attention_assessment
+from app.services.care_attention_intelligence import build_care_attention_assessment, CARE_ATTENTION_POLICY_VERSION
 from app.services.care_continuity import get_freshness
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
@@ -3464,6 +3464,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "baseline_source_available": baseline_source_available,
                 "baseline_source_complete": baseline_source_complete,
                 "canonical_conflicts": conflict_items,
+                "care_attention_policy_version": CARE_ATTENTION_POLICY_VERSION,
             },
         ),
         "person_id": str(person_id),
