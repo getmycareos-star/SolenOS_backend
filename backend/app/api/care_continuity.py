@@ -3564,7 +3564,6 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "baseline_is_stable": bool(baseline.is_stable) if baseline else False,
                 "baseline_history_completeness": baseline.history_completeness if baseline else None,
                 "expected_source_record_count": len(change.evidence_ids or []),
-                "expected_source_record_count": len(change.evidence_ids or []),
                 "records": source_refs,
             })
     return {
