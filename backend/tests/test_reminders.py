@@ -858,3 +858,53 @@ def test_reminder_assignment_rejects_inactive_or_foreign_caregiver():
         },
     )
     assert rejected.status_code == 403, rejected.text
+
+
+def test_due_reminder_notification_targets_current_assignee_not_creator():
+    from app.models.notifications import CareNotification
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    primary = create_session(client, "Reminder creator")
+    primary_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=primary_headers,
+        json={"email": "reminder-assignee@example.test"},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite.json()["invitation_token"],
+            "email": "reminder-assignee@example.test",
+            "password": "reminder-assignee-password-456",
+            "name": "Reminder assignee",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+
+    due_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=primary_headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "title": "Assigned care follow-up",
+            "due_at": due_at,
+            "assigned_to_caregiver_id": accepted.json()["caregiver_id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    db = TestSessionLocal()
+    try:
+        assert deliver_due_reminders(db=db) == 1
+        notification = db.query(CareNotification).filter_by(
+            source_event_id=created.json()["id"],
+            category="reminder_due",
+        ).one()
+        assert notification.caregiver_id == accepted.json()["caregiver_id"]
+        assert notification.caregiver_id != primary["caregiver"]["id"]
+    finally:
+        db.close()
