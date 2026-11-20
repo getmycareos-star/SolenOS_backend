@@ -1398,17 +1398,44 @@ class SituationDisplayNameUpdate(BaseModel):
 @situation_router.patch("/situation")
 def update_situation_display_name(
     payload: SituationDisplayNameUpdate,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    # The submitted person/caregiver IDs are references, not credentials.
+    # Resolve the record scope exclusively from the server-issued bearer session.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    authorized_session = (
+        db.query(AnonymousSession)
+        .filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if authorized_session is None:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+
+    scoped_person_id = str(authorized_session.person_id)
+    scoped_caregiver_id = str(authorized_session.caregiver_id)
+    if str(payload.person_id) != scoped_person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    if str(payload.caregiver_id) != scoped_caregiver_id:
+        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
+
     display_name = payload.display_name.strip()
     if not display_name:
         raise HTTPException(status_code=422, detail="display_name must not be blank")
-    person = db.query(Person).filter(Person.id == payload.person_id).first()
+    person = db.query(Person).filter(Person.id == scoped_person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Care recipient not found")
     caregiver = db.query(Caregiver).filter(
-        Caregiver.id == payload.caregiver_id,
-        Caregiver.person_id == payload.person_id,
+        Caregiver.id == scoped_caregiver_id,
+        Caregiver.person_id == scoped_person_id,
     ).first()
     if not caregiver:
         raise HTTPException(status_code=403, detail="Session caregiver is not linked to this care record")
