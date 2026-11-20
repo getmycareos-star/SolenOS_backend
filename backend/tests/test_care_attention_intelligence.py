@@ -448,11 +448,12 @@ def test_bounded_persisted_change_history_cannot_produce_complete_priority():
         source_coverage={"persisted_change_history_bounded": True},
         as_of=NOW,
     )
-    assert result["important_to_address"] == []
+    assert [item["record_id"] for item in result["important_to_address"]] == ["bounded-change"]
+    assert result["important_to_address"][0]["history_completeness"] == "bounded"
+    assert "overall change list is incomplete" in result["important_to_address"][0]["reason"]
     clarification_by_id = {
         item["record_id"]: item for item in result["needs_clarification"]
     }
-    assert clarification_by_id["bounded-change"]["category"] == "needs_clarification"
     assert clarification_by_id["bounded-history"]["category"] == "needs_clarification"
 
 
@@ -486,19 +487,47 @@ def test_unavailable_persisted_change_source_is_not_silently_treated_as_no_chang
 
 
 
-def test_persisted_change_with_one_unresolved_source_record_is_clarification():
+def test_persisted_attention_candidate_remains_visible_when_source_coverage_is_incomplete():
     from app.services.care_attention_intelligence import _persisted_change_decisions
 
     important, clarification = _persisted_change_decisions([{
         "id": "change-partial-source", "significance_verdict": "meaningful_candidate",
-        "attention_candidate": True, "baseline_coverage_status": "covered",
+        "attention_candidate": True, "evidence_status": "reported",
+        "evidence_confidence": 0.42, "significance_confidence": 0.61,
+        "action_status": "not_recorded", "baseline_coverage_status": "covered",
         "current_coverage_status": "covered", "baseline_is_stable": True,
         "baseline_history_completeness": "complete", "expected_source_record_count": 2,
         "records": [{"source": "events", "record_id": "event-resolved", "evidence_ids": []}],
     }])
-    assert important == []
-    assert len(clarification) == 1
-    assert clarification[0]["category"] == "needs_clarification"
+    assert len(important) == 1
+    assert clarification == []
+    item = important[0]
+    assert item["care_significance"] == "attention_candidate"
+    assert item["evidence_status"] == "reported"
+    assert item["evidence_confidence"] == 0.42
+    assert item["significance_confidence"] == 0.61
+    assert item["action_status"] == "not_recorded"
+    assert item["history_completeness"] == "partial_or_unknown"
+    assert "does not cancel the recorded need for follow-up" in item["reason"]
+
+
+def test_follow_up_candidate_is_not_downgraded_by_insufficient_evidence_verdict():
+    from app.services.care_attention_intelligence import _persisted_change_decisions
+
+    important, clarification = _persisted_change_decisions([{
+        "id": "change-needs-follow-up", "significance_verdict": "insufficient_evidence",
+        "attention_candidate": False, "follow_up_candidate": True,
+        "evidence_status": "reported", "evidence_confidence": 0.31,
+        "baseline_coverage_status": "unknown", "current_coverage_status": "covered",
+        "baseline_is_stable": False, "baseline_history_completeness": "unknown",
+        "expected_source_record_count": 1,
+        "records": [{"source": "events", "record_id": "event-one", "evidence_ids": ["evidence-one"]}],
+    }])
+    assert len(important) == 1
+    assert clarification == []
+    assert important[0]["care_significance"] == "follow_up_candidate"
+    assert important[0]["evidence_confidence"] == 0.31
+    assert important[0]["history_completeness"] == "partial_or_unknown"
 
 
 def test_repeated_dementia_caregiver_observations_are_reviewed_without_claiming_change():
