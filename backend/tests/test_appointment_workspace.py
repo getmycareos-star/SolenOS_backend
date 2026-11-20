@@ -1346,6 +1346,75 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
     assert "Other person private care detail" not in response.text
 
 
+def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need(client):
+    from app.core.uncertainty_enums import Priority
+    from app.models.uncertainty import OpenQuestion
+
+    test_client, owner, other = client
+    evidence = Evidence(
+        id="appointment-need-source",
+        person_id=owner["person"]["id"],
+        type="note",
+        source_text="The clinic asked the family to confirm the follow-up appointment date.",
+        uploaded_by_caregiver_id=owner["caregiver"]["id"],
+        source_type="caregiver_report",
+    )
+    rationale = "The family must confirm the visit date before arranging transport."
+    context = [{
+        "source_kind": "caregiver_report",
+        "source_id": evidence.id,
+        "necessity": "necessary",
+        "necessity_rationale": rationale,
+        "decision_dependency": "Transport planning depends on the confirmed appointment date.",
+        "necessity_assessment": {
+            "necessity": "necessary",
+            "necessity_rationale": rationale,
+            "decision_dependency": "Transport planning depends on the confirmed appointment date.",
+            "evidence_ids": [evidence.id],
+        },
+    }]
+    question = OpenQuestion(
+        id="appointment-need-question",
+        person_id=owner["person"]["id"],
+        question="Confirm the follow-up appointment date with the clinic.",
+        subject_type="appointment",
+        subject_id="follow-up-visit",
+        intended_answerer_role="reporting_caregiver",
+        intended_answerer_label="Family caregiver",
+        necessity="necessary",
+        necessity_rationale=rationale,
+        status="open",
+        priority=Priority.HIGH,
+        evidence_ids=[evidence.id],
+        context=context,
+        created_by_caregiver_id=owner["caregiver"]["id"],
+    )
+    db = TestSessionLocal()
+    try:
+        db.add(evidence)
+        db.add(question)
+        db.commit()
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["appointment_needs"]) == 1
+    need = body["appointment_needs"][0]
+    assert need["source_id"] == "appointment-need-question"
+    assert need["question"] == question.question
+    assert need["priority"] == "high"
+    assert "not mean a visit has been booked or confirmed" in need["interpretation_limit"]
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    private = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=other_headers)
+    assert private.status_code == 200, private.text
+    assert private.json()["appointment_needs"] == []
+    assert "Confirm the follow-up appointment date" not in private.text
+
+
 def test_appointment_preparation_brief_includes_person_scoped_extracted_document_text(client):
     from app.models.capture_analysis import CaptureAnalysis
 
