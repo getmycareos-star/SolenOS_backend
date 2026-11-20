@@ -140,6 +140,10 @@ CONSUMER_DOMAINS = [
 ]
 
 PERSISTENCE_DOMAINS = [
+    ("/api/v1/assistant/evaluate-production", "No care-record writes; synthetic-only production inference acceptance probe"),
+    ("/api/v1/assistant", "QwenBackgroundJob; QwenModelOutput; QwenSafetyEvaluation; AIOutputLCRProposal where a separate caregiver review is required; runtime status endpoints are read-only"),
+    ("/api/v1/time", "No persistence; deterministic time utility"),
+    ("/api/v1/parse-time", "No persistence; deterministic time parsing utility"),
     ("/api/v1/sessions", "AnonymousSession; session refresh/revocation and identity audit records"),
     ("/api/v1/accounts", "CaregiverAccount; account recovery and identity audit records"),
     ("/api/v1/caregiver-access", "CaregiverAccessGrant; invitation and access audit records"),
