@@ -235,7 +235,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
     try:
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
-            workspace_id=row.id, payload=payload.payload,
+            workspace_id=row.id, payload=payload.payload, appointment_id=row.appointment_id,
         )
         db.flush()
         execute_care_continuity_reconciliation(
@@ -400,6 +400,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "deadline_source": loop.deadline_source,
                 "source_type": loop.source_type,
                 "source_reference": loop.source_id,
+                "appointment_id": next((item.get("appointment_id") for item in (loop.evidence or []) if isinstance(item, dict) and item.get("appointment_id")), None),
+                "source_workspace_id": next((item.get("record_id") for item in (loop.evidence or []) if isinstance(item, dict) and item.get("record_type") == "appointment_workspace"), None),
                 "evidence": loop.evidence or [],
                 "updated_at": _iso(loop.updated_at),
                 "interpretation_limit": "This is an unresolved tracked item. A recorded owner or deadline is not proof that the person accepted the task or that it was completed.",
@@ -1220,7 +1222,6 @@ def create_appointment_outcome_proposals(record_id: str, request: Request, db: S
         proposal = db.query(AIOutputLCRProposal).filter(
             AIOutputLCRProposal.id == proposal_id,
             AIOutputLCRProposal.person_id == person_id,
-            AIOutputLCRProposal.caregiver_id == caregiver_id,
         ).first()
         if proposal is None:
             proposal = AIOutputLCRProposal(
@@ -1283,7 +1284,6 @@ def list_appointment_outcome_proposals(record_id: str, request: Request, db: Ses
         raise HTTPException(status_code=404, detail="Appointment workspace not found")
     scoped_proposals = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.person_id == person_id,
-        AIOutputLCRProposal.caregiver_id == caregiver_id,
         AIOutputLCRProposal.proposal_type == "appointment_workspace_outcome",
     ).order_by(AIOutputLCRProposal.created_at.desc()).limit(500).all()
     proposals = [
@@ -1317,7 +1317,6 @@ def review_appointment_outcome_proposal(
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
         AIOutputLCRProposal.person_id == person_id,
-        AIOutputLCRProposal.caregiver_id == caregiver_id,
         AIOutputLCRProposal.proposal_type == "appointment_workspace_outcome",
     ).with_for_update().first()
     if proposal is None or (proposal.proposed_change_json or {}).get("source_record_id") != record_id:
@@ -1355,7 +1354,11 @@ def review_appointment_outcome_proposal(
         corrected_proposal = None
         if decision == "correct":
             next_id = _appointment_proposal_id(record_id, int(revision_number), int(proposal.candidate_index), int(proposal.proposal_version) + 1)
-            corrected_proposal = db.query(AIOutputLCRProposal).filter(AIOutputLCRProposal.id == next_id).first()
+            corrected_proposal = db.query(AIOutputLCRProposal).filter(
+                AIOutputLCRProposal.id == next_id,
+                AIOutputLCRProposal.person_id == person_id,
+                AIOutputLCRProposal.proposal_type == "appointment_workspace_outcome",
+            ).first()
             if corrected_proposal is None:
                 raise HTTPException(status_code=409, detail="The saved correction proposal is unavailable")
             corrected_change = corrected_proposal.proposed_change_json or {}
@@ -1394,7 +1397,6 @@ def review_appointment_outcome_proposal(
         corrected_proposal = db.query(AIOutputLCRProposal).filter(
             AIOutputLCRProposal.id == next_id,
             AIOutputLCRProposal.person_id == person_id,
-            AIOutputLCRProposal.caregiver_id == caregiver_id,
         ).first()
         if corrected_proposal is None:
             corrected_proposal = AIOutputLCRProposal(
@@ -1642,7 +1644,7 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
     try:
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
-            workspace_id=row.id, payload=payload.payload,
+            workspace_id=row.id, payload=payload.payload, appointment_id=row.appointment_id,
         )
         db.flush()
         execute_care_continuity_reconciliation(
