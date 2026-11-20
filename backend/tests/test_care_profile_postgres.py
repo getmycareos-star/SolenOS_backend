@@ -193,6 +193,7 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
         assert first_person.name == f"Updated recipient {suffix}"
         assert first_profile.relationship == "Daughter"
         assert len(profile_versions) == 2
+        assert all(row.reported_by_caregiver_id == first_caregiver_id for row in profile_versions)
         assert all(row.effective_start is not None for row in profile_versions)
         assert all(row.context_metadata.get("epistemic_status") == "caregiver_reported" for row in profile_versions)
         assert any(row.context_metadata.get("condition") == "Dementia stage reported by caregiver" for row in profile_versions)
@@ -200,6 +201,7 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
         assert any(row.effective_end is not None for row in profile_versions)
         assert any(row.context_metadata.get("recipient_name") == f"Updated recipient {suffix}" for row in profile_versions)
         assert len(relationship_versions) == 1
+        assert relationship_versions[0].reported_by_caregiver_id == first_caregiver_id
         assert relationship_versions[0].context_metadata.get("caregiver_relationship") == "Daughter"
         audit_events = db.query(AuditLogEvent).filter_by(
             person_id=first_person_id,
