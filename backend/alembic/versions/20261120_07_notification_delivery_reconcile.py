@@ -158,7 +158,7 @@ def upgrade():
             op.execute(sa.text(
                 "UPDATE data_subject_requests "
                 "SET subject_id = person_id "
-                "WHERE subject_id IS NULL AND person_id IS NOT NULL"
+                "WHERE subject_id IS NULL AND person_id IS NOT NULL AND request_status <> 'fulfilled'"
             ))
             unresolved_active = bind.execute(sa.text(
                 "SELECT COUNT(*) FROM data_subject_requests "
