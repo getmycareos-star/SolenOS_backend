@@ -1,17 +1,12 @@
 from collections import Counter
 
 from app.main import app
-from scripts.export_registered_endpoints import build_inventory
+from scripts.export_registered_endpoints import build_inventory, registered_route_keys
 
 
 def test_runtime_endpoint_inventory_covers_every_registered_api_route():
     inventory = build_inventory(app)
-    registered = Counter(
-        (method, route.path)
-        for route in app.routes
-        if hasattr(route, "methods") and hasattr(route, "path") and hasattr(route, "dependant")
-        for method in (route.methods or [])
-    )
+    registered = Counter(registered_route_keys(app))
     inventoried = Counter(
         (item["method"], item["path"])
         for item in inventory["routes"]
