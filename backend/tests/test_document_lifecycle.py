@@ -1329,6 +1329,20 @@ def test_second_authorized_caregiver_can_retrieve_shared_document_extraction(cli
     assert listed.status_code == 200, listed.text
     assert any(item["source_evidence_id"] == evidence_id for item in listed.json()["items"])
 
+    status = test_client.get(
+        "/api/v1/documents/status",
+        headers=collaborator_headers,
+    )
+    assert status.status_code == 200, status.text
+    assert any(item["evidence_id"] == evidence_id for item in status.json()["items"])
+
+    downloaded = test_client.get(
+        f"/api/v1/upload/{evidence_id}",
+        headers=collaborator_headers,
+    )
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.content == b"Care note: breakfast was mostly uneaten."
+
     queued = test_client.post(
         f"/api/v1/documents/{evidence_id}/queue",
         headers=collaborator_headers,
