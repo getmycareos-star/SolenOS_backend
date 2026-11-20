@@ -481,6 +481,9 @@ def test_missing_significance_assessment_is_disclosed_without_hiding_saved_follo
         "significance_assessment_status": "not_recorded",
         "attention_candidate": False,
         "follow_up_candidate": True,
+        "action_status": "closed",
+        "linked_follow_up_outcome_status": "outcome_unknown",
+        "linked_follow_up_id": "loop-closed-unknown",
         "expected_source_record_count": 0,
         "records": [],
         "explanation": "A saved follow-up concern remains open.",
@@ -489,6 +492,9 @@ def test_missing_significance_assessment_is_disclosed_without_hiding_saved_follo
     assert important[0]["evidence_status"] == "unknown"
     assert important[0]["significance_assessment_status"] == "not_recorded"
     assert "No separate significance assessment is linked" in important[0]["reason"]
+    assert important[0]["action_status"] == "closed"
+    assert important[0]["linked_follow_up_outcome_status"] == "outcome_unknown"
+    assert "follow-up was closed, but its outcome was not recorded" in important[0]["reason"]
     assert important[0]["history_completeness"] == "partial_or_unknown"
     assert clarification == []
 
