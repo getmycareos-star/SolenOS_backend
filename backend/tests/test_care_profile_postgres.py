@@ -75,6 +75,49 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     assert readback.status_code == 200, readback.text
     assert readback.json() == saved.json()
 
+    # An invited caregiver on the same care record sees shared recipient
+    # context but retains an independent caregiver-to-recipient relationship.
+    invited_email = f"care-profile-invited-{suffix}@example.test"
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=restored_headers,
+        json={"email": invited_email, "expires_in_days": 7},
+    )
+    assert invitation.status_code == 201, invitation.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": invited_email,
+            "password": f"invited-care-profile-password-{suffix}",
+            "name": f"Invited caregiver {suffix}",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    invited = accepted.json()
+    invited_headers = {"Authorization": f"Bearer {invited['access_token']}"}
+    invited_read = client.get("/api/v1/care-profile", headers=invited_headers)
+    assert invited_read.status_code == 200, invited_read.text
+    assert invited_read.json()["name"] == f"Updated recipient {suffix}"
+    assert invited_read.json()["condition"] == "Dementia stage reported by caregiver"
+    invited_relationship = invited_read.json()["relationship"]
+    invited_saved = client.put(
+        "/api/v1/care-profile",
+        headers=invited_headers,
+        json={
+            "name": f"Updated recipient {suffix}",
+            "relationship": "Son",
+            "condition": "Dementia stage reported by caregiver",
+        },
+    )
+    assert invited_saved.status_code == 200, invited_saved.text
+    assert invited_saved.json()["relationship"] == "Son"
+    primary_after_invited_update = client.get("/api/v1/care-profile", headers=restored_headers)
+    assert primary_after_invited_update.status_code == 200, primary_after_invited_update.text
+    assert primary_after_invited_update.json()["relationship"] == "Daughter"
+    assert primary_after_invited_update.json()["condition"] == "Dementia stage reported by caregiver"
+    assert invited_relationship != "Daughter"
+
     # A second independent care record cannot read or mutate the first record.
     second = client.post(
         "/api/v1/sessions/anonymous",
