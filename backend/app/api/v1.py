@@ -16,6 +16,7 @@ from app.services.uncertainty import persist_source_clarification_questions
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.lcr_context import build_lcr_context
+from app.services.caregiver_permissions import require_request_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
 from app.models.capture_analysis import CaptureAnalysis as CaptureAnalysisModel
@@ -291,6 +292,9 @@ def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = De
     _require_session_scope(
         request, db, evidence.person_id, evidence.uploaded_by_caregiver_id
     )
+    require_request_caregiver_permission(
+        request, db, "view_documents" if str(evidence.type).lower() == "document" else "add_evidence"
+    )
     _require_person_and_linked_caregiver(
         db, evidence.person_id, evidence.uploaded_by_caregiver_id
     )
@@ -408,6 +412,11 @@ def list_evidence(
     db: Session = Depends(get_db),
 ):
     _require_session_scope(request, db, person_id)
+    require_request_caregiver_permission(
+        request, db,
+        "view_documents" if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
+        else "view_lcr",
+    )
 
     query = db.query(EvidenceModel).filter(
         EvidenceModel.person_id == person_id,
@@ -1398,6 +1407,7 @@ def create_event(event: CareEventCreate, request: Request, db: Session = Depends
     # to the same server-issued person+caregiver capability as Daily Care.
     _require_session_scope(request, db, event.person_id, event.created_by_caregiver_id)
     _require_full_record_access(request)
+    require_request_caregiver_permission(request, db, "add_evidence")
     _require_person_and_linked_caregiver(
         db, event.person_id, event.created_by_caregiver_id
     )
@@ -1513,6 +1523,7 @@ def create_event(event: CareEventCreate, request: Request, db: Session = Depends
 def list_events(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
     _require_full_record_access(request)
+    require_request_caregiver_permission(request, db, "view_lcr")
     return (
         db.query(CareEventModel)
         .filter(CareEventModel.person_id == person_id)
@@ -1783,6 +1794,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
 def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
     _require_full_record_access(request)
+    require_request_caregiver_permission(request, db, "correct_records")
     require_caregiver_permission(db, correction.person_id, correction.caregiver_id, "correct_records")
     if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
         raise HTTPException(status_code=403, detail="This caregiver can review documents, not correct other care information.")
@@ -1882,6 +1894,7 @@ def retry_correction(
 def list_corrections(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
     _require_full_record_access(request)
+    require_request_caregiver_permission(request, db, "view_lcr")
     return (
         db.query(CorrectionModel)
         .filter(CorrectionModel.person_id == person_id)
