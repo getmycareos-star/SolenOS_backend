@@ -3228,7 +3228,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     change_columns = {column["name"] for column in inspector.get_columns("changes")} if change_table_available else set()
     required_change_columns = {
         "id", "person_id", "is_active", "superseded_by_change_id", "created_at",
-        "significance_verdict", "attention_candidate", "follow_up_candidate",
+        "significance_assessment_id", "significance_verdict", "attention_candidate", "follow_up_candidate",
         "confirmation_status", "baseline_id", "baseline_coverage_status",
         "current_coverage_status", "evidence_ids", "subject_type", "change_type",
         "change_direction", "previous_state", "current_state", "explanation",
