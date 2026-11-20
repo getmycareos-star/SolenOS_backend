@@ -1163,3 +1163,51 @@ def test_query_retrieval_scans_beyond_250_candidates_and_keeps_old_exact_match()
         connection.close()
         engine.dispose()
 
+def test_one_failed_care_source_does_not_hide_successful_source_reads():
+    from sqlalchemy.exc import SQLAlchemyError
+
+    engine, connection = _sqlite_retrieval_db()
+    try:
+        with connection.begin():
+            connection.execute(Person.__table__.insert(), {"id": "person-source-failure", "name": "Care recipient"})
+            connection.execute(Caregiver.__table__.insert(), {
+                "id": "caregiver-source-failure",
+                "name": "Caregiver",
+                "relationship": "family",
+                "person_id": "person-source-failure",
+            })
+        with Session(bind=connection) as db:
+            original_execute = db.execute
+
+            def fail_only_events(statement, *args, **kwargs):
+                source_names = {
+                    getattr(source, "name", None)
+                    for source in statement.get_final_froms()
+                }
+                if "care_events" in source_names:
+                    raise SQLAlchemyError("simulated care-events source outage")
+                return original_execute(statement, *args, **kwargs)
+
+            from unittest.mock import patch
+            with patch.object(db, "execute", side_effect=fail_only_events):
+                context = build_lcr_context(
+                    db,
+                    "person-source-failure",
+                    caregiver_id="caregiver-source-failure",
+                )
+
+        assert context["sources"]["events"]["status"] == "failed"
+        assert "events" in context["failed_sources"]
+        assert "events" in context["failed_required_sources"]
+        assert context["schema_status"] == "partial"
+        assert context["history_coverage"] == "partial_source_history"
+        assert context["retrieval_scan_complete"] is False
+        successful_sources = [
+            source for name, source in context["sources"].items()
+            if name != "events" and source["status"] in {"available", "empty"}
+        ]
+        assert successful_sources, "a failed source must not erase successful source results"
+    finally:
+        connection.close()
+        engine.dispose()
+
