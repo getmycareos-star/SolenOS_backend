@@ -34,12 +34,19 @@ def client():
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
-    with TestClient(app) as test_client:
-        created = test_client.post("/api/v1/sessions/anonymous", json={
-            "name": "Document lifecycle recipient", "caregiver_name": "Family caregiver"
-        })
-        assert created.status_code == 201, created.text
-        yield test_client, created.json()
+    # These tests drive durable processing jobs explicitly. Do not start the
+    # application's long-running worker loops against a shared in-memory
+    # SQLite StaticPool: concurrent worker sessions can interleave on the same
+    # connection and make a committed upload appear partially persisted.
+    # PostgreSQL worker/HTTP behavior is covered by the dedicated integration
+    # workflow, which runs the real lifespan and database.
+    test_client = TestClient(app)
+    created = test_client.post("/api/v1/sessions/anonymous", json={
+        "name": "Document lifecycle recipient", "caregiver_name": "Family caregiver"
+    })
+    assert created.status_code == 201, created.text
+    yield test_client, created.json()
+    test_client.close()
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
     Base.metadata.drop_all(bind=engine)
