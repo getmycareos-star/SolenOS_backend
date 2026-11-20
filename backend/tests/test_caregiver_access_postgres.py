@@ -143,6 +143,11 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             f"/api/v1/evidence/{person_id}", headers=primary_headers
         )
         assert primary_still_authorised.status_code == 200, primary_still_authorised.text
+        active_assignable = client.get(
+            "/api/v1/caregiver-access/assignable-members", headers=primary_headers
+        )
+        assert active_assignable.status_code == 200, active_assignable.text
+        assert [row["caregiver_id"] for row in active_assignable.json()] == [primary_caregiver_id]
 
         # Verify the transition in a fresh PostgreSQL session, not the request ORM cache.
         with Session() as db:
