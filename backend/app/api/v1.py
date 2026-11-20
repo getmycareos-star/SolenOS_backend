@@ -2156,10 +2156,15 @@ def update_appointment_lifecycle_endpoint(
 
 @router.post("/transitions", response_model=CareTransitionSchema)
 def create_care_transition(transition: CareTransitionCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, transition.person_id, transition.created_by_caregiver_id)
-    _require_person_and_linked_caregiver(
-        db, transition.person_id, transition.created_by_caregiver_id, caregiver_required=False
+    session_person_id, session_caregiver_id = _require_session_scope(
+        request, db, transition.person_id, transition.created_by_caregiver_id
     )
+    if transition.created_by_caregiver_id and str(transition.created_by_caregiver_id) != str(session_caregiver_id):
+        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
+    _require_person_and_linked_caregiver(
+        db, session_person_id, session_caregiver_id, caregiver_required=True
+    )
+    transition.created_by_caregiver_id = session_caregiver_id
     if not transition.transition_type or transition.transition_type == "unknown":
         inferred = infer_transition_type(transition.from_location, transition.to_location)
         transition.transition_type = inferred
@@ -2227,8 +2232,12 @@ def get_care_transition_sequence(person_id: str, transition_type: str, request: 
 
 @router.post("/locations", response_model=LocationSchema)
 def create_location(location: LocationCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, location.person_id, location.created_by_caregiver_id)
-    db_location = LocationModel(**location.model_dump())
+    session_person_id, session_caregiver_id = _require_session_scope(request, db, location.person_id)
+    location_payload = location.model_dump()
+    # The API schema intentionally does not accept a caller-selected actor.
+    # Persist attribution from the validated server session instead.
+    location_payload["created_by_caregiver_id"] = session_caregiver_id
+    db_location = LocationModel(**location_payload)
     db.add(db_location)
     db.commit()
     db.refresh(db_location)
