@@ -2196,7 +2196,7 @@ def create_care_transition(transition: CareTransitionCreate, request: Request, d
     session_person_id, session_caregiver_id = _require_session_scope(
         request, db, transition.person_id, transition.created_by_caregiver_id
     )
- _require_full_record_access(request)
+    _require_full_record_access(request)
     if transition.created_by_caregiver_id and str(transition.created_by_caregiver_id) != str(session_caregiver_id):
         raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
     _require_person_and_linked_caregiver(
@@ -2275,7 +2275,8 @@ def get_care_transition_sequence(person_id: str, transition_type: str, request: 
 @router.post("/locations", response_model=LocationSchema)
 def create_location(location: LocationCreate, request: Request, db: Session = Depends(get_db)):
     session_person_id, session_caregiver_id = _require_session_scope(request, db, location.person_id)
- _require_full_record_access(request)
+    _require_full_record_access(request)
+    _require_person_and_linked_caregiver(db, session_person_id, session_caregiver_id)
     location_payload = location.model_dump()
     # The API schema intentionally does not accept a caller-selected actor.
     # Persist attribution from the validated server session instead.
@@ -2426,10 +2427,11 @@ def create_timezone_context(
     if request is None:
         raise HTTPException(status_code=401, detail="A valid care session is required")
     session_person_id, session_caregiver_id = _require_session_scope(request, db, person_id)
- _require_full_record_access(request)
+    _require_full_record_access(request)
     if caregiver_id and str(caregiver_id) != str(session_caregiver_id):
         raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
     caregiver_id = session_caregiver_id
+    _require_person_and_linked_caregiver(db, session_person_id, session_caregiver_id)
     if not validate_timezone(timezone_id):
         raise HTTPException(status_code=400, detail="Invalid or unsupported timezone")
 
