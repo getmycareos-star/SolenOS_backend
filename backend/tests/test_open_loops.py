@@ -872,6 +872,17 @@ def test_open_loop_offset_pagination_returns_stable_complete_pages():
     ]
 
     first = client.get("/api/v1/open-loops?limit=2&offset=0", headers=headers)
+    # A mutable deadline/status/update timestamp must not move an existing
+    # row across the page boundary while the caregiver loads the next page.
+    changed_between_pages = client.patch(
+        f"/api/v1/open-loops/{created[0]['id']}",
+        headers=headers,
+        json={
+            "description": "Edited while the next page is loading",
+            "idempotency_key": "pagination-update-between-pages",
+        },
+    )
+    assert changed_between_pages.status_code == 200, changed_between_pages.text
     second = client.get("/api/v1/open-loops?limit=2&offset=2", headers=headers)
     repeated_first = client.get("/api/v1/open-loops?limit=2&offset=0", headers=headers)
 
