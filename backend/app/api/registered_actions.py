@@ -70,6 +70,15 @@ def _session_scope(request: Request, db: Session) -> tuple[str, str]:
     ).first()
     if caregiver is None:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+    grant = db.query(CaregiverAccessGrant.id).filter(
+        CaregiverAccessGrant.person_id == session.person_id,
+        CaregiverAccessGrant.caregiver_id == session.caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.access_scope == "full_record",
+    ).first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="Active full care-record access is required")
     return str(session.person_id), str(session.caregiver_id)
 
 
