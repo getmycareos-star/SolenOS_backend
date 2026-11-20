@@ -30,7 +30,7 @@ class CareWindow(CareWindowBase):
 class AppointmentBase(BaseModel):
     person_id: str
     title: str
-    scheduled_at: datetime
+    scheduled_at: Optional[datetime] = None
     scheduled_at_timezone: Optional[str] = None
     location: Optional[str] = None
     location_type: Optional[str] = None
