@@ -131,6 +131,16 @@ def main() -> int:
     model_tables = sorted(Base.metadata.tables)
     unmanaged_tables = sorted(set(database_tables) - set(model_tables) - {"alembic_version"})
     missing_model_tables = sorted(set(model_tables) - set(database_tables))
+    unexpected_columns = {}
+    for table_name in sorted(set(model_tables) & set(database_tables)):
+        actual = {
+            column["name"]
+            for column in inspector.get_columns(table_name, schema="public")
+        }
+        expected = set(Base.metadata.tables[table_name].columns.keys())
+        extra = sorted(actual - expected)
+        if extra:
+            unexpected_columns[table_name] = extra
 
     with engine.connect() as connection:
         migration_context = MigrationContext.configure(connection)
@@ -158,8 +168,13 @@ def main() -> int:
     enums = inspector.get_enums(schema="public") if hasattr(inspector, "get_enums") else []
     single_head = len(expected_heads) == 1
     migration_current = current_heads == expected_heads
-    schema_current = not drift and not missing_model_tables
-    status = "passed" if single_head and migration_current and schema_current else "failed"
+    schema_current = (
+        not drift
+        and not missing_model_tables
+        and not unmanaged_tables
+        and not unexpected_columns
+    )
+    status = "passed" if single_head and migration_current and schema_current else "review_required"
 
     report = {
         "status": status,
@@ -175,6 +190,7 @@ def main() -> int:
             "table_count": len(database_tables),
             "unmanaged_tables_requiring_ownership_review": unmanaged_tables,
             "missing_orm_tables": missing_model_tables,
+            "unexpected_columns_by_table": unexpected_columns,
             "triggers": [dict(item) for item in triggers],
         },
         "orm": {
@@ -199,7 +215,7 @@ def main() -> int:
             ],
         },
         "warnings": [
-            "Unmanaged tables require explicit ownership review; they are not silently classified as errors.",
+            "Unmanaged tables and extra columns require explicit ownership review before a clean release gate.",
             "This report describes schema structure only and does not inspect caregiver data or prove workflow behavior.",
         ],
     }
