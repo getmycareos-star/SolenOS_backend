@@ -26,6 +26,7 @@ from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.services.document_binary_storage import read_document_binary
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.capture_analysis import CaptureAnalysis
@@ -62,10 +63,10 @@ def _identity(request: Request, db: Session) -> tuple[str, str]:
 
 def _verified_content(upload: EvidenceUpload) -> bytes:
     """Verify the persisted original before both first extraction and cached retries."""
-    content = bytes(upload.content)
-    if len(content) != upload.size_bytes or hashlib.sha256(content).hexdigest() != upload.sha256:
-        raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
-    return content
+    try:
+        return read_document_binary(upload)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check") from exc
 
 
 def _ocr_image(image: Image.Image) -> str:
