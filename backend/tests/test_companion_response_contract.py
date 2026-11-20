@@ -18,6 +18,7 @@ from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
 from app.services.unified_lcr_retrieval import _conversation_context
+from app.services.lcr_context import format_lcr_context_for_prompt
 
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
@@ -2934,6 +2935,37 @@ def test_multi_topic_caregiver_history_is_source_quoted_when_inference_is_unavai
         assert data["persistence"] == "conversation_only"
     finally:
         teardown()
+
+
+def test_lcr_prompt_serialization_preserves_source_identity_for_receipts_and_citations():
+    context = {
+        "schema_status": "complete",
+        "history_coverage": "query_scanned_ranked_subset",
+        "retrieval_scan_complete": True,
+        "retrieval_projection_complete": True,
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "sources": {
+            "events": {
+                "status": "available",
+                "returned_count": 1,
+                "candidate_count": 1,
+                "candidate_scan_complete": True,
+                "has_more": False,
+                "items": [{"id": "event-1", "title": "Sleep observation"}],
+            },
+        },
+    }
+    prompt = format_lcr_context_for_prompt(context)
+    record_line = next(line for line in prompt.splitlines() if line.startswith("{"))
+    payload = json.loads(record_line)
+
+    assert payload["source_type"] == "events"
+    assert payload["source_id"] == "event-1"
+    assert payload["record"]["id"] == "event-1"
+    assert collaboration._context_record_refs([record_line]) == [
+        {"record_type": "care_event", "record_id": "event-1"}
+    ]
 
 
 def test_retrieval_receipt_distinguishes_retrieval_from_prompt_inclusion():
