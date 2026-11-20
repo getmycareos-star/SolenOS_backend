@@ -6,6 +6,7 @@ fails after the correction receipt commits; the retry must recover that same
 receipt, not create another correction.
 """
 from datetime import datetime, timedelta, timezone
+import os
 import hashlib
 import uuid
 

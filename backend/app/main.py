@@ -632,9 +632,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                     return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
 
                 # The legacy situation-capture UI has no server person ID yet.
-                # Bind its write to the authenticated session rather than
-                # trusting the client-generated caregiver key as identity.
-                if path.endswith("/situation") and method in {"POST", "PATCH"}:
+                # Bind only creation writes to the authenticated session. PATCH
+                # updates carry explicit caregiver attribution and must be rejected
+                # if it differs from the bearer-bound caregiver.
+                if path.endswith("/situation") and method == "POST":
                     if supplied_person_id and str(supplied_person_id) != str(scoped_person_id):
                         return JSONResponse(status_code=403, content={"detail": "This session is not authorised for that care record"})
                     if method == "POST" and payload.get("caregiver_id"):
