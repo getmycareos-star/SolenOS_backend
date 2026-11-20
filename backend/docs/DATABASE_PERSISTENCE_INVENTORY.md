@@ -77,9 +77,11 @@ No new table was added. The implementation reuses the authoritative `persons`, `
 2. Current-main PostgreSQL migration validation passes from a clean legacy schema and from the current migration head.
 3. The PostgreSQL care-profile lifecycle test passes, including invited caregiver visibility and per-caregiver relationship separation.
 4. Frontend typecheck, regression suite and production build pass.
-5. Browser E2E uses the PostgreSQL-backed backend and proves profile persistence across refresh and a new account session.
-6. Production `/ready` reports the expected migration head and schema contract; a real authenticated production read/write/readback test is completed without exposing real caregiver data.
-7. Backup restore is rehearsed and verified against PostgreSQL.
-8. Every category marked Partially implemented, Blocked or Not implemented is closed or explicitly excluded from the active MVP surface.
+5. Browser E2E uses the PostgreSQL-backed backend and proves profile persistence across refresh/new account session, server-only situation hydration, and Companion conversation restoration when the device-local pointer is absent.
+6. PostgreSQL integration proves Companion conversation listing after bearer refresh and denies access across caregiver/person scopes.
+7. Migration tests prove legacy notification attempt backfills, caregiver-context ORM alignment, and zero schema-contract differences after upgrade.
+8. Production `/ready` reports the expected migration head and schema contract; a real authenticated production read/write/readback test is completed without exposing real caregiver data.
+9. Backup restore is rehearsed and verified against PostgreSQL.
+10. Every category marked Partially implemented, Blocked or Not implemented is closed or explicitly excluded from the active MVP surface.
 
 **Current release decision:** NOT VERIFIED. Production database access and the latest main-branch CI results are not yet available as passing evidence. No 9/10 reliability score is asserted.
