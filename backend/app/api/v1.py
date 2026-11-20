@@ -172,7 +172,18 @@ def _require_session_scope(request: Request, db: Session, person_id: str, caregi
         if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
         else "view_lcr"
     )
-    require_caregiver_permission(db, str(session.person_id), str(session.caregiver_id), required_permission)
+    grant = require_caregiver_permission(db, str(session.person_id), str(session.caregiver_id), required_permission)
+    # Bind the request identity from the bearer session after this helper has
+    # independently validated its token and requested record scope. Endpoints
+    # that use this helper must not depend on middleware-only request state when
+    # enforcing their second, operation-specific permission.
+    request.state.anonymous_session_id = session.id
+    request.state.scoped_person_id = str(session.person_id)
+    request.state.scoped_caregiver_id = str(session.caregiver_id)
+    request.state.caregiver_access_grant_id = grant.id
+    request.state.caregiver_access_role = grant.role
+    request.state.caregiver_access_scope = grant.access_scope or "full_record"
+    request.state.caregiver_can_manage_members = bool(grant.can_manage_members)
     return session
 
 
