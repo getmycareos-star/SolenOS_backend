@@ -245,39 +245,15 @@ def get_person(person_id: str, request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/caregivers", response_model=CaregiverSchema)
-def create_caregiver(
-    caregiver: CaregiverCreate,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    # A browser-supplied person_id is only a reference. The active server-issued
-    # bearer session must already be linked to this exact care record.
-    _require_session_scope(request, db, caregiver.person_id)
-    _require_full_record_access(request)
-    person = db.query(PersonModel).filter(PersonModel.id == caregiver.person_id).first()
-    if not person:
-        raise HTTPException(status_code=404, detail="Person not found")
-    existing = (db.query(CaregiverModel).filter(CaregiverModel.email == caregiver.email).first() if caregiver.email else None)
-    if existing:
-        raise HTTPException(status_code=409, detail="A caregiver with this email already exists")
-    db_caregiver = CaregiverModel(**caregiver.model_dump())
-    db.add(db_caregiver)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Caregiver email conflicts with an existing record") from exc
-    db.refresh(db_caregiver)
-    _log_and_learn(
-        db,
-        db_caregiver.person_id,
-        "caregiver_added",
-        f"Added caregiver {db_caregiver.name}",
-        "api",
-        caregiver_id=db_caregiver.id,
+def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
+    # This legacy endpoint creates an unverified caregiver row without an
+    # invitation, acceptance or CaregiverAccessGrant. The canonical family
+    # membership workflow lives in /caregiver-access and is the only supported
+    # path for adding another caregiver.
+    raise HTTPException(
+        status_code=410,
+        detail="This legacy endpoint is disabled. Add family caregivers through the caregiver-access invitation flow.",
     )
-    return db_caregiver
-
 
 @router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema])
 def list_caregivers(person_id: str, request: Request, db: Session = Depends(get_db)):
