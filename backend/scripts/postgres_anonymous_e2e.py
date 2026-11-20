@@ -2998,6 +2998,25 @@ def main():
             f"Foreign caregiver could read Daily Care history after restart: {foreign_daily_history_status}: {foreign_daily_history}",
         )
 
+        restarted_situation_status, restarted_situation = request(
+            "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
+        )
+        restarted_situation_assessment = (restarted_situation or {}).get("assessment") or {}
+        restarted_significance_item = next(
+            (item for item in restarted_situation_assessment.get("care_attention", {}).get("important_to_address", [])
+             if item.get("record_id") == care_change_id),
+            None,
+        )
+        require(
+            restarted_situation_status == 200
+            and (restarted_situation or {}).get("source_freshness", {}).get("status") == "current_for_bounded_source_view"
+            and restarted_significance_item is not None
+            and restarted_significance_item.get("evidence_confidence") == 0.55
+            and restarted_significance_item.get("action_status") == "closed"
+            and restarted_significance_item.get("linked_follow_up_id") == linked_follow_up_id,
+            f"PostgreSQL significance, follow-up state, or freshness did not survive Uvicorn restart: {restarted_situation_status}: {restarted_significance_item}",
+        )
+
         # Verify the same restored account and all its data after an actual server restart.
         restarted_login_status, restarted_login = request(
             "POST", "/api/v1/accounts/login",
@@ -3105,6 +3124,7 @@ def main():
         )
 
         print("PASS: PostgreSQL readiness, anonymous session creation, durable capture/hydration,")
+        print("      care-significance/evidence separation, follow-up linkage and freshness invalidation,")
         print("      cross-record denial, token rotation, and persistence after Uvicorn restart.")
     finally:
         if server.poll() is None:
