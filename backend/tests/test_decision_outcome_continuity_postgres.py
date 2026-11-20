@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.main import app
 import app.main as main_module
 from app.models.care import CareEvent, Evidence
+from app.models.care_continuity import CareStateRevision
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(
@@ -263,6 +264,27 @@ def test_decision_outcome_revision_follow_up_fresh_session_and_person_isolation(
             assert revised.status_code == 200, revised.text
             assert revised.json()["decision_text"].endswith("three days each week.")
             assert revised.json()["context"]["reason"] == "Evening coverage was difficult"
+
+            # Both the Core-written decision/outcome sources and the legacy
+            # decision revision projection must be represented in the unified
+            # as-of ledger used by LCR reconstruction and Delta invalidation.
+            with Session(engine) as db:
+                decision_state_revisions = db.query(CareStateRevision).filter(
+                    CareStateRevision.person_id == person_id,
+                    CareStateRevision.target_type == "care_decisions",
+                    CareStateRevision.target_id == decision_id,
+                ).order_by(CareStateRevision.revision_number.asc()).all()
+                outcome_state_revisions = db.query(CareStateRevision).filter(
+                    CareStateRevision.person_id == person_id,
+                    CareStateRevision.target_type == "decision_outcomes",
+                    CareStateRevision.target_id == outcome.json()["id"],
+                ).all()
+                assert [row.revision_number for row in decision_state_revisions] == [1, 2]
+                assert decision_state_revisions[0].before_state is None
+                assert decision_state_revisions[1].before_state
+                assert len(outcome_state_revisions) == 1
+                assert outcome_state_revisions[0].revision_number == 1
+                assert outcome_state_revisions[0].after_state
 
             revisions = client.get("/api/v1/care-continuity/decision-revisions", headers=headers)
             assert revisions.status_code == 200, revisions.text
