@@ -4598,6 +4598,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 db.query(CaptureAnalysis)
                 .filter(
                     CaptureAnalysis.person_id == person_id,
+                    CaptureAnalysis.caregiver_id.in_(visible_document_uploaders),
+                    CaptureAnalysis.extraction_status == "available",
                 )
                 .order_by(CaptureAnalysis.created_at.desc())
                 .limit(30)
@@ -4611,6 +4613,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     EvidenceModel.id == analysis.source_evidence_id,
                     EvidenceModel.person_id == person_id,
                     EvidenceModel.type == "document",
+                    EvidenceModel.uploaded_by_caregiver_id == analysis.caregiver_id,
                     EvidenceModel.uploaded_by_caregiver_id.in_(visible_document_uploaders),
                     (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
                 ).first()
