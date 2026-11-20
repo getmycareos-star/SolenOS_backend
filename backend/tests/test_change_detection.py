@@ -1312,12 +1312,23 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
         assert transitions[0].evidence_ids == [evidence_id]
         db.close()
 
+        exact_retry = client.post(
+            url,
+            json={"status": "confirmed", "reason": "Caregiver reviewed the linked observations.", "evidence_ids": [evidence_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert exact_retry.status_code == 200, exact_retry.text
+        assert exact_retry.json()["transition_id"] == payload["transition_id"]
+        db = TestingSessionLocal()
+        assert db.query(ChangeConfirmationEvent).filter(ChangeConfirmationEvent.change_id == change_id).count() == 1
+        db.close()
+
         invalid_repeat = client.post(
             url,
             json={"status": "confirmed", "reason": "Repeated confirmation.", "evidence_ids": []},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert invalid_repeat.status_code == 409
+        assert invalid_repeat.status_code == 422
 
         missing_reason = client.post(
             url,
@@ -1325,6 +1336,89 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
             headers={"Authorization": f"Bearer {token}"},
         )
         assert missing_reason.status_code == 422
+    finally:
+        teardown_db()
+
+
+
+def test_change_confirmation_accepts_same_person_saved_evidence_and_rejects_other_person_evidence():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-confirm-evidence", name="Evidence recipient")
+        caregiver = Caregiver(
+            id="caregiver-confirm-evidence",
+            name="Evidence caregiver",
+            email="evidence@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="person-confirm-evidence-other", name="Other recipient")
+        other_caregiver = Caregiver(
+            id="caregiver-confirm-evidence-other",
+            name="Other caregiver",
+            email="evidence-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        own_evidence = Evidence(
+            person_id=person.id,
+            type="note",
+            source_text="Caregiver reported a change.",
+            uploaded_by_caregiver_id=caregiver.id,
+            occurred_at=now,
+        )
+        other_evidence = Evidence(
+            person_id=other_person.id,
+            type="note",
+            source_text="Unrelated source.",
+            uploaded_by_caregiver_id=other_caregiver.id,
+            occurred_at=now,
+        )
+        db.add_all([own_evidence, other_evidence])
+        db.flush()
+        change = Change(
+            id="change-confirm-evidence",
+            person_id=person.id,
+            subject_type="care_recipient",
+            subject_id=person.id,
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            previous_state="Earlier information",
+            current_state="New caregiver report",
+            evidence_ids=[own_evidence.id],
+            explanation="Source-linked change candidate.",
+            confirmation_status="detected",
+            is_active=True,
+        )
+        db.add(change)
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        change_id = change.id
+        own_id = own_evidence.id
+        other_id = other_evidence.id
+        db.close()
+
+        client = TestClient(app)
+        url = f"/api/v1/change/changes/{person.id}/{change_id}/confirmation"
+        denied = client.post(
+            url,
+            json={"status": "confirmed", "reason": "Reviewed source.", "evidence_ids": [other_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert denied.status_code == 422
+        accepted = client.post(
+            url,
+            json={"status": "confirmed", "reason": "Reviewed source.", "evidence_ids": [own_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["change"]["confirmation_status"] == "confirmed"
     finally:
         teardown_db()
 

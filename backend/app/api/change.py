@@ -376,27 +376,14 @@ def transition_change_confirmation(
                 detail="A resolution decision must reference the saved source records being reviewed",
             )
     previous_status = change.confirmation_status or "detected"
-    transitions = {
-        "detected": {"awaiting_confirmation", "confirmed", "rejected", "inconclusive", "resolved"},
-        "awaiting_confirmation": {"confirmed", "rejected", "inconclusive", "resolved"},
-        "confirmed": {"awaiting_confirmation", "resolved"},
-        "resolved": {"awaiting_confirmation"},
-        "rejected": {"awaiting_confirmation"},
-        "inconclusive": {"awaiting_confirmation"},
-    }
-    if payload.status not in transitions.get(previous_status, set()):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Invalid confirmation transition from {previous_status} to {payload.status}",
-        )
-
-    if payload.status == "confirmed" and not payload.evidence_ids:
+    normalized_reason = (payload.reason or "").strip() or None
+    supplied_evidence_ids = sorted(set(payload.evidence_ids or []))
+    if payload.status == "confirmed" and not supplied_evidence_ids:
         raise HTTPException(
             status_code=422,
-            detail="At least one persisted source event or assertion is required to confirm a change",
+            detail="At least one saved source record is required to confirm a change",
         )
 
-    supplied_evidence_ids = list(dict.fromkeys(payload.evidence_ids))
     if payload.status == "resolved" and not set(supplied_evidence_ids).issubset(
         set(change.evidence_ids or [])
     ):
@@ -426,12 +413,62 @@ def transition_change_confirmation(
                 EvidenceObservation.id.in_(supplied_evidence_ids),
             ).all()
         }
-        valid_ids = valid_event_ids | valid_assertion_ids | valid_observation_ids
+        valid_source_evidence_ids = {
+            row[0]
+            for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(supplied_evidence_ids),
+            ).all()
+        }
+        valid_ids = valid_event_ids | valid_assertion_ids | valid_observation_ids | valid_source_evidence_ids
         if valid_ids != set(supplied_evidence_ids):
             raise HTTPException(
                 status_code=422,
-                detail="Every confirmation evidence reference must identify a persisted event or assertion in this care record",
+                detail="Every confirmation reference must identify a saved source in this care record",
             )
+
+    # An exact retry returns the original transition instead of creating a
+    # duplicate event or a misleading conflict. The row lock above serializes
+    # concurrent requests for this change before this check.
+    existing_transition = (
+        db.query(ChangeConfirmationEvent)
+        .filter(
+            ChangeConfirmationEvent.change_id == change.id,
+            ChangeConfirmationEvent.person_id == person_id,
+            ChangeConfirmationEvent.actor_caregiver_id == session.caregiver_id,
+            ChangeConfirmationEvent.new_status == payload.status,
+        )
+        .order_by(ChangeConfirmationEvent.created_at.desc(), ChangeConfirmationEvent.id.desc())
+        .first()
+    )
+    if (
+        change.confirmation_status == payload.status
+        and existing_transition is not None
+        and existing_transition.reason == normalized_reason
+        and sorted(existing_transition.evidence_ids or []) == supplied_evidence_ids
+    ):
+        return ChangeConfirmationTransitionResponse(
+            change=change,
+            transition_id=existing_transition.id,
+            previous_status=existing_transition.previous_status,
+            new_status=existing_transition.new_status,
+            actor_caregiver_id=session.caregiver_id,
+            created_at=existing_transition.created_at,
+        )
+
+    transitions = {
+        "detected": {"awaiting_confirmation", "confirmed", "rejected", "inconclusive", "resolved"},
+        "awaiting_confirmation": {"confirmed", "rejected", "inconclusive", "resolved"},
+        "confirmed": {"awaiting_confirmation", "resolved"},
+        "resolved": {"awaiting_confirmation"},
+        "rejected": {"awaiting_confirmation"},
+        "inconclusive": {"awaiting_confirmation"},
+    }
+    if payload.status not in transitions.get(previous_status, set()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid confirmation transition from {previous_status} to {payload.status}",
+        )
 
     transition = ChangeConfirmationEvent(
         change_id=change.id,
@@ -439,7 +476,7 @@ def transition_change_confirmation(
         actor_caregiver_id=session.caregiver_id,
         previous_status=previous_status,
         new_status=payload.status,
-        reason=(payload.reason or "").strip() or None,
+        reason=normalized_reason,
         evidence_ids=supplied_evidence_ids,
     )
     change.confirmation_status = payload.status
