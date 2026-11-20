@@ -670,12 +670,6 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     body = saved.json()
     process_daily_capture_job(body["qwen_job_id"], monkeypatch)
 
-    account = client.post(
-        "/api/v1/accounts",
-        headers=first_auth,
-        json={"email": "shared-reviewer@example.com", "password": "another-long-password-789"},
-    )
-    assert account.status_code == 201, account.text
     invitation = client.post(
         "/api/v1/caregiver-access/invitations",
         headers=first_auth,
