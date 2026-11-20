@@ -647,6 +647,7 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
 @router.get("/directory/recipients")
 def list_handoff_recipients(request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     if not _has_required_consent(db, person_id, caregiver_id):
         db.add(AuditLogEvent(
             id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
@@ -687,6 +688,7 @@ def list_handoff_recipients(request: Request, db: Session = Depends(get_db)):
 @router.get("/inbox")
 def list_handoff_inbox(request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     if not _has_required_consent(db, person_id, caregiver_id):
         db.add(AuditLogEvent(
             id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
@@ -755,6 +757,7 @@ def list_handoff_inbox(request: Request, db: Session = Depends(get_db)):
 @router.get("/outbox")
 def list_handoff_outbox(request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     # Owners must retain a narrow management path after consent is revoked so
     # they can locate and revoke existing shares. The outbox never returns summary
     # contents, and recipient access remains blocked by the read endpoints.
@@ -806,6 +809,7 @@ def list_handoff_outbox(request: Request, db: Session = Depends(get_db)):
 @router.get("/{handoff_id}")
 def get_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     handoff = db.query(HandoffRecord).filter(
         HandoffRecord.id == handoff_id, HandoffRecord.person_id == person_id
     ).first()
@@ -1046,6 +1050,7 @@ def acknowledge_handoff(handoff_id: str, payload: HandoffAcknowledge, request: R
 @router.post("/{handoff_id}/revoke")
 def revoke_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     handoff = db.query(HandoffRecord).filter(
         HandoffRecord.id == handoff_id, HandoffRecord.person_id == person_id
     ).first()
