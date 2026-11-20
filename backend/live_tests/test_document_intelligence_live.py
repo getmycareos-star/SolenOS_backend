@@ -163,6 +163,61 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         finally:
             db.close()
 
+        # Historical and tentative document statements must also enter the
+        # canonical LCR only after explicit caregiver approval.
+        historical_text = next(
+            case["text"] for case in semantic_dataset["cases"]
+            if case["id"] == "previous-diagnosis"
+        )
+        historical_index = next(
+            index for index, candidate in enumerate(candidates)
+            if historical_text in candidate["source_quote"]
+        )
+        historical_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=headers,
+            json={"candidate_index": historical_index, "decision": "accept"},
+        )
+        assert historical_review.status_code == 200, historical_review.text
+        assert historical_review.json()["written_to_lcr"] is True
+        historical_assertion_id = historical_review.json()["source_record_ref"]["record_id"]
+
+        tentative_text = next(
+            case["text"] for case in semantic_dataset["cases"]
+            if case["id"] == "possible-condition"
+        )
+        tentative_index = next(
+            index for index, candidate in enumerate(candidates)
+            if tentative_text in candidate["source_quote"]
+        )
+        tentative_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=headers,
+            json={"candidate_index": tentative_index, "decision": "accept"},
+        )
+        assert tentative_review.status_code == 200, tentative_review.text
+        assert tentative_review.json()["written_to_lcr"] is True
+        tentative_assertion_id = tentative_review.json()["source_record_ref"]["record_id"]
+
+        db = TestingSessionLocal()
+        try:
+            historical_assertion = db.query(CareAssertion).filter_by(
+                id=historical_assertion_id,
+                person_id=session["person"]["id"],
+            ).one()
+            assert historical_assertion.source_context["document_candidate"]["temporal_context"] == "historical"
+            tentative_assertion = db.query(CareAssertion).filter_by(
+                id=tentative_assertion_id,
+                person_id=session["person"]["id"],
+            ).one()
+            assert tentative_assertion.source_context["document_candidate"]["modality"] == "tentative"
+            accepted_assertion_count = db.query(CareAssertion).filter_by(
+                person_id=session["person"]["id"],
+            ).count()
+            assert accepted_assertion_count == 3
+        finally:
+            db.close()
+
         # The accepted document assertion must be available to the same caregiver's
         # real-Qwen Companion response, with the original upload retained as source.
         companion = client.post(
@@ -194,6 +249,38 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             ), grounded
         assert grounded.get("written_to_lcr") is False, grounded
 
+        historical_companion = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": session["person"]["id"],
+                "text": "What does the discharge document say about the person's previous Parkinson's diagnosis? Is it described as current?",
+            },
+        )
+        assert historical_companion.status_code == 200, historical_companion.text
+        historical_payload = historical_companion.json()
+        assert evidence_id in historical_payload.get("source_evidence_ids", [])
+        assert analysis_id in historical_payload.get("source_document_analysis_ids", [])
+        assert historical_assertion_id in historical_payload.get("source_assertion_ids", [])
+        historical_reply = historical_payload.get("reply", "").casefold()
+        assert any(term in historical_reply for term in ("previous", "history", "historical")), historical_payload
+
+        tentative_companion = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": session["person"]["id"],
+                "text": "What does the discharge document say about pneumonia? Is the condition confirmed or only suspected?",
+            },
+        )
+        assert tentative_companion.status_code == 200, tentative_companion.text
+        tentative_payload = tentative_companion.json()
+        assert evidence_id in tentative_payload.get("source_evidence_ids", [])
+        assert analysis_id in tentative_payload.get("source_document_analysis_ids", [])
+        assert tentative_assertion_id in tentative_payload.get("source_assertion_ids", [])
+        tentative_reply = tentative_payload.get("reply", "").casefold()
+        assert any(term in tentative_reply for term in ("possible", "suspected", "suspects", "not confirmed")), tentative_payload
+
         total_gold = len(semantic_dataset["cases"])
         temporal_correct = sum(
             canonical["temporal_context"] == case["expected"]["temporal_context"]
@@ -221,7 +308,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
                     "source_quote_accuracy": 1.0,
                     "unsupported_candidate_rate": 0.0,
                     "companion_lcr_assertion_retrieval": True,
-                    "accepted_assertion_count": 1,
+                    "accepted_assertion_count": accepted_assertion_count,
                     "duplicate_assertion_count": 0,
                 },
                 sort_keys=True,
