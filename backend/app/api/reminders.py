@@ -84,6 +84,17 @@ def _assignment_audit(person_id: str, actor_id: str, reminder_id: str, previous_
     )
 
 
+def _commit_reminder_update(db: Session) -> None:
+    try:
+        db.commit()
+    except StaleDataError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This reminder changed concurrently. Refresh before trying again.",
+        )
+
+
 @router.post("/reminders", response_model=CareReminderRead, status_code=201)
 def create_reminder(payload: CareReminderCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _session_scope(request, db)
@@ -109,7 +120,7 @@ def create_reminder(payload: CareReminderCreate, request: Request, db: Session =
     db.add(reminder)
     db.flush()
     db.add(_assignment_audit(person_id, caregiver_id, reminder.id, None, assignee_id))
-    db.commit()
+    _commit_reminder_update(db)
     db.refresh(reminder)
     return reminder
 
@@ -138,11 +149,7 @@ def reassign_reminder(
         return reminder
     reminder.assigned_to_caregiver_id = payload.assigned_to_caregiver_id
     db.add(_assignment_audit(person_id, actor_id, reminder.id, previous_id, payload.assigned_to_caregiver_id))
-    try:
-        db.commit()
-    except StaleDataError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="This reminder changed concurrently. Refresh before retrying.")
+    _commit_reminder_update(db)
     db.refresh(reminder)
     return reminder
 
@@ -176,6 +183,7 @@ def complete_reminder(
     reminder = (
         db.query(CareReminder)
         .filter(CareReminder.id == reminder_id, CareReminder.person_id == person_id)
+        .with_for_update()
         .first()
     )
     if reminder is None:
