@@ -214,6 +214,7 @@ def snooze_reminder(
     reminder = (
         db.query(CareReminder)
         .filter(CareReminder.id == reminder_id, CareReminder.person_id == person_id)
+        .with_for_update()
         .first()
     )
     if reminder is None:
@@ -247,6 +248,7 @@ def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(ge
     reminder = (
         db.query(CareReminder)
         .filter(CareReminder.id == reminder_id, CareReminder.person_id == person_id)
+        .with_for_update()
         .first()
     )
     if reminder is None:
