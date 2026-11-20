@@ -1266,8 +1266,12 @@ async def upload_evidence(
     document_job_status = "not_applicable"
     if evidence_type == "document":
         document_job_status = "queue_unavailable"
-        savepoint = db.begin_nested()
+        savepoint = None
         try:
+            # begin_nested flushes pending evidence/blob metadata before opening
+            # the savepoint. If that flush itself fails, the original upload is
+            # not durable and the external object must be compensated below.
+            savepoint = db.begin_nested()
             document_job = _ensure_document_intake_job(
                 db, scoped_person_id, scoped_caregiver_id, persisted_evidence_id
             )
@@ -1276,9 +1280,24 @@ async def upload_evidence(
                 document_job_status = str(document_job.status)
             savepoint.commit()
         except Exception:
-            savepoint.rollback()
+            if savepoint is not None:
+                try:
+                    savepoint.rollback()
+                except Exception:
+                    logger.exception("Document intake savepoint rollback failed for evidence %s", persisted_evidence_id)
             document_job_id = None
             document_job_status = "queue_unavailable"
+            if not db.is_active:
+                db.rollback()
+                if stored_binary["storage_backend"] == "s3":
+                    try:
+                        await asyncio.to_thread(delete_document_object, "s3", stored_binary["storage_key"])
+                    except Exception:
+                        logger.exception("Unreferenced document object cleanup failed for evidence %s", persisted_evidence_id)
+                raise HTTPException(
+                    status_code=503,
+                    detail="The original document could not be committed. Nothing was marked as saved.",
+                )
             logger.exception("Document processing could not be queued for evidence %s", persisted_evidence_id)
 
     # Commit the immutable original, its storage pointer, and any successfully
