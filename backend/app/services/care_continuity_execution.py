@@ -108,8 +108,8 @@ def execute_care_continuity_reconciliation(
         source_authors = {
             str(value)
             for value in (
-                [event.created_by_caregiver_id for event in events]
-                + [item.uploaded_by_caregiver_id for item in evidence_rows]
+                [getattr(event, "created_by_caregiver_id", None) for event in events]
+                + [getattr(item, "uploaded_by_caregiver_id", None) for item in evidence_rows]
             )
             if value
         }
@@ -117,14 +117,14 @@ def execute_care_continuity_reconciliation(
             resolved_source_caregiver_id = next(iter(source_authors))
 
     if source_caregiver_id and any(
-        str(event.created_by_caregiver_id) != str(source_caregiver_id)
+        str(getattr(event, "created_by_caregiver_id", None)) != str(source_caregiver_id)
         for event in events
     ):
         raise CareContinuityExecutionError(
             "A source event was not created by the authenticated caregiver"
         )
     if source_caregiver_id and any(
-        str(item.uploaded_by_caregiver_id) != str(source_caregiver_id)
+        str(getattr(item, "uploaded_by_caregiver_id", None)) != str(source_caregiver_id)
         for item in evidence_rows
     ):
         raise CareContinuityExecutionError(
