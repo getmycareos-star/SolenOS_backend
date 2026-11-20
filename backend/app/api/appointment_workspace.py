@@ -13,7 +13,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import text, inspect
+from sqlalchemy import text, inspect, case
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -376,7 +376,13 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             OpenLoopRecord.person_id == person_id,
             OpenLoopRecord.status.notin_(["closed", "cancelled"]),
         ).order_by(
-            OpenLoopRecord.priority.desc(),
+            case(
+                (OpenLoopRecord.priority.in_(["critical", "urgent"]), 0),
+                (OpenLoopRecord.priority == "high", 1),
+                (OpenLoopRecord.priority == "normal", 2),
+                (OpenLoopRecord.priority == "low", 3),
+                else_=4,
+            ),
             OpenLoopRecord.updated_at.desc(),
         ).limit(41).all()
         open_loops_has_more = len(fetched_open_loops) > 40
