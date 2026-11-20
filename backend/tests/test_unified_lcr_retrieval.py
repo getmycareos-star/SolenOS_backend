@@ -123,7 +123,10 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
     try:
         metadata = ConversationSession.metadata
         with Session(bind=connection) as db:
-            db.add(Person(id="fact-lineage-person", name="Care recipient"))
+            db.add_all([
+                Person(id="fact-lineage-person", name="Care recipient"),
+                Person(id="other-fact-person", name="Other care recipient"),
+            ])
             db.flush()
             db.add(Caregiver(
                 id="fact-lineage-caregiver", name="Caregiver",
@@ -143,14 +146,25 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
                     "review_notes": None,
                 }],
             )
-            db.execute(metadata.tables["evidence"].insert(), {
-                "id": "fact-source-evidence", "person_id": "fact-lineage-person",
-            })
+            db.execute(metadata.tables["evidence"].insert(), [
+                {"id": "fact-source-evidence", "person_id": "fact-lineage-person"},
+                {"id": "other-person-evidence", "person_id": "other-fact-person"},
+            ])
+            db.execute(metadata.tables["care_fact_evidence"].insert(), [
+                {
+                    "person_id": "fact-lineage-person", "fact_id": "fact-with-source",
+                    "evidence_id": "fact-source-evidence", "evidence_role": "supports",
+                    "source_span": "Caregiver reported overnight waking.", "created_at": now,
+                },
+                {
+                    # Even a malformed cross-person link row must not make the
+                    # other person's evidence visible in this person's LCR.
+                    "person_id": "fact-lineage-person", "fact_id": "fact-with-source",
+                    "evidence_id": "other-person-evidence", "evidence_role": "supports",
+                    "source_span": "Private information for another person.", "created_at": now,
+                },
+            ])
             db.execute(metadata.tables["care_fact_evidence"].insert(), {
-                "person_id": "fact-lineage-person", "fact_id": "fact-with-source",
-                "evidence_id": "fact-source-evidence", "evidence_role": "supports",
-                "source_span": "Caregiver reported overnight waking.", "created_at": now,
-            })
             db.commit()
             from app.services.lcr_context import _load_source_schema
             _load_source_schema.cache_clear()
