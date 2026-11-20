@@ -1294,6 +1294,8 @@ def test_session_derived_caregiver_network_reads_use_bearer_scope():
         assert cross_record.status_code == 403, cross_record.text
         cross_record_path = client.get("/api/v1/multi-caregiver-summary/another-person")
         assert cross_record_path.status_code == 403, cross_record_path.text
+        cross_state_path = client.get("/api/v1/care-network-state/another-person")
+        assert cross_state_path.status_code == 403, cross_state_path.text
         cross_state = client.get(
             "/api/v1/care-network-state",
             params={"person_id": "another-person"},
