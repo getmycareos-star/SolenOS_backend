@@ -724,3 +724,47 @@ def test_member_permissions_cannot_grant_membership_administration():
         json={"permissions": ["view_lcr", "manage_members"]},
     )
     assert denied.status_code == 422, denied.text
+
+
+
+def test_invitation_is_invalidated_when_inviting_administrator_loses_authority():
+    client = TestClient(app)
+    primary = create_primary(client)
+    owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    created = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "pending-invitee@example.com"},
+    )
+    assert created.status_code == 201, created.text
+    invite = created.json()
+
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=primary["person"]["id"],
+            caregiver_id=primary["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        db.commit()
+    finally:
+        db.close()
+
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite["invitation_token"],
+            "email": "pending-invitee@example.com",
+            "password": "a-long-test-password-123",
+            "name": "Pending invitee",
+        },
+    )
+    assert accepted.status_code == 410, accepted.text
+
+    db = TestSessionLocal()
+    try:
+        stored = db.query(CaregiverInvitation).filter_by(id=invite["invitation_id"]).one()
+        assert stored.status == "revoked"
+        assert stored.revoked_at is not None
+    finally:
+        db.close()
