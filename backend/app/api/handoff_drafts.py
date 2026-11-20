@@ -865,6 +865,34 @@ def _validate_draft_quotes(content: dict, source_snapshot: dict) -> bool:
 def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
     """Compare every persisted source fingerprint with the immutable draft snapshot."""
     snapshot = draft.source_snapshot if isinstance(draft.source_snapshot, dict) else {}
+    # The snapshot hash covers the evidence projection and its retrieval limits.
+    # Verify it before comparing individual source rows; otherwise a corrupted
+    # snapshot could be treated as a valid basis for approval.
+    expected_snapshot_hash = snapshot.get("snapshot_sha256")
+    snapshot_hash_payload = {
+        "authority": snapshot.get("authority"),
+        "person_scope": snapshot.get("person_scope"),
+        "source_statuses": snapshot.get("source_statuses"),
+        "source_records": snapshot.get("source_records"),
+        "evidence_lineage": snapshot.get("evidence_lineage"),
+        "limitations": snapshot.get("limitations"),
+        "retrieval_complete": snapshot.get("retrieval_complete"),
+        "partial_sources": snapshot.get("partial_sources"),
+        "window": snapshot.get("window"),
+        "appointment_id": snapshot.get("appointment_id"),
+        "selected_appointment": snapshot.get("selected_appointment"),
+    }
+    if (
+        not isinstance(expected_snapshot_hash, str)
+        or len(expected_snapshot_hash) != 64
+        or _fingerprint(snapshot_hash_payload) != expected_snapshot_hash
+    ):
+        return {
+            "status": "unknown",
+            "reason": "source_snapshot_integrity_check_failed",
+            "stale_source_count": 0,
+            "unknown_source_count": 1,
+        }
     source_records = snapshot.get("source_records", [])
     stale = []
     unknown = []
