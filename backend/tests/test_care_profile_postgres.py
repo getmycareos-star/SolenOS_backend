@@ -67,8 +67,8 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     )
     assert login.status_code == 200, login.text
     restored = login.json()
-    assert restored["person"]["id"] == first_person_id
-    assert restored["caregiver"]["id"] == first_caregiver_id
+    assert restored["person_id"] == first_person_id
+    assert restored["caregiver_id"] == first_caregiver_id
     restored_headers = {"Authorization": f"Bearer {restored['access_token']}"}
     readback = client.get("/api/v1/care-profile", headers=restored_headers)
     assert readback.status_code == 200, readback.text
