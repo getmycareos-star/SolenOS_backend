@@ -927,14 +927,16 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
     quote = "Donepezil 10 mg once daily."
+    second_quote = "Donepezil 20 mg once daily."
     source = "[Page 1]\nMedication list: " + quote
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+        selected_quote = second_quote if second_quote in page_text else quote
         return {
             "observations": [{
                 "subject": "Donepezil",
-                "observation": quote,
-                "source_quote": quote,
+                "observation": selected_quote,
+                "source_quote": selected_quote,
                 "extraction_method": "test_verbatim",
             }],
             "open_questions": [],
@@ -977,23 +979,55 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
+        first_document_assertion_id = accepted.json()["source_record_ref"]["record_id"]
+
+        # A second, different discharge document reports a conflicting dose.
+        # Both source-backed assertions must survive; neither silently replaces the other.
+        second_evidence_id = save_original(
+            caregiver,
+            "[Page 1]\\nMedication list: " + second_quote,
+        )
+        second_extracted = client.post(
+            f"/api/v1/documents/{second_evidence_id}/extract", headers=auth
+        )
+        assert second_extracted.status_code == 201, second_extracted.text
+        second_understood = client.post(
+            f"/api/v1/documents/{second_evidence_id}/intelligence", headers=auth
+        )
+        assert second_understood.status_code == 201, second_understood.text
+        second_accepted = client.post(
+            f"/api/v1/documents/intelligence/{second_understood.json()['analysis_id']}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert second_accepted.status_code == 200, second_accepted.text
+        assert second_accepted.json()["written_to_lcr"] is True
+        second_document_assertion_id = second_accepted.json()["source_record_ref"]["record_id"]
 
         from app.models.uncertainty import Contradiction
         db = Session()
         try:
-            document_assertion = db.query(CareAssertion).filter(
-                CareAssertion.id == accepted.json()["source_record_ref"]["record_id"],
+            document_assertions = db.query(CareAssertion).filter(
                 CareAssertion.person_id == caregiver["person"]["id"],
-            ).one()
-            assert document_assertion.field == "medication"
-            assert document_assertion.assertion_status == "accepted"
-            contradiction = db.query(Contradiction).filter(
+                CareAssertion.id.in_([first_document_assertion_id, second_document_assertion_id]),
+            ).all()
+            assert {row.id for row in document_assertions} == {
+                first_document_assertion_id, second_document_assertion_id
+            }
+            assert {row.source_text for row in document_assertions} == {quote, second_quote}
+            assert all(row.field == "medication" for row in document_assertions)
+            contradictions = db.query(Contradiction).filter(
                 Contradiction.person_id == caregiver["person"]["id"],
                 Contradiction.field == "medication",
-            ).one()
-            assert contradiction.resolution_status == "unresolved"
-            assert document_assertion.id in contradiction.source_assertion_ids
-            assert len(contradiction.source_assertion_ids) == 2
+                Contradiction.resolution_status == "unresolved",
+            ).all()
+            assert contradictions
+            assert any(
+                {first_document_assertion_id, second_document_assertion_id}.issubset(
+                    set(row.source_assertion_ids or [])
+                )
+                for row in contradictions
+            ), "Both conflicting document assertions must remain represented in unresolved contradiction state"
         finally:
             db.close()
     finally:
