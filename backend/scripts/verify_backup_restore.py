@@ -402,6 +402,7 @@ def main() -> int:
                 "evidence ownership and source fingerprint",
                 "care event to evidence association",
                 "uploaded document bytes, size and SHA-256",
+                "S3 object-loss recovery from the PostgreSQL binary copy when object storage is enabled",
                 "correction history",
                 "LCR care-state revision and evidence association",
                 "cross-caregiver ownership isolation",
