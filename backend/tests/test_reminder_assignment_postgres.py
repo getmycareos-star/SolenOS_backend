@@ -141,6 +141,20 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
     assert reassigned.json()["assigned_to_caregiver_id"] == primary_id
     assert reassigned.json()["version"] == 2
 
+    # Reassignment advances the delivery generation so the new responsible
+    # caregiver receives a fresh in-app notification for the still-due item.
+    with SessionLocal() as db:
+        from app.services.reminder_delivery import deliver_due_reminders
+        assert deliver_due_reminders(db=db, now=datetime.now(timezone.utc)) >= 1
+        new_notification = db.query(CareNotification).filter_by(
+            person_id=person_id,
+            source_event_id=reminder_id,
+            category="reminder_due",
+            caregiver_id=primary_id,
+            status="active",
+        ).one()
+        assert new_notification.caregiver_id == primary_id
+
     stale = client.patch(
         f"/api/v1/reminders/{reminder_id}/assignment",
         headers=primary_headers,
@@ -159,10 +173,18 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
             person_id=person_id,
             source_event_id=reminder_id,
             category="reminder_due",
+            caregiver_id=recipient_id,
         ).one()
-        assert previous_notification.caregiver_id == recipient_id
         assert previous_notification.status == "resolved"
         assert previous_notification.resolution_reason == "reminder_reassigned"
+        current_notification = db.query(CareNotification).filter_by(
+            person_id=person_id,
+            source_event_id=reminder_id,
+            category="reminder_due",
+            caregiver_id=primary_id,
+            status="active",
+        ).one()
+        assert current_notification.caregiver_id == primary_id
         events = db.query(AuditLogEvent).filter(
             AuditLogEvent.person_id == person_id,
             AuditLogEvent.target_type == "care_reminder",
