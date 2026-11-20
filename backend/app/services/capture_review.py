@@ -407,12 +407,24 @@ def persist_structured_daily_capture_observations(
         "oxygen_saturation": "oxygen_saturation",
         "weight": "weight",
     }
+
+    def vital_context(raw):
+        # Preserve the caregiver's note, but never imply that an entered value
+        # has passed clinical validation. This capture layer does not validate
+        # or interpret measurements.
+        note = raw.get("note")
+        detail_note = str(note).strip() if isinstance(note, str) and note.strip() else None
+        return "; ".join(part for part in (
+            detail_note,
+            "Caregiver-entered value preserved as reported; not validated as a clinically usable measurement.",
+        ) if part)
+
     append_structured_items(
         "vitals",
         lambda raw: vital_attributes.get(str(raw.get("vital_type") or "").strip().lower(), str(raw.get("vital_type") or "").strip().lower().replace(" ", "_") or None),
         lambda raw: raw.get("value"),
         lambda raw: str(raw.get("unit")).strip() if isinstance(raw.get("unit"), str) and raw.get("unit").strip() else None,
-        lambda raw: str(raw.get("note")).strip() if isinstance(raw.get("note"), str) and raw.get("note").strip() else "Caregiver-entered measurement; shown as reported and not independently checked.",
+        vital_context,
         lambda raw: raw.get("measured_at"),
     )
 
