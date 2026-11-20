@@ -87,6 +87,8 @@ def test_reminder_create_list_complete_persists_attribution():
     assert body["status"] == "completed"
     assert body["completed_by_caregiver_id"] == session["caregiver"]["id"]
     assert body["completed_at"] is not None
+    assert body["lifecycle_history"][-1]["action"] == "care.reminder.completed"
+    assert body["lifecycle_history"][-1]["actor_caregiver_id"] == session["caregiver"]["id"]
     assert body["completion_note"] == "Questions reviewed."
 
     listed_completed = client.get(
