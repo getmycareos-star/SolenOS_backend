@@ -269,6 +269,10 @@ class ChangeObservationEvidenceResponse(BaseModel):
     units: Optional[str] = None
     observed_at: Optional[datetime] = None
     occurred_at: Optional[datetime] = None
+    reported_at: Optional[datetime] = None
+    recorded_at: Optional[datetime] = None
+    observer_label: Optional[str] = None
+    observation_method: Optional[str] = None
     source_passage: str
     negated: Optional[bool] = None
     hedge_marker: Optional[str] = None
