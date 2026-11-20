@@ -118,20 +118,17 @@ def _schema_column_types_compatible(expected, actual, dialect_name: str) -> bool
             return set(expected_enum) == set(actual_enum)
         return actual_affinity.__name__ == "String"
 
-    # Float and Numeric are both valid SQL numeric storage for a
-    # floating-point ORM field. Only enforce precision/scale when the ORM
-    # explicitly declares a Numeric contract; unspecified Float precision
-    # must not reject a database NUMERIC column merely because it is exact.
-    numeric_affinities = {"Numeric", "Float"}
-    expected_numeric = getattr(expected_affinity, "__name__", "") in numeric_affinities
-    actual_numeric = getattr(actual_affinity, "__name__", "") in numeric_affinities
-    if expected_numeric and actual_numeric:
-        expected_precision = getattr(expected, "precision", None)
-        if expected.__class__.__name__ == "Numeric" and expected_precision is not None:
+    # PostgreSQL NUMERIC and FLOAT are both valid numeric storage for an
+    # ORM Float. When the ORM explicitly declares Numeric precision/scale,
+    # require the reflected database contract to match exactly.
+    from sqlalchemy import Float, Numeric
+
+    if isinstance(expected, (Float, Numeric)) and isinstance(actual, (Float, Numeric)):
+        if isinstance(expected, Numeric) and expected.precision is not None:
             return (
-                actual.__class__.__name__ == "Numeric"
-                and expected_precision == getattr(actual, "precision", None)
-                and getattr(expected, "scale", None) == getattr(actual, "scale", None)
+                isinstance(actual, Numeric)
+                and expected.precision == actual.precision
+                and expected.scale == actual.scale
             )
         return True
 
@@ -312,6 +309,7 @@ import app.models.open_loop  # register persistent open-loop tables without impo
 import app.models.ai_output_governance  # register shared AI proposal and decision records
 import app.models.caregiver_access  # register caregiver membership, invitation and transfer tables before local bootstrap
 import app.models.operational_worker_heartbeat  # register worker health table before local schema bootstrap
+import app.models.care  # register core care-record tables for schema verification and local bootstrap
 
 
 # Metadata bootstrap is strictly a local SQLite convenience. Running Alembic
