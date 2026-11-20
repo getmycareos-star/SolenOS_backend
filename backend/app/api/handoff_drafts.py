@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
 from app.core.database import get_db
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.services.document_binary_storage import read_document_binary
 from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraftRevision
 from app.models.care import Evidence, CareEvent, Caregiver
@@ -1215,6 +1216,7 @@ def save_handoff_draft_revision(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     draft = db.query(HandoffDraft).filter(
         HandoffDraft.id == draft_id,
         HandoffDraft.person_id == person_id,
@@ -1283,6 +1285,8 @@ def approve_handoff_draft(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
+    require_caregiver_permission(db, person_id, caregiver_id, "share_summaries")
     draft = db.query(HandoffDraft).filter(
         HandoffDraft.id == draft_id,
         HandoffDraft.person_id == person_id,
@@ -2241,6 +2245,8 @@ def prepare_handoff_draft(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scoped_identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=payload.window_days)
     selected_appointment = None
