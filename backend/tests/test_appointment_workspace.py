@@ -2983,3 +2983,42 @@ def test_current_care_projection_exposes_persisted_outcomes_outside_attention_li
     assert action["related_record_id"] == "owner-action"
     assert "PRIVATE OTHER PERSON RESULT" not in response.text
     assert body["outcomes_has_more"] is False
+
+def test_current_care_projection_can_retry_one_scoped_history_source(client):
+    test_client, owner, other = client
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO care_facts (
+                id, person_id, subject_type, subject_id, fact_type, fact_value,
+                epistemic_status, created_at, updated_at
+            ) VALUES
+              ('owner-source-retry-fact', :owner_id, 'person', :owner_id,
+               'sleep_pattern', 'Caregiver-reported sleep changes', 'reported',
+               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+              ('other-source-retry-fact', :other_id, 'person', :other_id,
+               'private_detail', 'Private care detail', 'reported',
+               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """), {
+            "owner_id": owner["person"]["id"],
+            "other_id": other["person"]["id"],
+        })
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get(
+        "/api/v1/care-continuity/current-care?source=facts",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["requested_sources"] == ["facts"]
+    assert set(body["source_coverage"]) == {"facts"}
+    assert any(item["id"] == "owner-source-retry-fact" for item in body["items"])
+    assert all(item["id"] != "other-source-retry-fact" for item in body["items"])
+    assert "Private care detail" not in response.text
+
+    invalid = test_client.get(
+        "/api/v1/care-continuity/current-care?source=not_a_real_source",
+        headers=headers,
+    )
+    assert invalid.status_code == 422, invalid.text
+
