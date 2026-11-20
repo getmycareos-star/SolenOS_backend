@@ -777,7 +777,7 @@ class QwenAssistRequest(BaseModel):
     appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
-def _scope(request: Request, db: Session) -> tuple[str, str]:
+def _scope(request: Request, db: Session, *, allow_documents_only: bool = False) -> tuple[str, str]:
     # Resolve the bearer capability and re-check the current membership grant
     # on every request, including when middleware has already populated identity.
     person_id = getattr(request.state, "scoped_person_id", None)
@@ -804,6 +804,8 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     ).first()
     if grant is None:
         raise HTTPException(status_code=403, detail="An active caregiver membership is required")
+    if grant.access_scope == "documents_only" and not allow_documents_only:
+        raise HTTPException(status_code=403, detail="This caregiver's access is limited to documents.")
     required = "view_documents" if grant.access_scope == "documents_only" else "view_lcr"
     require_caregiver_permission(db, str(person_id), str(caregiver_id), required)
     request.state.scoped_person_id = str(person_id)
@@ -917,7 +919,7 @@ async def upload_evidence(
     capture_page_number: Optional[int] = Form(None),
     ingestion_key: str = Form(""),
 ):
-    scoped_person_id, scoped_caregiver_id = _scope(request, db)
+    scoped_person_id, scoped_caregiver_id = _scope(request, db, allow_documents_only=True)
     if (
         getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only"
         and str(evidence_type).lower() != "document"
@@ -1363,7 +1365,7 @@ def list_document_processing_status(
     db: Session = Depends(get_db),
 ):
     """Return truthful caregiver-facing status for recent uploaded documents."""
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db, allow_documents_only=True)
     require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     evidence_rows = db.query(EvidenceModel).filter(
         EvidenceModel.person_id == person_id,
@@ -1512,7 +1514,7 @@ def link_corrected_document_version(
     db: Session = Depends(get_db),
 ):
     """Link an explicitly identified corrected upload without replacing its predecessor."""
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db, allow_documents_only=True)
     require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     if payload.replacement_evidence_id == evidence_id:
@@ -1604,7 +1606,7 @@ def link_corrected_document_version(
 @router.get("/upload/{evidence_id}/version-comparison")
 def compare_document_version(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Compare source-grounded candidate statements across an explicitly linked version pair."""
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db, allow_documents_only=True)
     require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     replacement = db.query(EvidenceModel).filter(
         EvidenceModel.id == evidence_id,
@@ -1743,7 +1745,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     source for any assertion, deletion is blocked until that dependency is
     explicitly resolved through the care-record correction workflow.
     """
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db, allow_documents_only=True)
     require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     evidence = db.query(EvidenceModel).filter(
@@ -2021,7 +2023,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
 
 @router.get("/upload/{evidence_id}")
 def download_evidence(evidence_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db, allow_documents_only=True)
     evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
     if not evidence or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Evidence not found")
