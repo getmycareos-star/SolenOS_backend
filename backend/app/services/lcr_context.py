@@ -977,17 +977,31 @@ def build_lcr_context(
         })
     elif selected_ids:
         evidence_lineage["status"] = "unavailable_schema"
-    schema_status = "complete" if not missing_required and not missing_optional else "partial"
+    failed_sources = sorted(
+        name for name, source in sources.items()
+        if source.get("status") in {"failed", "partial"}
+    )
+    failed_required_sources = sorted(
+        name for name in failed_sources if SOURCE_SPECS.get(name, {}).get("required")
+    )
+    failed_optional_sources = sorted(
+        name for name in failed_sources if not SOURCE_SPECS.get(name, {}).get("required")
+    )
+    schema_status = "complete" if not missing_required and not missing_optional and not failed_sources else "partial"
     return {
         "person_id": str(person_id),
         "as_of": datetime.now().astimezone().isoformat(),
         "read_only": True,
         "history_coverage": (
-            "paginated_history_page" if any(source.get("offset", 0) > 0 for source in sources.values())
+            "partial_source_history" if failed_sources
+            else "paginated_history_page" if any(source.get("offset", 0) > 0 for source in sources.values())
             else "complete_history_scan_ranked_subset" if include_all_history
             else "query_scanned_ranked_subset" if terms or temporal_window
             else "bounded_recent_subset"
         ),
+        "failed_sources": failed_sources,
+        "failed_required_sources": failed_required_sources,
+        "failed_optional_sources": failed_optional_sources,
         "source_offsets": {
             name: source.get("offset", 0) for name, source in sources.items()
             if source.get("offset", 0) > 0
@@ -997,6 +1011,7 @@ def build_lcr_context(
         # erase proof that the available source history was fully scanned.
         "retrieval_scan_complete": (
             bool(terms or temporal_window or include_all_history)
+            and not failed_sources
             and any(source.get("status") in {"available", "empty"} for source in sources.values())
             and all(
                 source.get("candidate_scan_complete") is True
