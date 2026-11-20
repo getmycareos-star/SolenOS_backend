@@ -28,10 +28,10 @@ permissions:
   contents: read
 
 concurrency:
-  # Keep PostgreSQL verification for each exact main commit; later pushes must not
-  # cancel a running migration/recovery validation before its evidence is recorded.
-  group: postgres-migration-validation-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: false
+  # Keep only the newest main-branch validation queued; obsolete revisions
+  # must not starve verification of the current source.
+  group: postgres-migration-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   postgres-migrations:
