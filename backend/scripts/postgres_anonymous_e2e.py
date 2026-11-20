@@ -1462,15 +1462,9 @@ def main():
         )
         require(status == 200, f"Reviewed Daily Care history failed: {status}: {reviewed_history}")
         reviewed_assertions = [
-            row
-            for row in (
-                reviewed_history.get("history", {})
-                .get("lcr_context", {})
-                .get("sources", {})
-                .get("assertions", {})
-                .get("items", [])
-            )
-            if row.get("id") == accepted_assertion_id
+            row for row in reviewed_history.get("records", [])
+            if row.get("source_type") == "care_assertion"
+            and row.get("source_id") == accepted_assertion_id
         ]
         require(
             len(reviewed_assertions) == 1,
@@ -1494,14 +1488,8 @@ def main():
             "GET", f"/api/v1/daily-care/intelligence/history?limit=200&offset=0&person_id={person_a}", token=token_a,
         )
         require(status == 200 and any(
-            row.get("id") == accepted_assertion_id
-            for row in (
-                refreshed_history.get("history", {})
-                .get("lcr_context", {})
-                .get("sources", {})
-                .get("assertions", {})
-                .get("items", [])
-            )
+            row.get("source_type") == "care_assertion" and row.get("source_id") == accepted_assertion_id
+            for row in refreshed_history.get("records", [])
         ), "Accepted Daily Care assertion did not survive session refresh and paginated LCR history")
 
         status, foreign_history = request(
