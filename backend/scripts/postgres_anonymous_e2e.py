@@ -1450,34 +1450,38 @@ def main():
         finally:
             source_db.close()
 
+        # current-care is intentionally a 12-item summary, not a complete
+        # assertion history. Verify the exact accepted record through the
+        # person-scoped LCR assertion collection instead of assuming every
+        # historical item must fit in the bounded summary.
         status, reviewed_lcr = request(
             "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
         )
-        require(status == 200, f"Reviewed LCR read failed: {status}: {reviewed_lcr}")
-        reviewed_assertions = [
-            row for row in reviewed_lcr.get("items", [])
+        require(status == 200, f"Reviewed current-care read failed: {status}: {reviewed_lcr}")
+        status, reviewed_assertion_rows = request(
+            "GET", f"/api/v1/care-continuity/assertions/{person_a}?limit=100", token=token_a,
+        )
+        require(status == 200 and len([
+            row for row in reviewed_assertion_rows
             if row.get("id") == accepted_assertion_id
-        ]
-        require(len(reviewed_assertions) == 1,
-                f"Accepted Daily Care assertion was not returned by LCR retrieval: {reviewed_assertions}")
+        ]) == 1, f"Accepted Daily Care assertion was not returned by person-scoped LCR history: {reviewed_assertion_rows}")
 
         status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_a)
         require(status == 200 and refreshed.get("access_token"),
                 f"Daily Care session refresh failed: {status}: {refreshed}")
         token_a = refreshed["access_token"]
-        status, refreshed_lcr = request(
-            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
+        status, refreshed_assertions = request(
+            "GET", f"/api/v1/care-continuity/assertions/{person_a}?limit=100", token=token_a,
         )
         require(status == 200 and any(
-            row.get("id") == accepted_assertion_id for row in refreshed_lcr.get("items", [])
-        ), "Accepted Daily Care assertion did not survive session refresh and retrieval")
+            row.get("id") == accepted_assertion_id for row in refreshed_assertions
+        ), "Accepted Daily Care assertion did not survive session refresh and person-scoped retrieval")
 
-        status, foreign_lcr = request(
-            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_b,
+        status, foreign_assertions = request(
+            "GET", f"/api/v1/care-continuity/assertions/{person_a}?limit=100", token=token_b,
         )
-        require(status == 200 and not any(
-            row.get("id") == accepted_assertion_id for row in foreign_lcr.get("items", [])
-        ), "A different care recipient session received another person's accepted assertion")
+        require(status == 403,
+                f"A different care recipient session was not denied access to another person's LCR assertions: {status}: {foreign_assertions}")
 
         status, daily_evidence = request(
             "GET", f"/api/v1/evidence/{person_a}", token=token_a,
