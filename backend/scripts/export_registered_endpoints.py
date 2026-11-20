@@ -98,7 +98,7 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
                     "response_model": _model_name(route.response_model),
                     "dependencies": _dependency_names(route),
                     "authentication_disposition": (
-                        "session_scope_middleware_review_required"
+                        "global_auth_policy_review_required"
                         if route.path.startswith("/api/")
                         else "public_or_non_api_review_required"
                     ),
