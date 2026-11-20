@@ -768,3 +768,46 @@ def test_invitation_is_invalidated_when_inviting_administrator_loses_authority()
         assert stored.revoked_at is not None
     finally:
         db.close()
+
+
+def test_explicit_empty_member_permissions_deny_operations_without_legacy_fallback():
+    client = TestClient(app)
+    primary = create_primary(client)
+    owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "restricted-caregiver@example.com"},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite.json()["invitation_token"],
+            "email": "restricted-caregiver@example.com",
+            "password": "a-long-test-password-123",
+            "name": "Restricted caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    member = accepted.json()
+    member_headers = {"Authorization": f"Bearer {member['access_token']}"}
+
+    update = client.patch(
+        f"/api/v1/caregiver-access/members/{member['caregiver_id']}/permissions",
+        headers=owner_headers,
+        json={"permissions": []},
+    )
+    assert update.status_code == 200, update.text
+    assert update.json()["permissions"] == []
+
+    members = client.get("/api/v1/caregiver-access/members", headers=owner_headers)
+    assert members.status_code == 200, members.text
+    restricted = next(row for row in members.json() if row["caregiver_id"] == member["caregiver_id"])
+    assert restricted["permissions"] == []
+
+    denied = client.get(
+        f"/api/v1/reminders/{primary['person']['id']}",
+        headers=member_headers,
+    )
+    assert denied.status_code == 403, denied.text
