@@ -26,6 +26,7 @@ from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFresh
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.uncertainty import Contradiction, OpenQuestion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
+from app.models.open_loop import OpenLoopRecord
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import (
@@ -327,6 +328,45 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     ).order_by(Appointment.scheduled_at.desc()).limit(16).all()
     appointments_has_more = len(fetched_appointments) > 15
     appointments = fetched_appointments[:15]
+
+    # Open loops are the existing system-owned continuity queue. Include every
+    # unresolved item for this person, regardless of which authorised caregiver
+    # originally recorded it; never turn a missing owner into caregiver work.
+    open_loop_source_status = "empty"
+    open_loops_has_more = None
+    open_loops = []
+    try:
+        fetched_open_loops = db.query(OpenLoopRecord).filter(
+            OpenLoopRecord.person_id == person_id,
+            OpenLoopRecord.status.notin_(["closed", "cancelled"]),
+        ).order_by(
+            OpenLoopRecord.priority.desc(),
+            OpenLoopRecord.updated_at.desc(),
+        ).limit(41).all()
+        open_loops_has_more = len(fetched_open_loops) > 40
+        for loop in fetched_open_loops[:40]:
+            open_loops.append({
+                "source_table": "open_loop_records",
+                "source_id": str(loop.id),
+                "title": loop.title,
+                "description": loop.description,
+                "status": loop.status,
+                "priority": loop.priority,
+                "owner_label": loop.owner_label,
+                "owner_role": loop.owner_role,
+                "deadline_at": _iso(loop.deadline_at),
+                "deadline_source": loop.deadline_source,
+                "source_type": loop.source_type,
+                "source_reference": loop.source_id,
+                "evidence": loop.evidence or [],
+                "updated_at": _iso(loop.updated_at),
+                "interpretation_limit": "This is an unresolved tracked item. A recorded owner or deadline is not proof that the person accepted the task or that it was completed.",
+            })
+        open_loop_source_status = "available" if open_loops else "empty"
+    except Exception:
+        db.rollback()
+        open_loops = []
+        open_loop_source_status = "failed"
 
     # Source-attributed observations and outcomes are part of the LCR even
     # when they have not been promoted to caregiver-reviewed assertions.
@@ -821,6 +861,13 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "retrieval_complete": not appointments_has_more,
             "record_limit": 15,
         },
+        "open_loops": {
+            "returned_count": len(open_loops),
+            "has_more": open_loops_has_more,
+            "retrieval_complete": open_loop_source_status in {"available", "empty"} and not open_loops_has_more,
+            "status": open_loop_source_status,
+            "record_limit": 40,
+        },
         "care_assertions": {
             "returned_count": len(assertion_items),
             "has_more": assertions_has_more,
@@ -885,6 +932,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "facts": facts,
         "events": event_items,
         "appointments": appointment_items,
+        "open_loops": open_loops,
         "assertions": assertion_items,
         "open_questions": question_items,
         "contradictions": contradiction_items,
@@ -918,6 +966,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             ),
             "care_events": "available" if event_items else "empty",
             "appointments": "available" if appointment_items else "empty",
+            "open_loops": open_loop_source_status,
             "care_assertions": assertion_source_status,
             "open_questions": question_source_status,
             "contradictions": contradiction_source_status,
