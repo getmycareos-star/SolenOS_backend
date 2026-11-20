@@ -240,6 +240,22 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             f"/api/v1/documents/{evidence_id}/intelligence",
             headers=other_headers,
         ).status_code == 404
+
+        # Companion retrieval must derive its sources from the authenticated
+        # person's canonical LCR, never from another person's accepted document.
+        foreign_companion = client.post(
+            "/api/v1/conversation/message",
+            headers=other_headers,
+            json={
+                "person_id": other.json()["person"]["id"],
+                "text": "What did the discharge summary say about walking?",
+            },
+        )
+        assert foreign_companion.status_code == 200, foreign_companion.text
+        foreign_payload = foreign_companion.json()
+        assert evidence_id not in foreign_payload.get("source_evidence_ids", [])
+        assert analysis_id not in foreign_payload.get("source_document_analysis_ids", [])
+        assert assertion_id not in foreign_payload.get("source_assertion_ids", [])
     finally:
         client.close()
         app.dependency_overrides.clear()
