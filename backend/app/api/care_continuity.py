@@ -2459,19 +2459,27 @@ def current_care_projection(
         "missing_optional_sources": context.get("missing_optional_sources", []),
         "items": ordered[:12],
         "item_count": min(len(ordered), 12),
-        "has_more": len(ordered) > 12,
+        "has_more": len(ordered) > 12 or any(
+            bool((source or {}).get("has_more")) for source in sources.values()
+        ),
         "outcomes": [
             item for item in ordered
             if item.get("source_collection") in {
                 "decision_outcomes", "action_outcomes", "follow_up_outcomes",
             }
         ][:50],
-        "outcomes_has_more": sum(
-            1 for item in ordered
-            if item.get("source_collection") in {
-                "decision_outcomes", "action_outcomes", "follow_up_outcomes",
-            }
-        ) > 50,
+        "outcomes_has_more": (
+            sum(
+                1 for item in ordered
+                if item.get("source_collection") in {
+                    "decision_outcomes", "action_outcomes", "follow_up_outcomes",
+                }
+            ) > 50
+            or any(
+                bool((sources.get(source_name) or {}).get("has_more"))
+                for source_name in ("decision_outcomes", "action_outcomes", "follow_up_links")
+            )
+        ),
         "source_coverage": {
             name: {"status": value.get("status"), "returned_count": value.get("returned_count", 0), "has_more": value.get("has_more", False)}
             for name, value in sources.items()
