@@ -253,3 +253,87 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
         headers=recipient_headers,
     )
     assert revoked_token_replay.status_code == 401, revoked_token_replay.text
+
+
+def test_postgres_reminder_completion_snooze_and_cancellation_keep_actor_history():
+    suffix = uuid.uuid4().hex[:12]
+    client = TestClient(app)
+    created_session = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": f"Reminder lifecycle person {suffix}", "caregiver_name": "Caregiver"},
+    )
+    assert created_session.status_code == 201, created_session.text
+    session = created_session.json()
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+
+    def create(title):
+        response = client.post(
+            "/api/v1/reminders",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "title": title,
+                "due_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    snooze_reminder = create(f"Snooze {suffix}")
+    complete_reminder = create(f"Complete {suffix}")
+    cancel_reminder = create(f"Cancel {suffix}")
+
+    snoozed = client.patch(
+        f"/api/v1/reminders/{snooze_reminder['id']}/snooze",
+        headers=headers,
+        json={"snooze_until": (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()},
+    )
+    assert snoozed.status_code == 200, snoozed.text
+    assert snoozed.json()["lifecycle_history"][-1]["action"] == "care.reminder.snoozed"
+
+    completed = client.patch(
+        f"/api/v1/reminders/{complete_reminder['id']}/complete",
+        headers=headers,
+        json={"completion_note": "Confirmed with the family."},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["lifecycle_history"][-1]["action"] == "care.reminder.completed"
+
+    cancelled = client.patch(
+        f"/api/v1/reminders/{cancel_reminder['id']}/cancel",
+        headers=headers,
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["lifecycle_history"][-1]["action"] == "care.reminder.cancelled"
+
+    with SessionLocal() as db:
+        rows = {
+            row.id: row for row in db.query(CareReminder).filter(
+                CareReminder.id.in_([
+                    snooze_reminder["id"], complete_reminder["id"], cancel_reminder["id"]
+                ])
+            ).all()
+        }
+        assert rows[snooze_reminder["id"]].status == "open"
+        assert rows[snooze_reminder["id"]].snoozed_by_caregiver_id == caregiver_id
+        assert rows[complete_reminder["id"]].status == "completed"
+        assert rows[complete_reminder["id"]].completed_by_caregiver_id == caregiver_id
+        assert rows[cancel_reminder["id"]].status == "cancelled"
+        assert rows[cancel_reminder["id"]].cancelled_by_caregiver_id == caregiver_id
+
+        events = db.query(AuditLogEvent).filter(
+            AuditLogEvent.person_id == person_id,
+            AuditLogEvent.target_type == "care_reminder",
+            AuditLogEvent.target_id.in_([
+                snooze_reminder["id"], complete_reminder["id"], cancel_reminder["id"]
+            ]),
+        ).all()
+        assert {event.action for event in events} == {
+            "care.reminder.assigned",
+            "care.reminder.snoozed",
+            "care.reminder.completed",
+            "care.reminder.cancelled",
+        }
+        assert all(event.actor_id == caregiver_id for event in events)
