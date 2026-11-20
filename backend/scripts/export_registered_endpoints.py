@@ -14,6 +14,11 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
+try:
+    from fastapi.routing import iter_route_contexts
+except ImportError:
+    iter_route_contexts = None
+
 from app.main import app
 
 
@@ -42,7 +47,7 @@ def _parameter_fields(fields: list[Any]) -> list[dict[str, Any]]:
     return output
 
 
-def _dependency_names(route: APIRoute) -> list[str]:
+def _dependency_names(dependant: Any) -> list[str]:
     names: set[str] = set()
 
     def visit(dependant: Any) -> None:
@@ -54,33 +59,61 @@ def _dependency_names(route: APIRoute) -> list[str]:
         for child in getattr(dependant, "dependencies", []) or []:
             visit(child)
 
-    visit(route.dependant)
+    visit(dependant)
     return sorted(names)
+
+
+def _registered_route_contexts(application: FastAPI):
+    if iter_route_contexts is not None:
+        yield from iter_route_contexts(application.routes)
+        return
+    yield from application.routes
+
+
+def registered_route_keys(application: FastAPI):
+    for context in _registered_route_contexts(application):
+        route = getattr(context, "route", context)
+        if not isinstance(route, APIRoute):
+            continue
+        effective_path = getattr(context, "path", route.path)
+        effective_methods = getattr(context, "methods", route.methods)
+        for method in effective_methods or []:
+            yield (method.upper(), effective_path)
 
 
 def build_inventory(application: FastAPI) -> dict[str, Any]:
     """Return a deterministic inventory of every registered HTTP API route."""
     entries: list[dict[str, Any]] = []
-    registered_routes = [route for route in application.routes if isinstance(route, APIRoute)]
+    contexts = []
+    for context in _registered_route_contexts(application):
+        route = getattr(context, "route", context)
+        if isinstance(route, APIRoute):
+            contexts.append((context, route))
     registration_counts: dict[tuple[str, str], int] = {}
-    for route in registered_routes:
-        for method in route.methods or []:
-            key = (method, route.path)
+    for context, route in contexts:
+        effective_path = getattr(context, "path", route.path)
+        effective_methods = getattr(context, "methods", route.methods)
+        for method in effective_methods or []:
+            key = (method.upper(), effective_path)
             registration_counts[key] = registration_counts.get(key, 0) + 1
 
-    for route in registered_routes:
-        endpoint = route.endpoint
+    for context, route in contexts:
+        endpoint = getattr(context, "endpoint", route.endpoint)
+        dependant = getattr(context, "dependant", None) or route.dependant
+        effective_path = getattr(context, "path", route.path)
+        effective_methods = getattr(context, "methods", route.methods)
         module = getattr(endpoint, "__module__", "unknown")
         handler = getattr(endpoint, "__qualname__", getattr(endpoint, "__name__", "unknown"))
-        for method in sorted(route.methods or []):
-            key = (method, route.path)
+        for method in sorted(effective_methods or []):
+            method = method.upper()
+            key = (method, effective_path)
             entries.append(
                 {
                     "method": method,
                     "operation_id": route.operation_id,
                     "include_in_schema": route.include_in_schema,
                     "deprecated": bool(route.deprecated),
-                    "path": route.path,
+                    "path": effective_path,
                     "name": route.name,
                     "router_module": module,
                     "handler": handler,
@@ -89,14 +122,14 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
                         getattr(getattr(route, "body_field", None), "type_", None)
                     ),
                     "request_parameters": {
-                        "path": _parameter_fields(route.dependant.path_params),
-                        "query": _parameter_fields(route.dependant.query_params),
-                        "headers": _parameter_fields(route.dependant.header_params),
-                        "cookies": _parameter_fields(route.dependant.cookie_params),
-                        "body": _parameter_fields(route.dependant.body_params),
+                        "path": _parameter_fields(dependant.path_params),
+                        "query": _parameter_fields(dependant.query_params),
+                        "headers": _parameter_fields(dependant.header_params),
+                        "cookies": _parameter_fields(dependant.cookie_params),
+                        "body": _parameter_fields(dependant.body_params),
                     },
                     "response_model": _model_name(route.response_model),
-                    "dependencies": _dependency_names(route),
+                    "dependencies": _dependency_names(dependant),
                     "authentication_disposition": (
                         "global_auth_policy_review_required"
                         if route.path.startswith("/api/")
@@ -112,7 +145,7 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
     entries.sort(key=lambda item: (item["path"], item["method"], item["router_module"], item["handler"]))
     return {
         "format_version": 1,
-        "source": "app.main:app runtime route registry",
+        "source": "app.main:app expanded runtime route contexts",
         "route_count": len(entries),
         "routes": entries,
     }
