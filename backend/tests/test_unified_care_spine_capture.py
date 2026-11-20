@@ -21,6 +21,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care_continuity import CareDeltaRun
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob
 import app.api.daily_care_intelligence as daily_care_intelligence
@@ -259,6 +260,17 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 assert completed_analysis.execution_status["review"] == "required"
                 assert completed_analysis.execution_status["projection"] == "verified"
                 assert completed_analysis.execution_status["longitudinal_retrieval"] == "verified"
+                # The Delta Engine is not mocked in this PostgreSQL journey:
+                # require a persisted run tied to this exact source event.
+                assert completed_analysis.execution_status["delta_reconciliation"] == "completed"
+                delta_run_id = completed_analysis.execution_status["delta_run_id"]
+                assert delta_run_id
+                assert db.query(CareDeltaRun).filter_by(
+                    id=delta_run_id,
+                    person_id=person_id,
+                    source_event_id=event_id,
+                    source="SolenOS Daily Capture",
+                ).one_or_none() is not None
                 analysis_id = completed_analysis.id
 
             job_status_response = client.get(
