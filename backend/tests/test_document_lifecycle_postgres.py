@@ -1036,3 +1036,125 @@ def test_postgres_document_upload_compensates_external_binary_after_implicit_flu
             assert verify.query(QwenBackgroundJob).filter_by(person_id=person_id).count() == 0
     finally:
         engine.dispose()
+
+
+
+def test_postgres_invited_caregiver_can_retrieve_shared_document_and_respects_document_only_scope():
+    suffix = uuid.uuid4().hex[:10]
+    invite_email = f"shared-doc-{suffix}@example.test"
+    with TestClient(app) as client:
+        owner = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"name": f"Shared document person {suffix}", "caregiver_name": "Primary caregiver"},
+        )
+        assert owner.status_code == 201, owner.text
+        owner_body = owner.json()
+        owner_headers = {"Authorization": f"Bearer {owner_body['access_token']}"}
+        person_id = owner_body["person"]["id"]
+        primary_caregiver_id = owner_body["caregiver"]["id"]
+
+        account = client.post(
+            "/api/v1/accounts",
+            headers=owner_headers,
+            json={"email": invite_email, "password": "primary-shared-doc-password-456"},
+        )
+        assert account.status_code == 201, account.text
+        invitation = client.post(
+            "/api/v1/caregiver-access/invitations",
+            headers=owner_headers,
+            json={"email": invite_email, "expires_in_days": 7},
+        )
+        assert invitation.status_code == 201, invitation.text
+        accepted = client.post(
+            "/api/v1/caregiver-access/invitations/accept",
+            json={
+                "token": invitation.json()["invitation_token"],
+                "email": invite_email,
+                "password": "shared-doc-recipient-password-456",
+                "name": "Second caregiver",
+            },
+        )
+        assert accepted.status_code == 201, accepted.text
+        collaborator_id = accepted.json()["caregiver_id"]
+        collaborator_headers = {"Authorization": f"Bearer {accepted.json()['access_token']}"}
+
+        original = b"The room was quiet after lunch. This is a synthetic shared-care document."
+        uploaded = client.post(
+            "/api/v1/upload",
+            headers=owner_headers,
+            data={
+                "person_id": person_id,
+                "caregiver_id": primary_caregiver_id,
+                "evidence_type": "document",
+            },
+            files={"file": (f"shared-note-{suffix}.txt", original, "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+
+        extracted = client.post(
+            f"/api/v1/documents/{evidence_id}/extract",
+            headers=owner_headers,
+            json={},
+        )
+        assert extracted.status_code == 201, extracted.text
+        analysis_id = extracted.json()["analysis_id"]
+
+        shared_analysis = client.get(
+            f"/api/v1/documents/analyses/{analysis_id}",
+            headers=collaborator_headers,
+        )
+        assert shared_analysis.status_code == 200, shared_analysis.text
+        assert shared_analysis.json()["extracted_text"] == original.decode("utf-8")
+
+        shared_status = client.get(
+            "/api/v1/documents/status",
+            headers=collaborator_headers,
+        )
+        assert shared_status.status_code == 200, shared_status.text
+        assert any(item["evidence_id"] == evidence_id for item in shared_status.json()["items"])
+
+        shared_download = client.get(
+            f"/api/v1/upload/{evidence_id}",
+            headers=collaborator_headers,
+        )
+        assert shared_download.status_code == 200, shared_download.text
+        assert shared_download.content == original
+
+        shared_intelligence = client.get(
+            "/api/v1/documents/intelligence",
+            headers=collaborator_headers,
+        )
+        assert shared_intelligence.status_code == 200, shared_intelligence.text
+        assert any(item["source_evidence_id"] == evidence_id for item in shared_intelligence.json()["items"])
+
+        restricted = client.patch(
+            f"/api/v1/caregiver-access/members/{collaborator_id}/access-scope",
+            headers=owner_headers,
+            json={"access_scope": "documents_only"},
+        )
+        assert restricted.status_code == 200, restricted.text
+
+        # Document-only access preserves authorized document retrieval but
+        # blocks Companion and the rest of the care record.
+        still_shared = client.get(
+            f"/api/v1/documents/analyses/{analysis_id}",
+            headers=collaborator_headers,
+        )
+        assert still_shared.status_code == 200, still_shared.text
+        still_downloadable = client.get(
+            f"/api/v1/upload/{evidence_id}",
+            headers=collaborator_headers,
+        )
+        assert still_downloadable.status_code == 200, still_downloadable.text
+        blocked_companion = client.post(
+            "/api/v1/conversation/message",
+            headers=collaborator_headers,
+            json={"person_id": person_id, "text": "What is in the care record?"},
+        )
+        assert blocked_companion.status_code == 403, blocked_companion.text
+        blocked_events = client.get(
+            f"/api/v1/events/{person_id}",
+            headers=collaborator_headers,
+        )
+        assert blocked_events.status_code == 403, blocked_events.text
