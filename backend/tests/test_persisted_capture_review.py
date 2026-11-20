@@ -162,6 +162,11 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
             "caregiver_note", "mood", "blood_pressure_systolic",
         }
         assert all(item.epistemic_status == "reported" for item in details)
+        assert all(item.recorded_at is not None for item in details)
+        caregiver_note = next(item for item in details if item.attribute == "caregiver_note")
+        assert caregiver_note.observed_at is None and caregiver_note.occurred_at is None
+        assert next(item for item in details if item.attribute == "mood").observed_at is not None
+        assert next(item for item in details if item.attribute == "blood_pressure_systolic").observed_at is not None
         assert all(evidence.source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
         assert next(item for item in details if item.attribute == "mood").value_text == "5"
         mood = next(item for item in details if item.attribute == "mood")

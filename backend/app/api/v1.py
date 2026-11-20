@@ -730,7 +730,8 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                             source_event_id=existing_event.id,
                             source_text=existing_source_evidence.source_text or "",
                             detail=clean_detail,
-                            reported_at=existing_event.recorded_at,
+                            reported_at=getattr(existing_event, "reported_at", None) or existing_event.recorded_at,
+                            recorded_at=existing_source_evidence.ingested_at or existing_event.recorded_at,
                         )
                         db.commit()
                         structured_details_status = "verified" if structured_detail_count else "not_applicable"
@@ -1047,7 +1048,8 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 source_event_id=event.id,
                 source_text=evidence.source_text or "",
                 detail=detail,
-                reported_at=event.recorded_at,
+                reported_at=getattr(event, "reported_at", None) or event.recorded_at,
+                recorded_at=evidence.ingested_at or event.recorded_at,
             )
             db.commit()
             structured_details_status = "verified" if structured_detail_count else "not_applicable"

@@ -316,6 +316,7 @@ def persist_structured_daily_capture_observations(
     source_text: str,
     detail: dict[str, Any] | None,
     reported_at,
+    recorded_at=None,
 ) -> int:
     """Persist deterministic, source-span-bound details already supplied in Daily Care.
 
@@ -455,8 +456,10 @@ def persist_structured_daily_capture_observations(
             value_text=candidate["value_text"],
             units=candidate["units"],
             context=candidate["context"],
+            occurred_at=candidate["observed_at"],
             observed_at=candidate["observed_at"],
             reported_at=reported_at,
+            recorded_at=recorded_at or reported_at,
             observer_label="Caregiver",
             observer_caregiver_id=caregiver_id,
             observation_method="Daily Care form",
