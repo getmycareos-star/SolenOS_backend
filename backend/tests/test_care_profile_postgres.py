@@ -57,6 +57,7 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
     assert (("person_id",), "persons") in context_foreign_keys
     assert (("caregiver_id",), "caregiver_profiles") in context_foreign_keys
     assert (("reported_by_caregiver_id",), "caregivers") in context_foreign_keys
+    assert (("reported_by_caregiver_id",), "caregivers") in context_foreign_keys
 
     suffix = uuid.uuid4().hex[:12]
     email = f"care-profile-{suffix}@example.test"
