@@ -3022,3 +3022,44 @@ def test_current_care_projection_can_retry_one_scoped_history_source(client):
     )
     assert invalid.status_code == 422, invalid.text
 
+def test_saving_an_upcoming_appointment_automatically_prepares_its_workspace(client):
+    test_client, owner, other = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    scheduled_at = datetime.now(timezone.utc) + timedelta(days=4)
+
+    created = test_client.post(
+        "/api/v1/appointments",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "created_by_caregiver_id": owner["caregiver"]["id"],
+            "title": "Upcoming specialist review",
+            "scheduled_at": scheduled_at.isoformat(),
+            "status": "scheduled",
+            "provider": "Specialist",
+        },
+    )
+    assert created.status_code == 200, created.text
+    appointment_id = created.json()["id"]
+
+    db = TestSessionLocal()
+    try:
+        workspaces = db.query(AppointmentWorkspaceRecord).filter(
+            AppointmentWorkspaceRecord.person_id == owner["person"]["id"],
+            AppointmentWorkspaceRecord.appointment_id == appointment_id,
+        ).all()
+        assert len(workspaces) == 1
+        assert workspaces[0].status == "preparation"
+        assert workspaces[0].payload["generatedBy"] == "solenos_appointment_continuity"
+        assert workspaces[0].payload["caregiverReport"] == ""
+    finally:
+        db.close()
+
+    # Preparation is person-scoped and does not leak through another session.
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    other_workspaces = test_client.get(
+        "/api/v1/appointment-workspaces",
+        headers=other_headers,
+    )
+    assert other_workspaces.status_code == 200, other_workspaces.text
+    assert appointment_id not in other_workspaces.text
