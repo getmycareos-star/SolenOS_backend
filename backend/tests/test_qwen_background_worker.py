@@ -219,6 +219,47 @@ def test_worker_handles_structured_qwen_failures_without_sticking_jobs(
     db.close()
 
 
+def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(
+        sessions,
+        status="processing",
+        locked_at=datetime.now(timezone.utc) - timedelta(minutes=9),
+    )
+
+    refreshed_at = datetime.now(timezone.utc)
+    assert worker._refresh_qwen_job_lease_once(
+        job_id,
+        "person-test",
+        "caregiver-test",
+        now=refreshed_at,
+    ) is True
+
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert job.status == "processing"
+    assert job.locked_at == refreshed_at
+    db.close()
+
+    # A cancelled job or a mismatched identity must never be resurrected.
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    job.status = "cancelled"
+    db.commit()
+    db.close()
+
+    assert worker._refresh_qwen_job_lease_once(
+        job_id,
+        "person-test",
+        "caregiver-test",
+    ) is False
+    assert worker._refresh_qwen_job_lease_once(
+        job_id,
+        "person-test",
+        "different-caregiver",
+    ) is False
+
+
 def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     stale_lock = datetime.now(timezone.utc) - timedelta(minutes=20)
