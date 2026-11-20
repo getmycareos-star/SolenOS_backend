@@ -156,3 +156,5 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 - `2d85850740d0be375275b7015e55187f48be76a9` / `1fd788b055bcf78d0e8648e57b99c6902a389c93` / `922ccca9dfa0f9bf59c30e79d9a071e3bf6d73bf` — source attribution in that projection remains unknown when no speaker is explicitly identified; tests prohibit invented speaker identity.
 - `0c8ca3a201b021586856bac5e2f9738fbda3d6f1` / `34072792925d838599be58b5958d80f42842f5c7` / `fbbb7127d6f4dff6c98d2877cab2a3cea82cb5d2` — projection covers time-bound and reported medication assertions, preserves the existing source-statement contract and avoids misclassifying document roles as speakers.
 - `5ec20cae34df9ddbbac64dd7536d5dee4adf89c2` — live conflict evaluation uses neutral document names so filename recency cannot bias the model's conflict explanation.
+
+- `c429ccf754e378d9e0aa03f737877491ae9ea7cd` — the live scanned-PDF/DOCX conflict test also verifies both source-backed assertions reach the existing Progressive Understanding situation response.
