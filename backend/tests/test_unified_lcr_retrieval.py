@@ -121,6 +121,7 @@ def _close_postgres_conversation_db(engine, connection, schema):
 def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
     engine, connection, schema = _postgres_conversation_db()
     try:
+        metadata = ConversationSession.metadata
         with Session(bind=connection) as db:
             db.add(Person(id="fact-lineage-person", name="Care recipient"))
             db.flush()
@@ -130,10 +131,8 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
             ))
             db.flush()
             now = datetime.now(UTC)
-            facts = db.get_bind()
             db.execute(
-                facts.dialect.statement_compiler(facts.dialect, None).statement
-                if False else metadata.tables["care_facts"].insert(),
+                metadata.tables["care_facts"].insert(),
                 [{
                     "id": "fact-with-source", "person_id": "fact-lineage-person",
                     "subject_type": "person", "subject_id": "fact-lineage-person",
