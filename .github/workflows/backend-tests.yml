@@ -40,7 +40,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-tests-${{ github.ref }}
+  group: backend-tests-${{ github.ref }}-${{ github.sha }}
   # Let the current main validation finish; a later push must not cancel evidence
   # for the code already under test.
   cancel-in-progress: false
