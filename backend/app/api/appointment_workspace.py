@@ -1970,7 +1970,7 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
     db.add(revision)
     try:
         _sync_appointment_document_links(
-            db, person_id=person_id, appointment_id=row.appointment_id, payload=payload.payload,
+            db, person_id=person_id, caregiver_id=caregiver_id, appointment_id=row.appointment_id, payload=payload.payload,
         )
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
