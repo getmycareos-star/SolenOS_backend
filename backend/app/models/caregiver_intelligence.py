@@ -87,7 +87,7 @@ class CaregiverResponsibility(Base):
 class CaregiverObservation(Base):
     __tablename__ = "caregiver_observations"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    caregiver_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=True, index=True)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     observation_content = Column(Text, nullable=False)
     observation_type = Column(Enum(ObservationType), nullable=False, default=ObservationType.DIRECT)
@@ -109,7 +109,7 @@ class CaregiverObservation(Base):
 class CaregiverPerspective(Base):
     __tablename__ = "caregiver_perspectives"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    caregiver_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=True, index=True)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     claim_type = Column(Enum(ClaimType), nullable=False)
     claim_content = Column(Text, nullable=False)
@@ -247,7 +247,7 @@ class DuplicateAction(Base):
 class CaregiverContext(Base):
     __tablename__ = "caregiver_contexts"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    caregiver_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=True, index=True)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     proximity_category = Column(Enum(CaregiverProximityCategory), nullable=True)
     observation_window_start = Column(String, nullable=True)
