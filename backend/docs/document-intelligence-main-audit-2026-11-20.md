@@ -142,3 +142,9 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 
 - `cb06d3a0219f1a28ad2dfac61566fffc05f63c47` — live conflict workflow now sends a scanned PDF through actual Tesseract OCR and then real Qwen candidate generation before review and LCR reconciliation.
 - `8fcfa6d998a94da45b91b23e4d0b00d42ce68e7f` — the second conflicting medication document is now a generated DOCX, so the same live-Qwen test covers scanned-PDF OCR and DOCX extraction through to Companion conflict retrieval.
+
+- `0a61ed917a131f245fe640f598cbdbf9b9a2369d` — accepted document-derived CareAssertions are now projected into the existing `GET /api/situation` response with exact quotation, source evidence/document ID, page, reviewer, temporal, negation, modality and epistemic metadata.
+- `0c8ca3a201b021586856bac5e2f9738fbda3d6f1` — the situation projection recognizes all caregiver-approved document assertions, including medication-status assertions that deliberately remain `reported` rather than clinically verified.
+- `54e01b84ef09866d333d21d8dea770e7dc17cdf8` — the same accepted LCR assertions are projected into the existing `SituationObservation` shape (`kind=document`, source reference, reported epistemic state) consumed by the frontend Progressive Understanding Engine; no new evidence table or write path was added.
+- `8d2d1a005ceef70f683af3caffe6961c6fb97765` — regression coverage proves pending candidates do not appear in Progressive Understanding, while caregiver-approved assertions do.
+- `fbbb7127d6f4dff6c98d2877cab2a3cea82cb5d2` — aligns document source statement attribution values with the existing Progressive Understanding observation contract.
