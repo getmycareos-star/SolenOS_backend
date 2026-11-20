@@ -3,7 +3,7 @@
 Unlike the SQLite transition tests, this exercises the real migrated PostgreSQL
 schema and the application middleware with two distinct bearer identities.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import os
 import uuid
 
@@ -35,6 +35,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
     primary_caregiver_id = None
     invited_caregiver_id = None
     invitation_id = None
+    foreign_person_id = None
 
     try:
         primary = client.post(
@@ -108,6 +109,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             json={"name": f"Foreign person {suffix}", "caregiver_name": "Foreign caregiver"},
         )
         assert foreign.status_code == 201, foreign.text
+        foreign_person_id = foreign.json()["person"]["id"]
         foreign_headers = {"Authorization": f"Bearer {foreign.json()['access_token']}"}
         cross_person = client.get(
             f"/api/v1/evidence/{person_id}", headers=foreign_headers
@@ -144,7 +146,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             assert stored_session.revoked_at is not None
             assert stored_session.expires_at > datetime.now(timezone.utc)
     finally:
-        if person_id and Session:
+        if Session and (person_id or foreign_person_id):
             with Session() as db:
                 if invitation_id:
                     db.query(CaregiverInvitation).filter_by(id=invitation_id).delete(synchronize_session=False)
@@ -153,7 +155,12 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
                 db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+                if foreign_person_id:
+                    db.query(AnonymousSession).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
+                    db.query(Caregiver).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
+                    db.query(Person).filter_by(id=foreign_person_id).delete(synchronize_session=False)
+                if person_id:
+                    db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
         if engine:
             engine.dispose()
