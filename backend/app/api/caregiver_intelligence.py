@@ -309,6 +309,8 @@ def update_care_recipient_profile(
     condition = payload.condition.strip() if payload.condition and payload.condition.strip() else None
 
     try:
+        previous_person_name = person.name
+        previous_relationship = caregiver_profile.relationship or ""
         person.name = name
         caregiver_profile.relationship = relationship
 
@@ -342,7 +344,15 @@ def update_care_recipient_profile(
             "reported_by_session_caregiver_id": session_caregiver_id,
         }
         snapshot_fields = ("recipient_name", "caregiver_relationship", "condition")
-        if any(previous_snapshot.get(field) != next_snapshot.get(field) for field in snapshot_fields):
+        changed_fields = [
+            field for field, previous, current in (
+                ("recipient_name", previous_person_name, name),
+                ("caregiver_relationship", previous_relationship, relationship),
+                ("condition", previous_snapshot.get("condition"), condition),
+            )
+            if previous != current
+        ]
+        if changed_fields:
             now = datetime.now(timezone.utc)
             if latest_profile_context is not None and latest_profile_context.effective_end is None:
                 latest_profile_context.effective_end = now
@@ -356,6 +366,22 @@ def update_care_recipient_profile(
                 context_metadata=next_snapshot,
                 effective_start=now,
                 effective_end=None,
+            ))
+            db.add(AuditLogEvent(
+                actor_id=session_caregiver_id,
+                subject_id=person_id,
+                person_id=person_id,
+                caregiver_id=session_caregiver_id,
+                action="care_recipient_profile_updated",
+                target_type="care_recipient_profile",
+                target_id=person_id,
+                outcome="success",
+                request_id=request.headers.get("x-request-id"),
+                policy_version="care-profile-v1",
+                record_metadata={
+                    "changed_fields": changed_fields,
+                    "condition_epistemic_status": "caregiver_reported" if condition else None,
+                },
             ))
         db.commit()
         db.refresh(person)
