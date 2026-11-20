@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, inspect, or_, text
+from sqlalchemy import and_, func, inspect, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -8476,6 +8476,56 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "ai_generated": _stored_response_metadata(row).get("ai_generated"),
             "response_mode": _stored_response_metadata(row).get("response_mode"),
         } for row in history],
+    }
+
+
+@router.get("/conversations")
+def list_conversations(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """List the authenticated caregiver's durable Companion conversations.
+
+    The list is scoped by the server-issued bearer identity, not by client
+    supplied person/caregiver identifiers, so a new device can restore history
+    without trusting a browser-local conversation ID.
+    """
+    person_id, caregiver_id = _scope(request, db)
+    rows = (
+        db.query(
+            ConversationSession,
+            func.count(ConversationMessage.id).label("message_count"),
+            func.max(ConversationMessage.created_at).label("last_message_at"),
+        )
+        .join(ConversationMessage, ConversationMessage.session_id == ConversationSession.id)
+        .filter(
+            ConversationSession.person_id == person_id,
+            ConversationSession.caregiver_id == caregiver_id,
+        )
+        .group_by(ConversationSession.id)
+        .order_by(
+            func.max(ConversationMessage.created_at).desc(),
+            ConversationSession.created_at.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+    return {
+        "person_id": person_id,
+        "items": [
+            {
+                "session_id": session.id,
+                "person_id": person_id,
+                "title": session.title,
+                "status": session.status,
+                "created_at": session.created_at.isoformat() if session.created_at else None,
+                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+                "last_message_at": last_message_at.isoformat() if last_message_at else None,
+                "message_count": int(message_count),
+            }
+            for session, message_count, last_message_at in rows
+        ],
     }
 
 
