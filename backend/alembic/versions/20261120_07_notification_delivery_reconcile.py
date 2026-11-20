@@ -151,25 +151,24 @@ def upgrade():
             column["name"]: column for column in inspect(bind).get_columns("data_subject_requests")
         }
         if "subject_id" in request_columns:
+            # Older active requests may have stored only person_id. Backfill
+            # those rows, but preserve NULL for fulfilled erasure receipts:
+            # privacy completion intentionally clears every direct subject
+            # identifier so the request itself cannot re-identify the person.
             op.execute(sa.text(
                 "UPDATE data_subject_requests "
                 "SET subject_id = person_id "
                 "WHERE subject_id IS NULL AND person_id IS NOT NULL"
             ))
-            remaining_nulls = bind.execute(sa.text(
-                "SELECT COUNT(*) FROM data_subject_requests WHERE subject_id IS NULL"
+            unresolved_active = bind.execute(sa.text(
+                "SELECT COUNT(*) FROM data_subject_requests "
+                "WHERE subject_id IS NULL AND request_status <> 'fulfilled'"
             )).scalar_one()
-            if remaining_nulls:
+            if unresolved_active:
                 raise RuntimeError(
-                    f"Cannot enforce data_subject_requests.subject_id NOT NULL: {remaining_nulls} rows have no subject or person ID."
+                    "Cannot reconcile active data-subject requests without a subject identifier: "
+                    + str(unresolved_active)
                 )
-            if request_columns["subject_id"].get("nullable", True):
-                with op.batch_alter_table("data_subject_requests") as batch:
-                    batch.alter_column(
-                        "subject_id",
-                        existing_type=sa.String(length=255),
-                        nullable=False,
-                    )
 
     expected_indexes = (
         ("delivery_failure_events", "delivery_id"),
