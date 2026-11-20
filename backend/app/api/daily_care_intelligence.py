@@ -93,6 +93,13 @@ def _history_bundle(
     # Existing paginated event/evidence reads remain available for the history UI.
     # The shared LCR projection adds facts, assertions, decisions, uncertainty,
     # conflicts, provenance, and records contributed by other authorised caregivers.
+    can_view_documents = True
+    try:
+        require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        can_view_documents = False
     events_q = db.query(CareEvent).filter(CareEvent.person_id == person_id)
     if query:
         terms = _expanded_search_terms(re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()))[:24]
@@ -109,12 +116,12 @@ def _history_bundle(
         Correction.person_id == person_id
     ).order_by(Correction.created_at.desc()).all()
 
-    # The direct history list remains caregiver-aware. The shared LCR projection
-    # below also includes other evidence the authenticated caregiver is authorised to see.
-    evidence_q = db.query(EvidenceModel).filter(
-        EvidenceModel.person_id == person_id,
-        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
-    )
+    # Evidence is shared at the care-record boundary. Document text remains
+    # separately permission-gated; caregivers without document access receive
+    # non-document evidence only.
+    evidence_q = db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id)
+    if not can_view_documents:
+        evidence_q = evidence_q.filter(EvidenceModel.type != "document")
     if query:
         terms = _expanded_search_terms(re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()))[:24]
         if terms:
@@ -133,21 +140,18 @@ def _history_bundle(
         if event.event_type in {
             "daily_care_entry", "structured_daily_capture", "quick_daily_checkin",
         }
-        and str(event.created_by_caregiver_id) == str(caregiver_id)
     ]
     analysis_by_event: dict[str, CaptureAnalysis] = {}
     job_by_event: dict[str, QwenBackgroundJob] = {}
     if daily_event_ids:
         analyses = db.query(CaptureAnalysis).filter(
             CaptureAnalysis.person_id == person_id,
-            CaptureAnalysis.caregiver_id == caregiver_id,
             CaptureAnalysis.source_event_id.in_(daily_event_ids),
         ).order_by(CaptureAnalysis.created_at.desc()).all()
         for analysis in analyses:
             analysis_by_event.setdefault(str(analysis.source_event_id), analysis)
         jobs = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.person_id == person_id,
-            QwenBackgroundJob.caregiver_id == caregiver_id,
             QwenBackgroundJob.workflow == "daily_capture_extraction",
             QwenBackgroundJob.source_event_ids_json.in_([
                 json.dumps([event_id]) for event_id in daily_event_ids
