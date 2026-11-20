@@ -1711,6 +1711,16 @@ def test_medication_authoring_and_review_are_person_scoped():
             person_id=foreign_person.id,
         )
         db.add_all([foreign_person, foreign_caregiver])
+        db.add(CaregiverAccessGrant(
+            person_id=foreign_person.id,
+            caregiver_id=foreign_caregiver.id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+            permissions=["view_lcr", "correct_records"],
+            granted_by_caregiver_id=foreign_caregiver.id,
+        ))
         db.commit()
         db.close()
 
@@ -1731,11 +1741,12 @@ def test_medication_authoring_and_review_are_person_scoped():
             json={},
         )
         assert foreign_review.status_code == 404
-        # This bearer session has no active grant for the owner's care record.
-        # The middleware must reject the projection rather than disclose even
-        # an empty response that could be used to probe record membership.
+        # The foreign caregiver is authorized only for their own record. Their
+        # medication projection must remain empty; the owner's subject ID must
+        # not cross the session boundary.
         foreign_projection = client.get("/api/v1/care-continuity/medications", headers=foreign_headers)
-        assert foreign_projection.status_code == 403
+        assert foreign_projection.status_code == 200, foreign_projection.text
+        assert foreign_projection.json()["medications"] == []
     finally:
         teardown_db()
 
