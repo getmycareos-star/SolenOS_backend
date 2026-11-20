@@ -151,3 +151,8 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 
 - `2d85850740d0be375275b7015e55187f48be76a9` and `1fd788b055bcf78d0e8648e57b99c6902a389c93` — document source projections do not invent a speaker identity; speaker attribution remains unknown unless the source actually names one.
 - `922ccca9dfa0f9bf59c30e79d9a071e3bf6d73bf` — regression coverage asserts the Progressive Understanding observation preserves unknown speaker attribution and source evidence identity.
+
+- `54e01b84ef09866d333d21d8dea770e7dc17cdf8` / `8f224659c64770939f3a939899a6ceb449292746` — the existing situation hydration now includes caregiver-approved document assertions in the Progressive Understanding observation stream and updates its captured timeline.
+- `2d85850740d0be375275b7015e55187f48be76a9` / `1fd788b055bcf78d0e8648e57b99c6902a389c93` / `922ccca9dfa0f9bf59c30e79d9a071e3bf6d73bf` — source attribution in that projection remains unknown when no speaker is explicitly identified; tests prohibit invented speaker identity.
+- `0c8ca3a201b021586856bac5e2f9738fbda3d6f1` / `34072792925d838599be58b5958d80f42842f5c7` / `fbbb7127d6f4dff6c98d2877cab2a3cea82cb5d2` — projection covers time-bound and reported medication assertions, preserves the existing source-statement contract and avoids misclassifying document roles as speakers.
+- `5ec20cae34df9ddbbac64dd7536d5dee4adf89c2` — live conflict evaluation uses neutral document names so filename recency cannot bias the model's conflict explanation.
