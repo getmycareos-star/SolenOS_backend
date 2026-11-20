@@ -523,6 +523,13 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             Appointment.scheduled_at.is_not(None),
             Appointment.scheduled_at <= now,
         ).order_by(Appointment.scheduled_at.desc()).first()
+    if next_appointment_row is None:
+        # Keep cancelled records available for a caregiver to record a
+        # reschedule, without presenting them as active appointments.
+        next_appointment_row = db.query(Appointment).filter(
+            Appointment.person_id == person_id,
+            Appointment.status.in_(["cancelled", "canceled"]),
+        ).order_by(Appointment.updated_at.desc(), Appointment.created_at.desc()).first()
     next_appointment = ({
         "source_table": "appointments",
         "source_id": str(next_appointment_row.id),
@@ -1245,6 +1252,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     )
     if context_retrieval_failed:
         appointment_context_code = "retrieval_failed"
+    elif next_appointment_row is not None and str(next_appointment_row.status).casefold() in {"cancelled", "canceled"}:
+        appointment_context_code = "cancelled"
     elif next_appointment_row is not None and str(next_appointment_row.status).casefold() == "overdue":
         appointment_context_code = "overdue"
     elif next_appointment_row is not None and str(next_appointment_row.status).casefold() == "rescheduled":
