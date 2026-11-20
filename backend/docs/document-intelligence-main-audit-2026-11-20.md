@@ -123,3 +123,9 @@ These changes and test definitions are committed on `main`. The CI workflow is c
 
 - `72dad4c067e2dde7b6d0117b3b85c6644506847a` — two separate discharge documents with conflicting Donepezil strengths are both retained as source-linked assertions.
 - `411f1b9dff7f674efd42f495e55c0d38a114b20a` — verifies both conflicting document assertions and their unresolved contradiction remain retrievable from the canonical LCR projection.
+
+- `9413c5236c3664c0f2e8fc4ef21b3cac395954f0` — added a manually labelled tentative-condition case to the synthetic semantic gold dataset.
+- `4fffd1f4ecfc3b0060617d915a5bad8ca0e2652b` — live-Qwen Companion evaluation now accepts and retrieves historical and tentative assertions, checking that the response retains the historical/tentative qualifiers.
+- `b583ce035c931f518a0d73b9ea36e8bc7f6e097b` — live-Qwen duplicate-upload test reprocesses the exact same binary and verifies the second accepted review reuses the original assertion and creates no duplicate assertion.
+- `13f56cedeb1eb3231282050ec262e5cacecdfb0e` — live-Qwen review tests select mobility and rejection candidates by exact source passage rather than relying on model output ordering.
+- `0deea7eb6309cea927a7608ed8218cde9ea53014` — historical Companion evaluation accepts past-tense wording variants.
