@@ -1895,12 +1895,32 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
         assert current_before.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
 
         with TestingSessionLocal() as db:
-            row = db.query(SignificanceAssessment).filter(
-                SignificanceAssessment.id == assessment_id,
-                SignificanceAssessment.person_id == person_id,
+            replacement_assessment_id = "freshness-linked-significance-assessment-v2"
+            db.add(SignificanceAssessment(
+                id=replacement_assessment_id,
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id=person_id,
+                target_type="change",
+                target_id=change_id,
+                verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                evidence_status=EvidenceStatus.REPORTED,
+                evidence_confidence=0.55,
+                significance_confidence=0.61,
+                dimensions=[{"name": "frequency", "score": 0.61}],
+                attention_candidate=True,
+                follow_up_candidate=True,
+                explanation="Updated persisted significance assessment.",
+                evidence_ids=[],
+                is_active=True,
+                version=2,
+            ))
+            db.flush()
+            persisted_change = db.query(Change).filter(
+                Change.id == change_id,
+                Change.person_id == person_id,
             ).one()
-            row.evidence_confidence = 0.55
-            row.explanation = "Updated persisted significance assessment."
+            persisted_change.significance_assessment_id = replacement_assessment_id
             db.commit()
 
         current_after = client.get(
