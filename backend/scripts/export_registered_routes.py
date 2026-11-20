@@ -244,7 +244,7 @@ def _authentication_disposition(path: str, method: str) -> str:
         return "share-token bootstrap"
     if path.startswith("/api/v1/share-intake/") and method == "GET":
         return "share-token read"
-    if path.startswith("/api/v1/") or path in {"/api/situation", "/api/lcr/orientation"}:
+    if path.startswith("/api/"):
         return "server-issued bearer session enforced by app middleware"
     return "inspect route dependencies and middleware explicitly"
 
