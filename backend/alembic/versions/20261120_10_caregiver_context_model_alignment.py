@@ -61,6 +61,83 @@ def upgrade():
             op.add_column(TABLE, sa.Column(name, column_type, nullable=True))
             columns.add(name)
 
+    # Legacy variants may have introduced nullable ownership/timestamp
+    # columns. Never invent a person or timestamp for an orphaned historical
+    # row: stop and require explicit reconciliation instead.
+    null_person_rows = bind.execute(
+        sa.text(f"SELECT count(*) FROM {TABLE} WHERE person_id IS NULL")
+    ).scalar_one()
+    if null_person_rows:
+        raise RuntimeError(
+            f"Cannot enforce caregiver_contexts.person_id: {null_person_rows} legacy rows have no care recipient"
+        )
+    null_created_rows = bind.execute(
+        sa.text(f"SELECT count(*) FROM {TABLE} WHERE created_at IS NULL")
+    ).scalar_one()
+    if null_created_rows:
+        raise RuntimeError(
+            f"Cannot enforce caregiver_contexts.created_at: {null_created_rows} legacy rows have no storage timestamp"
+        )
+
+    orphan_people = bind.execute(sa.text(
+        "SELECT count(*) FROM caregiver_contexts c "
+        "LEFT JOIN persons p ON p.id = c.person_id WHERE p.id IS NULL"
+    )).scalar_one()
+    if orphan_people:
+        raise RuntimeError(
+            f"Cannot add caregiver_contexts.person_id foreign key: {orphan_people} orphan rows exist"
+        )
+    orphan_caregivers = bind.execute(sa.text(
+        "SELECT count(*) FROM caregiver_contexts c "
+        "LEFT JOIN caregiver_profiles p ON p.id = c.caregiver_id "
+        "WHERE c.caregiver_id IS NOT NULL AND p.id IS NULL"
+    )).scalar_one()
+    if orphan_caregivers:
+        raise RuntimeError(
+            f"Cannot add caregiver_contexts.caregiver_id foreign key: {orphan_caregivers} orphan rows exist"
+        )
+
+    actual_foreign_keys = {
+        (tuple(item.get("constrained_columns") or ()), item.get("referred_table"), tuple(item.get("referred_columns") or ()))
+        for item in inspect(bind).get_foreign_keys(TABLE)
+    }
+    for local_column, remote_table, remote_column, constraint_name in (
+        ("person_id", "persons", "id", "fk_caregiver_contexts_person_id_persons"),
+        ("caregiver_id", "caregiver_profiles", "id", "fk_caregiver_contexts_caregiver_id_profiles"),
+    ):
+        key = ((local_column,), remote_table, (remote_column,))
+        if key not in actual_foreign_keys:
+            if bind.dialect.name == "sqlite":
+                with op.batch_alter_table(TABLE) as batch:
+                    batch.create_foreign_key(
+                        constraint_name,
+                        remote_table,
+                        [local_column],
+                        [remote_column],
+                        ondelete="CASCADE",
+                    )
+            else:
+                op.create_foreign_key(
+                    constraint_name,
+                    TABLE,
+                    remote_table,
+                    [local_column],
+                    [remote_column],
+                    ondelete="CASCADE",
+                )
+
+    for column_name, column_type in (
+        ("person_id", sa.String(length=36)),
+        ("created_at", sa.DateTime(timezone=True)),
+    ):
+        column = next(item for item in inspect(bind).get_columns(TABLE) if item["name"] == column_name)
+        if bool(column.get("nullable", True)):
+            if bind.dialect.name == "sqlite":
+                with op.batch_alter_table(TABLE) as batch:
+                    batch.alter_column(column_name, existing_type=column_type, nullable=False)
+            else:
+                op.alter_column(TABLE, column_name, existing_type=column_type, nullable=False)
+
     existing_index_definitions = {
         (tuple(index.get("column_names") or ()), bool(index.get("unique", False)))
         for index in inspect(bind).get_indexes(TABLE)
