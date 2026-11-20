@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
+from app.services.document_binary_storage import read_document_binary
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
@@ -287,15 +288,17 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
         if binary_upload is None:
             binary_status = "missing"
         else:
-            binary_content = bytes(binary_upload.content)
             binary_stored_hash = binary_upload.sha256
-            binary_computed_hash = hashlib.sha256(binary_content).hexdigest()
-            binary_status = (
-                "match"
-                if len(binary_content) == binary_upload.size_bytes
-                and hmac.compare_digest(binary_stored_hash, binary_computed_hash)
-                else "mismatch"
-            )
+            try:
+                binary_content = read_document_binary(binary_upload)
+                binary_computed_hash = hashlib.sha256(binary_content).hexdigest()
+                binary_status = (
+                    "match"
+                    if hmac.compare_digest(binary_stored_hash, binary_computed_hash)
+                    else "mismatch"
+                )
+            except Exception:
+                binary_status = "mismatch"
 
     text_duplicate_ids = []
     if stored_hash and integrity_status == "match":
