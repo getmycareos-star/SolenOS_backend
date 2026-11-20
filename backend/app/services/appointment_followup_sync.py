@@ -293,6 +293,7 @@ def sync_appointment_followups(
             event_type="source_follow_up_removed", before_state=before,
             after_state=_snapshot(loop),
             evidence=[{"record_type": "appointment_workspace", "record_id": workspace_id,
+                       "appointment_id": appointment_id,
                        "reason": "Absent from latest saved workspace revision",
                        "outcome": "cancelled_not_resolved"}],
             actor="solenos_reconciliation",
