@@ -1458,7 +1458,7 @@ def main():
         # items. Verify the accepted assertion through the paginated History LCR
         # context instead of incorrectly requiring every assertion in that card.
         status, reviewed_history = request(
-            "GET", f"/api/v1/daily-care/history?limit=200&offset=0&person_id={person_a}", token=token_a,
+            "GET", f"/api/v1/daily-care/intelligence/history?limit=200&offset=0&person_id={person_a}", token=token_a,
         )
         require(status == 200, f"Reviewed Daily Care history failed: {status}: {reviewed_history}")
         reviewed_assertions = [
@@ -1480,7 +1480,7 @@ def main():
                 f"Daily Care session refresh failed: {status}: {refreshed}")
         token_a = refreshed["access_token"]
         status, refreshed_history = request(
-            "GET", f"/api/v1/daily-care/history?limit=200&offset=0&person_id={person_a}", token=token_a,
+            "GET", f"/api/v1/daily-care/intelligence/history?limit=200&offset=0&person_id={person_a}", token=token_a,
         )
         require(status == 200 and any(
             row.get("id") == accepted_assertion_id
@@ -1494,7 +1494,7 @@ def main():
         ), "Accepted Daily Care assertion did not survive session refresh and paginated LCR history")
 
         status, foreign_history = request(
-            "GET", f"/api/v1/daily-care/history?limit=200&offset=0&person_id={person_a}", token=token_b,
+            "GET", f"/api/v1/daily-care/intelligence/history?limit=200&offset=0&person_id={person_a}", token=token_b,
         )
         require(status == 403,
                 f"A different care recipient session was not denied access to another person's history: {status}: {foreign_history}")
