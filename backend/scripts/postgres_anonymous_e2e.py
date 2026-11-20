@@ -1571,6 +1571,7 @@ def main():
             and significance_item.get("evidence_status") == "reported"
             and significance_item.get("evidence_confidence") == 0.42
             and significance_item.get("significance_confidence") == 0.61
+            and significance_item.get("confidence_interpretation") == "uncalibrated_score_not_probability"
             and significance_item.get("action_status") == "open"
             and significance_item.get("linked_follow_up_id") == linked_follow_up_id
             and significance_item.get("history_completeness") == "partial_or_unknown"
