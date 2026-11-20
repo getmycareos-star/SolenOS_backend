@@ -14,6 +14,7 @@ from app.models.caregiver_account import CaregiverAccount
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer, CaregiverPrimaryTransfer
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility, CaregiverHandoff
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
+from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent
 from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus, HandoffAcceptanceStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
@@ -394,6 +395,21 @@ def update_member_permissions(
         raise HTTPException(status_code=404, detail="Active caregiver access was not found.")
     if grant.role == "primary" or grant.can_manage_members:
         raise HTTPException(status_code=409, detail="Primary care-record administration cannot be reassigned through ordinary permissions.")
+    current_permissions = set(grant.permissions or [])
+    if (
+        "complete_assigned_reminders" in current_permissions
+        and "complete_assigned_reminders" not in requested
+    ):
+        open_assigned_count = db.query(CareReminder.id).filter(
+            CareReminder.person_id == person_id,
+            CareReminder.assigned_to_caregiver_id == caregiver_id,
+            CareReminder.status == "open",
+        ).count()
+        if open_assigned_count:
+            raise HTTPException(
+                status_code=409,
+                detail="Reassign or close this caregiver's open reminders before removing their completion permission.",
+            )
     grant.permissions = sorted(requested)
     grant.updated_at = datetime.now(timezone.utc)
     db.add(_audit_event(
