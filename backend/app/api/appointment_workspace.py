@@ -284,13 +284,24 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
     now = datetime.now(timezone.utc)
     appointment = db.query(Appointment).filter(
         Appointment.person_id == person_id,
-        Appointment.status.in_(["scheduled", "upcoming", "today"]),
+        Appointment.status.in_(["scheduled", "upcoming", "today", "rescheduled"]),
+        Appointment.scheduled_at.is_not(None),
         Appointment.scheduled_at >= now,
     ).order_by(Appointment.scheduled_at.asc()).with_for_update().first()
+    appointment_date_unknown = False
+    if appointment is None:
+        # Preserve an already-recorded appointment whose date is unknown.
+        # This creates a preparation workspace only; it never invents a date.
+        appointment = db.query(Appointment).filter(
+            Appointment.person_id == person_id,
+            Appointment.status.in_(["date_unknown", "scheduled", "upcoming", "rescheduled"]),
+            Appointment.scheduled_at.is_(None),
+        ).order_by(Appointment.updated_at.desc(), Appointment.created_at.desc()).with_for_update().first()
+        appointment_date_unknown = appointment is not None
     if appointment is None:
         return {
             "created": False,
-            "reason": "no_upcoming_scheduled_appointment",
+            "reason": "no_appointment_information",
             "workspace": None,
         }
 
@@ -307,7 +318,7 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
         "captureStage": "prepare",
         "caregiverReport": "",
         "generatedBy": "solenos_appointment_continuity",
-        "generationReason": "existing_scheduled_appointment",
+        "generationReason": "appointment_date_unknown" if appointment_date_unknown else "existing_scheduled_appointment",
     }
     row = AppointmentWorkspaceRecord(
         id=str(uuid.uuid4()),
@@ -318,13 +329,14 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
         status="preparation",
         version_number=1,
         payload=payload,
-        last_revision_reason="Automatically prepared for an existing scheduled appointment",
+        last_revision_reason=("Automatically prepared for an existing appointment with no recorded date" if appointment_date_unknown else "Automatically prepared for an existing scheduled appointment"),
         idempotency_key=f"auto-upcoming:{appointment.id}",
         idempotency_request_sha256=_request_fingerprint({
             "appointment_id": appointment.id,
             "status": "preparation",
             "payload": payload,
             "generation": "solenos_appointment_continuity",
+            "appointment_date_state": "unknown" if appointment_date_unknown else "known",
         }),
     )
     revision = AppointmentWorkspaceRevision(
@@ -333,7 +345,7 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
         person_id=person_id,
         revision_number=1,
         payload=payload,
-        change_reason="Automatically prepared for an existing scheduled appointment",
+        change_reason=("Automatically prepared for an existing appointment with no recorded date" if appointment_date_unknown else "Automatically prepared for an existing scheduled appointment"),
         changed_by_caregiver_id=caregiver_id,
         idempotency_key=f"auto-upcoming:{appointment.id}",
         idempotency_request_sha256=row.idempotency_request_sha256,
@@ -357,7 +369,7 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
         logger.exception("Automatic appointment workspace creation failed")
         raise HTTPException(status_code=503, detail="Appointment preparation could not be saved") from exc
 
-    return {"created": True, "reason": "prepared_for_existing_appointment", "workspace": _record_out(row, db)}
+    return {"created": True, "reason": "prepared_for_existing_appointment_date_unknown" if appointment_date_unknown else "prepared_for_existing_appointment", "workspace": _record_out(row, db)}
 
 
 @router.get("/preparation-brief")
@@ -440,9 +452,16 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     # upcoming scheduled visit rather than the furthest future appointment.
     next_appointment_row = db.query(Appointment).filter(
         Appointment.person_id == person_id,
-        Appointment.status.in_(["scheduled", "upcoming", "today"]),
+        Appointment.status.in_(["scheduled", "upcoming", "today", "rescheduled"]),
+        Appointment.scheduled_at.is_not(None),
         Appointment.scheduled_at >= now,
     ).order_by(Appointment.scheduled_at.asc()).first()
+    if next_appointment_row is None:
+        next_appointment_row = db.query(Appointment).filter(
+            Appointment.person_id == person_id,
+            Appointment.status.in_(["date_unknown", "scheduled", "upcoming", "rescheduled"]),
+            Appointment.scheduled_at.is_(None),
+        ).order_by(Appointment.updated_at.desc(), Appointment.created_at.desc()).first()
     next_appointment = ({
         "source_table": "appointments",
         "source_id": str(next_appointment_row.id),
@@ -1084,6 +1103,63 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "record_limit": 500,
         },
     }
+    appointment_related_open_loops = [
+        item for item in open_loops
+        if item.get("source_type") == "appointment_workspace_follow_up" or item.get("appointment_id")
+    ]
+    context_retrieval_failed = bool(
+        living_care_record_context.get("retrieval_error")
+        or living_care_record_context.get("schema_status") == "failed"
+        or living_care_record_context.get("failed_sources")
+    )
+    context_retrieval_partial = bool(
+        living_care_record_context.get("schema_status") != "complete"
+        or living_care_record_context.get("missing_required_sources")
+        or living_care_record_context.get("missing_optional_sources")
+        or living_care_record_context.get("retrieval_projection_complete") is not True
+    )
+    if context_retrieval_failed:
+        appointment_context_code = "retrieval_failed"
+    elif next_appointment_row is not None and next_appointment_row.scheduled_at is None:
+        appointment_context_code = "date_unknown"
+    elif next_appointment_row is not None:
+        appointment_context_code = "scheduled"
+    elif any(str(item.get("status", "")).casefold() in {"cancelled", "canceled"} for item in appointment_items):
+        appointment_context_code = "cancelled"
+    elif any(str(item.get("status", "")).casefold() == "rescheduled" for item in appointment_items):
+        appointment_context_code = "rescheduled"
+    elif any(str(item.get("status", "")).casefold() in {"completed", "resolved", "historical"} for item in appointment_items):
+        appointment_context_code = "occurred"
+    elif appointment_need_items or appointment_related_open_loops:
+        appointment_context_code = "follow_up_needed"
+    elif appointment_items:
+        appointment_context_code = "no_upcoming_appointment"
+    else:
+        appointment_context_code = "no_appointment_information"
+
+    appointment_context_status = {
+        "code": appointment_context_code,
+        "has_appointment_information": bool(appointment_items or appointment_need_items or appointment_related_open_loops),
+        "date_known": (
+            None if next_appointment_row is None
+            else next_appointment_row.scheduled_at is not None
+        ),
+        "next_appointment_id": str(next_appointment_row.id) if next_appointment_row is not None else None,
+        "interpretation_limit": (
+            "A missing date remains unknown. No date, provider, attendance or booking confirmation is inferred."
+        ),
+    }
+    lcr_retrieval_status = {
+        "status": "failed" if context_retrieval_failed else "partial" if context_retrieval_partial else "complete",
+        "schema_status": living_care_record_context.get("schema_status"),
+        "scan_complete": living_care_record_context.get("retrieval_scan_complete") is True,
+        "projection_complete": living_care_record_context.get("retrieval_projection_complete") is True,
+        "failed_sources": living_care_record_context.get("failed_sources", []),
+        "missing_required_sources": living_care_record_context.get("missing_required_sources", []),
+        "missing_optional_sources": living_care_record_context.get("missing_optional_sources", []),
+        "retrieval_error": living_care_record_context.get("retrieval_error"),
+    }
+
     return {
         "person_scope_verified": True,
         "snapshot_at": now.isoformat(),
@@ -1094,6 +1170,9 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "events": event_items,
         "appointments": appointment_items,
         "next_appointment": next_appointment,
+        "appointment_context_status": appointment_context_status,
+        "appointment_related_open_loops": appointment_related_open_loops,
+        "lcr_retrieval_status": lcr_retrieval_status,
         "open_loops": open_loops,
         "prior_decisions": prior_decisions,
         "decision_outcomes": decision_outcomes,
