@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 
 
 class CareWindowBase(BaseModel):
@@ -49,6 +49,14 @@ class AppointmentBase(BaseModel):
 
 class AppointmentCreate(AppointmentBase):
     pass
+
+
+class AppointmentLifecycleUpdate(BaseModel):
+    status: Optional[Literal[
+        "scheduled", "upcoming", "today", "completed", "cancelled",
+        "rescheduled", "date_unknown", "resolved", "historical", "overdue",
+    ]] = None
+    scheduled_at: Optional[datetime] = None
 
 
 class Appointment(AppointmentBase):
