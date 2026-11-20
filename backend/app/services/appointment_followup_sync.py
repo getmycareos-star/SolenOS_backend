@@ -63,7 +63,7 @@ def _snapshot(loop):
 
 
 def sync_appointment_followups(
-    db: Session, *, person_id: str, caregiver_id: str, workspace_id: str, payload: dict
+    db: Session, *, person_id: str, caregiver_id: str, workspace_id: str, payload: dict, appointment_id: str | None = None
 ) -> dict[str, int]:
     """Maintain source-linked Open Loops for explicit follow-ups in a saved workspace.
 
@@ -161,6 +161,7 @@ def sync_appointment_followups(
                 )
         evidence = [{
             "record_type": "appointment_workspace", "record_id": workspace_id,
+            "appointment_id": appointment_id,
             "source_type": SOURCE_TYPE, "reported_owner": owner_label,
             "reported_owner_role": owner_role,
             "reported_due": due_text, "reported_status": source_status,
@@ -184,7 +185,6 @@ def sync_appointment_followups(
 
         loop = db.query(OpenLoopRecord).filter(
             OpenLoopRecord.person_id == person_id,
-            OpenLoopRecord.caregiver_id == caregiver_id,
             OpenLoopRecord.loop_type == "follow_up",
             OpenLoopRecord.source_type == SOURCE_TYPE,
             OpenLoopRecord.source_id == source_id,
@@ -272,7 +272,7 @@ def sync_appointment_followups(
         updated += 1
 
     prior_loops = db.query(OpenLoopRecord).filter(
-        OpenLoopRecord.person_id == person_id, OpenLoopRecord.caregiver_id == caregiver_id,
+        OpenLoopRecord.person_id == person_id,
         OpenLoopRecord.loop_type == "follow_up", OpenLoopRecord.source_type == SOURCE_TYPE,
         OpenLoopRecord.source_id.like(f"{workspace_id}:%"),
         OpenLoopRecord.status.notin_(["closed", "cancelled"]),
