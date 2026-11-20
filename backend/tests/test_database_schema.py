@@ -24,6 +24,9 @@ def test_schema_verifier_reports_missing_columns():
         )
         assert caregiver_difference is not None
         assert "name" in caregiver_difference or "person_id" in caregiver_difference
+        assert any(item.startswith("caregivers: missing foreign keys") for item in differences)
+        assert any(item.startswith("caregivers: missing unique constraints") for item in differences)
+        assert any(item.startswith("caregivers: missing indexes") for item in differences)
     finally:
         engine.dispose()
 
