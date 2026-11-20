@@ -2342,6 +2342,15 @@ def update_appointment_lifecycle_endpoint(
 
     if payload is not None:
         supplied = payload.model_fields_set
+        if (
+            payload.status == "rescheduled"
+            and payload.scheduled_at is not None
+            and payload.scheduled_at <= utc_now()
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="A rescheduled date must be in the future or remain unknown. Past dates require attendance confirmation.",
+            )
         if "scheduled_at" in supplied:
             appointment.scheduled_at = payload.scheduled_at
             if payload.scheduled_at is None and "status" not in supplied and appointment.status not in {"completed", "cancelled", "resolved", "historical"}:
