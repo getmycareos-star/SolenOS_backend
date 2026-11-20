@@ -376,6 +376,7 @@ class CaregiverContextCreate(CaregiverContextBase):
 
 class CaregiverContext(CaregiverContextBase):
     id: str
+    reported_by_caregiver_id: Optional[str] = None
     created_at: datetime
 
     class Config:
