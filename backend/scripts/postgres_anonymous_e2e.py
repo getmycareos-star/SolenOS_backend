@@ -22,8 +22,10 @@ from pathlib import Path
 from sqlalchemy import text
 
 from app.core.database import SessionLocal
-from app.core.change_enums import SituationType, SituationState
-from app.models.change import Situation as SituationModel
+from app.core.change_enums import SituationType, SituationState, ChangeType, ChangeDirection, SignificanceVerdict, EvidenceStatus
+from app.models.change import Situation as SituationModel, Change
+from app.models.significance import SignificanceAssessment
+from app.models.open_loop import OpenLoopRecord
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.care import CareEvent
@@ -1479,6 +1481,180 @@ def main():
                 and assessment_records[0].get("evidence_ids") == [daily_evidence_id]
                 and assessment_records[0].get("source_label") == "Caregiver",
                 f"Situation assessment did not rebuild from the verified source: {assessment_records}")
+
+        # Verify persisted care significance, evidence provenance, follow-up state,
+        # and snapshot invalidation through the real PostgreSQL-backed HTTP path.
+        care_change_id = str(uuid.uuid4())
+        significance_assessment_id = str(uuid.uuid4())
+        linked_follow_up_id = str(uuid.uuid4())
+        with SessionLocal() as db:
+            db.add(SignificanceAssessment(
+                id=significance_assessment_id,
+                person_id=person_a,
+                subject_type="sleep",
+                subject_id=person_a,
+                target_type="change",
+                target_id=care_change_id,
+                verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                evidence_status=EvidenceStatus.REPORTED,
+                evidence_confidence=0.42,
+                significance_confidence=0.61,
+                dimensions=[{"name": "frequency", "score": 0.61}],
+                attention_candidate=True,
+                follow_up_candidate=True,
+                explanation="PostgreSQL E2E persisted sleep change requires caregiver review.",
+                evidence_ids=[daily_event_id],
+                is_active=True,
+            ))
+            db.flush()
+            db.add(Change(
+                id=care_change_id,
+                person_id=person_a,
+                subject_type="sleep",
+                subject_id=person_a,
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state="Previously recorded sleep pattern",
+                current_state="More frequent waking recorded",
+                baseline_coverage_status="unknown",
+                current_coverage_status="covered",
+                evidence_ids=[daily_event_id],
+                explanation="PostgreSQL E2E persisted sleep change.",
+                significance_assessment_id=significance_assessment_id,
+                significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                attention_candidate=True,
+                follow_up_candidate=True,
+                confirmation_status="detected",
+                is_active=True,
+            ))
+            db.add(OpenLoopRecord(
+                id=linked_follow_up_id,
+                person_id=person_a,
+                caregiver_id=caregiver_a,
+                assigned_caregiver_id=caregiver_a,
+                loop_type="follow_up",
+                title="Review the recorded sleep change",
+                description="The follow-up outcome has not yet been confirmed.",
+                status="open",
+                outcome_status="outcome_unknown",
+                source_type="persisted_change",
+                source_id=care_change_id,
+                source_fingerprint=hashlib.sha256(
+                    f"{care_change_id}:postgres-e2e-follow-up".encode("utf-8")
+                ).hexdigest(),
+                evidence=[],
+                uncertainty="unknown",
+                missing_information=[],
+                options=[],
+                response_evidence=[],
+                action_evidence=[],
+                outcome_evidence=[],
+                priority="normal",
+                priority_reasons=[],
+                closure_evidence=[],
+                version=1,
+            ))
+            db.commit()
+
+        status, significance_projection = request(
+            "POST", "/api/v1/care-continuity/situation-understanding/reassess", token=token_a,
+        )
+        require(status == 200, f"PostgreSQL care-significance reassessment failed: {status}: {significance_projection}")
+        significance_items = significance_projection.get("assessment", {}).get("care_attention", {}).get("important_to_address", [])
+        significance_item = next(
+            (item for item in significance_items if item.get("record_id") == care_change_id),
+            None,
+        )
+        require(
+            significance_item is not None
+            and significance_item.get("significance_assessment_status") == "linked"
+            and significance_item.get("evidence_status") == "reported"
+            and significance_item.get("evidence_confidence") == 0.42
+            and significance_item.get("significance_confidence") == 0.61
+            and significance_item.get("action_status") == "open"
+            and significance_item.get("linked_follow_up_id") == linked_follow_up_id
+            and significance_item.get("history_completeness") == "partial_or_unknown"
+            and significance_item.get("source_record_ids") == [daily_event_id]
+            and significance_item.get("evidence_ids") == [daily_evidence_id],
+            f"PostgreSQL LCR did not independently project significance, evidence, source and follow-up state: {significance_item}",
+        )
+
+        status, current_significance = request(
+            "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
+        )
+        require(status == 200
+                and current_significance.get("source_freshness", {}).get("status") == "current_for_bounded_source_view",
+                f"PostgreSQL significance snapshot should initially be current: {status}: {current_significance}")
+
+        with SessionLocal() as db:
+            persisted_assessment = db.query(SignificanceAssessment).filter(
+                SignificanceAssessment.id == significance_assessment_id,
+                SignificanceAssessment.person_id == person_a,
+            ).one()
+            persisted_assessment.evidence_confidence = 0.55
+            persisted_assessment.explanation = "PostgreSQL E2E updated significance assessment."
+            db.commit()
+
+        status, changed_significance = request(
+            "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
+        )
+        require(status == 200
+                and changed_significance.get("source_freshness", {}).get("status") == "source_changed_since_assessment",
+                f"PostgreSQL significance edits must invalidate the saved situation snapshot: {status}: {changed_significance}")
+
+        status, refreshed_significance = request(
+            "POST", "/api/v1/care-continuity/situation-understanding/reassess", token=token_a,
+        )
+        require(status == 200, f"PostgreSQL significance refresh failed: {status}: {refreshed_significance}")
+        refreshed_item = next(
+            (item for item in refreshed_significance.get("assessment", {}).get("care_attention", {}).get("important_to_address", [])
+             if item.get("record_id") == care_change_id),
+            None,
+        )
+        require(refreshed_item is not None and refreshed_item.get("evidence_confidence") == 0.55,
+                f"PostgreSQL reassessment did not load the updated significance record: {refreshed_item}")
+
+        with SessionLocal() as db:
+            persisted_follow_up = db.query(OpenLoopRecord).filter(
+                OpenLoopRecord.id == linked_follow_up_id,
+                OpenLoopRecord.person_id == person_a,
+            ).one()
+            persisted_follow_up.status = "closed"
+            persisted_follow_up.updated_at = datetime.now(timezone.utc)
+            db.commit()
+
+        status, changed_follow_up = request(
+            "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
+        )
+        require(status == 200
+                and changed_follow_up.get("source_freshness", {}).get("status") == "source_changed_since_assessment",
+                f"PostgreSQL follow-up status changes must invalidate the saved situation snapshot: {status}: {changed_follow_up}")
+
+        status, closed_follow_up_assessment = request(
+            "POST", "/api/v1/care-continuity/situation-understanding/reassess", token=token_a,
+        )
+        require(status == 200, f"PostgreSQL closed follow-up reassessment failed: {status}: {closed_follow_up_assessment}")
+        closed_item = next(
+            (item for item in closed_follow_up_assessment.get("assessment", {}).get("care_attention", {}).get("important_to_address", [])
+             if item.get("record_id") == care_change_id),
+            None,
+        )
+        require(closed_item is not None
+                and closed_item.get("action_status") == "closed"
+                and closed_item.get("linked_follow_up_id") == linked_follow_up_id,
+                f"PostgreSQL LCR did not reflect the persisted closed follow-up: {closed_item}")
+
+        status, other_person_situation = request(
+            "GET", "/api/v1/care-continuity/situation-understanding", token=token_b,
+        )
+        require(
+            status in {200, 404}
+            and not any(
+                item.get("record_id") == care_change_id
+                for item in (other_person_situation or {}).get("assessment", {}).get("care_attention", {}).get("important_to_address", [])
+            ),
+            f"PostgreSQL significance or follow-up state crossed care-recipient scope: {status}: {other_person_situation}",
+        )
 
         status, daily_replay = request(
             "POST", "/api/v1/daily/log", token=token_a, body=daily_capture_payload,
