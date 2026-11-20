@@ -710,7 +710,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 db.refresh(existing_event)
             structured_detail_count = 0
             structured_details_status = "not_applicable"
-            if event_type in {"structured_daily_capture", "daily_care_entry"} and linked_evidence_ids:
+            if event_type in {"structured_daily_capture", "daily_care_entry"} and linked_evidence_ids and detail.get("capture_kind") != "natural_language_update":
                 existing_source_evidence = db.query(EvidenceModel).filter(
                     EvidenceModel.person_id == person_id,
                     EvidenceModel.id == linked_evidence_ids[0],
@@ -1038,7 +1038,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
     structured_detail_count = 0
     structured_details_status = "not_applicable"
-    if event_type in {"structured_daily_capture", "daily_care_entry"} and evidence is not None:
+    if event_type in {"structured_daily_capture", "daily_care_entry"} and evidence is not None and not natural_language_update:
         try:
             structured_detail_count = persist_structured_daily_capture_observations(
                 db,
