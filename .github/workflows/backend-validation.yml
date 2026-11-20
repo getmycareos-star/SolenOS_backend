@@ -215,6 +215,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build production Docker image
         run: docker build --tag solenos-backend-ci:latest .
+      - name: Migrate PostgreSQL before starting production workers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # Match Railway's pre-deploy ordering: migrations complete before
+          # application workers can query migration-owned tables.
+          docker run --rm --network host \
+            --env APP_ENV=ci \
+            --env DATABASE_URL="$DATABASE_URL" \
+            --env SECRET_KEY=ci-only-not-for-production \
+            --entrypoint alembic \
+            solenos-backend-ci:latest \
+            -c /app/alembic.ini upgrade head
       - name: Verify production image starts and becomes ready against migrated PostgreSQL
         shell: bash
         run: |
@@ -243,7 +256,6 @@ jobs:
             echo "FAIL: production image did not start /health." >&2
             exit 1
           fi
-          docker exec solenos-backend-ci alembic -c /app/alembic.ini upgrade head
           for attempt in $(seq 1 45); do
             ready_response=$(curl --silent --show-error --max-time 10 http://127.0.0.1:8080/ready || true)
             if curl --silent --fail --max-time 10 http://127.0.0.1:8080/ready >/dev/null; then
