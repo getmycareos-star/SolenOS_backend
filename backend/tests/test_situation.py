@@ -180,6 +180,8 @@ def test_post_situation_idempotency_replays_same_capture_without_duplicate_evide
         assert replay_data["message"] == "This care update was already saved. No duplicate was created."
         assert replay_data["analysis_status"] == "partial"
 
+        from app.models.capture_analysis import CaptureAnalysis
+        from app.models.qwen_background_job import QwenBackgroundJob
         with TestingSessionLocal() as db:
             evidence_rows = db.query(Evidence).filter(
                 Evidence.person_id == person_id,
@@ -191,8 +193,18 @@ def test_post_situation_idempotency_replays_same_capture_without_duplicate_evide
                 ).all()
                 if first_data["evidence_id"] in (event.evidence_ids or [])
             ]
+            analysis_rows = db.query(CaptureAnalysis).filter(
+                CaptureAnalysis.person_id == person_id,
+                CaptureAnalysis.source_event_id == first_data["care_event_id"],
+            ).all()
+            job_rows = db.query(QwenBackgroundJob).filter(
+                QwenBackgroundJob.person_id == person_id,
+                QwenBackgroundJob.workflow == "daily_capture_extraction",
+            ).all()
             assert len(evidence_rows) == 1
             assert len(event_rows) == 1
+            assert len(analysis_rows) == 1
+            assert len(job_rows) == 1
             assert evidence_rows[0].ingestion_request_sha256
 
         changed = {**payload, "raw_input": "A different capture must not reuse the same retry key."}
