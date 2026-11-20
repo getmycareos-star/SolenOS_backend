@@ -1734,10 +1734,11 @@ def test_medication_authoring_and_review_are_person_scoped():
             json={},
         )
         assert foreign_review.status_code == 404
+        # This bearer session has no active grant for the owner's care record.
+        # The middleware must reject the projection rather than disclose even
+        # an empty response that could be used to probe record membership.
         foreign_projection = client.get("/api/v1/care-continuity/medications", headers=foreign_headers)
-        assert foreign_projection.status_code == 200
-        assert foreign_projection.json()["medications"] == []
-        assert foreign_projection.json()["pending_review"] == []
+        assert foreign_projection.status_code == 403
     finally:
         teardown_db()
 
