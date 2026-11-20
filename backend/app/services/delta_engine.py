@@ -28,7 +28,7 @@ from app.services.claim_provenance import build_claim_provenance
 
 logger = logging.getLogger(__name__)
 
-DELTA_ENGINE_VERSION = "2026.11.15.2"
+DELTA_ENGINE_VERSION = "2026.11.20.1"
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
