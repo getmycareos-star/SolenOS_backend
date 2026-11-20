@@ -3,12 +3,14 @@
 This exercises the production route against the migrated PostgreSQL schema,
 then signs in again to prove the profile survives a new authorized session.
 """
+import importlib.util
 import os
+from pathlib import Path
 import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -214,3 +216,96 @@ def test_care_profile_write_read_new_session_history_and_record_isolation():
         second_person = db.query(Person).filter_by(id=second.json()["person"]["id"]).one()
         assert second_person.name == f"Separate recipient updated {suffix}"
         assert second_person.id != first_person.id
+
+
+def _load_notification_delivery_migration():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20261120_07_notification_delivery_reconcile.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "notification_delivery_reconcile_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_legacy_notification_attempt_backfill_preserves_unknown_and_orders_retries():
+    migration = _load_notification_delivery_migration()
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TEMP TABLE notification_delivery_attempts (
+                id VARCHAR(36) PRIMARY KEY,
+                notification_id VARCHAR(36) NOT NULL,
+                attempt_number INTEGER NULL,
+                channel TEXT NOT NULL,
+                attempted_at TIMESTAMPTZ NULL,
+                result TEXT NULL,
+                metadata JSON NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NULL
+            ) ON COMMIT DROP
+        """))
+        connection.execute(text("""
+            INSERT INTO notification_delivery_attempts
+                (id, notification_id, attempt_number, channel, attempted_at,
+                 result, metadata, created_at, updated_at)
+            VALUES
+                ('attempt-known', 'notification-a', 2, 'in_app',
+                 '2026-11-01T09:00:00Z', 'accepted', '{"provider":"known"}',
+                 '2026-11-01T09:00:00Z', '2026-11-01T09:00:00Z'),
+                ('attempt-a-missing', 'notification-a', NULL, 'in_app',
+                 NULL, NULL, NULL, '2026-11-02T09:00:00Z', NULL),
+                ('attempt-b-missing', 'notification-b', NULL, 'in_app',
+                 NULL, NULL, NULL, '2026-11-03T09:00:00Z', NULL)
+        """))
+
+        migration._backfill_nullable_attempt_values(connection)
+        rows = {
+            row["id"]: row
+            for row in connection.execute(text("""
+                SELECT id, notification_id, attempt_number, attempted_at,
+                       result, metadata, created_at, updated_at
+                FROM notification_delivery_attempts
+            """)).mappings()
+        }
+
+        assert rows["attempt-known"]["attempt_number"] == 2
+        assert rows["attempt-known"]["result"] == "accepted"
+        assert rows["attempt-a-missing"]["attempt_number"] == 3
+        assert rows["attempt-b-missing"]["attempt_number"] == 1
+        for key in ("attempt-a-missing", "attempt-b-missing"):
+            assert rows[key]["attempted_at"] == rows[key]["created_at"]
+            assert rows[key]["updated_at"] == rows[key]["created_at"]
+            assert rows[key]["result"] == "unknown_legacy"
+            assert rows[key]["metadata"] == {}
+
+
+def test_legacy_notification_attempt_backfill_refuses_to_invent_missing_created_at():
+    migration = _load_notification_delivery_migration()
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TEMP TABLE notification_delivery_attempts (
+                id VARCHAR(36) PRIMARY KEY,
+                notification_id VARCHAR(36) NOT NULL,
+                attempt_number INTEGER NULL,
+                channel TEXT NOT NULL,
+                attempted_at TIMESTAMPTZ NULL,
+                result TEXT NULL,
+                metadata JSON NULL,
+                created_at TIMESTAMPTZ NULL,
+                updated_at TIMESTAMPTZ NULL
+            ) ON COMMIT DROP
+        """))
+        connection.execute(text("""
+            INSERT INTO notification_delivery_attempts
+                (id, notification_id, attempt_number, channel, created_at)
+            VALUES ('attempt-no-timestamp', 'notification-a', NULL, 'in_app', NULL)
+        """))
+        with pytest.raises(RuntimeError, match="no created_at timestamp"):
+            migration._backfill_nullable_attempt_values(connection)
