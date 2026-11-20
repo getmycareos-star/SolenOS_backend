@@ -214,19 +214,19 @@ def _source_grounded_weight_loss_detail(
     """
     text_to_check = " ".join(str(source_text or "").split())
     positive = re.search(
-        r"\\b(?:los(?:ing|t)|loosing)(?:\\s+some)?\\s+weight\\b"
-        r"|\\bweight\\s+(?:loss|is\\s+down|has\\s+decreased)\\b",
+        r"\b(?:los(?:ing|t)|loosing)(?:\s+some)?\s+weight\b"
+        r"|\bweight\s+(?:loss|is\s+down|has\s+decreased)\b",
         text_to_check,
         re.IGNORECASE,
     )
     if positive is None:
         return None
     negative = re.search(
-        r"\\b(?:not|never|no\\s+longer)\\s+(?:currently\\s+)?"
-        r"(?:losing|loosing|lost)(?:\\s+some)?\\s+weight\\b"
-        r"|\\bno\\s+weight\\s+loss\\b"
-        r"|\\bden(?:y|ies|ied)\\s+(?:any\\s+)?(?:weight\\s+loss|losing\\s+weight)\\b"
-        r"|\\bweight\\s+loss\\b.{0,32}\\b(?:not|never|absent|denied)\\b",
+        r"\b(?:not|never|no\s+longer)\s+(?:currently\s+)?"
+        r"(?:losing|loosing|lost)(?:\s+some)?\s+weight\b"
+        r"|\bno\s+weight\s+loss\b"
+        r"|\bden(?:y|ies|ied)\s+(?:any\s+)?(?:weight\s+loss|losing\s+weight)\b"
+        r"|\bweight\s+loss\b.{0,32}\b(?:not|never|absent|denied)\b",
         text_to_check,
         re.IGNORECASE,
     )
@@ -234,13 +234,13 @@ def _source_grounded_weight_loss_detail(
         return None
 
     amount_recorded = bool(re.search(
-        r"\\b\\d+(?:[.,]\\d+)?\\s*(?:kg|kgs|kilograms?|lb|lbs|pounds?|stone)\\b",
+        r"\b\d+(?:[.,]\d+)?\s*(?:kg|kgs|kilograms?|lb|lbs|pounds?|stone)\b",
         text_to_check,
         re.IGNORECASE,
     ))
     timeframe_recorded = bool(re.search(
-        r"\\b(?:in|over|within|during|for|since|past|last)\\s+"
-        r"(?:the\\s+)?(?:\\d+\\s*)?(?:days?|weeks?|months?|years?|fortnights?)\\b",
+        r"\b(?:in|over|within|during|for|since|past|last)\s+"
+        r"(?:the\s+)?(?:\d+\s*)?(?:days?|weeks?|months?|years?|fortnights?)\b",
         text_to_check,
         re.IGNORECASE,
     ))
