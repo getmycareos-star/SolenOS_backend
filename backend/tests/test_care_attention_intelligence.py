@@ -648,9 +648,9 @@ def test_missing_significance_assessment_is_disclosed_without_hiding_saved_follo
     assert len(important) == 1
     assert important[0]["evidence_status"] == "unknown"
     assert important[0]["significance_assessment_status"] == "not_recorded"
-    assert "No separate significance assessment is linked" in important[0]["reason"]
+    assert "has not had a separate importance review yet" in important[0]["reason"]
     assert important[0]["action_status"] == "closed"
     assert important[0]["linked_follow_up_outcome_status"] == "outcome_unknown"
-    assert "follow-up was closed, but its outcome was not recorded" in important[0]["reason"]
+    assert "follow-up was closed, but no result was recorded" in important[0]["reason"]
     assert important[0]["history_completeness"] == "partial_or_unknown"
     assert clarification == []
