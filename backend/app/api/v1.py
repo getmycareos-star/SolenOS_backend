@@ -1541,9 +1541,9 @@ def list_events(person_id: str, request: Request, db: Session = Depends(get_db))
 
 @router.post("/insights", response_model=InsightSchema)
 def create_insight(insight: InsightCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, insight.person_id)
+    session = _require_session_scope(request, db, insight.person_id)
     _require_full_record_access(request)
-    require_caregiver_permission(db, insight.person_id, request.state.scoped_caregiver_id, "add_evidence")
+    require_caregiver_permission(db, session.person_id, session.caregiver_id, "add_evidence")
     person = db.query(PersonModel).filter(PersonModel.id == insight.person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -1894,8 +1894,8 @@ def retry_correction(
     ).first()
     if correction_row is None:
         raise HTTPException(status_code=404, detail="Correction not found")
-    _require_session_scope(request, db, person_id, correction_row.caregiver_id)
-    require_caregiver_permission(db, person_id, request.state.scoped_caregiver_id, "correct_records")
+    session = _require_session_scope(request, db, person_id, correction_row.caregiver_id)
+    require_caregiver_permission(db, person_id, session.caregiver_id, "correct_records")
     return _process_persisted_correction(db, person_id, correction_id)
 
 
@@ -1987,9 +1987,9 @@ def get_observation_trends(person_id: str, request: Request, db: Session = Depen
 
 @router.post("/reasoning-memory", response_model=ReasoningMemorySchema)
 def create_reasoning_memory(memory: ReasoningMemoryCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, memory.person_id)
+    session = _require_session_scope(request, db, memory.person_id)
     _require_full_record_access(request)
-    require_caregiver_permission(db, memory.person_id, request.state.scoped_caregiver_id, "correct_records")
+    require_caregiver_permission(db, memory.person_id, session.caregiver_id, "correct_records")
     db_memory = ReasoningMemoryModel(**memory.model_dump())
     db.add(db_memory)
     db.commit()
@@ -2140,10 +2140,10 @@ def time_until(reference_datetime: str, target_datetime: str):
 def create_care_windows_from_event(
     person_id: str, event_type: str, occurred_at: str, request: Request, db: Session = Depends(get_db)
 ):
-    _require_session_scope(request, db, person_id)
+    session = _require_session_scope(request, db, person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, person_id, request.state.scoped_caregiver_id, "add_evidence")
+    require_caregiver_permission(db, person_id, session.caregiver_id, "add_evidence")
     event_dt = datetime.fromisoformat(occurred_at)
     windows = calculate_care_windows(event_type, event_dt)
     db_windows = []
@@ -2532,10 +2532,10 @@ def list_timezone_contexts(person_id: str, request: Request, db: Session = Depen
 def create_temporal_relationship(
     person_id: str, event_a_id: str, event_b_id: str, request: Request, db: Session = Depends(get_db)
 ):
-    _require_session_scope(request, db, person_id)
+    session = _require_session_scope(request, db, person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, person_id, request.state.scoped_caregiver_id, "add_evidence")
+    require_caregiver_permission(db, person_id, session.caregiver_id, "add_evidence")
     event_a = (
         db.query(CareEventModel)
         .filter(CareEventModel.id == event_a_id, CareEventModel.person_id == person_id)
@@ -2613,10 +2613,10 @@ def get_time_patterns(person_id: str, request: Request, window_days: int = 30, d
 
 @router.post("/temporal/facts", response_model=TemporalFactSchema)
 def create_temporal_fact_endpoint(fact: TemporalFactCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, fact.person_id)
+    session = _require_session_scope(request, db, fact.person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, fact.person_id, request.state.scoped_caregiver_id, "add_evidence")
+    require_caregiver_permission(db, fact.person_id, session.caregiver_id, "add_evidence")
     return create_temporal_fact(db, fact)
 
 
@@ -2625,10 +2625,10 @@ def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, requ
     existing = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
     if existing is None:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
-    _require_session_scope(request, db, existing.person_id)
+    session = _require_session_scope(request, db, existing.person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, existing.person_id, request.state.scoped_caregiver_id, "correct_records")
+    require_caregiver_permission(db, existing.person_id, session.caregiver_id, "correct_records")
     result = update_temporal_fact(db, fact_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -2641,10 +2641,10 @@ def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, request: Re
     replacement = db.query(TemporalFactModel).filter(TemporalFactModel.id == new_fact_id).first()
     if existing is None or replacement is None or existing.person_id != replacement.person_id:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
-    _require_session_scope(request, db, existing.person_id)
+    session = _require_session_scope(request, db, existing.person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, existing.person_id, request.state.scoped_caregiver_id, "correct_records")
+    require_caregiver_permission(db, existing.person_id, session.caregiver_id, "correct_records")
     result = supersede_temporal_fact(db, fact_id, new_fact_id)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -2666,10 +2666,10 @@ def list_temporal_facts(person_id: str, request: Request, subject_type: Optional
 
 @router.post("/temporal/relations", response_model=TemporalRelationSchema)
 def create_temporal_relation_endpoint(relation: TemporalRelationCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, relation.person_id)
+    session = _require_session_scope(request, db, relation.person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, relation.person_id, request.state.scoped_caregiver_id, "add_evidence")
+    require_caregiver_permission(db, relation.person_id, session.caregiver_id, "add_evidence")
     return create_temporal_relation(db, relation)
 
 
@@ -2683,10 +2683,10 @@ def list_temporal_relations(person_id: str, request: Request, db: Session = Depe
 
 @router.post("/temporal/reference-frames", response_model=TemporalReferenceFrameSchema)
 def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, frame.person_id)
+    session = _require_session_scope(request, db, frame.person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, frame.person_id, request.state.scoped_caregiver_id, "add_evidence")
+    require_caregiver_permission(db, frame.person_id, session.caregiver_id, "add_evidence")
     return create_temporal_reference_frame(db, frame.person_id, frame.name, frame.reference_time, frame.source_event_id, frame.source_fact_id)
 
 
@@ -2731,10 +2731,10 @@ def list_temporal_conflicts(person_id: str, request: Request, subject_type: Opti
 
 @router.post("/temporal/contradictions", response_model=TemporalContradictionSchema)
 def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionCreate, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, contradiction.person_id)
+    session = _require_session_scope(request, db, contradiction.person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, contradiction.person_id, request.state.scoped_caregiver_id, "add_evidence")
+    require_caregiver_permission(db, contradiction.person_id, session.caregiver_id, "add_evidence")
     return create_temporal_contradiction(db, contradiction)
 
 
@@ -2743,10 +2743,10 @@ def update_temporal_contradiction_endpoint(contradiction_id: str, update: Tempor
     existing = db.query(TemporalContradictionModel).filter(TemporalContradictionModel.id == contradiction_id).first()
     if existing is None:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
-    _require_session_scope(request, db, existing.person_id)
+    session = _require_session_scope(request, db, existing.person_id)
 
     _require_full_record_access(request)
-    require_caregiver_permission(db, existing.person_id, request.state.scoped_caregiver_id, "correct_records")
+    require_caregiver_permission(db, existing.person_id, session.caregiver_id, "correct_records")
     result = update_temporal_contradiction(db, contradiction_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
