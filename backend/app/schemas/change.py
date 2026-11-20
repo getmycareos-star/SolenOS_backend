@@ -291,11 +291,31 @@ class ChangeConfirmationHistoryItem(BaseModel):
         from_attributes = True
 
 
+class ChangeSourceEvidenceResponse(BaseModel):
+    id: str
+    type: str
+    evidence_kind: Optional[str] = None
+    epistemic_status: Optional[str] = None
+    source_text: Optional[str] = None
+    occurred_at: Optional[datetime] = None
+    uploaded_at: Optional[datetime] = None
+    ingested_at: Optional[datetime] = None
+    reported_at: Optional[datetime] = None
+    collection_method: Optional[str] = None
+    origin_channel: Optional[str] = None
+    reported_by_label: Optional[str] = None
+    original_author: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ChangeDetailResponse(BaseModel):
     change: Change
     evidence: List[ChangeEvidenceResponse]
     assertions: List[ChangeAssertionEvidenceResponse] = Field(default_factory=list)
     observations: List[ChangeObservationEvidenceResponse] = Field(default_factory=list)
+    source_evidence: List[ChangeSourceEvidenceResponse] = Field(default_factory=list)
     confirmation_history: List[ChangeConfirmationHistoryItem] = Field(default_factory=list)
 
 class ChangeConfirmationRequest(BaseModel):

@@ -1512,6 +1512,13 @@ def test_change_confirmation_accepts_same_person_saved_evidence_and_rejects_othe
             headers={"Authorization": f"Bearer {token}"},
         )
         assert denied.status_code == 422
+        detail = client.get(
+            f"/api/v1/change/changes/{person.id}/{change_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail.status_code == 200, detail.text
+        assert [item["id"] for item in detail.json()["source_evidence"]] == [own_id]
+
         accepted = client.post(
             url,
             json={"status": "confirmed", "reason": "Reviewed source.", "evidence_ids": [own_id]},

@@ -552,6 +552,15 @@ def get_change_detail(
         .order_by(EvidenceObservation.observed_at.asc(), EvidenceObservation.id.asc())
         .all()
     ) if evidence_ids else []
+    source_evidence = (
+        db.query(Evidence)
+        .filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(evidence_ids),
+        )
+        .order_by(Evidence.occurred_at.asc(), Evidence.ingested_at.asc(), Evidence.id.asc())
+        .all()
+    ) if evidence_ids else []
     # Do not return arbitrary source records referenced by stale or corrupt IDs.
     history = (
         db.query(ChangeConfirmationEvent)
@@ -567,6 +576,7 @@ def get_change_detail(
         evidence=evidence,
         assertions=assertion_evidence,
         observations=observation_evidence,
+        source_evidence=source_evidence,
         confirmation_history=history,
     )
 
