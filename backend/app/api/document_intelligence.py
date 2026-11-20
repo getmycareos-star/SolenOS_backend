@@ -1754,12 +1754,25 @@ def review_document_candidate(
     execution = None
     if payload.decision == "accept":
         try:
+            # A byte-identical duplicate upload can be reviewed against an
+            # assertion already anchored to the original evidence row. Keep
+            # the duplicate's ID in DocumentReviewEvent provenance, but pass
+            # only an evidence ID that is actually present in the canonical
+            # assertion lineage to reconciliation.
+            assertion_evidence_ids = [
+                str(value) for value in (assertion_row.evidence_ids or [])
+            ] if assertion_row is not None else []
+            reconciliation_evidence_id = (
+                evidence_id
+                if evidence_id in assertion_evidence_ids
+                else (assertion_evidence_ids[0] if assertion_evidence_ids else None)
+            )
             execution = execute_care_continuity_reconciliation(
                 db,
                 person_id,
                 workflow="document_candidate_review",
                 source_caregiver_id=caregiver_id,
-                source_evidence_id=evidence_id,
+                source_evidence_id=reconciliation_evidence_id,
                 source_assertion_id=assertion_id,
             )
             change_intelligence_status = "available"
