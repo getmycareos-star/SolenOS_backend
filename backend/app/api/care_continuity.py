@@ -3305,9 +3305,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             column["name"] for column in inspector.get_columns("significance_assessments")
         } if significance_table_available else set()
         required_significance_columns = {
-            "id", "person_id", "evidence_status", "evidence_confidence",
-            "significance_confidence", "dimensions", "explanation", "is_active",
-            "superseded_by_assessment_id",
+            "id", "person_id", "target_type", "target_id", "verdict",
+            "evidence_status", "evidence_confidence", "significance_confidence",
+            "dimensions", "attention_candidate", "follow_up_candidate",
+            "explanation", "is_active", "superseded_by_assessment_id",
         }
         significance_schema_available = required_significance_columns.issubset(significance_columns)
         significance_assessment_ids = sorted({
@@ -3318,10 +3319,15 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         if significance_schema_available and significance_assessment_ids:
             significance_rows = db.query(
                 SignificanceAssessment.id,
+                SignificanceAssessment.target_type,
+                SignificanceAssessment.target_id,
+                SignificanceAssessment.verdict,
                 SignificanceAssessment.evidence_status,
                 SignificanceAssessment.evidence_confidence,
                 SignificanceAssessment.significance_confidence,
                 SignificanceAssessment.dimensions,
+                SignificanceAssessment.attention_candidate,
+                SignificanceAssessment.follow_up_candidate,
                 SignificanceAssessment.explanation,
             ).filter(
                 SignificanceAssessment.person_id == person_id,
@@ -3335,17 +3341,55 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         # Fingerprint every active change row, not only candidates selected for
         # caregiver attention. Rejection, retirement, or a changed verdict must
         # invalidate an older situation snapshot too.
-        change_source_state = [
-            {
+        change_source_state = []
+        significance_by_change_id = {}
+        for change in active_change_rows:
+            significance = significance_assessment_by_id.get(
+                str(getattr(change, "significance_assessment_id", "") or "")
+            )
+            if significance and (
+                str(significance.target_type or "") != "change"
+                or str(significance.target_id or "") != str(change.id)
+            ):
+                # Never attach a same-person assessment to the wrong change.
+                significance = None
+            if significance:
+                significance_by_change_id[str(change.id)] = significance
+
+            verdict = (
+                getattr(significance.verdict, "value", significance.verdict)
+                if significance else getattr(change.significance_verdict, "value", change.significance_verdict)
+            )
+            attention_candidate = bool(
+                significance.attention_candidate if significance else change.attention_candidate
+            )
+            follow_up_candidate = bool(
+                significance.follow_up_candidate if significance else change.follow_up_candidate
+            )
+            change_source_state.append({
                 "id": str(change.id),
                 "updated_at": change.updated_at,
                 "created_at": change.created_at,
                 "is_active": bool(change.is_active),
                 "superseded_by_change_id": change.superseded_by_change_id,
-                "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "significance_verdict": verdict,
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
-                "attention_candidate": bool(change.attention_candidate),
-                "follow_up_candidate": bool(change.follow_up_candidate),
+                "significance_evidence_status": (
+                    getattr(significance.evidence_status, "value", significance.evidence_status)
+                    if significance else None
+                ),
+                "significance_evidence_confidence": (
+                    significance.evidence_confidence if significance else None
+                ),
+                "significance_confidence": (
+                    significance.significance_confidence if significance else None
+                ),
+                "significance_dimensions": (
+                    list(significance.dimensions or []) if significance else []
+                ),
+                "significance_explanation": significance.explanation if significance else None,
+                "attention_candidate": attention_candidate,
+                "follow_up_candidate": follow_up_candidate,
                 "confirmation_status": change.confirmation_status,
                 "baseline_id": change.baseline_id,
                 "baseline_coverage_status": change.baseline_coverage_status,
@@ -3358,16 +3402,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "previous_state": change.previous_state,
                 "current_state": change.current_state,
                 "explanation": change.explanation,
-            }
-            for change in active_change_rows
-        ]
-        for change in active_change_rows:
-            verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
+            })
             if verdict not in {"meaningful_candidate", "insufficient_evidence"}:
                 continue
-            if not (change.attention_candidate or change.follow_up_candidate):
+            if not (attention_candidate or follow_up_candidate):
                 continue
-            if str(change.confirmation_status or "").casefold() in {"rejected", "dismissed", "cancelled", "withdrawn", "superseded"}:
+            if str(change.confirmation_status or "").casefold() in {
+                "rejected", "dismissed", "cancelled", "withdrawn", "superseded"
+            }:
                 continue
             relevant_changes.append(change)
         baseline_ids = sorted({str(change.baseline_id) for change in relevant_changes if change.baseline_id})
@@ -3471,7 +3513,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 assertion_by_id=assertion_by_id,
                 observation_by_id=observation_by_id,
             )
-            significance = significance_assessment_by_id.get(str(getattr(change, "significance_assessment_id", "") or ""))
+            significance = significance_by_change_id.get(str(change.id))
             linked_follow_up = next(
                 (loop for loop in open_loops if str(loop.get("source_id") or "") == str(change.id)),
                 None,
@@ -3481,7 +3523,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "title": str(change.subject_type or "Recorded care change").replace("_", " ").capitalize(),
                 "change_type": getattr(change.change_type, "value", change.change_type),
                 "change_direction": getattr(change.change_direction, "value", change.change_direction),
-                "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "significance_verdict": (
+                    getattr(significance.verdict, "value", significance.verdict)
+                    if significance else getattr(change.significance_verdict, "value", change.significance_verdict)
+                ),
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
                 "evidence_status": (
                     getattr(significance.evidence_status, "value", significance.evidence_status)
@@ -3490,8 +3535,12 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "evidence_confidence": significance.evidence_confidence if significance else None,
                 "significance_confidence": significance.significance_confidence if significance else None,
                 "assessment_dimensions": list(significance.dimensions or []) if significance else [],
-                "attention_candidate": bool(change.attention_candidate),
-                "follow_up_candidate": bool(change.follow_up_candidate),
+                "attention_candidate": bool(
+                    significance.attention_candidate if significance else change.attention_candidate
+                ),
+                "follow_up_candidate": bool(
+                    significance.follow_up_candidate if significance else change.follow_up_candidate
+                ),
                 "action_status": str(linked_follow_up.get("status") or "unknown") if linked_follow_up else "not_recorded",
                 "linked_follow_up_id": str(linked_follow_up.get("id")) if linked_follow_up else None,
                 "confirmation_status": change.confirmation_status,
