@@ -488,6 +488,15 @@ def main() -> None:
         f"({inventory['unique_method_path_count']} unique method/path pairs) "
         f"to {output}"
     )
+    print(
+        "Endpoint disposition counts: "
+        f"frontend={inventory['frontend_product_workflow_count']} "
+        f"internal={inventory['internal_service_or_operations_count']} "
+        f"review={inventory['disposition_review_required_count']} "
+        f"consumer_review={inventory['consumer_review_required_count']} "
+        f"persistence_review={inventory['persistence_review_required_count']} "
+        f"not_in_openapi={inventory['registered_but_not_in_openapi_count']}"
+    )
     if inventory["duplicate_method_paths"]:
         print("Duplicate method/path registrations:")
         for key, handlers in inventory["duplicate_method_paths"].items():
