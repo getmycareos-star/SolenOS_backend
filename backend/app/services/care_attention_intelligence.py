@@ -357,6 +357,13 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
             "baseline_coverage_status": change.get("baseline_coverage_status"),
             "current_coverage_status": change.get("current_coverage_status"),
         }
+        assessment_status = item["significance_assessment_status"]
+        if assessment_status in {"schema_unavailable", "missing_or_inactive", "target_mismatch"}:
+            item["reason"] += " The linked significance assessment could not be verified, so its evidence details are unavailable."
+        elif assessment_status == "not_recorded":
+            item["reason"] += " No separate significance assessment is linked; this item reflects the persisted change flags."
+        if item["action_status"] == "closed" and item["linked_follow_up_outcome_status"] in {"outcome_unknown", "unknown", "not_recorded"}:
+            item["reason"] += " The follow-up was closed, but its outcome was not recorded."
         # A persisted care-attention decision and the completeness of its
         # supporting history are separate facts. Missing baseline/source
         # coverage must not silently hide an explicitly saved follow-up need.
@@ -444,7 +451,7 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
     deferred.sort(key=lambda item: (str(item.get("review_at") or ""), item["source"], item["record_id"]))
     clarification.sort(key=lambda item: (item["source"], item["record_id"]))
     return {
-        "schema_version": "care-attention.v1", "as_of": now.isoformat(),
+        "schema_version": CARE_ATTENTION_POLICY_VERSION, "as_of": now.isoformat(),
         "status": "bounded_evidence_assessment",
         "needs_attention_now": immediate[:100], "important_to_address": important[:100],
         "can_wait_with_documented_basis": deferred[:100], "needs_clarification": clarification[:100],
