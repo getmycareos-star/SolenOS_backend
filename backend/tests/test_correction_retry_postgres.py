@@ -31,12 +31,12 @@ def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(
     engine = create_engine(database_url, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
-    suffix = uuid.uuid4().hex
-    person_id = f"correction-pg-person-{suffix}"
-    caregiver_id = f"correction-pg-caregiver-{suffix}"
-    foreign_person_id = f"correction-pg-foreign-person-{suffix}"
-    foreign_caregiver_id = f"correction-pg-foreign-caregiver-{suffix}"
-    event_id = f"correction-pg-event-{suffix}"
+    suffix = uuid.uuid4().hex[:8]
+    person_id = f"cpg-person-{suffix}"
+    caregiver_id = f"cpg-caregiver-{suffix}"
+    foreign_person_id = f"cpg-other-person-{suffix}"
+    foreign_caregiver_id = f"cpg-other-caregiver-{suffix}"
+    event_id = f"cpg-event-{suffix}"
     raw_token = f"correction-pg-token-{uuid.uuid4().hex}"
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     calls = {"reconciliation": 0}
@@ -201,12 +201,12 @@ def test_postgres_delta_replay_is_invalidated_by_a_later_correction():
     engine = create_engine(database_url, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
-    suffix = uuid.uuid4().hex
-    person_id = f"delta-replay-person-{suffix}"
-    caregiver_id = f"delta-replay-caregiver-{suffix}"
+    suffix = uuid.uuid4().hex[:8]
+    person_id = f"dpg-person-{suffix}"
+    caregiver_id = f"dpg-caregiver-{suffix}"
     raw_token = f"delta-replay-token-{uuid.uuid4().hex}"
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
-    event_id = f"delta-replay-event-{suffix}"
+    event_id = f"dpg-event-{suffix}"
     source_text = "Caregiver reports that overnight waking has increased."
     client = TestClient(app)
     headers = {"Authorization": f"Bearer {raw_token}"}
