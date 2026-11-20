@@ -132,7 +132,7 @@ def build_inventory(application: FastAPI) -> dict[str, Any]:
                     "dependencies": _dependency_names(dependant),
                     "authentication_disposition": (
                         "global_auth_policy_review_required"
-                        if route.path.startswith("/api/")
+                        if effective_path.startswith("/api/")
                         else "public_or_non_api_review_required"
                     ),
                     "consumer_disposition": "unmapped_review_required",
