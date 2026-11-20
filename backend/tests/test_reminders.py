@@ -1070,3 +1070,27 @@ def test_reminders_cannot_be_assigned_to_caregivers_without_completion_permissio
     )
     assert eligible_assignment.status_code == 200, eligible_assignment.text
     assert eligible_assignment.json()["assigned_to_caregiver_id"] == second_id
+
+    # Permission removal must not strand open work with a caregiver who can no
+    # longer complete it. Reassign the open reminder first, then removal is safe.
+    blocked_removal = client.patch(
+        f"/api/v1/caregiver-access/members/{second_id}/permissions",
+        headers=primary_headers,
+        json={"permissions": permissions},
+    )
+    assert blocked_removal.status_code == 409, blocked_removal.text
+
+    reassigned_back = client.patch(
+        f"/api/v1/reminders/{reminder_id}/assignment",
+        headers=primary_headers,
+        json={"assigned_to_caregiver_id": primary_id, "expected_version": 2},
+    )
+    assert reassigned_back.status_code == 200, reassigned_back.text
+    assert reassigned_back.json()["assigned_to_caregiver_id"] == primary_id
+
+    safe_removal = client.patch(
+        f"/api/v1/caregiver-access/members/{second_id}/permissions",
+        headers=primary_headers,
+        json={"permissions": permissions},
+    )
+    assert safe_removal.status_code == 200, safe_removal.text
