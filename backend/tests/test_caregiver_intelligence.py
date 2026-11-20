@@ -79,7 +79,8 @@ def get_test_client(caregiver_id=None):
                 token_hash=token_hash,
                 expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
             ))
-            db.commit()
+        # A grant added for a reused deterministic session must still persist.
+        db.commit()
     finally:
         db.close()
     return TestClient(app, headers={"Authorization": f"Bearer {token}"})
@@ -123,6 +124,37 @@ def create_test_person_and_caregivers(db):
     db.add_all([sarah, john])
     db.commit()
     return person, sarah, john
+
+
+def test_reused_test_session_persists_a_newly_created_access_grant():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        create_test_person_and_caregivers(db)
+        db.close()
+
+        get_test_client()
+        db = TestingSessionLocal()
+        db.query(CaregiverAccessGrant).filter_by(
+            person_id="person-1", caregiver_id="caregiver-sarah"
+        ).delete()
+        db.commit()
+        db.close()
+
+        client = get_test_client()
+        response = client.get("/api/v1/caregiver-profiles/person-1")
+        assert response.status_code == 200, response.text
+        db = TestingSessionLocal()
+        try:
+            grant = db.query(CaregiverAccessGrant).filter_by(
+                person_id="person-1", caregiver_id="caregiver-sarah"
+            ).one()
+            assert grant.status == "active"
+            assert grant.access_scope == "full_record"
+        finally:
+            db.close()
+    finally:
+        teardown_db()
 
 
 def test_create_caregiver_profile():
