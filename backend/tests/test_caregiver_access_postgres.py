@@ -131,6 +131,11 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
         assert suspended.status_code == 200, suspended.text
         assert suspended.json()["status"] == "suspended"
         assert suspended.json()["sessions_revoked"] is True
+        suspended_assignable = client.get(
+            "/api/v1/caregiver-access/assignable-members", headers=primary_headers
+        )
+        assert suspended_assignable.status_code == 200, suspended_assignable.text
+        assert [row["caregiver_id"] for row in suspended_assignable.json()] == [primary_caregiver_id]
         suspended_session = client.get(
             f"/api/v1/evidence/{person_id}", headers=invited_headers
         )
