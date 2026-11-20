@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,16 @@ def _schema_name(value: Any) -> Any:
 
 
 def _auth_disposition(path: str, method: str) -> str:
+    if path == "/api/v1/assistant/evaluate-production" and method.lower() == "post":
+        return "github-actions-token-and-live-main-workflow-verification"
+    if (
+        path == "/api/v1/privacy/requests/reviewer/pending"
+        or re.fullmatch(
+            r"/api/v1/privacy/requests/[^/]+/(?:review|fulfil-export|fulfil-correction|fulfil-deletion)",
+            path,
+        )
+    ):
+        return "privacy-reviewer-credential-required"
     if (path, method.upper()) in PUBLIC_V1_ENDPOINTS:
         return "explicit-public-exception"
     if path == "/api/v1/sessions/anonymous" and method.lower() == "post":
