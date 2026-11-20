@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +13,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.appointment_workspace import AppointmentWorkspaceRecord
-from app.models.care import CareEvent, Evidence
+from app.models.care import Caregiver, CareEvent, Evidence
 from app.models.time_location import Appointment
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
@@ -2598,3 +2600,132 @@ def test_appointment_preparation_brief_selects_nearest_upcoming_visit(client):
     assert next_visit["location"] == "Clinic"
     assert next_visit["status"] == "scheduled"
     assert "Other person's appointment" not in response.text
+
+
+def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_appointment_link(client):
+    from app.models.open_loop import OpenLoopRecord
+
+    test_client, owner, other_person = client
+    now = datetime.now(timezone.utc)
+    db = TestSessionLocal()
+    appointment = Appointment(
+        person_id=owner["person"]["id"],
+        created_by_caregiver_id=owner["caregiver"]["id"],
+        title="Primary care review",
+        scheduled_at=now + timedelta(days=3),
+        status="scheduled",
+    )
+    db.add(appointment)
+    db.commit()
+    appointment_id = appointment.id
+    db.close()
+
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    workspace_response = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=owner_headers,
+        json={
+            "appointment_id": appointment_id,
+            "status": "follow_up_pending",
+            "payload": {
+                "follow_ups": [{
+                    "id": "pending-clinic-result",
+                    "action": "Check whether the clinic released the result",
+                    "status": "open",
+                }],
+            },
+            "change_reason": "Record appointment follow-up",
+        },
+    )
+    assert workspace_response.status_code == 201, workspace_response.text
+    workspace_id = workspace_response.json()["id"]
+
+    # A second caregiver receives an explicit server-side grant for this same
+    # person. Their own bearer session must see the same persisted workspace.
+    db = TestSessionLocal()
+    shared_caregiver = Caregiver(
+        name="Authorised second caregiver",
+        relationship="family",
+        person_id=owner["person"]["id"],
+    )
+    db.add(shared_caregiver)
+    db.flush()
+    db.add(CaregiverAccessGrant(
+        person_id=owner["person"]["id"],
+        caregiver_id=shared_caregiver.id,
+        role="family",
+        access_scope="full_record",
+        status="active",
+        can_manage_members=False,
+        permissions=["view_lcr", "add_evidence"],
+        granted_by_caregiver_id=owner["caregiver"]["id"],
+    ))
+    raw_token = str(uuid.uuid4())
+    db.add(AnonymousSession(
+        person_id=owner["person"]["id"],
+        caregiver_id=shared_caregiver.id,
+        token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+        expires_at=now + timedelta(days=1),
+    ))
+    db.commit()
+    db.close()
+    shared_headers = {"Authorization": f"Bearer {raw_token}"}
+
+    shared_read = test_client.get(
+        f"/api/v1/appointment-workspaces/{workspace_id}",
+        headers=shared_headers,
+    )
+    assert shared_read.status_code == 200, shared_read.text
+    assert shared_read.json()["appointment_id"] == appointment_id
+
+    # A second authorised caregiver editing the same source follow-up must
+    # reconcile the existing person-level Open Loop, not create a duplicate.
+    updated = test_client.patch(
+        f"/api/v1/appointment-workspaces/{workspace_id}",
+        headers=shared_headers,
+        json={
+            "expected_version": 1,
+            "status": "follow_up_pending",
+            "payload": {
+                "follow_ups": [{
+                    "id": "pending-clinic-result",
+                    "action": "Check whether the clinic released the result",
+                    "status": "open",
+                }],
+            },
+            "change_reason": "Second caregiver reviewed the same follow-up",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+
+    shared_brief = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers=shared_headers,
+    )
+    assert shared_brief.status_code == 200, shared_brief.text
+    linked = [
+        item for item in shared_brief.json()["open_loops"]
+        if item.get("source_workspace_id") == workspace_id
+    ]
+    assert len(linked) == 1
+    assert linked[0]["appointment_id"] == appointment_id
+    assert linked[0]["source_reference"].startswith(workspace_id + ":")
+
+    db = TestSessionLocal()
+    try:
+        loops = db.query(OpenLoopRecord).filter(
+            OpenLoopRecord.person_id == owner["person"]["id"],
+            OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+            OpenLoopRecord.source_id.like(f"{workspace_id}:%"),
+        ).all()
+        assert len(loops) == 1
+        assert loops[0].evidence[0]["appointment_id"] == appointment_id
+    finally:
+        db.close()
+
+    # A caregiver with no grant for this person cannot read the appointment.
+    denied = test_client.get(
+        f"/api/v1/appointment-workspaces/{workspace_id}",
+        headers={"Authorization": f"Bearer {other_person['access_token']}"},
+    )
+    assert denied.status_code == 404
