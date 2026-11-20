@@ -62,6 +62,59 @@ NEAR_DUPLICATE_RATIO = 0.92
 NEAR_DUPLICATE_MAX_RECORDS = 200
 
 
+def _change_source_refs(
+    change: Any,
+    *,
+    event_by_id: dict[str, Any],
+    assertion_by_id: dict[str, Any],
+    observation_by_id: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Resolve change source IDs across every supported persisted source type.
+
+    Change.evidence_ids may refer to care events, caregiver assertions, or
+    source-span observations. A missing source remains missing; it is never
+    replaced with a guessed or cross-person record.
+    """
+    refs: list[dict[str, Any]] = []
+    for raw_id in change.evidence_ids or []:
+        source_id = str(raw_id)
+        event = event_by_id.get(source_id)
+        if event is not None:
+            refs.append({
+                "source": "events",
+                "record_id": str(event.id),
+                "title": str(event.title or event.event_type or "Care event")[:240],
+                "occurred_at": event.occurred_at,
+                "recorded_at": getattr(event, "recorded_at", None) or getattr(event, "created_at", None),
+                "evidence_ids": [str(value) for value in (event.evidence_ids or []) if value],
+            })
+            continue
+        assertion = assertion_by_id.get(source_id)
+        if assertion is not None:
+            refs.append({
+                "source": "care_assertions",
+                "record_id": str(assertion.id),
+                "title": str(assertion.field or "Care detail")[:240],
+                "occurred_at": assertion.observed_at,
+                "recorded_at": assertion.recorded_at,
+                "evidence_ids": [str(value) for value in (assertion.evidence_ids or []) if value],
+            })
+            continue
+        observation = observation_by_id.get(source_id)
+        if observation is not None:
+            value = str(observation.value_text or "").strip()
+            attribute = str(observation.attribute or "Care observation").strip()
+            refs.append({
+                "source": "evidence_observations",
+                "record_id": str(observation.id),
+                "title": (f"{attribute}: {value}" if value else attribute)[:240],
+                "occurred_at": observation.occurred_at or observation.observed_at,
+                "recorded_at": observation.recorded_at,
+                "evidence_ids": [str(observation.evidence_id)] if observation.evidence_id else [],
+            })
+    return refs
+
+
 def _near_duplicate_candidates(evidence_rows: list[Any]) -> dict[str, Any]:
     """Return conservative text-similarity candidates; never infer shared origin or corroboration."""
     if len(evidence_rows) > NEAR_DUPLICATE_MAX_RECORDS:
@@ -3436,26 +3489,39 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         assessment_quality["assessment_use_status"] = (
             "restricted_by_recorded_limitations" if quality_blockers else "bounded_source_review_only"
         )
-        event_ids = sorted({str(event_id) for change in relevant_changes for event_id in (change.evidence_ids or []) if event_id})
+        source_record_ids = sorted({
+            str(source_id)
+            for change in relevant_changes
+            for source_id in (change.evidence_ids or [])
+            if source_id
+        })
         event_by_id = {}
-        if event_ids:
+        assertion_by_id = {}
+        observation_by_id = {}
+        if source_record_ids:
             event_by_id = {
-                str(row.id): row for row in db.query(CareEvent).filter(CareEvent.person_id == person_id, CareEvent.id.in_(event_ids)).all()
+                str(row.id): row for row in db.query(CareEvent).filter(
+                    CareEvent.person_id == person_id, CareEvent.id.in_(source_record_ids)
+                ).all()
+            }
+            assertion_by_id = {
+                str(row.id): row for row in db.query(CareAssertion).filter(
+                    CareAssertion.person_id == person_id, CareAssertion.id.in_(source_record_ids)
+                ).all()
+            }
+            observation_by_id = {
+                str(row.id): row for row in db.query(EvidenceObservation).filter(
+                    EvidenceObservation.person_id == person_id, EvidenceObservation.id.in_(source_record_ids)
+                ).all()
             }
         for change in relevant_changes:
-            linked_events = [event_by_id[event_id] for event_id in (change.evidence_ids or []) if str(event_id) in event_by_id]
             baseline = baseline_by_id.get(str(change.baseline_id)) if change.baseline_id else None
-            event_refs = [
-                {
-                    "source": "events",
-                    "record_id": str(event.id),
-                    "title": str(event.title or event.event_type or "Care event")[:240],
-                    "occurred_at": event.occurred_at,
-                    "recorded_at": getattr(event, "recorded_at", None) or getattr(event, "created_at", None),
-                    "evidence_ids": [str(value) for value in (event.evidence_ids or []) if value],
-                }
-                for event in linked_events
-            ]
+            source_refs = _change_source_refs(
+                change,
+                event_by_id=event_by_id,
+                assertion_by_id=assertion_by_id,
+                observation_by_id=observation_by_id,
+            )
             significance = significance_by_change_id.get(str(change.id))
             linked_follow_up = next(
                 (loop for loop in open_loops if str(loop.get("source_id") or "") == str(change.id)),
@@ -3478,8 +3544,12 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "evidence_confidence": significance.evidence_confidence if significance else None,
                 "significance_confidence": significance.significance_confidence if significance else None,
                 "assessment_dimensions": list(significance.dimensions or []) if significance else [],
-                "attention_candidate": bool(change.attention_candidate),
-                "follow_up_candidate": bool(change.follow_up_candidate),
+                "attention_candidate": bool(
+                    significance.attention_candidate if significance else change.attention_candidate
+                ),
+                "follow_up_candidate": bool(
+                    significance.follow_up_candidate if significance else change.follow_up_candidate
+                ),
                 "action_status": str(linked_follow_up.get("status") or "unknown") if linked_follow_up else "not_recorded",
                 "linked_follow_up_id": str(linked_follow_up.get("id")) if linked_follow_up else None,
                 "confirmation_status": change.confirmation_status,
@@ -3494,7 +3564,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "baseline_is_stable": bool(baseline.is_stable) if baseline else False,
                 "baseline_history_completeness": baseline.history_completeness if baseline else None,
                 "expected_source_record_count": len(change.evidence_ids or []),
-                "records": event_refs,
+                "expected_source_record_count": len(change.evidence_ids or []),
+                "records": source_refs,
             })
     return {
         "schema_version": "situation-understanding.v1",
