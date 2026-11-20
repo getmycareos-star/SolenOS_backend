@@ -577,6 +577,11 @@ def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
     # as incomplete on legacy databases.
     if "evidence_source_relationships" in available_tables:
         present.append("evidence_source_relationships")
+    # Fact-to-evidence links are a separate canonical relation, not a column on
+    # care_facts. Reflect it as auxiliary lineage metadata and enrich only the
+    # facts already selected for this person-scoped projection.
+    if "care_fact_evidence" in available_tables:
+        present.append("care_fact_evidence")
     if present:
         metadata.reflect(bind=bind, only=list(dict.fromkeys(present)), resolve_fks=False)
     return available_tables, metadata
@@ -796,6 +801,62 @@ def build_lcr_context(
                 "recent_records_page"
             ),
         }
+
+    # Attach explicit, person-scoped evidence links to selected care facts.
+    # Without this join, the fact text could be retrieved while its originating
+    # evidence remained invisible to the Companion and downstream briefings.
+    fact_items = sources.get("facts", {}).get("items", [])
+    fact_link_table = metadata.tables.get("care_fact_evidence")
+    evidence_table_for_facts = metadata.tables.get("evidence")
+    if fact_items and fact_link_table is not None and evidence_table_for_facts is not None:
+        fact_ids = [
+            str(item["id"]) for item in fact_items
+            if isinstance(item, dict) and item.get("id")
+        ]
+        link_columns = [
+            fact_link_table.c[name]
+            for name in ("fact_id", "evidence_id", "evidence_role", "source_span")
+            if name in fact_link_table.c
+        ]
+        if fact_ids and {"person_id", "fact_id", "evidence_id"}.issubset(fact_link_table.c.keys()):
+            valid_links = db.execute(
+                select(*link_columns).select_from(
+                    fact_link_table.join(
+                        evidence_table_for_facts,
+                        and_(
+                            fact_link_table.c.evidence_id == evidence_table_for_facts.c.id,
+                            evidence_table_for_facts.c.person_id == str(person_id),
+                        ),
+                    )
+                ).where(
+                    fact_link_table.c.person_id == str(person_id),
+                    fact_link_table.c.fact_id.in_(fact_ids),
+                ).order_by(
+                    fact_link_table.c.fact_id.asc(),
+                    fact_link_table.c.evidence_id.asc(),
+                )
+            ).mappings().all()
+            links_by_fact: dict[str, list[dict[str, Any]]] = {}
+            for link in valid_links:
+                fact_key = str(link["fact_id"])
+                links_by_fact.setdefault(fact_key, []).append({
+                    "evidence_id": str(link["evidence_id"]),
+                    "evidence_role": link.get("evidence_role"),
+                    "source_span": link.get("source_span"),
+                    "integrity_status": "verified_person_scoped",
+                })
+            for item in fact_items:
+                links = links_by_fact.get(str(item.get("id")), [])
+                item["evidence_links"] = links
+                item["evidence_ids"] = [link["evidence_id"] for link in links]
+                item["evidence_link_status"] = (
+                    "verified_person_scoped_links" if links else "no_verified_linked_evidence"
+                )
+    elif fact_items:
+        for item in fact_items:
+            item["evidence_links"] = []
+            item["evidence_ids"] = []
+            item["evidence_link_status"] = "lineage_schema_unavailable"
 
     evidence_lineage: dict[str, Any] = {
         "status": "not_assessed",
