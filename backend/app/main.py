@@ -76,6 +76,7 @@ from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent  # register durable job tables
+from app.models.operational_worker_heartbeat import OperationalWorkerHeartbeat  # register migration-owned worker health table
 from app.services.qwen_background_worker import qwen_worker_loop
 from app.services.reminder_delivery import reminder_delivery_loop
 from app.services.privacy_export_expiry import expire_privacy_exports_once
@@ -330,7 +331,7 @@ app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
-app.include_router(safety_router, prefix="/api/v1")
+app.include_router(safety_router, prefix="/api/v1/safety")
 app.include_router(causal_router, prefix="/api/v1")
 # Community is intentionally suspended, not deleted. Keep its implementation and data
 # in the repository, but do not register any Community endpoint on the public API.
@@ -598,7 +599,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 db.query(LegacyAppointmentModel.person_id)
                 .filter(LegacyAppointmentModel.id == appointment_id)
                 .scalar()
-            )
+            ) or scoped_person_id
+            # If the appointment does not exist, bind middleware scope to the
+            # authenticated session's own record and let the endpoint return
+            # 404. Existing appointments are still resolved to their true owner.
         if not target_person_id:
             # Legacy read routes carry the care-recipient ID in the path. Nested
             # APIRouter matching is not always available inside middleware, so
