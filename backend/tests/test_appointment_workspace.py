@@ -3118,3 +3118,95 @@ def test_appointment_save_remains_durable_when_auto_preparation_fails(client, mo
         ).count() == 0
     finally:
         db.close()
+
+
+def test_appointment_without_known_date_is_preserved_and_auto_prepared(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/appointments", headers=headers, json={
+        "person_id": owner["person"]["id"],
+        "title": "Specialist follow-up",
+        "created_by_caregiver_id": owner["caregiver"]["id"],
+    })
+    assert created.status_code == 200, created.text
+    appointment = created.json()
+    assert appointment["scheduled_at"] is None
+    assert appointment["status"] == "date_unknown"
+
+    brief = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers=headers,
+    )
+    assert brief.status_code == 200, brief.text
+    assert brief.json()["appointment_context_status"]["code"] == "date_unknown"
+    assert brief.json()["next_appointment"]["source_id"] == appointment["id"]
+    assert brief.json()["next_appointment"]["scheduled_at"] is None
+
+    workspaces = test_client.get("/api/v1/appointment-workspaces", headers=headers)
+    assert workspaces.status_code == 200, workspaces.text
+    prepared = [
+        item for item in workspaces.json()["items"]
+        if item.get("appointment_id") == appointment["id"]
+    ]
+    assert len(prepared) == 1
+    assert prepared[0]["payload"]["generationReason"] == "appointment_date_unknown"
+    assert "date" not in str(prepared[0]["payload"].get("visitDate", "")).lower()
+
+
+def test_appointment_document_links_are_same_person_and_durable(client):
+    test_client, owner, other = client
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    now = datetime.now(timezone.utc)
+    appointment_id = str(uuid.uuid4())
+    own_document_id = str(uuid.uuid4())
+    other_document_id = str(uuid.uuid4())
+    with TestSessionLocal() as db:
+        db.add(Appointment(
+            id=appointment_id,
+            person_id=owner["person"]["id"],
+            title="Clinic review",
+            scheduled_at=None,
+            status="date_unknown",
+            created_by_caregiver_id=owner["caregiver"]["id"],
+        ))
+        db.add(Evidence(
+            id=own_document_id,
+            person_id=owner["person"]["id"],
+            type="document",
+            source_text="Clinic letter uploaded to this care record.",
+            uploaded_by_caregiver_id=owner["caregiver"]["id"],
+            uploaded_at=now,
+        ))
+        db.add(Evidence(
+            id=other_document_id,
+            person_id=other["person"]["id"],
+            type="document",
+            source_text="Private document belonging to another person.",
+            uploaded_by_caregiver_id=other["caregiver"]["id"],
+            uploaded_at=now,
+        ))
+        db.commit()
+
+    saved = test_client.post("/api/v1/appointment-workspaces", headers=owner_headers, json={
+        "appointment_id": appointment_id,
+        "status": "preparation",
+        "payload": {"attachedEvidenceIds": [own_document_id]},
+        "change_reason": "Attach clinic letter to appointment",
+        "idempotency_key": "appointment-document-link-" + uuid.uuid4().hex,
+    })
+    assert saved.status_code == 201, saved.text
+    with TestSessionLocal() as db:
+        appointment = db.query(Appointment).filter_by(id=appointment_id).one()
+        assert appointment.evidence_ids == [own_document_id]
+
+    denied = test_client.post("/api/v1/appointment-workspaces", headers=owner_headers, json={
+        "appointment_id": appointment_id,
+        "status": "preparation",
+        "payload": {"attachedEvidenceIds": [other_document_id]},
+        "change_reason": "Attempt cross-person document attachment",
+        "idempotency_key": "appointment-document-denied-" + uuid.uuid4().hex,
+    })
+    assert denied.status_code == 422, denied.text
+    with TestSessionLocal() as db:
+        appointment = db.query(Appointment).filter_by(id=appointment_id).one()
+        assert appointment.evidence_ids == [own_document_id]
