@@ -359,11 +359,11 @@ def _persisted_change_decisions(changes: list[dict[str, Any]]) -> tuple[list[dic
         }
         assessment_status = item["significance_assessment_status"]
         if assessment_status in {"schema_unavailable", "missing_or_inactive", "target_mismatch"}:
-            item["reason"] += " The linked significance assessment could not be verified, so its evidence details are unavailable."
+            item["reason"] += " The saved review details for this possible change are not available right now. The original care information remains in the record."
         elif assessment_status == "not_recorded":
-            item["reason"] += " No separate significance assessment is linked; this item reflects the persisted change flags."
+            item["reason"] += " This possible change has not had a separate importance review yet. It is based on the saved care information."
         if item["action_status"] == "closed" and item["linked_follow_up_outcome_status"] in {"outcome_unknown", "unknown", "not_recorded"}:
-            item["reason"] += " The follow-up was closed, but its outcome was not recorded."
+            item["reason"] += " The follow-up was closed, but no result was recorded."
         # A persisted care-attention decision and the completeness of its
         # supporting history are separate facts. Missing baseline/source
         # coverage must not silently hide an explicitly saved follow-up need.
