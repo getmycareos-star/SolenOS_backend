@@ -180,7 +180,7 @@ def reassign_reminder(
     _require_active_full_access(db, person_id, payload.assigned_to_caregiver_id)
     previous_id = reminder.assigned_to_caregiver_id
     if previous_id == payload.assigned_to_caregiver_id:
-        return reminder
+        return _reminder_response(db, reminder)
     if previous_id:
         _resolve_previous_assignee_notifications(db, reminder.id, previous_id)
     reminder.assigned_to_caregiver_id = payload.assigned_to_caregiver_id
@@ -303,4 +303,4 @@ def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(ge
         reminder.cancelled_by_caregiver_id = caregiver_id
     _commit_reminder_update(db)
     db.refresh(reminder)
-    return reminder
+    return _reminder_response(db, reminder)
