@@ -44,6 +44,7 @@ from app.services.care_continuity import (
 )
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
+from app.services.caregiver_permissions import require_request_caregiver_permission
 from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
 from app.request_metrics import RequestMetricsMiddleware
 from app.models.anonymous_session import AnonymousSession
