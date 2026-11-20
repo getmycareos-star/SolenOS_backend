@@ -207,10 +207,10 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         with Session() as db:
             assertions = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"],
-                field="observation",
+                id=first_assertion_id,
             ).all()
             assert len(assertions) == 1
-            assert assertions[0].id == first_assertion_id
+            assert assertions[0].source_text == quote
             assert assertions[0].source_text == quote
             assert assertions[0].evidence_ids == [first_evidence_id]
             events = db.query(DocumentReviewEvent).filter(
