@@ -179,7 +179,7 @@ def list_appointment_workspaces(request: Request, db: Session = Depends(get_db))
 @router.post("", status_code=201)
 def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
-    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "add_evidence", read_only=False)
     if len(json.dumps(payload.payload, ensure_ascii=False, default=str)) > 100_000:
         raise HTTPException(status_code=413, detail="Appointment workspace payload exceeds 100 KB")
     if payload.appointment_id:
@@ -1060,7 +1060,7 @@ def _parse_appointment_event_time(value: Optional[str]):
 def create_appointment_outcome_proposals(record_id: str, request: Request, db: Session = Depends(get_db)):
     """Create idempotent, review-required LCR candidates from an immutable workspace revision."""
     person_id, caregiver_id = _scope(request, db)
-    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "add_evidence", read_only=False)
     row = db.query(AppointmentWorkspaceRecord).filter(
         AppointmentWorkspaceRecord.id == record_id,
         AppointmentWorkspaceRecord.person_id == person_id,
@@ -1469,7 +1469,7 @@ def get_appointment_workspace(record_id: str, request: Request, db: Session = De
 @router.patch("/{record_id}")
 def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUpdate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
-    _require_appointment_permission(request, db, person_id, caregiver_id, "view_lcr", read_only=True)
+    _require_appointment_permission(request, db, person_id, caregiver_id, "add_evidence", read_only=False)
     if len(json.dumps(payload.payload, ensure_ascii=False, default=str)) > 100_000:
         raise HTTPException(status_code=413, detail="Appointment workspace payload exceeds 100 KB")
     row = db.query(AppointmentWorkspaceRecord).filter(
