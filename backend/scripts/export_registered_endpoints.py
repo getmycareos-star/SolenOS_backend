@@ -61,16 +61,19 @@ def _dependency_names(route: APIRoute) -> list[str]:
 def build_inventory(application: FastAPI) -> dict[str, Any]:
     """Return a deterministic inventory of every registered HTTP API route."""
     entries: list[dict[str, Any]] = []
+    registered_routes = [route for route in application.routes if isinstance(route, APIRoute)]
     registration_counts: dict[tuple[str, str], int] = {}
-    for route in application.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in registered_routes:
+        for method in route.methods or []:
+            key = (method, route.path)
+            registration_counts[key] = registration_counts.get(key, 0) + 1
+
+    for route in registered_routes:
         endpoint = route.endpoint
         module = getattr(endpoint, "__module__", "unknown")
         handler = getattr(endpoint, "__qualname__", getattr(endpoint, "__name__", "unknown"))
         for method in sorted(route.methods or []):
             key = (method, route.path)
-            registration_counts[key] = registration_counts.get(key, 0) + 1
             entries.append(
                 {
                     "method": method,
