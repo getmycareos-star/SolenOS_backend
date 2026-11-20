@@ -247,6 +247,10 @@ def _get_scoped(db, person_id, caregiver_id, loop_id, *, for_update=False):
         or_(
             OpenLoopRecord.caregiver_id == caregiver_id,
             OpenLoopRecord.assigned_caregiver_id == caregiver_id,
+            # Appointment follow-ups belong to the person's care history.
+            # Any caregiver with view_lcr permission may see them; mutations
+            # remain separately guarded by manage_responsibilities.
+            OpenLoopRecord.source_type == "appointment_workspace_follow_up",
         ),
     )
     # Mutations must serialize on the parent row before reading JSON-backed
@@ -473,7 +477,14 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     query = db.query(OpenLoopRecord).filter(
-        OpenLoopRecord.person_id == person_id, or_(OpenLoopRecord.caregiver_id == caregiver_id, OpenLoopRecord.assigned_caregiver_id == caregiver_id))
+        OpenLoopRecord.person_id == person_id,
+        or_(
+            OpenLoopRecord.caregiver_id == caregiver_id,
+            OpenLoopRecord.assigned_caregiver_id == caregiver_id,
+            # Appointment follow-ups are shared person-level care history.
+            OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+        ),
+    )
     if status:
         if status not in ALL_STATES:
             raise HTTPException(status_code=422, detail="Invalid status filter")
@@ -518,7 +529,11 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
         for dep in deps:
             prerequisite = db.query(OpenLoopRecord).filter(
                 OpenLoopRecord.id == dep.prerequisite_id, OpenLoopRecord.person_id == person_id,
-                or_(OpenLoopRecord.caregiver_id == caregiver_id, OpenLoopRecord.assigned_caregiver_id == caregiver_id)).first()
+                or_(
+                    OpenLoopRecord.caregiver_id == caregiver_id,
+                    OpenLoopRecord.assigned_caregiver_id == caregiver_id,
+                    OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+                )).first()
             if prerequisite and prerequisite.status != "closed":
                 blockers.append({"id": prerequisite.id, "title": prerequisite.title, "status": prerequisite.status})
         loop._mandatory_blockers = blockers
@@ -1013,7 +1028,6 @@ def list_occurrences(loop_id: str, request: Request, limit: int = Query(100, ge=
     rows = db.query(OpenLoopOccurrence).filter(
         OpenLoopOccurrence.loop_id == loop.id,
         OpenLoopOccurrence.person_id == person_id,
-        OpenLoopOccurrence.caregiver_id == caregiver_id,
     ).order_by(OpenLoopOccurrence.occurred_at.asc()).limit(limit).all()
     return [{
         "id": row.id, "loop_id": row.loop_id, "source_type": row.source_type,
@@ -1030,7 +1044,7 @@ def loop_history(loop_id: str, request: Request, limit: int = Query(100, ge=1, l
     loop = _get_scoped(db, person_id, caregiver_id, loop_id)
     events = db.query(OpenLoopEvent).filter(
         OpenLoopEvent.loop_id == loop.id, OpenLoopEvent.person_id == person_id,
-        OpenLoopEvent.caregiver_id == caregiver_id).order_by(OpenLoopEvent.created_at.asc()).limit(limit).all()
+    ).order_by(OpenLoopEvent.created_at.asc()).limit(limit).all()
     return [{"id": e.id, "event_type": e.event_type, "before_state": e.before_state, "after_state": e.after_state,
              "evidence": e.evidence, "actor": e.actor, "created_at": e.created_at} for e in events]
 
