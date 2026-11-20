@@ -108,3 +108,33 @@ def test_committed_care_record_survives_engine_recreation(tmp_path):
     finally:
         second_session.close()
         second_engine.dispose()
+
+
+def test_schema_type_contract_accepts_matching_postgres_native_enum_labels():
+    from enum import Enum as PythonEnum
+    from sqlalchemy import Enum as SQLAlchemyEnum
+    from sqlalchemy.dialects.postgresql import ENUM as PostgreSQLEnum
+
+    from app.core.database import _schema_column_types_compatible
+
+    class ReviewState(str, PythonEnum):
+        PENDING = "pending"
+        ACCEPTED = "accepted"
+
+    expected = SQLAlchemyEnum(ReviewState, name="review_state")
+    matching_native = PostgreSQLEnum("PENDING", "ACCEPTED", name="review_state")
+    mismatched_native = PostgreSQLEnum("PENDING", "REJECTED", name="review_state")
+
+    assert _schema_column_types_compatible(expected, matching_native, "postgresql")
+    assert not _schema_column_types_compatible(expected, mismatched_native, "postgresql")
+    assert _schema_column_types_compatible(expected, String(32), "postgresql")
+
+
+def test_schema_type_contract_only_enforces_explicit_numeric_precision():
+    from sqlalchemy import Float, Numeric
+
+    from app.core.database import _schema_column_types_compatible
+
+    assert _schema_column_types_compatible(Float(), Numeric(8, 4), "postgresql")
+    assert _schema_column_types_compatible(Numeric(8, 4), Numeric(8, 4), "postgresql")
+    assert not _schema_column_types_compatible(Numeric(8, 4), Numeric(10, 4), "postgresql")
