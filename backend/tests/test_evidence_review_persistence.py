@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import Caregiver, Evidence, Person
 from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, CareAssertion
@@ -53,6 +54,19 @@ def issue_client(person_id: str) -> TestClient:
     caregiver = db.query(Caregiver).filter(Caregiver.person_id == person_id).first()
     assert caregiver is not None
     token = f"evidence-review-token-{person_id}"
+    grant = db.query(CaregiverAccessGrant).filter_by(
+        person_id=person_id, caregiver_id=caregiver.id
+    ).one_or_none()
+    if grant is None:
+        db.add(CaregiverAccessGrant(
+            person_id=person_id,
+            caregiver_id=caregiver.id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+            granted_by_caregiver_id=caregiver.id,
+        ))
     db.add(AnonymousSession(
         person_id=person_id,
         caregiver_id=caregiver.id,
