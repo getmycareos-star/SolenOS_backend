@@ -679,26 +679,76 @@ def test_appointment_write_rejects_caregiver_from_another_person():
 
 
 
-def test_caregiver_creation_rejects_unknown_person():
+def test_caregiver_creation_requires_a_session_scoped_to_the_target_person():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        client = TestClient(app)
+        payload = {
+            "name": "Unlinked Caregiver",
+            "email": "unknown-person@example.invalid",
+            "relationship": "Family",
+            "person_id": "person-daily-test",
+        }
+
+        unauthenticated = client.post("/api/v1/caregivers", json=payload)
+        assert unauthenticated.status_code == 401, unauthenticated.text
+
+        foreign_headers = session_headers("person-other-test", "caregiver-other-test")
+        spoofed = client.post("/api/v1/caregivers", headers=foreign_headers, json=payload)
+        assert spoofed.status_code == 403, spoofed.text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Caregiver).filter_by(email="unknown-person@example.invalid").count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_caregiver_creation_persists_for_the_authenticated_record_owner():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        response = client.post(
+            "/api/v1/caregivers",
+            headers=headers,
+            json={
+                "name": "Second Family Caregiver",
+                "email": "second-caregiver@example.invalid",
+                "relationship": "Family",
+                "person_id": "person-daily-test",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["person_id"] == "person-daily-test"
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Caregiver).filter_by(email="second-caregiver@example.invalid").count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_legacy_person_creation_is_disabled_to_prevent_ownerless_records():
     setup_db()
     try:
         client = TestClient(app)
         response = client.post(
-            "/api/v1/caregivers",
-            json={
-                "name": "Unlinked Caregiver",
-                "email": "unknown-person@example.invalid",
-                "relationship": "Family",
-                "person_id": "missing-person",
-            },
+            "/api/v1/persons",
+            json={"name": "Ownerless legacy person"},
         )
-        # The authorization middleware may reject the unknown care-record ID
-        # before the endpoint can return its more specific 404.
-        assert response.status_code in {403, 404}, response.text
-        assert response.json()["detail"] in {
-            "Person not found",
-            "You are not a member of this care circle.",
-        }
+        assert response.status_code == 410, response.text
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Person).count() == 0
+        finally:
+            db.close()
     finally:
         teardown_db()
 
