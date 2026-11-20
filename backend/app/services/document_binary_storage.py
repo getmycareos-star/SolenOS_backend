@@ -94,7 +94,7 @@ def store_document_binary(
     return {
         "storage_backend": "s3",
         "storage_key": key,
-        "content": None,
+        "content": payload,
         "size_bytes": len(payload),
         "sha256": digest,
     }
@@ -127,6 +127,33 @@ def read_document_binary(upload: Any) -> bytes:
     if hashlib.sha256(payload).hexdigest() != expected_hash:
         raise RuntimeError("Original document checksum does not match its persisted metadata")
     return payload
+
+
+def restore_document_binary_from_database(upload: Any) -> bytes:
+    """Rebuild a missing S3 object from the PostgreSQL recovery copy."""
+    backend = (getattr(upload, "storage_backend", None) or "postgres").strip().lower()
+    if backend == "postgres":
+        return read_document_binary(upload)
+    if backend != "s3":
+        raise RuntimeError(f"Unsupported document storage backend: {backend}")
+
+    payload = bytes(getattr(upload, "content", None) or b"")
+    expected_size = int(getattr(upload, "size_bytes", -1))
+    expected_hash = str(getattr(upload, "sha256", "") or "")
+    if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_hash:
+        raise RuntimeError("PostgreSQL document recovery copy failed its integrity check")
+
+    key = getattr(upload, "storage_key", None)
+    if not key:
+        raise RuntimeError("S3-backed document is missing its storage key")
+    _s3_client().put_object(
+        Bucket=_bucket_name(),
+        Key=key,
+        Body=payload,
+        ContentType=getattr(upload, "mime_type", "application/octet-stream"),
+        Metadata={"sha256": expected_hash, "evidence-id": str(getattr(upload, "evidence_id", ""))},
+    )
+    return read_document_binary(upload)
 
 
 def delete_document_binary(upload: Any) -> None:
