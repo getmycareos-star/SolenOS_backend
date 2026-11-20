@@ -181,6 +181,8 @@ def test_post_situation_idempotency_replays_same_capture_without_duplicate_evide
         assert replay_data["care_event_id"] == first_data["care_event_id"]
         assert replay_data["message"] == "This care update was already saved. No duplicate was created."
         assert replay_data["analysis_status"] == "partial"
+        assert replay_data["qwen_job_ids"] == first_data["qwen_job_ids"]
+        assert replay_data["qwen_analysis_id"] == first_data["qwen_analysis_id"]
 
         from app.models.capture_analysis import CaptureAnalysis
         from app.models.qwen_background_job import QwenBackgroundJob
