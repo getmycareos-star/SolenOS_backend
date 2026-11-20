@@ -12,6 +12,7 @@ from typing import Any
 CLOSED_STATUSES = {"resolved", "closed", "completed", "answered", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "dismissed", "not_applicable", "known"}
 OPEN_STATUSES = {"open", "active", "pending", "unresolved", "needs_review", "not_started", "follow_up_pending", "waiting", "deferred", "blocked", "review_abandoned", "pending_closure_verification"}
 CRITICAL_DELAY_REASON = "Critical consequence of delay was explicitly recorded"
+CARE_ATTENTION_POLICY_VERSION = "care-attention.v2"
 MAX_PATTERN_WINDOW_DAYS = 14
 
 
@@ -430,7 +431,7 @@ def build_care_attention_assessment(*, records: list[dict[str, Any]], open_loops
     deferred.sort(key=lambda item: (str(item.get("review_at") or ""), item["source"], item["record_id"]))
     clarification.sort(key=lambda item: (item["source"], item["record_id"]))
     return {
-        "schema_version": "care-attention.v1", "as_of": now.isoformat(),
+        "schema_version": CARE_ATTENTION_POLICY_VERSION, "as_of": now.isoformat(),
         "status": "bounded_evidence_assessment",
         "needs_attention_now": immediate[:100], "important_to_address": important[:100],
         "can_wait_with_documented_basis": deferred[:100], "needs_clarification": clarification[:100],
