@@ -1286,7 +1286,39 @@ async def upload_evidence(
     # a crash window between the evidence commit and a second queue commit.
     document_job_id = None
     document_job_status = "not_applicable"
-    if evidence_type == "document":
+    original_committed = False
+    if evidence_type == "document" and db.get_bind().dialect.name == "sqlite":
+        # SQLite is used by lightweight unit fixtures. Commit the immutable
+        # original first, then attempt the queue in a separate transaction:
+        # pysqlite's legacy SAVEPOINT handling can otherwise roll back the
+        # evidence row when a nested queue operation fails. Production uses
+        # PostgreSQL and keeps evidence + job in one transaction below.
+        try:
+            db.commit()
+            original_committed = True
+        except Exception:
+            db.rollback()
+            if stored_binary["storage_backend"] == "s3":
+                try:
+                    await asyncio.to_thread(delete_document_object, "s3", stored_binary["storage_key"])
+                except Exception:
+                    logger.exception("Unreferenced document object cleanup failed for evidence %s", persisted_evidence_id)
+            raise
+        document_job_status = "queue_unavailable"
+        try:
+            document_job = _ensure_document_intake_job(
+                db, scoped_person_id, scoped_caregiver_id, persisted_evidence_id
+            )
+            if document_job is not None:
+                document_job_id = str(document_job.id)
+                document_job_status = str(document_job.status)
+            db.commit()
+        except Exception:
+            db.rollback()
+            document_job_id = None
+            document_job_status = "queue_unavailable"
+            logger.exception("Document processing could not be queued for evidence %s", persisted_evidence_id)
+    elif evidence_type == "document":
         document_job_status = "queue_unavailable"
         savepoint = None
         try:
@@ -1331,7 +1363,8 @@ async def upload_evidence(
     # enqueued processing job together. If PostgreSQL fails after an S3 write,
     # compensate by deleting the unreferenced object; never report a partial save.
     try:
-        db.commit()
+        if not original_committed:
+            db.commit()
     except Exception:
         db.rollback()
         if stored_binary["storage_backend"] == "s3":
