@@ -8,6 +8,7 @@ import json
 import logging
 import hashlib
 from app.core.database import get_db
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis, persist_source_grounded_daily_observations
@@ -1782,6 +1783,7 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
 def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
     _require_full_record_access(request)
+    require_caregiver_permission(db, correction.person_id, correction.caregiver_id, "correct_records")
     if getattr(request.state, "caregiver_access_scope", "full_record") == "documents_only":
         raise HTTPException(status_code=403, detail="This caregiver can review documents, not correct other care information.")
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
@@ -1892,6 +1894,7 @@ def list_corrections(person_id: str, request: Request, db: Session = Depends(get
 def create_observation(observation: ObservationCreate, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, observation.person_id, observation.caregiver_id)
     _require_full_record_access(request)
+    require_caregiver_permission(db, observation.person_id, observation.caregiver_id, "add_evidence")
     # Validate referential integrity before persisting an observation.
     person = db.query(PersonModel).filter(PersonModel.id == observation.person_id).first()
     if not person:
