@@ -83,6 +83,22 @@ def _resolve_previous_assignee_notifications(db: Session, reminder_id: str, prev
     _cancel_pending_reminder_pushes(db, reminder_id)
 
 
+def _reminder_response(db: Session, reminder: CareReminder) -> dict:
+    recipient_id = reminder.assigned_to_caregiver_id or reminder.created_by_caregiver_id
+    notification_exists = db.query(CareNotification.id).filter(
+        CareNotification.person_id == reminder.person_id,
+        CareNotification.caregiver_id == recipient_id,
+        CareNotification.source_event_id == reminder.id,
+        CareNotification.category == "reminder_due",
+        CareNotification.status == "active",
+    ).first() is not None
+    payload = CareReminderRead.model_validate(reminder).model_dump()
+    payload["notification_delivery_status"] = (
+        "in_app_notification_created" if notification_exists else "not_created"
+    )
+    return payload
+
+
 def _assignment_audit(person_id: str, actor_id: str, reminder_id: str, previous_id: str | None, next_id: str):
     return AuditLogEvent(
         actor_id=actor_id,
@@ -140,7 +156,7 @@ def create_reminder(payload: CareReminderCreate, request: Request, db: Session =
     db.add(_assignment_audit(person_id, caregiver_id, reminder.id, None, assignee_id))
     _commit_reminder_update(db)
     db.refresh(reminder)
-    return reminder
+    return _reminder_response(db, reminder)
 
 
 @router.patch("/reminders/{reminder_id}/assignment", response_model=CareReminderRead)
@@ -175,7 +191,7 @@ def reassign_reminder(
     db.add(_assignment_audit(person_id, actor_id, reminder.id, previous_id, payload.assigned_to_caregiver_id))
     _commit_reminder_update(db)
     db.refresh(reminder)
-    return reminder
+    return _reminder_response(db, reminder)
 
 
 @router.get("/reminders/{person_id}", response_model=list[CareReminderRead])
@@ -193,7 +209,8 @@ def list_reminders(
     query = db.query(CareReminder).filter(CareReminder.person_id == scoped_person_id)
     if status:
         query = query.filter(CareReminder.status == status)
-    return query.order_by(CareReminder.due_at.asc(), CareReminder.created_at.asc()).all()
+    reminders = query.order_by(CareReminder.due_at.asc(), CareReminder.created_at.asc()).all()
+    return [_reminder_response(db, reminder) for reminder in reminders]
 
 
 @router.patch("/reminders/{reminder_id}/complete", response_model=CareReminderRead)
@@ -224,7 +241,7 @@ def complete_reminder(
         reminder.completion_note = payload.completion_note.strip() or None
     _commit_reminder_update(db)
     db.refresh(reminder)
-    return reminder
+    return _reminder_response(db, reminder)
 
 
 @router.patch("/reminders/{reminder_id}/snooze", response_model=CareReminderRead)
@@ -263,7 +280,7 @@ def snooze_reminder(
     reminder.delivery_generation = (reminder.delivery_generation or 0) + 1
     _commit_reminder_update(db)
     db.refresh(reminder)
-    return reminder
+    return _reminder_response(db, reminder)
 
 
 @router.patch("/reminders/{reminder_id}/cancel", response_model=CareReminderRead)
