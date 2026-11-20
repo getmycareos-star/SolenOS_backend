@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: reminder-assignment-repair-postgres-${{ github.ref }}
+  group: reminder-assignment-repair-postgres-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
