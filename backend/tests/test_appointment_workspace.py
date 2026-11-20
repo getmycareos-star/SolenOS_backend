@@ -2628,6 +2628,7 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
             "appointment_id": appointment_id,
             "status": "follow_up_pending",
             "payload": {
+                "caregiverReport": "Caregiver recorded that the clinic plans to release the result.",
                 "follow_ups": [{
                     "id": "pending-clinic-result",
                     "action": "Check whether the clinic released the result",
@@ -2639,6 +2640,13 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
     )
     assert workspace_response.status_code == 201, workspace_response.text
     workspace_id = workspace_response.json()["id"]
+    proposals_created = test_client.post(
+        f"/api/v1/appointment-workspaces/{workspace_id}/outcome-proposals",
+        headers=owner_headers,
+        json={},
+    )
+    assert proposals_created.status_code == 200, proposals_created.text
+    assert proposals_created.json()["count"] == 1
 
     # A second caregiver receives an explicit server-side grant for this same
     # person. Their own bearer session must see the same persisted workspace.
@@ -2657,7 +2665,7 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
         access_scope="full_record",
         status="active",
         can_manage_members=False,
-        permissions=["view_lcr", "add_evidence"],
+        permissions=["view_lcr", "add_evidence", "correct_records"],
         granted_by_caregiver_id=owner["caregiver"]["id"],
     ))
     raw_token = str(uuid.uuid4())
@@ -2677,6 +2685,21 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
     )
     assert shared_read.status_code == 200, shared_read.text
     assert shared_read.json()["appointment_id"] == appointment_id
+
+    shared_proposals = test_client.get(
+        f"/api/v1/appointment-workspaces/{workspace_id}/outcome-proposals",
+        headers=shared_headers,
+    )
+    assert shared_proposals.status_code == 200, shared_proposals.text
+    assert len(shared_proposals.json()["items"]) == 1
+    proposal_id = shared_proposals.json()["items"][0]["id"]
+    reviewed = test_client.post(
+        f"/api/v1/appointment-workspaces/{workspace_id}/outcome-proposals/{proposal_id}/review",
+        headers=shared_headers,
+        json={"decision": "accept"},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["written_to_lcr"] is True
 
     # A second authorised caregiver editing the same source follow-up must
     # reconcile the existing person-level Open Loop, not create a duplicate.
