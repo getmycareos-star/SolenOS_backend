@@ -172,6 +172,36 @@ def _validate_source_evidence_references(db: Session, person_id: str, evidence: 
     return evidence_ids
 
 
+
+def _validate_source_record_reference(
+    db: Session,
+    person_id: str,
+    source_type: str | None,
+    source_id: str | None,
+) -> None:
+    """Reject known persisted source references outside the authenticated care record."""
+    if not source_type:
+        return
+    if str(source_type).strip().casefold() == "persisted_change":
+        if not source_id or not str(source_id).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="A persisted care change link requires a source identifier",
+            )
+        from app.models.change import Change
+
+        exists = db.query(Change.id).filter(
+            Change.id == str(source_id).strip(),
+            Change.person_id == str(person_id),
+        ).first()
+        if exists is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Referenced care change was not found in this care record",
+            )
+
+
+
 def _scope(request: Request, db: Session) -> tuple[str, str]:
     authorization = request.headers.get("authorization", "")
     scheme, _, token = authorization.partition(" ")
@@ -328,6 +358,7 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     _validate_source_evidence_references(db, person_id, payload.evidence)
+    _validate_source_record_reference(db, person_id, payload.source_type, payload.source_id)
     deadline = _utc(payload.deadline_at)
     if deadline and not payload.deadline_source:
         raise HTTPException(status_code=422, detail="A deadline requires an explicit source")
