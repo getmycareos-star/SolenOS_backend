@@ -1309,7 +1309,12 @@ async def upload_evidence(
                     logger.exception("Document intake savepoint rollback failed for evidence %s", persisted_evidence_id)
             document_job_id = None
             document_job_status = "queue_unavailable"
-            if not db.is_active:
+            if savepoint is None or not db.is_active:
+                # begin_nested() flushes pending upload metadata before a
+                # savepoint exists. A failed flush can leave the PostgreSQL
+                # transaction aborted even while Session.is_active is true.
+                # Without a savepoint there is no safe partial commit: roll
+                # back the original metadata and compensate the external blob.
                 db.rollback()
                 if stored_binary["storage_backend"] == "s3":
                     try:
