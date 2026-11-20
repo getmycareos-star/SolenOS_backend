@@ -668,6 +668,18 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "context": item.context or [],
         "asked_at": _iso(item.asked_at),
     } for item in (question_rows or [])]
+    # Appointment-related clarification questions are surfaced separately so
+    # the caregiver can see a need to arrange/confirm a visit without filling
+    # out an appointment form. They remain questions, not booked appointments.
+    appointment_need_items = [
+        {
+            **item,
+            "interpretation_limit": "This is an unresolved appointment-related question from the care record. It does not mean a visit has been booked or confirmed.",
+        }
+        for item in question_items
+        if item.get("subject_type") == "appointment"
+        and item.get("status") in {"open", "unresolved"}
+    ]
     contradictions_has_more = None
     try:
         fetched_contradictions = db.query(Contradiction).filter(
@@ -1087,6 +1099,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "decision_outcomes": decision_outcomes,
         "assertions": assertion_items,
         "open_questions": question_items,
+        "appointment_needs": appointment_need_items,
         "contradictions": contradiction_items,
         "documents": documents,
         "source_completeness": source_completeness,
