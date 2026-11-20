@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, JSON, String, UniqueConstraint, text
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -24,6 +24,7 @@ class CaregiverAccessGrant(Base):
     access_scope = Column(String(32), nullable=False, default="full_record")
     status = Column(String(16), nullable=False, default="active", index=True)
     can_manage_members = Column(Boolean, nullable=False, default=False)
+    permissions = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     granted_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
     granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
@@ -43,6 +44,7 @@ class CaregiverInvitation(Base):
     token_hash = Column(String(64), nullable=False)
     invited_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
     role = Column(String(32), nullable=False, default="family")
+    permissions = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     status = Column(String(16), nullable=False, default="pending", index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     accepted_at = Column(DateTime(timezone=True), nullable=True)
