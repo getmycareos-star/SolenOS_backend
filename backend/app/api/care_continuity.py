@@ -2110,6 +2110,20 @@ def current_care_projection(
                               "perspective_text", "observed_value", "normalized_value", "value_text", "source_passage", "ambiguity_note", "decision_text", "summary", "resolution", "decision_notes")
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
+        if source_name == "events" and str(row.get("event_type") or "").strip().lower() in {
+            "structured_daily_capture", "daily_care_entry",
+        }:
+            # Event descriptions are stored as a JSON envelope for provenance
+            # and idempotency. Never show that internal envelope as caregiver
+            # prose: project only the exact caregiver-entered note. The full
+            # immutable envelope remains available in the source event history.
+            try:
+                capture_detail = json.loads(row.get("description") or "{}")
+            except (TypeError, ValueError):
+                capture_detail = {}
+            if isinstance(capture_detail, dict):
+                caregiver_note = capture_detail.get("notes")
+                description = caregiver_note.strip() if isinstance(caregiver_note, str) else ""
         occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("event_time_text") or row.get("decided_at")
         recorded_at = row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at") or row.get("asked_at")
         evidence_ids = row.get("evidence_ids")
