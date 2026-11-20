@@ -954,6 +954,7 @@ def read_handoff_summary(handoff_id: str, request: Request, db: Session = Depend
 @router.post("/{handoff_id}/accept")
 def accept_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     handoff = db.query(HandoffRecord).filter(
         HandoffRecord.id == handoff_id, HandoffRecord.person_id == person_id
     ).first()
@@ -989,6 +990,7 @@ def accept_handoff(handoff_id: str, request: Request, db: Session = Depends(get_
 @router.post("/{handoff_id}/acknowledge")
 def acknowledge_handoff(handoff_id: str, payload: HandoffAcknowledge, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     handoff = db.query(HandoffRecord).filter(
         HandoffRecord.id == handoff_id, HandoffRecord.person_id == person_id
     ).first()
