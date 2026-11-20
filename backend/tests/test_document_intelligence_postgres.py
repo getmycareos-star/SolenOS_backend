@@ -599,7 +599,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             },
         )
         assert corrected.status_code == 409, corrected.text
-        assert "directly supported by its preserved source quotation" in corrected.json()["detail"]
+        assert "preserve the complete source quotation" in corrected.json()["detail"]
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
