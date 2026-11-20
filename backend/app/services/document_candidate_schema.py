@@ -199,7 +199,7 @@ def statement_context_markers(excerpt: str) -> dict[str, str]:
         re.I,
     ) else "not_explicitly_marked"
     modality = "tentative" if re.search(
-        r"\b(?:may|might|possibly|possible|suspected|appears to|suggests?|probable|likely|unlikely)\b",
+        r"\b(?:may|might|possibly|possible|suspected|suspects?|appears to|suggests?|probable|likely|unlikely)\b",
         lowered,
         re.I,
     ) else "not_explicitly_marked"
