@@ -72,6 +72,7 @@ from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.services.document_binary_storage import (
     store_document_binary,
     read_document_binary,
+    delete_document_binary,
     delete_document_object,
 )
 
@@ -1890,7 +1891,16 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         )
     upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).with_for_update().first()
     original_hash = upload.sha256 if upload is not None else None
+    original_binary = None
     if upload is not None:
+        try:
+            original_binary = read_document_binary(upload)
+            # Delete the external object before removing its database pointer.
+            # If the later transaction fails, the exception handler restores it.
+            delete_document_binary(upload)
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="The original document could not be safely removed.") from exc
         db.execute(EvidenceUpload.__table__.delete().where(EvidenceUpload.evidence_id == evidence_id))
 
     metadata = {
@@ -1923,6 +1933,16 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         db.commit()
     except Exception:
         db.rollback()
+        if upload is not None and upload.storage_backend == "s3" and original_binary is not None:
+            try:
+                store_document_binary(
+                    person_id=person_id,
+                    evidence_id=evidence_id,
+                    data=original_binary,
+                    mime_type=upload.mime_type,
+                )
+            except Exception:
+                logger.exception("Could not restore original document object after failed deletion transaction %s", evidence_id)
         logger.exception("Document deletion transaction failed for evidence %s", evidence_id)
         raise HTTPException(status_code=503, detail="The document could not be deleted. No deletion was confirmed.")
     return {
