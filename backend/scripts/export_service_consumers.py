@@ -76,6 +76,13 @@ def build_service_consumer_inventory() -> dict:
                     "call_expression": ast.unparse(node.func),
                 })
 
+    service_root = APP_ROOT / "services"
+    for file_path in sorted(service_root.rglob("*.py")):
+        if any(part in {"__pycache__"} for part in file_path.parts):
+            continue
+        module = _module_name(file_path)
+        consumers.setdefault((module, "*"), {"imports": [], "calls": []})
+
     entries = []
     for (service_module, service_symbol), references in sorted(consumers.items()):
         imports = sorted(references["imports"], key=lambda item: (item["consumer_module"], item["line"]))
@@ -89,7 +96,8 @@ def build_service_consumer_inventory() -> dict:
             "imports": imports,
             "calls": calls,
             "disposition": "callsite_found_runtime_invocation_verification_required" if calls
-                else "import_found_no_direct_call_review_required",
+                else "import_found_no_direct_call_review_required" if imports
+                else "no_import_or_call_dead_service_review_required",
         })
     return {
         "format_version": 1,
