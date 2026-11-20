@@ -3250,3 +3250,39 @@ def test_appointment_lifecycle_preserves_reschedule_cancel_and_unknown_date(clie
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     assert cancelled.json()["external_booking_confirmed"] is False
+
+
+def test_appointment_workspace_survives_session_refresh_and_logout_revokes_access(client):
+    test_client, owner, _ = client
+    original_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/appointments", headers=original_headers, json={
+        "person_id": owner["person"]["id"],
+        "title": "Persisted follow-up visit",
+        "scheduled_at": (datetime.now(timezone.utc) + timedelta(days=8)).isoformat(),
+        "created_by_caregiver_id": owner["caregiver"]["id"],
+    })
+    assert created.status_code == 200, created.text
+    appointment_id = created.json()["id"]
+    workspaces = test_client.get("/api/v1/appointment-workspaces", headers=original_headers)
+    assert workspaces.status_code == 200, workspaces.text
+    workspace = next(item for item in workspaces.json()["items"] if item.get("appointment_id") == appointment_id)
+    workspace_id = workspace["id"]
+
+    refreshed = test_client.post("/api/v1/sessions/refresh", headers=original_headers)
+    assert refreshed.status_code == 200, refreshed.text
+    fresh_headers = {"Authorization": f"Bearer {refreshed.json()['access_token']}"}
+    persisted = test_client.get(
+        f"/api/v1/appointment-workspaces/{workspace_id}",
+        headers=fresh_headers,
+    )
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json()["appointment_id"] == appointment_id
+    assert persisted.json()["payload"]["generatedBy"] == "solenos_appointment_continuity"
+
+    revoked = test_client.post("/api/v1/sessions/revoke", headers=fresh_headers, json={})
+    assert revoked.status_code == 200, revoked.text
+    denied = test_client.get(
+        f"/api/v1/appointment-workspaces/{workspace_id}",
+        headers=fresh_headers,
+    )
+    assert denied.status_code == 401, denied.text
