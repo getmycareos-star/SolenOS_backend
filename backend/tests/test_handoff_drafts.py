@@ -2182,6 +2182,8 @@ def test_tampered_lcr_snapshot_is_unknown_and_cannot_be_approved(client):
     try:
         draft = db.query(HandoffDraft).filter(HandoffDraft.id == draft_id).one()
         tampered_snapshot = dict(draft.source_snapshot)
+        assert tampered_snapshot.get("integrity_version") == 2
+        tampered_snapshot["caregiver_scope"] = "another-caregiver"
         tampered_snapshot["limitations"] = list(tampered_snapshot.get("limitations") or []) + [{
             "source": "care_facts",
             "status": "available",
