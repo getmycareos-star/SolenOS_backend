@@ -35,3 +35,15 @@ def test_document_candidate_preserves_patient_denial_and_source_quote():
     assert candidate["negation_status"] == "explicitly_negated"
     assert candidate["source_attribution"] == "patient_reported"
     assert candidate["temporal_context"] == "not_established"
+
+
+def test_clinician_suspects_wording_remains_tentative():
+    quote = "The clinician suspects an infection."
+    candidate = canonical_candidate(
+        {"subject": "infection", "observation": quote, "source_quote": quote},
+        document_id="adversarial-clinician-suspicion",
+        source_text=f"[Page 1]\\n{quote}",
+    )
+    assert candidate["modality"] == "tentative"
+    assert candidate["review_status"] == "Pending"
+    assert any("tentative" in warning for warning in candidate["warnings"])
