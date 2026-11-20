@@ -1006,18 +1006,18 @@ def get_situation(
     document_assertions_by_evidence = {}
     document_assertion_payloads = []
     for assertion in care_assertion_rows:
+        source_context = assertion.source_context if isinstance(assertion.source_context, dict) else {}
         if (
-            assertion.assertion_kind != "document_reviewed_observation"
-            or assertion.assertion_status != "accepted"
+            source_context.get("kind") != "caregiver_reviewed_document_candidate"
+            or source_context.get("review_status") != "accepted_by_caregiver"
         ):
             continue
-        source_context = assertion.source_context if isinstance(assertion.source_context, dict) else {}
         candidate_context = source_context.get("document_candidate")
         candidate_context = candidate_context if isinstance(candidate_context, dict) else {}
         for source_evidence_id in dict.fromkeys(assertion.evidence_ids or []):
             source_evidence_id = str(source_evidence_id)
             evidence_model = evidence_models_by_id.get(source_evidence_id)
-            if evidence_model is None:
+            if evidence_model is None or evidence_model.type != "document":
                 continue
             payload = {
                 "id": str(assertion.id),
@@ -1032,8 +1032,9 @@ def get_situation(
                 "source_span_end": candidate_context.get("source_span_end"),
                 "source_span_unit": candidate_context.get("source_span_unit"),
                 "source_page": candidate_context.get("page_number"),
-                "review_status": "accepted",
+                "review_status": source_context.get("review_status"),
                 "assertion_status": assertion.assertion_status,
+                "authority": source_context.get("authority"),
                 "epistemic_status": assertion.epistemic_state,
                 "field": assertion.field,
                 "asserted_value": assertion.asserted_value,
