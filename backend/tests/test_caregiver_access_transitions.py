@@ -601,6 +601,18 @@ def test_member_operation_permissions_are_enforced_for_reminders():
     member = accepted.json()
     member_headers = {"Authorization": f"Bearer {member['access_token']}"}
 
+    empty = client.patch(
+        f"/api/v1/caregiver-access/members/{member['caregiver_id']}/permissions",
+        headers=owner_headers,
+        json={"permissions": []},
+    )
+    assert empty.status_code == 200, empty.text
+    denied_empty_read = client.get(
+        f"/api/v1/reminders/{primary['person']['id']}",
+        headers=member_headers,
+    )
+    assert denied_empty_read.status_code == 403, denied_empty_read.text
+
     changed = client.patch(
         f"/api/v1/caregiver-access/members/{member['caregiver_id']}/permissions",
         headers=owner_headers,
