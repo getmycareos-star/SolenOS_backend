@@ -235,7 +235,7 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
     try:
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
-            workspace_id=row.id, payload=payload.payload,
+            workspace_id=row.id, payload=payload.payload, appointment_id=row.appointment_id,
         )
         db.flush()
         execute_care_continuity_reconciliation(
@@ -400,6 +400,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "deadline_source": loop.deadline_source,
                 "source_type": loop.source_type,
                 "source_reference": loop.source_id,
+                "appointment_id": next((item.get("appointment_id") for item in (loop.evidence or []) if isinstance(item, dict) and item.get("appointment_id")), None),
+                "source_workspace_id": next((item.get("record_id") for item in (loop.evidence or []) if isinstance(item, dict) and item.get("record_type") == "appointment_workspace"), None),
                 "evidence": loop.evidence or [],
                 "updated_at": _iso(loop.updated_at),
                 "interpretation_limit": "This is an unresolved tracked item. A recorded owner or deadline is not proof that the person accepted the task or that it was completed.",
@@ -1642,7 +1644,7 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
     try:
         sync_appointment_followups(
             db, person_id=person_id, caregiver_id=caregiver_id,
-            workspace_id=row.id, payload=payload.payload,
+            workspace_id=row.id, payload=payload.payload, appointment_id=row.appointment_id,
         )
         db.flush()
         execute_care_continuity_reconciliation(
