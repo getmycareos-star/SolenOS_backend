@@ -127,6 +127,34 @@ def database_schema_differences(bind=None):
         if missing_columns:
             differences.append(f"{table_name}: missing columns {', '.join(missing_columns)}")
 
+        def type_contract(value):
+            affinity = getattr(value, "_type_affinity", type(value))
+            return (
+                getattr(affinity, "__name__", str(affinity)),
+                getattr(value, "length", None),
+                getattr(value, "precision", None),
+                getattr(value, "scale", None),
+                getattr(value, "timezone", None),
+            )
+
+        type_mismatches = sorted(
+            column.name
+            for column in table.columns
+            if column.name in reflected_columns
+            and type_contract(column.type) != type_contract(reflected_columns[column.name]["type"])
+        )
+        if type_mismatches:
+            differences.append(
+                f"{table_name}: data types differ for {', '.join(type_mismatches)}"
+            )
+
+        expected_primary_key = tuple(column.name for column in table.primary_key.columns)
+        actual_primary_key = tuple(inspector.get_pk_constraint(table_name).get("constrained_columns") or [])
+        if expected_primary_key != actual_primary_key:
+            differences.append(
+                f"{table_name}: primary key differs (expected {expected_primary_key}, actual {actual_primary_key})"
+            )
+
         # Nullability is part of the persisted data contract. Do not silently
         # accept a nullable production column where the ORM requires a value.
         nullability_mismatches = sorted(
