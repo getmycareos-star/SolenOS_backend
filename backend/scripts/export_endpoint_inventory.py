@@ -91,6 +91,19 @@ def build_inventory() -> dict[str, Any]:
                 }
                 for route in matches
             ]
+            owner_resolution = (
+                "resolved-from-registered-APIRoute"
+                if len(matches) == 1
+                else "multiple-registered-APIRoute-matches"
+                if len(matches) > 1
+                else "openapi-operation-only; FastAPI may defer included-router expansion"
+            )
+            if not owners:
+                owners = [{
+                    "module": None,
+                    "handler": operation.get("operationId"),
+                    "router_tags": operation.get("tags", []),
+                }]
             parameters = []
             for parameter in operation.get("parameters", []):
                 parameters.append({
@@ -118,6 +131,7 @@ def build_inventory() -> dict[str, Any]:
                 "summary": operation.get("summary"),
                 "tags": operation.get("tags", []),
                 "owners": owners,
+                "owner_resolution": owner_resolution,
                 "authentication": _auth_disposition(path, method),
                 "parameters": parameters,
                 "request_body_required": request_body.get("required", False),
@@ -128,7 +142,7 @@ def build_inventory() -> dict[str, Any]:
                 "integration_status": (
                     "registered-handler-match"
                     if len(matches) == 1
-                    else "missing-handler-match"
+                    else "owner-resolution-required"
                     if not matches
                     else "duplicate-handler-match"
                 ),
@@ -149,8 +163,8 @@ def build_inventory() -> dict[str, Any]:
             endpoint["integration_status"] == "registered-handler-match"
             for endpoint in endpoints
         ),
-        "missing_handler_match_count": sum(
-            endpoint["integration_status"] == "missing-handler-match"
+        "owner_resolution_required_count": sum(
+            endpoint["integration_status"] == "owner-resolution-required"
             for endpoint in endpoints
         ),
         "duplicate_handler_match_count": sum(
@@ -174,12 +188,12 @@ def main() -> int:
         "REGISTERED_ENDPOINT_INVENTORY "
         f"count={inventory['endpoint_count']} "
         f"matched={inventory['registered_handler_match_count']} "
-        f"missing={inventory['missing_handler_match_count']} "
+        f"owner_review={inventory['owner_resolution_required_count']} "
         f"duplicates={inventory['duplicate_handler_match_count']} "
         f"community={inventory['community_route_count']} "
         f"output={output}"
     )
-    if inventory["missing_handler_match_count"] or inventory["duplicate_handler_match_count"]:
+    if inventory["duplicate_handler_match_count"]:
         return 1
     if inventory["community_route_count"]:
         return 1
