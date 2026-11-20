@@ -2176,7 +2176,7 @@ def current_care_projection(
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
             "original_author": row.get("original_author") or (primary_source.original_author if primary_source else None),
             "reported_by_label": row.get("reported_by_label") or (primary_source.reported_by_label if primary_source else None),
-            "reported_by_caregiver_id": row.get("reported_by_caregiver_id") or (primary_source.reported_by_caregiver_id if primary_source else None),
+            "reported_by_caregiver_id": row.get("reported_by_caregiver_id") or row.get("created_by_caregiver_id") or row.get("caregiver_id") or row.get("uploaded_by_caregiver_id") or (primary_source.reported_by_caregiver_id if primary_source else None),
             "original_source_reference": row.get("original_source_reference") or (primary_source.original_source_reference if primary_source else None),
             "occurred_at": occurred_at,
             "reported_at": reported_at,
