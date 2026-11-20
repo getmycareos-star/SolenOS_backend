@@ -198,6 +198,91 @@ def supplement_source_grounded_daily_observations(
     return result
 
 
+def _source_grounded_weight_loss_detail(
+    db: Session,
+    *,
+    person_id: str,
+    evidence_id: str,
+    source_text: str,
+    observation_text: str,
+) -> dict[str, Any] | None:
+    """Give an explicitly reported weight-loss phrase a cautious display label.
+
+    The exact source wording remains in value_text/source_passage. The normalized
+    label is only a caregiver-report descriptor; it is never a measurement,
+    diagnosis, confirmed change, or trend.
+    """
+    text_to_check = " ".join(str(source_text or "").split())
+    positive = re.search(
+        r"\\b(?:los(?:ing|t)|loosing)(?:\\s+some)?\\s+weight\\b"
+        r"|\\bweight\\s+(?:loss|is\\s+down|has\\s+decreased)\\b",
+        text_to_check,
+        re.IGNORECASE,
+    )
+    if positive is None:
+        return None
+    negative = re.search(
+        r"\\b(?:not|never|no\\s+longer)\\s+(?:currently\\s+)?"
+        r"(?:losing|loosing|lost)(?:\\s+some)?\\s+weight\\b"
+        r"|\\bno\\s+weight\\s+loss\\b"
+        r"|\\bden(?:y|ies|ied)\\s+(?:any\\s+)?(?:weight\\s+loss|losing\\s+weight)\\b"
+        r"|\\bweight\\s+loss\\b.{0,32}\\b(?:not|never|absent|denied)\\b",
+        text_to_check,
+        re.IGNORECASE,
+    )
+    if negative is not None:
+        return None
+
+    amount_recorded = bool(re.search(
+        r"\\b\\d+(?:[.,]\\d+)?\\s*(?:kg|kgs|kilograms?|lb|lbs|pounds?|stone)\\b",
+        text_to_check,
+        re.IGNORECASE,
+    ))
+    timeframe_recorded = bool(re.search(
+        r"\\b(?:in|over|within|during|for|since|past|last)\\s+"
+        r"(?:the\\s+)?(?:\\d+\\s*)?(?:days?|weeks?|months?|years?|fortnights?)\\b",
+        text_to_check,
+        re.IGNORECASE,
+    ))
+    previous_weight = db.query(EvidenceObservation.id).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id != evidence_id,
+        EvidenceObservation.attribute == "weight",
+    ).first() is not None
+
+    context_parts = [
+        "Caregiver report; not independently confirmed.",
+        "No amount was stated in this report." if not amount_recorded else "An amount was included in the caregiver report.",
+        "No timeframe was stated in this report." if not timeframe_recorded else "A timeframe was included in the caregiver report.",
+        (
+            "A previous weight entry is available in saved care history; it has not been treated as confirmation of this report."
+            if previous_weight
+            else "No previous weight measurement was found in the saved care history."
+        ),
+        "Clinical interpretation has not been established.",
+    ]
+    missing = []
+    if not amount_recorded:
+        missing.append("amount")
+    if not timeframe_recorded:
+        missing.append("timeframe")
+    if not previous_weight:
+        missing.append("previous weight measurement")
+    hedge = _source_hedge_for_observation(source_text, observation_text)
+    return {
+        "attribute": "reported_weight_change",
+        "normalized_value": "possible weight loss",
+        "context": " ".join(context_parts),
+        "ambiguity_note": (
+            "Not established from the available report: " + ", ".join(missing) + "."
+            if missing else None
+        ),
+        "epistemic_status": "uncertain" if hedge else "reported",
+        "hedge_marker": hedge.group(0) if hedge else None,
+        "negated": False,
+    }
+
+
 def persist_source_grounded_daily_observations(
     db: Session,
     *,
@@ -262,6 +347,24 @@ def persist_source_grounded_daily_observations(
         if existing:
             continue
 
+        normalized_detail = _source_grounded_weight_loss_detail(
+            db,
+            person_id=person_id,
+            evidence_id=evidence_id,
+            source_text=quote,
+            observation_text=observation_text,
+        )
+        if normalized_detail is not None and db.query(EvidenceObservation.id).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+            EvidenceObservation.source_span_start == start,
+            EvidenceObservation.source_span_end == end,
+            EvidenceObservation.extraction_method == "structured_daily_capture",
+            EvidenceObservation.attribute == normalized_detail["attribute"],
+        ).first():
+            # Structured Daily Care already wrote the normalized detail for
+            # this exact source span; do not project the model's paraphrase again.
+            continue
         hedge = _source_hedge_for_observation(quote, observation_text)
         time_reference = _source_time_for_observation(quote, observation_text)
         context_parts = [
@@ -269,15 +372,21 @@ def persist_source_grounded_daily_observations(
         ]
         if time_reference:
             context_parts.append(f"Caregiver time wording: {time_reference.group(0)}.")
+        if normalized_detail is not None:
+            context_parts.append(normalized_detail["context"])
         db.add(EvidenceObservation(
             person_id=person_id,
             evidence_id=evidence_id,
             observation_kind="caregiver_report",
-            epistemic_status="uncertain" if hedge else "reported",
+            epistemic_status=normalized_detail["epistemic_status"] if normalized_detail else ("uncertain" if hedge else "reported"),
             subject_label=subject_text[:160],
-            attribute="caregiver_reported_observation",
+            attribute=normalized_detail["attribute"] if normalized_detail else "caregiver_reported_observation",
             value_text=observation_text[:2000],
+            normalized_value=normalized_detail["normalized_value"] if normalized_detail else None,
             context=" ".join(context_parts),
+            ambiguity_note=normalized_detail["ambiguity_note"] if normalized_detail else None,
+            hedge_marker=normalized_detail["hedge_marker"] if normalized_detail else (hedge.group(0) if hedge else None),
+            negated=normalized_detail["negated"] if normalized_detail else None,
             reported_at=reported_at,
             observer_label="Caregiver",
             observer_caregiver_id=caregiver_id,
@@ -344,6 +453,7 @@ def persist_structured_daily_capture_observations(
         marker_start = source_text.find(marker)
         if marker_start >= 0:
             passage_start = marker_start + len(json.dumps("notes") + ":")
+            note_end = passage_start + len(quoted_note)
             candidates.append({
                 "attribute": "caregiver_note",
                 "value_text": note,
@@ -351,9 +461,28 @@ def persist_structured_daily_capture_observations(
                 "context": "Original wording shared by a caregiver; not independently verified.",
                 "source_passage": quoted_note,
                 "source_span_start": passage_start,
-                "source_span_end": passage_start + len(quoted_note),
+                "source_span_end": note_end,
                 "observed_at": None,
             })
+            normalized_detail = _source_grounded_weight_loss_detail(
+                db,
+                person_id=person_id,
+                evidence_id=evidence_id,
+                source_text=note,
+                observation_text=note,
+            )
+            if normalized_detail is not None:
+                candidates.append({
+                    **normalized_detail,
+                    "value_text": note,
+                    "units": None,
+                    "source_passage": quoted_note,
+                    "source_span_start": passage_start,
+                    "source_span_end": note_end,
+                    "observed_at": None,
+                    "observation_method": "Daily Care form; source-grounded care-detail normalization",
+                    "extraction_version": "structured-daily-capture-v2",
+                })
 
     def append_structured_items(key: str, attribute_for, value_for, units_for, context_for, time_for):
         items = detail.get(key)
@@ -463,6 +592,7 @@ def persist_structured_daily_capture_observations(
             EvidenceObservation.source_span_start == start,
             EvidenceObservation.source_span_end == end,
             EvidenceObservation.extraction_method == "structured_daily_capture",
+            EvidenceObservation.attribute == candidate["attribute"],
         ).first()
         if existing:
             continue
@@ -470,24 +600,28 @@ def persist_structured_daily_capture_observations(
             person_id=person_id,
             evidence_id=evidence_id,
             observation_kind="caregiver_report",
-            epistemic_status="reported",
+            epistemic_status=candidate.get("epistemic_status") or "reported",
             subject_label="Care recipient",
             attribute=candidate["attribute"],
             value_text=candidate["value_text"],
+            normalized_value=candidate.get("normalized_value"),
             units=candidate["units"],
             context=candidate["context"],
+            ambiguity_note=candidate.get("ambiguity_note"),
+            hedge_marker=candidate.get("hedge_marker"),
+            negated=candidate.get("negated"),
             occurred_at=candidate["observed_at"],
             observed_at=candidate["observed_at"],
             reported_at=reported_at,
             recorded_at=recorded_at or reported_at,
             observer_label="Caregiver",
             observer_caregiver_id=caregiver_id,
-            observation_method="Daily Care form",
+            observation_method=candidate.get("observation_method") or "Daily Care form",
             source_passage=passage,
             source_span_start=start,
             source_span_end=end,
             extraction_method="structured_daily_capture",
-            extraction_version="structured-daily-capture-v1",
+            extraction_version=candidate.get("extraction_version") or "structured-daily-capture-v1",
             extraction_run_id=source_event_id,
             created_by_caregiver_id=caregiver_id,
         ))
