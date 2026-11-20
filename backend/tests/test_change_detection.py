@@ -1325,7 +1325,7 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
 
         invalid_repeat = client.post(
             url,
-            json={"status": "confirmed", "reason": "Repeated confirmation.", "evidence_ids": []},
+            json={"status": "confirmed", "reason": "Repeated confirmation.", "evidence_ids": [evidence_id]},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert invalid_repeat.status_code == 422

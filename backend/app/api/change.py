@@ -435,8 +435,6 @@ def transition_change_confirmation(
         .filter(
             ChangeConfirmationEvent.change_id == change.id,
             ChangeConfirmationEvent.person_id == person_id,
-            ChangeConfirmationEvent.actor_caregiver_id == session.caregiver_id,
-            ChangeConfirmationEvent.new_status == payload.status,
         )
         .order_by(ChangeConfirmationEvent.created_at.desc(), ChangeConfirmationEvent.id.desc())
         .first()
@@ -444,6 +442,8 @@ def transition_change_confirmation(
     if (
         change.confirmation_status == payload.status
         and existing_transition is not None
+        and existing_transition.actor_caregiver_id == session.caregiver_id
+        and existing_transition.new_status == payload.status
         and existing_transition.reason == normalized_reason
         and sorted(existing_transition.evidence_ids or []) == supplied_evidence_ids
     ):
