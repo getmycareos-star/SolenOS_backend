@@ -13,10 +13,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import pytest
+
 from app.api import v1 as api_v1
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Correction, Person
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("DATABASE_URL"),
+    reason="requires the real PostgreSQL integration database",
+)
 
 
 def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(monkeypatch):
