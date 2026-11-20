@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import Person, Caregiver, Evidence
 from app.models.care_continuity import EvidenceCompletenessPolicy, EvidenceCompletenessAssessment
 
@@ -71,6 +72,15 @@ def setup_records():
     db.commit()
     for _, caregiver in people:
         token = f"freshness-token-{caregiver.person_id}"
+        db.add(CaregiverAccessGrant(
+            person_id=caregiver.person_id,
+            caregiver_id=caregiver.id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+            granted_by_caregiver_id=caregiver.id,
+        ))
         db.add(AnonymousSession(
             person_id=caregiver.person_id,
             caregiver_id=caregiver.id,
