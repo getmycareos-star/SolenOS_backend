@@ -171,10 +171,12 @@ def test_post_situation_idempotency_replays_same_capture_without_duplicate_evide
         first = client.post("/api/situation", headers=headers, json=payload)
         assert first.status_code == 200, first.text
         first_data = first.json()
+        assert first_data["idempotent_replay"] is False
 
         replay = client.post("/api/situation", headers=headers, json=payload)
         assert replay.status_code == 200, replay.text
         replay_data = replay.json()
+        assert replay_data["idempotent_replay"] is True
         assert replay_data["evidence_id"] == first_data["evidence_id"]
         assert replay_data["care_event_id"] == first_data["care_event_id"]
         assert replay_data["message"] == "This care update was already saved. No duplicate was created."
