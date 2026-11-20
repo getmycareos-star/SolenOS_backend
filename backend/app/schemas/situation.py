@@ -92,6 +92,9 @@ class SituationResponse(BaseModel):
     what_changed: Optional[str] = None
     analysis_status: Literal["complete", "partial"] = "complete"
     analysis_warning: Optional[str] = None
+    # True only when the server found the original durable capture for this
+    # idempotency key. Callers must not enqueue extraction a second time.
+    idempotent_replay: bool = False
     # Persisted-care projection consumed by the workspace after capture.
     care_recipient_id: Optional[str] = None
     care_recipient_display_name: Optional[str] = None
