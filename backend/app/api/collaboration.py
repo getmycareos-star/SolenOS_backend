@@ -69,6 +69,11 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import build_unified_lcr_context
+from app.services.document_binary_storage import (
+    store_document_binary,
+    read_document_binary,
+    delete_document_object,
+)
 
 
 from app.services.lcr_context import _expanded_search_terms
@@ -1072,8 +1077,12 @@ async def upload_evidence(
             if prior.uploaded_by_caregiver_id != scoped_caregiver_id or prior.ingestion_request_sha256 != request_fingerprint:
                 raise HTTPException(status_code=409, detail="This upload retry key was already used for a different upload. Start a new capture instead of reusing it.")
             prior_blob = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == prior.id).first()
-            if prior_blob is None or prior_blob.sha256 != digest or len(prior_blob.content) != prior_blob.size_bytes:
+            if prior_blob is None or prior_blob.sha256 != digest:
                 raise HTTPException(status_code=409, detail="The original upload linked to this retry key is unavailable or failed integrity validation.")
+            try:
+                read_document_binary(prior_blob)
+            except Exception as exc:
+                raise HTTPException(status_code=409, detail="The original upload linked to this retry key is unavailable or failed integrity validation.") from exc
             prior_meta = {}
             try:
                 prior_meta = prior.extra_metadata if isinstance(prior.extra_metadata, dict) else json.loads(prior.extra_metadata or "{}")
@@ -1210,19 +1219,41 @@ async def upload_evidence(
     )
     db.add(evidence)
     db.flush()
+    persisted_evidence_id = str(evidence.id)
+    try:
+        stored_binary = store_document_binary(
+            person_id=scoped_person_id,
+            evidence_id=persisted_evidence_id,
+            data=data,
+            mime_type=mime_type,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Original document binary could not be stored for evidence %s", persisted_evidence_id)
+        raise HTTPException(status_code=503, detail="The original file could not be stored. Nothing was marked as saved.")
     db.add(EvidenceUpload(
         evidence_id=evidence.id,
         filename=filename,
         mime_type=mime_type,
-        content=data,
-        size_bytes=len(data),
-        sha256=digest,
+        content=stored_binary["content"],
+        storage_backend=stored_binary["storage_backend"],
+        storage_key=stored_binary["storage_key"],
+        size_bytes=stored_binary["size_bytes"],
+        sha256=stored_binary["sha256"],
     ))
-    persisted_evidence_id = str(evidence.id)
-    # Commit the immutable original before queueing work. If the worker queue
-    # cannot be written, the caregiver still keeps the uploaded bytes and can
-    # retry processing later; a queue failure must never roll back the source.
-    db.commit()
+    # Commit the immutable original and its storage pointer together. If the
+    # PostgreSQL transaction fails after an S3 write, compensate by deleting
+    # the unreferenced object; never report a partially saved document.
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        if stored_binary["storage_backend"] == "s3":
+            try:
+                delete_document_object("s3", stored_binary["storage_key"])
+            except Exception:
+                logger.exception("Unreferenced document object cleanup failed for evidence %s", persisted_evidence_id)
+        raise
     document_job_id = None
     document_job_status = "not_applicable"
     if evidence_type == "document":
@@ -1536,9 +1567,10 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
         upload = db.query(EvidenceUpload).filter_by(evidence_id=source.id).first()
         if upload is None:
             raise HTTPException(status_code=409, detail="A document original is unavailable; version comparison was blocked")
-        raw_bytes = bytes(upload.content)
-        if len(raw_bytes) != upload.size_bytes or hashlib.sha256(raw_bytes).hexdigest() != upload.sha256:
-            raise HTTPException(status_code=409, detail="A document original failed its integrity check; version comparison was blocked")
+        try:
+            read_document_binary(upload)
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail="A document original failed its integrity check; version comparison was blocked") from exc
 
     def latest_candidates(source_id: str):
         upload = db.query(EvidenceUpload).filter_by(evidence_id=source_id).first()
@@ -1919,9 +1951,10 @@ def download_evidence(evidence_id: str, request: Request, db: Session = Depends(
     blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
     if not blob:
         raise HTTPException(status_code=404, detail="Original upload is unavailable")
-    content = bytes(blob.content)
-    if len(content) != blob.size_bytes or not hashlib.sha256(content).hexdigest() == blob.sha256:
-        raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
+    try:
+        content = read_document_binary(blob)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check") from exc
     safe_filename = blob.filename.replace("\r", "").replace("\n", "").replace('"', "")
     return Response(
         content=content,
