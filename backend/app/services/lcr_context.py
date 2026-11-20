@@ -612,6 +612,7 @@ def build_lcr_context(
     temporal_window: dict[str, str] | None = None,
     include_all_history: bool = False,
     source_offsets: dict[str, int] | None = None,
+    only_sources: set[str] | None = None,
 ) -> dict[str, Any]:
     """Return a person-scoped LCR projection with explicit retrieval coverage.
 
@@ -638,6 +639,8 @@ def build_lcr_context(
 
     source_offsets = source_offsets or {}
     for source_name, spec in SOURCE_SPECS.items():
+        if only_sources is not None and source_name not in only_sources:
+            continue
         source_offset = max(0, int(source_offsets.get(source_name, 0) or 0))
         table_name = spec["table"]
         if table_name not in available_tables:
@@ -992,6 +995,7 @@ def build_lcr_context(
         "person_id": str(person_id),
         "as_of": datetime.now().astimezone().isoformat(),
         "read_only": True,
+        "requested_sources": sorted(only_sources) if only_sources is not None else sorted(SOURCE_SPECS),
         "history_coverage": (
             "partial_source_history" if failed_sources
             else "paginated_history_page" if any(source.get("offset", 0) > 0 for source in sources.values())
