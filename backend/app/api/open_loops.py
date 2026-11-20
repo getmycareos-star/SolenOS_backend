@@ -524,9 +524,12 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
             )
         )
     total = query.count()
+    # A unique final ordering key makes offset pagination deterministic when
+    # multiple follow-ups share the same deadline and update timestamp.
     rows = query.order_by(
         OpenLoopRecord.deadline_at.asc().nullslast(),
         OpenLoopRecord.updated_at.desc(),
+        OpenLoopRecord.id.asc(),
     ).offset(offset).limit(limit).all()
     items = []
     for loop in rows:
