@@ -1431,3 +1431,87 @@ def test_document_only_access_scope_cannot_read_or_write_non_document_care_data(
     request.state.caregiver_access_scope = "full_record"
     _require_full_record_access(request)
 
+def test_direct_care_event_write_is_idempotent_and_rejects_changed_replay():
+    from app.models.care import CareEvent
+
+    client = TestClient(app)
+    created = create_session(client, "Idempotent event recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    payload = {
+        "person_id": created["person"]["id"],
+        "event_type": "care_observation",
+        "occurred_at": "2026-11-20T10:15:00Z",
+        "title": "Morning observation",
+        "description": "Caregiver reported a quieter morning.",
+        "evidence_ids": [],
+        "created_by_caregiver_id": created["caregiver"]["id"],
+        "ingestion_key": "event-retry-20261120-001",
+    }
+
+    first = client.post("/api/v1/events", headers=headers, json=payload)
+    replay = client.post("/api/v1/events", headers=headers, json=payload)
+    assert first.status_code == 200, first.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["id"] == first.json()["id"]
+
+    changed = {**payload, "description": "A different report using the same retry key."}
+    conflict = client.post("/api/v1/events", headers=headers, json=changed)
+    assert conflict.status_code == 409, conflict.text
+
+    db = TestSessionLocal()
+    try:
+        rows = db.query(CareEvent).filter_by(
+            person_id=created["person"]["id"],
+            ingestion_key=payload["ingestion_key"],
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].description == payload["description"]
+        assert rows[0].ingestion_request_sha256
+    finally:
+        db.close()
+
+
+def test_direct_care_event_rejects_evidence_references_outside_its_person_scope():
+    client = TestClient(app)
+    owner = create_session(client, "Event evidence owner")
+    other = create_session(client, "Foreign evidence owner")
+    from app.models.care import Evidence
+
+    db = TestSessionLocal()
+    try:
+        foreign = Evidence(
+            person_id=other["person"]["id"],
+            type="note",
+            source_text="Private evidence belonging to another person.",
+            uploaded_by_caregiver_id=other["caregiver"]["id"],
+        )
+        db.add(foreign)
+        db.commit()
+        foreign_id = foreign.id
+    finally:
+        db.close()
+
+    response = client.post(
+        "/api/v1/events",
+        headers={"Authorization": f"Bearer {owner['access_token']}"},
+        json={
+            "person_id": owner["person"]["id"],
+            "event_type": "care_observation",
+            "occurred_at": "2026-11-20T10:15:00Z",
+            "title": "Invalid linked observation",
+            "description": "This must not reference another person's evidence.",
+            "evidence_ids": [foreign_id],
+            "created_by_caregiver_id": owner["caregiver"]["id"],
+            "ingestion_key": "event-foreign-evidence-001",
+        },
+    )
+    assert response.status_code == 422, response.text
+
+    from app.models.care import CareEvent
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareEvent).filter_by(person_id=owner["person"]["id"]).count() == 0
+    finally:
+        db.close()
+
+
