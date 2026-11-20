@@ -11,6 +11,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 
@@ -271,6 +272,82 @@ def test_appointment_workspace_persists_versions_and_revision_history(client):
     assert items[0]["payload"]["clinician_findings"] == ""
     assert items[1]["payload"]["clinician_findings"].startswith("Clinician statement")
 
+
+
+
+def test_appointment_workspace_writes_require_add_evidence_permission(client):
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr"]
+        db.commit()
+    finally:
+        db.close()
+
+    denied_create = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={"payload": {"visit_purpose": "Unauthorized write"}},
+    )
+    assert denied_create.status_code == 403, denied_create.text
+    assert "add evidence" in denied_create.text.lower()
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(main_module.AppointmentWorkspaceRecord).filter_by(
+            person_id=session["person"]["id"]
+        ).count() == 0
+    finally:
+        db.close()
+
+
+def test_appointment_workspace_update_requires_add_evidence_permission(client):
+    test_client, session, _ = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    created = test_client.post(
+        "/api/v1/appointment-workspaces",
+        headers=headers,
+        json={"payload": {"visit_purpose": "Authorized initial note"}},
+    )
+    assert created.status_code == 201, created.text
+
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = ["view_lcr"]
+        db.commit()
+    finally:
+        db.close()
+
+    denied_update = test_client.patch(
+        f"/api/v1/appointment-workspaces/{created.json()['id']}",
+        headers=headers,
+        json={
+            "expected_version": 1,
+            "payload": {"visit_purpose": "Unauthorized overwrite"},
+            "change_reason": "Permission regression test",
+        },
+    )
+    assert denied_update.status_code == 403, denied_update.text
+    assert "add evidence" in denied_update.text.lower()
+
+    unchanged = test_client.get(
+        f"/api/v1/appointment-workspaces/{created.json()['id']}",
+        headers=headers,
+    )
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json()["version_number"] == 1
+    assert unchanged.json()["payload"]["visit_purpose"] == "Authorized initial note"
 
 
 def test_appointment_workspace_rejects_invalid_lifecycle_transition(client):
