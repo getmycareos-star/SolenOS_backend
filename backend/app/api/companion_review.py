@@ -421,6 +421,7 @@ def review_companion_care_update(
             active_assertion = assertion is not None and assertion.assertion_status not in {"rejected", "superseded"}
             return {
                 "proposal": _proposal_json(proposal),
+                "status": proposal.status,
                 "decision": decision,
                 "assertion_id": assertion.id if active_assertion else None,
                 "written_to_lcr": active_assertion,
