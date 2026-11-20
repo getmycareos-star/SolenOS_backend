@@ -15,6 +15,7 @@ from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import Caregiver
 from app.models.collaboration import ConsentRecord
 from app.models.notifications import CareNotification
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.privacy_delivery import (
     AuditLogEvent,
     HandoffAccessLog,
@@ -270,6 +271,7 @@ def _view(db: Session, handoff: HandoffRecord) -> dict:
 @router.post("", status_code=201)
 def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "manage_handoffs")
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     if not _has_required_consent(db, person_id, caregiver_id):
@@ -840,6 +842,7 @@ def attach_handoff_summary(
     request: Request, db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "share_summaries")
     handoff = db.query(HandoffRecord).filter(
         HandoffRecord.id == handoff_id, HandoffRecord.person_id == person_id
     ).first()
