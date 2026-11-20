@@ -3018,7 +3018,8 @@ def main():
             and restarted_significance_item.get("evidence_confidence") == 0.55
             and restarted_significance_item.get("action_status") == "closed"
             and restarted_significance_item.get("linked_follow_up_outcome_status") == "outcome_unknown"
-            and restarted_significance_item.get("linked_follow_up_id") == linked_follow_up_id,
+            and restarted_significance_item.get("linked_follow_up_id") == linked_follow_up_id
+            and "follow-up was closed, but its outcome was not recorded" in restarted_significance_item.get("reason", ""),
             f"PostgreSQL significance, follow-up state, or freshness did not survive Uvicorn restart: {restarted_situation_status}: {restarted_significance_item}",
         )
 
