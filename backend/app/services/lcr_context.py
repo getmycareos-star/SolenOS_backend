@@ -199,6 +199,19 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "occurred_at", "evidence_ids", "epistemic_status", "is_projection", "created_at"],
         "order": ["occurred_at", "created_at"],
     },
+    "contradictions": {
+        "table": "contradictions",
+        "required": False,
+        "fields": [
+            "id", "person_id", "subject_type", "subject_id", "field", "description",
+            "event_id", "context_key", "effective_from", "effective_to",
+            "matching_candidate_ids", "evidence_ids", "source_assertion_ids",
+            "resolution_status", "resolution_notes", "resolution_scope",
+            "unresolved_remainder", "resolved_at", "resolved_by_caregiver_id",
+            "created_at", "updated_at",
+        ],
+        "order": ["updated_at", "created_at"],
+    },
     "uncertainties": {
         "table": "care_uncertainties",
         "required": False,
