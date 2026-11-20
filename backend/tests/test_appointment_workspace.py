@@ -2750,6 +2750,11 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
     )
     assert shared_occurrences.status_code == 200, shared_occurrences.text
     assert len(shared_occurrences.json()) >= 1
+    shared_loop_detail = test_client.get(
+        f"/api/v1/open-loops/{shared_loop['id']}",
+        headers=shared_headers,
+    )
+    assert shared_loop_detail.status_code == 200, shared_loop_detail.text
     shared_history = test_client.get(
         f"/api/v1/open-loops/{shared_loop['id']}/history",
         headers=shared_headers,
@@ -2773,8 +2778,20 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
         db.close()
 
     # A caregiver with no grant for this person cannot read the appointment.
+    other_headers = {"Authorization": f"Bearer {other_person['access_token']}"}
     denied = test_client.get(
         f"/api/v1/appointment-workspaces/{workspace_id}",
-        headers={"Authorization": f"Bearer {other_person['access_token']}"},
+        headers=other_headers,
     )
     assert denied.status_code == 404
+    other_loops = test_client.get("/api/v1/open-loops", headers=other_headers)
+    assert other_loops.status_code == 200, other_loops.text
+    assert all(
+        item.get("source_id", "").split(":", 1)[0] != workspace_id
+        for item in other_loops.json()["items"]
+    )
+    denied_loop = test_client.get(
+        f"/api/v1/open-loops/{shared_loop['id']}",
+        headers=other_headers,
+    )
+    assert denied_loop.status_code == 404
