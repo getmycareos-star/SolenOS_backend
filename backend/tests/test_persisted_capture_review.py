@@ -280,6 +280,18 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert result["written_to_lcr"] is False
     assert "remains pending explicit approval" in result["message"]
 
+    persisted_correction = client.get(
+        f"/api/v1/capture/analyses/{body['qwen_analysis_id']}",
+        headers=auth,
+    )
+    assert persisted_correction.status_code == 200, persisted_correction.text
+    persisted_candidate = persisted_correction.json()["candidates"]["observations"][0]
+    assert persisted_candidate["observation"] == "Mum slept badly last night."
+    assert persisted_candidate["corrected_observation"] == "Mum slept poorly last night."
+    assert persisted_candidate["review_status"] == "corrected_pending_approval"
+    assert persisted_correction.json()["review_required"] is True
+    assert persisted_correction.json()["written_to_lcr"] is False
+
     db = TestSessionLocal()
     try:
         assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
