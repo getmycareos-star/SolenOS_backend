@@ -1412,3 +1412,17 @@ def test_location_write_uses_the_authenticated_caregiver_as_author():
     finally:
         db.close()
 
+def test_document_only_access_scope_cannot_read_or_write_non_document_care_data():
+    from starlette.requests import Request
+    from fastapi import HTTPException
+    from app.api.v1 import _require_full_record_access
+
+    request = Request({"type": "http", "headers": [], "method": "GET", "path": "/api/v1/appointments"})
+    request.state.caregiver_access_scope = "documents_only"
+    with pytest.raises(HTTPException) as denied:
+        _require_full_record_access(request)
+    assert denied.value.status_code == 403
+
+    request.state.caregiver_access_scope = "full_record"
+    _require_full_record_access(request)
+
