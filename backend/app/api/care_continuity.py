@@ -3349,11 +3349,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "significance_verdict": getattr(getattr(significance_by_change_id.get(str(change.id)), "verdict", None), "value", getattr(significance_by_change_id.get(str(change.id)), "verdict", None)) if significance_by_change_id.get(str(change.id)) else getattr(change.significance_verdict, "value", change.significance_verdict),
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
                 "significance_assessment_status": significance_status_by_change_id.get(str(change.id), "not_recorded"),
-                "evidence_status": (
-                    getattr(getattr(significance_by_change_id.get(str(change.id)), "evidence_status", None), "value",
-                            getattr(significance_by_change_id.get(str(change.id)), "evidence_status", None))
-                    if significance_by_change_id.get(str(change.id)) else "unknown"
-                ),
+                "evidence_status": getattr(getattr(significance_by_change_id.get(str(change.id)), "evidence_status", None), "value", getattr(significance_by_change_id.get(str(change.id)), "evidence_status", None)) if significance_by_change_id.get(str(change.id)) else "unknown",
                 "evidence_confidence": getattr(significance_by_change_id.get(str(change.id)), "evidence_confidence", None),
                 "significance_confidence": getattr(significance_by_change_id.get(str(change.id)), "significance_confidence", None),
                 "assessment_dimensions": list(getattr(significance_by_change_id.get(str(change.id)), "dimensions", None) or []),
