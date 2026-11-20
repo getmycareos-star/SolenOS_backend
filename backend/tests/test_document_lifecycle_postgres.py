@@ -1028,6 +1028,11 @@ def test_postgres_document_upload_compensates_external_binary_after_implicit_flu
                 person_id=person_id,
             ))
             db.commit()
+            # Create the access grant before patching Session.flush. The test
+            # must fail the second flush inside upload_evidence(), not the
+            # fixture's unrelated caregiver-access setup flush.
+            _ensure_test_caregiver_access(db, person_id, caregiver_id)
+            db.commit()
 
         monkeypatch.setattr(collaboration_api, "store_document_binary", fake_store_document_binary)
         monkeypatch.setattr(collaboration_api, "delete_document_object", record_delete)
