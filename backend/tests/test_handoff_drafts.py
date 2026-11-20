@@ -2222,3 +2222,44 @@ def test_tampered_lcr_snapshot_is_unknown_and_cannot_be_approved(client):
         },
     )
     assert approval.status_code == 409, approval.text
+
+
+def test_handoff_draft_reads_require_explicit_operation_permissions(client):
+    test_client, session = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.access_scope = "full_record"
+        grant.permissions = ["view_lcr"]
+        db.commit()
+    finally:
+        db.close()
+
+    # LCR visibility alone must not expose handoff appointments or drafts.
+    assert test_client.get("/api/v1/handoff-drafts/appointments", headers=headers).status_code == 403
+    assert test_client.get("/api/v1/handoff-drafts", headers=headers).status_code == 403
+
+
+def test_handoff_draft_snapshot_reads_require_document_permission(client):
+    test_client, session = client
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=session["person"]["id"],
+            caregiver_id=session["caregiver"]["id"],
+        ).one()
+        grant.can_manage_members = False
+        grant.access_scope = "full_record"
+        grant.permissions = ["view_lcr", "manage_handoffs"]
+        db.commit()
+    finally:
+        db.close()
+
+    # Drafts contain document-derived snapshots; manage_handoffs is insufficient.
+    assert test_client.get("/api/v1/handoff-drafts", headers=headers).status_code == 403
