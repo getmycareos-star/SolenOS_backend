@@ -12,7 +12,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
-from app.models.care_continuity import CareAssertion, CareStateRevision
+from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
@@ -86,7 +86,7 @@ def _sqlite_retrieval_db():
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
     metadata.create_all(connection, tables=[
         Person.__table__, Caregiver.__table__, CareEvent.__table__,
-        CareAssertion.__table__, CareStateRevision.__table__, CaptureAnalysis.__table__,
+        CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, CaptureAnalysis.__table__,
         ConversationSession.__table__, ConversationMessage.__table__,
         QwenBackgroundJob.__table__, QwenModelOutput.__table__,
         AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
@@ -722,6 +722,13 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
                 "status": "recorded", "occurred_at": now - timedelta(days=1), "title": "Sleep disruption",
                 "description": "Repeated waking overnight", "evidence_ids": [], "created_by_caregiver_id": "caregiver-local",
             })
+            connection.execute(CareActionOutcome.__table__.insert(), {
+                "id": "action-outcome-local", "person_id": "person-local",
+                "action_id": "follow-up-action-local", "action_type": "care_follow_up",
+                "outcome_status": "completed", "notes": "Caregiver confirmed the follow-up was completed.",
+                "correction_text": None, "evidence_ids": [],
+                "created_by_caregiver_id": "caregiver-local", "created_at": now,
+            })
             connection.execute(CareAssertion.__table__.insert(), [
                 {
                     "id": "accepted-local", "person_id": "person-local", "subject_type": "person", "subject_id": "person-local",
@@ -762,6 +769,9 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
             yesterday = build_unified_lcr_context(db, "person-local", "caregiver-local", query="sleep yesterday")
         sources = context["sources"]
         assert "daily-event-local" in {row["id"] for row in sources["events"]["items"]}
+        assert {row["id"] for row in sources["action_outcomes"]["items"]} == {"action-outcome-local"}
+        assert sources["action_outcomes"]["items"][0]["outcome_status"] == "completed"
+        assert "Caregiver confirmed the follow-up was completed." in str(sources["action_outcomes"]["items"][0])
         assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-local"}
         assert {row["id"] for row in sources["assertions"]["items"]} == {
             "accepted-local", "caregiver-reviewed-local"
