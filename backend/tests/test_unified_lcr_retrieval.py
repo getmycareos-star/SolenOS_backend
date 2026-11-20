@@ -164,7 +164,6 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
                     "source_span": "Private information for another person.", "created_at": now,
                 },
             ])
-            db.execute(metadata.tables["care_fact_evidence"].insert(), {
             db.commit()
             from app.services.lcr_context import _load_source_schema
             _load_source_schema.cache_clear()
