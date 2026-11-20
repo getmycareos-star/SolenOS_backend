@@ -190,6 +190,8 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
                 db, "fact-lineage-person", ["fact-with-source"],
             )
         fact = next(item for item in context["sources"]["facts"]["items"] if item["id"] == "fact-with-source")
+        prompt_context = format_lcr_context_for_prompt(context)
+        assert "fact-source-evidence" in prompt_context
         assert fact["evidence_ids"] == ["fact-source-evidence"]
         assert fact["evidence_link_status"] == "verified_person_scoped_links"
         assert fact["evidence_links"] == [{
