@@ -2189,24 +2189,26 @@ def readiness_check(db: Session = Depends(get_db)):
         logger.error("Readiness failed: missing ORM tables: %s", sorted(missing_tables))
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
-    # Keep the strict ORM comparison as an observable schema-drift audit, but
-    # do not make the traffic-readiness probe fail on legacy physical differences
-    # such as TEXT/VARCHAR sizing, JSON decorator reflection, or non-critical
-    # secondary indexes. Missing tables, unapplied Alembic revisions, required
-    # migration tables, and append-only integrity triggers remain hard failures.
+    # A service with schema drift is not safe to receive care writes. All
+    # supported legacy layouts must be reconciled by Alembic before this image
+    # is deployed; never downgrade a schema mismatch to a warning.
     try:
         differences = database_schema_differences(db.get_bind())
     except Exception as exc:
         logger.error("Readiness failed: ORM schema verification exception type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
     if differences:
-        logger.warning(
-            "Readiness passed migration/table gates with ORM schema drift count=%s details=%s",
+        logger.error(
+            "Readiness failed: ORM schema drift count=%s details=%s",
             len(differences),
             differences,
         )
+        raise HTTPException(
+            status_code=503,
+            detail="Database schema does not match the application contract",
+        )
 
-    schema_state = "verified" if not differences else "migration_verified_with_orm_drift"
+    schema_state = "verified"
     migration_state = "not_checked"
     migration_head = None
     continuity_schema = "orm_verified"
