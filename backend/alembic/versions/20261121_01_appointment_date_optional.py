@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261121_01_appointment_date_optional"
+revision = "20261121_01_appt_date_optional"
 down_revision = "20261120_10_caregiver_context_model_alignment"
 branch_labels = None
 depends_on = None
