@@ -438,3 +438,13 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert revoked.status_code == 200, revoked.text
     blocked = client.get(f"/api/v1/handoffs/{handoff_id}/summary", headers=recipient_headers)
     assert blocked.status_code == 404
+
+    # Revoking caregiver membership invalidates the already-issued bearer
+    # session as well as the previously shared handoff link.
+    member_revoked = client.delete(
+        f"/api/v1/caregiver-access/members/{recipient_id}",
+        headers=owner_headers,
+    )
+    assert member_revoked.status_code == 200, member_revoked.text
+    stale_inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
+    assert stale_inbox.status_code == 401, stale_inbox.text
