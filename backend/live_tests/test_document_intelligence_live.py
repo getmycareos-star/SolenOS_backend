@@ -94,6 +94,14 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         candidates = data["observations"]
         assert any("walked 20 metres" in candidate["source_quote"] for candidate in candidates), candidates
         assert any("ate half of lunch" in candidate["source_quote"] for candidate in candidates), candidates
+        mobility_index = next(
+            index for index, candidate in enumerate(candidates)
+            if "walked 20 metres" in candidate["source_quote"]
+        )
+        reject_index = next(
+            index for index, candidate in enumerate(candidates)
+            if "ate half of lunch" in candidate["source_quote"]
+        )
 
         assert all(candidate["review_status"] == "pending_review" for candidate in candidates)
         assert all(candidate["source_quote"] in source for candidate in candidates)
@@ -135,7 +143,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         rejected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=headers,
-            json={"candidate_index": 1, "decision": "reject"},
+            json={"candidate_index": reject_index, "decision": "reject"},
         )
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["written_to_lcr"] is False
@@ -149,7 +157,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=headers,
-            json={"candidate_index": 0, "decision": "accept"},
+            json={"candidate_index": mobility_index, "decision": "accept"},
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
@@ -159,8 +167,8 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             assert assertion.assertion_status == "accepted"
             assertion_id = str(assertion.id)
             assert assertion.evidence_ids == [evidence_id]
-            assert candidates[0]["source_quote"] in assertion.source_text
-            assert f"page {candidates[0]['page_number']}" in assertion.source_label
+            assert candidates[mobility_index]["source_quote"] in assertion.source_text
+            assert f"page {candidates[mobility_index]['page_number']}" in assertion.source_label
         finally:
             db.close()
 
@@ -248,7 +256,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         )
         assert duplicate_understanding.status_code == 201, duplicate_understanding.text
         duplicate_candidates = duplicate_understanding.json()["observations"]
-        original_mobility_candidate = candidates[0]
+        original_mobility_candidate = candidates[mobility_index]
         duplicate_mobility_index = next(
             index for index, candidate in enumerate(duplicate_candidates)
             if candidate.get("source_quote") == original_mobility_candidate.get("source_quote")
