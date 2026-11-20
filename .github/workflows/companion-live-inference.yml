@@ -98,6 +98,10 @@ jobs:
         run: python -m alembic upgrade head
       - name: Run document semantic and lifecycle regression tests
         run: python -m pytest backend/tests/test_document_candidate_schema.py backend/tests/test_document_candidate_adversarial.py backend/tests/test_document_intelligence_lifecycle.py -q
+      - name: Run PostgreSQL document persistence, review, duplicate and restart integration tests
+        env:
+          SOLENOS_TEST_POSTGRES_RESTART: "1"
+        run: python -m pytest backend/tests/test_document_intelligence_postgres.py -q -s
       - name: Run bounded Qwen startup retry regression tests
         run: python -m pytest backend/tests/test_qwen_retry_budget.py -q
       - name: Start isolated Ollama runtime
