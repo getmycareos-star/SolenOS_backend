@@ -70,6 +70,15 @@ jobs:
         run: docker run --rm -v "$GITHUB_WORKSPACE:/workspace" -w /workspace/backend solenos-backend-ci-tests python -m compileall -q app
       - name: Smoke-test ASGI startup, health and backend tests
         run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace/backend solenos-backend-ci-tests bash /workspace/ci/run-backend-validation.sh
+      - name: Export complete runtime-registered endpoint inventory
+        run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace/backend solenos-backend-ci-tests python scripts/export_registered_endpoints.py --output /workspace/backend-endpoint-inventory.json
+      - name: Publish endpoint inventory artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-endpoint-inventory
+          path: backend-endpoint-inventory.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Export actual registered endpoint inventory
         id: endpoint_inventory
         if: always() && steps.backend_image.outcome == 'success'
