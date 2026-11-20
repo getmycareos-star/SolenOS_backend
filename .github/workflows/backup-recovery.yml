@@ -25,9 +25,10 @@ permissions:
   contents: read
 
 concurrency:
-  # Preserve backup and restore verification evidence for each exact main commit.
-  group: solenos-backup-recovery-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: false
+  # Keep only the newest main-branch validation queued; obsolete revisions
+  # must not starve verification of the current source.
+  group: backup-recovery-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   restore-and-verify:
