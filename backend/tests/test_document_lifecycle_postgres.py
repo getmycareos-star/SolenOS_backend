@@ -164,7 +164,7 @@ import uuid
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
@@ -956,5 +956,83 @@ def test_postgres_transient_page_failure_is_counted_and_eventually_stops_retryin
             assert calls["count"] == 7
             stored_upload = db.query(EvidenceUpload).filter_by(evidence_id=uploaded["evidence_id"]).one()
             assert bytes(stored_upload.content) == b"Original document bytes remain unchanged during OCR timeout retries."
+    finally:
+        engine.dispose()
+
+
+
+def test_postgres_document_upload_compensates_external_binary_after_implicit_flush_failure(monkeypatch):
+    """A failed implicit savepoint flush must roll back metadata and delete the S3 object."""
+    from app.api import collaboration as collaboration_api
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-flush-failure-person-{suffix}"
+    caregiver_id = f"doc-flush-failure-caregiver-{suffix}"
+    storage_key = f"ci-document-flush-failure/{suffix}"
+    deleted_objects = []
+    flush_calls = 0
+
+    def fake_store_document_binary(*, person_id, evidence_id, data, mime_type):
+        return {
+            "content": None,
+            "storage_backend": "s3",
+            "storage_key": storage_key,
+            "size_bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+
+    def record_delete(storage_backend, key):
+        deleted_objects.append((storage_backend, key))
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document flush failure fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Document flush failure caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.commit()
+
+        monkeypatch.setattr(collaboration_api, "store_document_binary", fake_store_document_binary)
+        monkeypatch.setattr(collaboration_api, "delete_document_object", record_delete)
+
+        with Session() as db:
+            original_flush = db.flush
+
+            def fail_second_flush(*args, **kwargs):
+                nonlocal flush_calls
+                flush_calls += 1
+                if flush_calls == 2:
+                    # The upload's initial Evidence flush succeeds. This
+                    # PostgreSQL error simulates begin_nested() failing while
+                    # flushing the pending EvidenceUpload metadata.
+                    db.execute(text("SELECT 1 / 0"))
+                return original_flush(*args, **kwargs)
+
+            monkeypatch.setattr(db, "flush", fail_second_flush)
+            with pytest.raises(HTTPException) as failure:
+                _upload_document_for_lifecycle(
+                    db,
+                    person_id,
+                    caregiver_id,
+                    "flush-failure-discharge-note.pdf",
+                    b"%PDF-1.4 synthetic CI bytes for external-object compensation",
+                )
+            assert failure.value.status_code == 503
+            assert flush_calls >= 2
+
+        assert deleted_objects == [("s3", storage_key)]
+
+        with Session() as verify:
+            assert verify.query(Evidence).filter_by(person_id=person_id).count() == 0
+            assert verify.query(EvidenceUpload).join(Evidence).filter(
+                Evidence.person_id == person_id
+            ).count() == 0
+            assert verify.query(QwenBackgroundJob).filter_by(person_id=person_id).count() == 0
     finally:
         engine.dispose()
