@@ -1305,6 +1305,72 @@ def main():
             "preservation, caregiver/person scoping, idempotent retry, History and LCR retrieval."
         )
 
+        # Scenario 02: a short caregiver concern must remain exactly what was
+        # reported. It is not a measurement, diagnosis, confirmed onset, or
+        # automatic emergency classification.
+        weight_report = "she's loosing weight"
+        weight_payload = {
+            "person_id": person_a,
+            "caregiver_id": caregiver_a,
+            "capture_kind": "natural_language_update",
+            "capture_idempotency_key": "postgres-scenario-02-weight-concern",
+            "notes": weight_report,
+        }
+        status, weight_receipt = request(
+            "POST", "/api/v1/daily-care/entries", token=token_a, body=weight_payload,
+        )
+        require(
+            status == 200 and weight_receipt.get("success") is True
+            and weight_receipt.get("id") and len(weight_receipt.get("evidence_ids") or []) == 1,
+            f"Scenario 02 caregiver concern was not durably accepted: {status}: {weight_receipt}",
+        )
+        weight_event_id = weight_receipt["id"]
+        weight_evidence_id = weight_receipt["evidence_ids"][0]
+        with SessionLocal() as db:
+            weight_event = db.query(CareEvent).filter_by(
+                id=weight_event_id, person_id=person_a,
+            ).one()
+            weight_detail = json.loads(weight_event.description or "{}")
+            weight_source = db.execute(
+                text("""
+                    SELECT person_id, reported_by_caregiver_id, source_text
+                    FROM evidence WHERE id = :evidence_id
+                """),
+                {"evidence_id": weight_evidence_id},
+            ).mappings().one()
+            weight_source_payload = json.loads(weight_source["source_text"])
+            require(
+                weight_detail.get("notes") == weight_report
+                and weight_source_payload["original_capture"]["notes"] == weight_report
+                and weight_source["person_id"] == person_a
+                and weight_source["reported_by_caregiver_id"] == caregiver_a,
+                "Scenario 02 changed the caregiver's original words or lost source attribution",
+            )
+            require(
+                not weight_event.attention_candidate
+                and not weight_event.follow_up_candidate
+                and not weight_event.significance_verdict,
+                "Scenario 02 promoted an unassessed caregiver concern into an automatic priority",
+            )
+        status, weight_source_retry = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50&source=events",
+            token=token_a,
+        )
+        require(
+            status == 200
+            and any(
+                row.get("id") == weight_event_id
+                and row.get("description") == weight_report
+                and row.get("epistemic_status") == "caregiver_reported"
+                for row in weight_source_retry.get("items", [])
+            ),
+            f"Scenario 02 concern did not remain a caregiver-reported LCR source: {status}: {weight_source_retry}",
+        )
+        print(
+            "PASS: Daily Care Scenario 02 exact caregiver concern preservation, source attribution, "
+            "no invented measurement or automatic urgency."
+        )
+
         # Exercise the caregiver review lifecycle against this real PostgreSQL
         # Daily Care event. Candidate generation is seeded as a persisted extraction
         # so this test does not depend on an external Qwen model being available.
