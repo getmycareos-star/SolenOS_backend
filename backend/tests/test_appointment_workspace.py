@@ -2815,7 +2815,7 @@ def test_appointment_follow_up_is_shared_across_authorised_caregivers_and_keeps_
         access_scope="full_record",
         status="active",
         can_manage_members=False,
-        permissions=["view_lcr", "add_evidence", "correct_records"],
+        permissions=["view_lcr", "add_evidence"],
         granted_by_caregiver_id=owner["caregiver"]["id"],
     ))
     raw_token = str(uuid.uuid4())
