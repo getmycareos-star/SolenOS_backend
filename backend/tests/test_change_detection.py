@@ -14,6 +14,7 @@ import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.change import Baseline, Change, Pattern, ChangeConfirmationEvent
 from app.models.significance import SignificanceAssessment
@@ -44,6 +45,17 @@ def setup_db():
 
 def issue_scoped_session(db, person, caregiver):
     token = f"change-api-token-{person.id}"
+    db.add(
+        CaregiverAccessGrant(
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            role="primary",
+            access_scope="full_record",
+            status="active",
+            can_manage_members=True,
+            granted_by_caregiver_id=caregiver.id,
+        )
+    )
     db.add(
         AnonymousSession(
             id=f"session-{person.id}",
@@ -1330,7 +1342,7 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
             json={"status": "confirmed", "reason": "Repeated confirmation.", "evidence_ids": [evidence_id]},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert invalid_repeat.status_code == 422
+        assert invalid_repeat.status_code == 409
 
         missing_reason = client.post(
             url,
