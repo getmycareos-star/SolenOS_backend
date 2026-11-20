@@ -427,6 +427,7 @@ def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution
             with Session() as db:
                 db.query(CareDeltaRun).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(AuditLogEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Evidence).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
@@ -577,6 +578,7 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
             with Session() as db:
                 db.query(CaregiverResponsibilityTransfer).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverHandoff).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverResponsibility).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(OpenLoopOccurrence).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(OpenLoopEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
