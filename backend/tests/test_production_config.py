@@ -5,6 +5,7 @@ from app.core.config import Settings
 
 def clear_environment(monkeypatch):
     for name in (
+        "RAILWAY_PROJECT_ID",
         "RAILWAY_ENVIRONMENT_NAME",
         "RAILWAY_ENVIRONMENT",
         "APP_ENV",
@@ -54,6 +55,29 @@ def test_production_rejects_empty_key(monkeypatch):
 def test_production_accepts_postgres_and_long_secret(monkeypatch):
     clear_environment(monkeypatch)
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    settings = Settings(
+        database_url="postgresql://db.example.test/solenos",
+        secret_key="a-unique-random-secret-value-with-more-than-32-characters",
+    )
+
+    settings.validate_production_configuration()
+
+
+def test_railway_project_id_alone_still_requires_a_strong_secret(monkeypatch):
+    clear_environment(monkeypatch)
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "railway-project")
+    settings = Settings(
+        database_url="postgresql://db.example.test/solenos",
+        secret_key="short",
+    )
+
+    with pytest.raises(RuntimeError, match="unique random value"):
+        settings.validate_production_configuration()
+
+
+def test_railway_project_id_alone_accepts_valid_hosted_configuration(monkeypatch):
+    clear_environment(monkeypatch)
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "railway-project")
     settings = Settings(
         database_url="postgresql://db.example.test/solenos",
         secret_key="a-unique-random-secret-value-with-more-than-32-characters",
