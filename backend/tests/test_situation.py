@@ -1913,7 +1913,6 @@ def test_situation_freshness_includes_linked_significance_assessment_updates():
                 explanation="Updated persisted significance assessment.",
                 evidence_ids=[],
                 is_active=True,
-                version=2,
             ))
             db.flush()
             persisted_change = db.query(Change).filter(
