@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.document_binary_storage import read_document_binary
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.capture_analysis import CaptureAnalysis
@@ -842,6 +843,7 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
 def extract_saved_document(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Extract from the persisted original bytes and bind the result to its evidence ID."""
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
@@ -975,6 +977,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
 @router.get("/analyses/{analysis_id}")
 def get_document_extraction(analysis_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _identity(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
