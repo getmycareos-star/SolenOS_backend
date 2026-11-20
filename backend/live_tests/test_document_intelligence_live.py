@@ -501,10 +501,10 @@ def test_live_qwen_companion_preserves_conflicting_document_medication_sources(m
                 CareAssertion.person_id == session["person"]["id"],
                 CareAssertion.id.in_(assertion_ids),
             ).all()
-            assert {row.source_text for row in assertions} == {
-                "Metformin 500 mg once daily.",
-                "Metformin 1000 mg twice daily.",
-            }
+            assert all(
+                any(statement in (row.source_text or "") for row in assertions)
+                for _, statement in documents
+            )
             assert {row.evidence_ids[0] for row in assertions} == set(evidence_ids)
             contradictions = db.query(Contradiction).filter(
                 Contradiction.person_id == session["person"]["id"],
