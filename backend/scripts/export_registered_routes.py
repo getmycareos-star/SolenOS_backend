@@ -387,6 +387,11 @@ def build_inventory() -> dict[str, Any]:
                     if consumer_domain
                     else "REVIEW_REQUIRED"
                 ),
+                "status": (
+                    "registered; consumer and persistence domain mapped; end-to-end verification pending"
+                    if consumer_domain and persistence_domain
+                    else "registered; classification gap requires review"
+                ),
                 "verification": "runtime registration and OpenAPI contract cross-check only; workflow, persistence and authorization tests must be linked separately",
             })
 
