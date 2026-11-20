@@ -699,9 +699,8 @@ def test_appointment_write_rejects_caregiver_from_another_person():
                 "created_by_caregiver_id": "caregiver-other-test",
             },
         )
-        # The request has a valid owner session, but its caller-supplied
-        # caregiver attribution belongs to another care record.
         assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "Caregiver attribution does not match this session"
     finally:
         teardown_db()
 
