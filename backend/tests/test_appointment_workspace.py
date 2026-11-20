@@ -2579,6 +2579,14 @@ def test_appointment_preparation_brief_selects_nearest_upcoming_visit(client):
             Appointment(
                 person_id=owner["person"]["id"],
                 created_by_caregiver_id=owner["caregiver"]["id"],
+                title="Nearest visit already marked upcoming",
+                scheduled_at=now + timedelta(days=1),
+                provider="Specialist",
+                status="upcoming",
+            ),
+            Appointment(
+                person_id=owner["person"]["id"],
+                created_by_caregiver_id=owner["caregiver"]["id"],
                 title="Past visit still marked scheduled",
                 scheduled_at=now - timedelta(days=2),
                 status="scheduled",
@@ -2599,10 +2607,9 @@ def test_appointment_preparation_brief_selects_nearest_upcoming_visit(client):
     response = test_client.get("/api/v1/appointment-workspaces/preparation-brief", headers=headers)
     assert response.status_code == 200, response.text
     next_visit = response.json()["next_appointment"]
-    assert next_visit["title"] == "Next clinic visit"
-    assert next_visit["provider"] == "Family doctor"
-    assert next_visit["location"] == "Clinic"
-    assert next_visit["status"] == "scheduled"
+    assert next_visit["title"] == "Nearest visit already marked upcoming"
+    assert next_visit["provider"] == "Specialist"
+    assert next_visit["status"] == "upcoming"
     assert "Other person's appointment" not in response.text
 
 
