@@ -99,6 +99,23 @@ def execute_care_continuity_reconciliation(
             )
         evidence_rows.append(evidence)
 
+    # When a workflow supplies several persisted sources but no single
+    # authenticated source author (for example a reviewed multi-caregiver
+    # Companion summary), expose attribution only when every supplied source
+    # resolves to the same caregiver. Mixed authors remain explicitly null.
+    resolved_source_caregiver_id = source_caregiver_id
+    if resolved_source_caregiver_id is None:
+        source_authors = {
+            str(value)
+            for value in (
+                [event.created_by_caregiver_id for event in events]
+                + [item.uploaded_by_caregiver_id for item in evidence_rows]
+            )
+            if value
+        }
+        if len(source_authors) == 1:
+            resolved_source_caregiver_id = next(iter(source_authors))
+
     if source_caregiver_id and any(
         str(event.created_by_caregiver_id) != str(source_caregiver_id)
         for event in events
@@ -328,7 +345,7 @@ def execute_care_continuity_reconciliation(
         "contract_version": "1.0",
         "workflow": workflow,
         "person_id": person_id,
-        "source_caregiver_id": source_caregiver_id,
+        "source_caregiver_id": resolved_source_caregiver_id,
         "source_event_id": source_event_id or (event_ids[0] if len(event_ids) == 1 else None),
         "source_event_ids": event_ids,
         "source_evidence_id": source_evidence_id or (evidence_ids[0] if len(evidence_ids) == 1 else None),
