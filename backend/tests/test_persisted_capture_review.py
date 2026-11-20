@@ -227,6 +227,9 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
         }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         assert blood_pressure.value_text == "10"
         assert blood_pressure.units == "mmHg"
+        assert blood_pressure.normalized_value is None
+        assert "not validated as a clinically usable measurement" in blood_pressure.context
+        assert "she's sad" in mood.context
         assert blood_pressure.source_passage == json.dumps({
             "measured_at": "2026-11-11T21:10:00.000Z", "note": "yes",
             "unit": "mmHg", "value": 10, "vital_type": "bp_systolic",
