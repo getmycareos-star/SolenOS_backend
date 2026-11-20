@@ -3223,6 +3223,14 @@ def test_appointment_lifecycle_preserves_reschedule_cancel_and_unknown_date(clie
     assert created.status_code == 200, created.text
     appointment_id = created.json()["id"]
 
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    invalid_reschedule = test_client.patch(
+        f"/api/v1/appointments/{appointment_id}/lifecycle",
+        headers=headers,
+        json={"status": "rescheduled", "scheduled_at": past},
+    )
+    assert invalid_reschedule.status_code == 422, invalid_reschedule.text
+
     future = (datetime.now(timezone.utc) + timedelta(days=21)).isoformat()
     rescheduled = test_client.patch(
         f"/api/v1/appointments/{appointment_id}/lifecycle",
