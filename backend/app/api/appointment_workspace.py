@@ -1162,6 +1162,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     )
     if context_retrieval_failed:
         appointment_context_code = "retrieval_failed"
+    elif next_appointment_row is not None and str(next_appointment_row.status).casefold() == "rescheduled":
+        appointment_context_code = "rescheduled"
     elif next_appointment_row is not None and next_appointment_row.scheduled_at is None:
         appointment_context_code = "date_unknown"
     elif next_appointment_row is not None:
