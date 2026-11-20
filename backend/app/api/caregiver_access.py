@@ -243,6 +243,18 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
         raise HTTPException(status_code=410, detail="This invitation has expired.")
     if not secrets.compare_digest(invitation.email_normalized, email):
         raise HTTPException(status_code=403, detail="This invitation was issued to a different email address.")
+    inviter_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == invitation.person_id,
+        CaregiverAccessGrant.caregiver_id == invitation.invited_by_caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.can_manage_members.is_(True),
+    ).with_for_update().first()
+    if inviter_grant is None:
+        invitation.status = "revoked"
+        invitation.revoked_at = now
+        db.commit()
+        raise HTTPException(status_code=410, detail="This invitation is no longer authorised. Ask an active care-record administrator for a new invitation.")
     if db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first():
         raise HTTPException(status_code=409, detail="An account already uses this email address.")
     if db.query(Caregiver).filter(Caregiver.email == email).first():
