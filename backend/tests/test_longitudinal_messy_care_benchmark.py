@@ -2104,6 +2104,62 @@ def test_situation_assessment_preserves_care_significance_and_exposes_evidence_d
         )
 
 
+
+def test_situation_assessment_does_not_borrow_mismatched_significance_link():
+    from app.api.care_continuity import _build_situation_understanding_assessment
+    from app.models.significance import SignificanceAssessment
+    from app.core.change_enums import EvidenceStatus
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "attention-mismatched-assessment")
+        event = add_event(db, person, caregiver, "sleep", 1, "Caregiver reported repeated waking.")
+        db.add(SignificanceAssessment(
+            id="significance-wrong-target",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            target_type="change",
+            target_id="some-other-change",
+            verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            evidence_status=EvidenceStatus.CONFIRMED,
+            evidence_confidence=0.99,
+            significance_confidence=0.99,
+            dimensions=[{"name": "frequency", "score": 0.99}],
+            attention_candidate=True,
+            follow_up_candidate=True,
+            explanation="This assessment belongs to a different change.",
+            evidence_ids=[],
+            is_active=True,
+        ))
+        db.add(Change(
+            id="change-with-mismatched-assessment",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            evidence_ids=[event.id],
+            explanation="The linked assessment does not match this change.",
+            significance_assessment_id="significance-wrong-target",
+            significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            attention_candidate=True,
+            follow_up_candidate=False,
+            confirmation_status="detected",
+            is_active=True,
+        ))
+        db.flush()
+
+        assessment = _build_situation_understanding_assessment(db, person.id)
+        item = next(
+            item for item in assessment["care_attention"]["important_to_address"]
+            if item["record_id"] == "change-with-mismatched-assessment"
+        )
+        assert item["care_significance"] == "attention_candidate"
+        assert item["evidence_status"] == "unknown"
+        assert item["evidence_confidence"] is None
+        assert item["significance_confidence"] is None
+        assert item["reason"].startswith("The linked assessment does not match this change.")
+
 def test_delta_does_not_persist_if_source_changes_during_model_inference(monkeypatch):
     """A correction during inference invalidates the pending comparison before save."""
     import json
