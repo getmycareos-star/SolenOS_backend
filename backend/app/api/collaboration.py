@@ -2062,7 +2062,8 @@ def community_feed(request: Request, limit: int = Query(50, ge=1, le=100), db: S
 
 @router.post("/community", status_code=201)
 def create_community_post(payload: PostCreate, request: Request, db: Session = Depends(get_db)):
-    _, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "share_observations")
     if payload.caregiver_id and payload.caregiver_id != caregiver_id:
         raise HTTPException(status_code=403, detail="Post attribution does not match this caregiver session")
     if not db.query(Caregiver.id).filter(Caregiver.id == caregiver_id).first():
@@ -2085,7 +2086,8 @@ def create_community_post(payload: PostCreate, request: Request, db: Session = D
 
 @router.post("/community/{post_id}/reactions")
 def react_to_post(post_id: str, payload: ReactionCreate, request: Request, db: Session = Depends(get_db)):
-    _, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "share_observations")
     post = db.query(CommunityPost).filter_by(id=post_id, visibility="public", moderation_status="published").first()
     if not post:
         raise HTTPException(status_code=404, detail="Published community post not found")
@@ -2102,7 +2104,8 @@ def react_to_post(post_id: str, payload: ReactionCreate, request: Request, db: S
 
 @router.delete("/community/{post_id}/reactions")
 def remove_reaction(post_id: str, request: Request, db: Session = Depends(get_db)):
-    _, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "share_observations")
     reaction = db.query(CommunityReaction).filter_by(post_id=post_id, caregiver_id=caregiver_id).first()
     if reaction:
         db.delete(reaction)
@@ -4259,6 +4262,7 @@ async def create_qwen_lcr_proposal(
 ):
     """Create a caregiver-reviewable LCR proposal from one completed, source-backed Qwen output."""
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
     job = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.id == job_id,
         QwenBackgroundJob.person_id == person_id,
