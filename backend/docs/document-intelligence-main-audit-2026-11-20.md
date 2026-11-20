@@ -120,3 +120,6 @@ Different documents with different binary hashes are not collapsed by this dupli
 ### Execution status
 
 These changes and test definitions are committed on `main`. The CI workflow is configured to execute the PostgreSQL and real-Qwen suites on relevant main pushes. A successful workflow run, test counts, per-case live-Qwen metrics and production deployment revision have not yet been independently confirmed; no passing result is inferred from the commits or Railway deployment status contexts.
+
+- `72dad4c067e2dde7b6d0117b3b85c6644506847a` — two separate discharge documents with conflicting Donepezil strengths are both retained as source-linked assertions.
+- `411f1b9dff7f674efd42f495e55c0d38a114b20a` — verifies both conflicting document assertions and their unresolved contradiction remain retrievable from the canonical LCR projection.
