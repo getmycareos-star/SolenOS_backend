@@ -691,9 +691,13 @@ def review_daily_care_lcr_proposal(
         event_ids = [value for value in source_ids if db.query(CareEvent.id).filter(
             CareEvent.id == value, CareEvent.person_id == person_id
         ).first()]
-        evidence_ids = [value for value in source_ids if db.query(EvidenceModel.id).filter(
-            EvidenceModel.id == value, EvidenceModel.person_id == person_id
-        ).first()]
+        evidence_rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(source_ids),
+        ).all() if source_ids else []
+        evidence_ids = [str(row.id) for row in evidence_rows]
+        if any(row.type == "document" for row in evidence_rows):
+            require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
         if not event_ids and not evidence_ids:
             raise HTTPException(status_code=409, detail="The proposal has no source evidence in this care record")
         assertion = create_assertion(
