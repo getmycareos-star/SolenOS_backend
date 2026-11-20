@@ -512,6 +512,15 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             Appointment.status.in_(["date_unknown", "scheduled", "upcoming", "rescheduled"]),
             Appointment.scheduled_at.is_(None),
         ).order_by(Appointment.updated_at.desc(), Appointment.created_at.desc()).first()
+    if next_appointment_row is None:
+        # A past date is not proof that the visit happened. Surface it for
+        # caregiver confirmation instead of silently treating it as completed.
+        next_appointment_row = db.query(Appointment).filter(
+            Appointment.person_id == person_id,
+            Appointment.status == "overdue",
+            Appointment.scheduled_at.is_not(None),
+            Appointment.scheduled_at <= now,
+        ).order_by(Appointment.scheduled_at.desc()).first()
     next_appointment = ({
         "source_table": "appointments",
         "source_id": str(next_appointment_row.id),
@@ -1172,6 +1181,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     )
     if context_retrieval_failed:
         appointment_context_code = "retrieval_failed"
+    elif next_appointment_row is not None and str(next_appointment_row.status).casefold() == "overdue":
+        appointment_context_code = "overdue"
     elif next_appointment_row is not None and str(next_appointment_row.status).casefold() == "rescheduled":
         appointment_context_code = "rescheduled"
     elif next_appointment_row is not None and next_appointment_row.scheduled_at is None:
