@@ -1127,12 +1127,29 @@ def test_decision_and_outcome_history_support_stable_offset_pagination():
         "/api/v1/care-continuity/decisions?limit=2&offset=0",
         headers=headers,
     )
-    decision_second = client.get(
-        "/api/v1/care-continuity/decisions?limit=2&offset=2",
-        headers=headers,
-    )
     outcome_first = client.get(
         f"/api/v1/care-continuity/outcomes/{first['person']['id']}?limit=2&offset=0",
+        headers=headers,
+    )
+    # Updates to existing rows must not move them across immutable creation
+    # order while the next history page is being requested.
+    db = TestingSessionLocal()
+    try:
+        db.execute(
+            Base.metadata.tables["care_decisions"].update()
+            .where(Base.metadata.tables["care_decisions"].c.id == decision_ids[0])
+            .values(decision_text="Updated after the first history page"),
+        )
+        db.execute(
+            Base.metadata.tables["care_action_outcomes"].update()
+            .where(Base.metadata.tables["care_action_outcomes"].c.id == outcome_ids[0])
+            .values(notes="Updated after the first outcome page"),
+        )
+        db.commit()
+    finally:
+        db.close()
+    decision_second = client.get(
+        "/api/v1/care-continuity/decisions?limit=2&offset=2",
         headers=headers,
     )
     outcome_second = client.get(
