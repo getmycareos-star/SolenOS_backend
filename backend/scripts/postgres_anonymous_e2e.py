@@ -1608,7 +1608,6 @@ def main():
                 explanation="PostgreSQL E2E updated significance assessment.",
                 evidence_ids=[daily_event_id],
                 is_active=True,
-                version=2,
             ))
             db.flush()
             persisted_change = db.query(Change).filter(
