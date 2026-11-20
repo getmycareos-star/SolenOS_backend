@@ -25,13 +25,19 @@ def build_service_consumer_inventory() -> dict:
     consumers: dict[tuple[str, str], dict[str, list[dict]]] = defaultdict(
         lambda: {"imports": [], "calls": []}
     )
-    for file_path in sorted(APP_ROOT.rglob("*.py")):
+    skipped_files = []
+    source_files = sorted(APP_ROOT.rglob("*.py"))
+    for file_path in source_files:
         if any(part in {"tests", "__pycache__"} for part in file_path.parts):
             continue
         try:
             source = file_path.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(file_path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
+        except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+            skipped_files.append({
+                "path": str(file_path.relative_to(APP_ROOT.parent)).replace("\\\\", "/"),
+                "reason": f"{type(exc).__name__}: {exc}",
+            })
             continue
 
         aliases: dict[str, tuple[str, str]] = {}
@@ -109,6 +115,9 @@ def build_service_consumer_inventory() -> dict:
     return {
         "format_version": 1,
         "source": "AST scan of backend/app imports and call expressions",
+        "source_file_count": len(source_files),
+        "skipped_file_count": len(skipped_files),
+        "skipped_files": skipped_files,
         "service_reference_count": len(entries),
         "service_references": entries,
     }
