@@ -45,7 +45,7 @@ class CaregiverProfile(Base):
     primary_designation_source = Column(String, nullable=True)
     identity_match_confidence = Column(Enum(IdentityMatchConfidence), nullable=False, default=IdentityMatchConfidence.UNKNOWN)
     identity_notes = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
@@ -57,9 +57,7 @@ class CaregiverRole(Base):
     role_type = Column(Enum(CaregiverRoleType), nullable=False)
     custom_role_name = Column(String, nullable=True)
     scope = Column(Text, nullable=True)
-    # Legacy caregiver-context rows may predate effective dating. New writes
-    # supply an explicit timestamp; null remains valid for preserved history.
-    effective_start = Column(DateTime(timezone=True), nullable=True)
+    effective_start = Column(DateTime(timezone=True), nullable=False)
     effective_end = Column(DateTime(timezone=True), nullable=True)
     is_current = Column(Boolean, nullable=False, default=True)
     assignment_source = Column(String, nullable=True)
@@ -256,9 +254,9 @@ class CaregiverContext(Base):
     observation_window_end = Column(String, nullable=True)
     availability_notes = Column(Text, nullable=True)
     context_metadata = Column(JSONList, nullable=True)
-    effective_start = Column(DateTime(timezone=True), nullable=False)
+    effective_start = Column(DateTime(timezone=True), nullable=True)
     effective_end = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class CareNetworkState(Base):
