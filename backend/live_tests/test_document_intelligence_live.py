@@ -208,6 +208,23 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert tentative_review.json()["written_to_lcr"] is True
         tentative_assertion_id = tentative_review.json()["source_record_ref"]["record_id"]
 
+        denial_text = next(
+            case["text"] for case in semantic_dataset["cases"]
+            if case["id"] == "patient-denies-pain"
+        )
+        denial_index = next(
+            index for index, candidate in enumerate(candidates)
+            if denial_text.rstrip(".") in candidate["source_quote"]
+        )
+        denial_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=headers,
+            json={"candidate_index": denial_index, "decision": "accept"},
+        )
+        assert denial_review.status_code == 200, denial_review.text
+        assert denial_review.json()["written_to_lcr"] is True
+        denial_assertion_id = denial_review.json()["source_record_ref"]["record_id"]
+
         db = TestingSessionLocal()
         try:
             historical_assertion = db.query(CareAssertion).filter_by(
@@ -223,7 +240,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             accepted_assertion_count = db.query(CareAssertion).filter_by(
                 person_id=session["person"]["id"],
             ).count()
-            assert accepted_assertion_count == 3
+            assert accepted_assertion_count == 4
         finally:
             db.close()
 
@@ -281,7 +298,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
             duplicate_assertion_count = len(all_assertions) - len({
                 row.source_text for row in all_assertions
             })
-            assert accepted_assertion_count == 3
+            assert accepted_assertion_count == 4
             assert duplicate_assertion_count == 0
             duplicate_review_events = db.query(DocumentReviewEvent).filter(
                 DocumentReviewEvent.person_id == session["person"]["id"],
@@ -357,6 +374,22 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         assert tentative_assertion_id in tentative_payload.get("source_assertion_ids", [])
         tentative_reply = tentative_payload.get("reply", "").casefold()
         assert any(term in tentative_reply for term in ("possible", "suspected", "suspects", "not confirmed")), tentative_payload
+
+        denial_companion = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": session["person"]["id"],
+                "text": "What does the discharge document say about whether the patient experienced pain?",
+            },
+        )
+        assert denial_companion.status_code == 200, denial_companion.text
+        denial_payload = denial_companion.json()
+        assert evidence_id in denial_payload.get("source_evidence_ids", [])
+        assert analysis_id in denial_payload.get("source_document_analysis_ids", [])
+        assert denial_assertion_id in denial_payload.get("source_assertion_ids", [])
+        denial_reply = denial_payload.get("reply", "").casefold()
+        assert any(term in denial_reply for term in ("denies", "denied", "no pain reported", "did not report pain")), denial_payload
 
         total_gold = len(semantic_dataset["cases"])
         temporal_correct = sum(
