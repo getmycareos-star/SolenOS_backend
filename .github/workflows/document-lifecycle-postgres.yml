@@ -43,8 +43,9 @@ permissions:
   statuses: write
 
 concurrency:
-  group: document-lifecycle-postgres-${{ github.ref }}
-  cancel-in-progress: true
+  # Preserve real PostgreSQL lifecycle evidence for every exact main revision.
+  group: document-lifecycle-postgres-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   document-lifecycle-postgres:
