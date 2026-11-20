@@ -34,7 +34,7 @@ class CareReminderRead(BaseModel):
     created_by_caregiver_id: str
     assigned_to_caregiver_id: Optional[str] = None
     version: int = 1
-    title
+    title: str
     note: Optional[str] = None
     due_at: datetime
     status: Literal["open", "completed", "cancelled"]
