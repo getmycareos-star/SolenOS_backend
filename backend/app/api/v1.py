@@ -1400,14 +1400,83 @@ def create_event(event: CareEventCreate, request: Request, db: Session = Depends
     _require_person_and_linked_caregiver(
         db, event.person_id, event.created_by_caregiver_id
     )
-    db_event = CareEventModel(**event.model_dump())
+
+    ingestion_key = event.ingestion_key
+    request_fingerprint = None
+    if ingestion_key:
+        canonical_payload = event.model_dump(exclude={"ingestion_key"})
+        request_fingerprint = hashlib.sha256(
+            json.dumps(
+                canonical_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        existing = db.query(CareEventModel).filter(
+            CareEventModel.person_id == event.person_id,
+            CareEventModel.ingestion_key == ingestion_key,
+        ).first()
+        if existing is not None:
+            if (
+                existing.created_by_caregiver_id == event.created_by_caregiver_id
+                and existing.ingestion_request_sha256 == request_fingerprint
+            ):
+                return existing
+            raise HTTPException(
+                status_code=409,
+                detail="This event retry key was already used for different content or ownership.",
+            )
+
+    evidence_ids = list(dict.fromkeys(event.evidence_ids or []))
+    if len(evidence_ids) > 100:
+        raise HTTPException(status_code=422, detail="An event may reference at most 100 evidence items.")
+    if evidence_ids:
+        owned_evidence_ids = {
+            row[0]
+            for row in db.query(EvidenceModel.id).filter(
+                EvidenceModel.person_id == event.person_id,
+                EvidenceModel.id.in_(evidence_ids),
+                (EvidenceModel.evidence_status.is_(None))
+                | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
+            ).all()
+        }
+        if owned_evidence_ids != set(evidence_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="Every referenced evidence item must be available in this care record.",
+            )
+
+    event_payload = event.model_dump(exclude={"ingestion_key"})
+    event_payload["ingestion_key"] = ingestion_key
+    event_payload["ingestion_request_sha256"] = request_fingerprint
+    db_event = CareEventModel(**event_payload)
     db.add(db_event)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if ingestion_key:
+            existing = db.query(CareEventModel).filter(
+                CareEventModel.person_id == event.person_id,
+                CareEventModel.ingestion_key == ingestion_key,
+            ).first()
+            if existing is not None and (
+                existing.created_by_caregiver_id == event.created_by_caregiver_id
+                and existing.ingestion_request_sha256 == request_fingerprint
+            ):
+                return existing
+            if existing is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This event retry key was already used for different content or ownership.",
+                ) from exc
+        raise
     db.refresh(db_event)
 
     # The care event is the user-requested write. Learning and reconciliation
-    # are secondary work and must not turn a committed event into an HTTP error:
-    # clients may otherwise retry and create a duplicate event.
+    # are secondary work and must not turn a committed event into an HTTP error.
     try:
         _log_and_learn(
             db,
