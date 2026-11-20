@@ -2284,6 +2284,21 @@ def create_appointment(appointment: AppointmentCreate, request: Request, db: Ses
     except Exception:
         db.rollback()
         logger.exception("Learning pipeline failed after durable appointment %s", db_appt.id)
+
+    # A newly saved appointment should already have its continuity workspace
+    # before the caregiver opens the appointment screen. This is secondary
+    # preparation: a failure must never undo or misreport the durable visit.
+    try:
+        from app.api.appointment_workspace import ensure_upcoming_appointment_workspace
+
+        ensure_upcoming_appointment_workspace(request, db)
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Automatic appointment preparation failed after durable appointment %s",
+            db_appt.id,
+        )
+
     db.refresh(db_appt)
     return db_appt
 
