@@ -89,8 +89,9 @@ CONSUMER_DOMAINS = [
     ("/api/v1/transitions", ("frontend", "Care transition history", "src/components/mvp-workspace/LCRCurrentUnderstanding.tsx")),
     ("/api/v1/persons", ("frontend", "Care-recipient identity", "src/api/client.ts")),
     ("/api/v1/caregivers", ("frontend", "Caregiver identity", "src/api/client.ts")),
-    ("/api/v1/reasoning", ("internal", "Care reasoning and explanation", "backend/app/api/v1.py")),
-    ("/api/v1/learning-events", ("internal", "Reviewed feedback and learning", "backend/app/api/v1.py")),
+    ("/api/v1/reasoning-memory", ("intentionally_unused", "Legacy reasoning-memory CRUD route has no production frontend or internal HTTP consumer; LearningEngine uses the service/ORM directly; retain only pending deprecation review", "backend/app/services/learning.py")),
+    ("/api/v1/reasoning", ("intentionally_unused", "Reasoning-summary API has no production frontend or internal HTTP consumer; LearningEngine is called directly by backend workflows", "backend/app/services/learning.py")),
+    ("/api/v1/learning-events", ("intentionally_unused", "Learning-event listing is used by E2E verification only, not a production caregiver workflow; LearningEngine owns writes", "backend/app/services/learning.py")),
     ("/api/v1/feedback", ("frontend", "Caregiver feedback", "src/components/mvp-workspace/HelpImproveSolenos.tsx")),
     ("/api/v1/parse-time", ("frontend", "Caregiver time parsing", "src/api/client.ts")),
     ("/api/v1/situation", ("frontend", "Progressive care understanding", "src/app/workspace/daily-care/page.tsx; src/components/mvp-workspace/SituationResponsePanel.tsx")),
@@ -381,14 +382,18 @@ def build_inventory() -> dict[str, Any]:
                     else "REVIEW_REQUIRED: no consumer domain mapping"
                 ),
                 "disposition": (
-                    "frontend_product_workflow"
+                    "intentionally_unused"
+                    if consumer_domain and consumer_domain[0] == "intentionally_unused"
+                    else "frontend_product_workflow"
                     if consumer_domain and consumer_domain[0] == "frontend"
                     else "internal_service_or_operations"
                     if consumer_domain
                     else "REVIEW_REQUIRED"
                 ),
                 "status": (
-                    "registered; consumer and persistence domain mapped; end-to-end verification pending"
+                    "intentionally unused; reason documented; pending deprecation review"
+                    if consumer_domain and consumer_domain[0] == "intentionally_unused"
+                    else "registered; consumer and persistence domain mapped; end-to-end verification pending"
                     if consumer_domain and persistence_domain
                     else "registered; classification gap requires review"
                 ),
