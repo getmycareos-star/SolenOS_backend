@@ -27,7 +27,7 @@ def caregiver_has_permission(grant: CaregiverAccessGrant | None, permission: str
         return False
     if bool(grant.can_manage_members):
         return True
-    permissions = grant.permissions or list(DEFAULT_FAMILY_PERMISSIONS)
+    permissions = grant.permissions if grant.permissions is not None else list(DEFAULT_FAMILY_PERMISSIONS)
     return permission in set(permissions)
 
 
