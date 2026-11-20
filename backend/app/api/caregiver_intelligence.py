@@ -110,12 +110,14 @@ def _care_recipient_profile_json(
         .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
         .all()
     )
-    relationship_snapshot = None
-    for context in relationship_contexts:
-        metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
-        if metadata.get("record_type") == "caregiver_relationship":
-            relationship_snapshot = metadata
-            break
+    if recipient_snapshot is None:
+        # Read the short-lived legacy shape written before recipient-level
+        # context was separated from caregiver-specific relationship history.
+        for context in relationship_contexts:
+            metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
+            if metadata.get("record_type") == "care_recipient_profile":
+                recipient_snapshot = metadata
+                break
     condition = recipient_snapshot.get("condition") if recipient_snapshot else None
     return {
         "name": person.name,
@@ -362,11 +364,20 @@ def update_care_recipient_profile(
             .all()
         )
         latest_relationship_context = None
+        legacy_recipient_context = None
         for context in relationship_contexts:
             metadata = context.context_metadata if isinstance(context.context_metadata, dict) else {}
-            if metadata.get("record_type") == "caregiver_relationship":
+            if metadata.get("record_type") == "caregiver_relationship" and latest_relationship_context is None:
                 latest_relationship_context = context
-                break
+            if metadata.get("record_type") == "care_recipient_profile" and legacy_recipient_context is None:
+                legacy_recipient_context = context
+        if latest_recipient_context is None and legacy_recipient_context is not None:
+            latest_recipient_context = legacy_recipient_context
+            previous_recipient_snapshot = (
+                legacy_recipient_context.context_metadata
+                if isinstance(legacy_recipient_context.context_metadata, dict)
+                else {}
+            )
 
         now = datetime.now(timezone.utc)
         changed_fields = []
