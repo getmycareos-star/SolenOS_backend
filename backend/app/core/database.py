@@ -311,6 +311,7 @@ import app.models.appointment_workspace  # register durable appointment workflow
 import app.models.open_loop  # register persistent open-loop tables without importing API routes
 import app.models.ai_output_governance  # register shared AI proposal and decision records
 import app.models.caregiver_access  # register caregiver membership, invitation and transfer tables before local bootstrap
+import app.models.operational_worker_heartbeat  # register worker health table before local schema bootstrap
 
 
 # Metadata bootstrap is strictly a local SQLite convenience. Running Alembic
