@@ -92,7 +92,7 @@ def _care_recipient_profile_json(
             CaregiverContextModel.person_id == str(person.id),
             CaregiverContextModel.caregiver_id.is_(None),
         )
-        .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+        .order_by(CaregiverContextModel.effective_start.desc().nullslast(), CaregiverContextModel.created_at.desc())
         .all()
     )
     recipient_snapshot = None
@@ -107,7 +107,7 @@ def _care_recipient_profile_json(
             CaregiverContextModel.person_id == str(person.id),
             CaregiverContextModel.caregiver_id == str(caregiver_profile.id),
         )
-        .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+        .order_by(CaregiverContextModel.effective_start.desc().nullslast(), CaregiverContextModel.created_at.desc())
         .all()
     )
     if recipient_snapshot is None:
@@ -337,7 +337,7 @@ def update_care_recipient_profile(
                 CaregiverContextModel.person_id == person_id,
                 CaregiverContextModel.caregiver_id.is_(None),
             )
-            .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+            .order_by(CaregiverContextModel.effective_start.desc().nullslast(), CaregiverContextModel.created_at.desc())
             .with_for_update()
             .all()
         )
@@ -359,7 +359,7 @@ def update_care_recipient_profile(
                 CaregiverContextModel.person_id == person_id,
                 CaregiverContextModel.caregiver_id == caregiver_profile.id,
             )
-            .order_by(CaregiverContextModel.effective_start.desc(), CaregiverContextModel.created_at.desc())
+            .order_by(CaregiverContextModel.effective_start.desc().nullslast(), CaregiverContextModel.created_at.desc())
             .with_for_update()
             .all()
         )
