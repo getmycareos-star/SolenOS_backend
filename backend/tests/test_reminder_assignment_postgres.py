@@ -119,6 +119,7 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
     assert created.json()["created_by_caregiver_id"] == primary_id
     assert created.json()["assigned_to_caregiver_id"] == recipient_id
     assert created.json()["version"] == 1
+    assert created.json()["notification_delivery_status"] == "not_created"
 
     # The actual due-reminder worker writes to the assigned caregiver's inbox.
     with SessionLocal() as db:
@@ -130,6 +131,14 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
             category="reminder_due",
         ).one()
         assert notification.caregiver_id == recipient_id
+
+    delivered_view = client.get(
+        f"/api/v1/reminders/{person_id}",
+        headers=primary_headers,
+    )
+    assert delivered_view.status_code == 200, delivered_view.text
+    delivered_item = next(item for item in delivered_view.json() if item["id"] == reminder_id)
+    assert delivered_item["notification_delivery_status"] == "in_app_notification_created"
 
     # The assigned caregiver can reassign responsibility; the old version cannot replay.
     reassigned = client.patch(
