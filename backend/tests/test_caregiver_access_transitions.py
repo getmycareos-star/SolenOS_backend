@@ -644,6 +644,50 @@ def test_member_operation_permissions_are_enforced_for_reminders():
     assert created.status_code == 201, created.text
 
 
+def test_member_operation_permissions_gate_open_loop_mutations():
+    client = TestClient(app)
+    primary = create_primary(client)
+    owner_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invite = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=owner_headers,
+        json={"email": "read-only-loops@example.com"},
+    ).json()
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invite["invitation_token"],
+            "email": "read-only-loops@example.com",
+            "password": "a-long-test-password-123",
+            "name": "Read-only caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    member = accepted.json()
+    member_headers = {"Authorization": f"Bearer {member['access_token']}"}
+
+    changed = client.patch(
+        f"/api/v1/caregiver-access/members/{member['caregiver_id']}/permissions",
+        headers=owner_headers,
+        json={"permissions": ["view_lcr"]},
+    )
+    assert changed.status_code == 200, changed.text
+
+    read = client.get("/api/v1/open-loops", headers=member_headers)
+    assert read.status_code == 200, read.text
+    denied = client.post(
+        "/api/v1/open-loops",
+        headers=member_headers,
+        json={
+            "loop_type": "pending_action",
+            "title": "Read-only member cannot create this",
+            "description": "This write requires manage_responsibilities.",
+            "idempotency_key": "readonly-open-loop-001",
+        },
+    )
+    assert denied.status_code == 403, denied.text
+
+
 def test_member_permissions_cannot_grant_membership_administration():
     client = TestClient(app)
     primary = create_primary(client)
