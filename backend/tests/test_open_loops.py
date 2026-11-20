@@ -13,6 +13,8 @@ from app.api.care_continuity import _build_situation_understanding_assessment
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Evidence
+from app.models.change import Change
+from app.core.change_enums import ChangeType
 
 pytestmark = pytest.mark.session_security
 
@@ -119,6 +121,59 @@ def test_open_loop_persists_and_lists_only_within_server_issued_session():
     denied = client.get(f"/api/v1/open-loops/{created['id']}", headers=second_headers)
     assert denied.status_code == 404, denied.text
 
+
+
+def test_persisted_change_can_be_linked_to_person_scoped_follow_up():
+    client = TestClient(app)
+    first, first_headers = session(client, "Change follow-up recipient")
+    second, second_headers = session(client, "Unrelated care recipient")
+    db = TestSessionLocal()
+    try:
+        change = Change(
+            person_id=first["person"]["id"],
+            subject_type="sleep",
+            subject_id=first["person"]["id"],
+            change_type=ChangeType.EMERGENCE,
+            evidence_ids=[],
+            explanation="Test fixture only: persisted change source.",
+            attention_candidate=True,
+            follow_up_candidate=True,
+        )
+        db.add(change)
+        db.commit()
+        db.refresh(change)
+        change_id = change.id
+    finally:
+        db.close()
+
+    created = client.post(
+        "/api/v1/open-loops",
+        headers=first_headers,
+        json={
+            "loop_type": "follow_up",
+            "title": "Review the saved change",
+            "description": "A persisted change needs a caregiver follow-up.",
+            "source_type": "persisted_change",
+            "source_id": change_id,
+            "evidence": [],
+            "uncertainty": "unknown",
+            "idempotency_key": "persisted-change-follow-up",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["source_type"] == "persisted_change"
+    assert body["source_id"] == change_id
+
+    listed = client.get("/api/v1/open-loops?limit=100", headers=first_headers)
+    assert listed.status_code == 200, listed.text
+    linked = next(item for item in listed.json()["items"] if item["id"] == body["id"])
+    assert linked["source_type"] == "persisted_change"
+    assert linked["source_id"] == change_id
+
+    isolated = client.get("/api/v1/open-loops?limit=100", headers=second_headers)
+    assert isolated.status_code == 200, isolated.text
+    assert isolated.json()["items"] == []
 
 
 def test_concurrent_create_audit_collision_returns_the_committed_occurrence(monkeypatch):
