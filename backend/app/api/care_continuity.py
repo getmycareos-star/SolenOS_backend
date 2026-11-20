@@ -3288,21 +3288,59 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         # Fingerprint every active change row, not only candidates selected for
         # caregiver attention. Rejection, retirement, or a changed verdict must
         # invalidate an older situation snapshot too.
-        change_source_state = [
-            {
+        change_source_state = []
+        significance_by_change_id = {}
+        for change in active_change_rows:
+            significance = significance_assessment_by_id.get(
+                str(getattr(change, "significance_assessment_id", "") or "")
+            )
+            if significance and (
+                str(significance.target_type or "") != "change"
+                or str(significance.target_id or "") != str(change.id)
+            ):
+                # A same-person assessment linked to a different change is not
+                # valid provenance for this row. Keep the change visible using
+                # its own persisted flags, but do not borrow another assessment.
+                significance = None
+            if significance:
+                significance_by_change_id[str(change.id)] = significance
+
+            verdict = (
+                getattr(significance.verdict, "value", significance.verdict)
+                if significance else getattr(change.significance_verdict, "value", change.significance_verdict)
+            )
+            attention_candidate = bool(
+                significance.attention_candidate if significance else change.attention_candidate
+            )
+            follow_up_candidate = bool(
+                significance.follow_up_candidate if significance else change.follow_up_candidate
+            )
+            change_source_state.append({
                 "id": str(change.id),
                 "updated_at": change.updated_at,
                 "created_at": change.created_at,
                 "is_active": bool(change.is_active),
                 "superseded_by_change_id": change.superseded_by_change_id,
-                "significance_verdict": getattr(change.significance_verdict, "value", change.significance_verdict),
+                "significance_verdict": verdict,
                 "significance_assessment_id": getattr(change, "significance_assessment_id", None),
-                "attention_candidate": bool(
-                    significance.attention_candidate if significance else change.attention_candidate
+                "significance_evidence_status": (
+                    getattr(significance.evidence_status, "value", significance.evidence_status)
+                    if significance else None
                 ),
-                "follow_up_candidate": bool(
-                    significance.follow_up_candidate if significance else change.follow_up_candidate
+                "significance_evidence_confidence": (
+                    significance.evidence_confidence if significance else None
                 ),
+                "significance_confidence": (
+                    significance.significance_confidence if significance else None
+                ),
+                "significance_dimensions": (
+                    list(significance.dimensions or []) if significance else []
+                ),
+                "significance_explanation": (
+                    significance.explanation if significance else None
+                ),
+                "attention_candidate": attention_candidate,
+                "follow_up_candidate": follow_up_candidate,
                 "confirmation_status": change.confirmation_status,
                 "baseline_id": change.baseline_id,
                 "baseline_coverage_status": change.baseline_coverage_status,
@@ -3315,16 +3353,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "previous_state": change.previous_state,
                 "current_state": change.current_state,
                 "explanation": change.explanation,
-            }
-            for change in active_change_rows
-        ]
-        for change in active_change_rows:
-            verdict = getattr(change.significance_verdict, "value", change.significance_verdict)
+            })
             if verdict not in {"meaningful_candidate", "insufficient_evidence"}:
                 continue
-            if not (change.attention_candidate or change.follow_up_candidate):
+            if not (attention_candidate or follow_up_candidate):
                 continue
-            if str(change.confirmation_status or "").casefold() in {"rejected", "dismissed", "cancelled", "withdrawn", "superseded"}:
+            if str(change.confirmation_status or "").casefold() in {
+                "rejected", "dismissed", "cancelled", "withdrawn", "superseded"
+            }:
                 continue
             relevant_changes.append(change)
         baseline_ids = sorted({str(change.baseline_id) for change in relevant_changes if change.baseline_id})
@@ -3420,15 +3456,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 }
                 for event in linked_events
             ]
-            significance = significance_assessment_by_id.get(str(getattr(change, "significance_assessment_id", "") or ""))
-            if significance and (
-                str(significance.target_type or "") != "change"
-                or str(significance.target_id or "") != str(change.id)
-            ):
-                # A same-person assessment linked to a different change is not
-                # valid provenance for this row. Keep the change visible using
-                # its own persisted flags, but do not borrow another assessment.
-                significance = None
+            significance = significance_by_change_id.get(str(change.id))
             linked_follow_up = next(
                 (loop for loop in open_loops if str(loop.get("source_id") or "") == str(change.id)),
                 None,
