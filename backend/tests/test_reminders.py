@@ -400,6 +400,8 @@ def test_reminder_snooze_moves_due_time_and_records_caregiver_without_completing
     assert body["snoozed_by_caregiver_id"] == session["caregiver"]["id"]
     assert body["snoozed_at"] is not None
     assert body["snooze_count"] == 1
+    assert body["lifecycle_history"][-1]["action"] == "care.reminder.snoozed"
+    assert body["lifecycle_history"][-1]["actor_caregiver_id"] == session["caregiver"]["id"]
     assert abs((datetime.fromisoformat(body["due_at"]) - datetime.fromisoformat(snooze_until)).total_seconds()) < 1
     from app.models.reminder import CareReminder
     db = TestSessionLocal()
