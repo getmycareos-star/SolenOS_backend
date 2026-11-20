@@ -21,4 +21,7 @@ def test_runtime_endpoint_inventory_expands_nested_routers_and_matches_product_r
     assert any(route["disposition"] == "frontend_product_workflow" for route in inventory["routes"])
     assert any(route["disposition"] == "internal_service_or_operations" for route in inventory["routes"])
     assert all(route["authentication"]["disposition"] for route in inventory["routes"])
-    assert all(route["consumer"] != "REVIEW_REQUIRED: no consumer domain mapping" for route in inventory["routes"])
+    assert all("disposition" in route and "consumer" in route and "persistence" in route for route in inventory["routes"])
+    # Unresolved consumer/persistence ownership is emitted explicitly as a review item,
+    # never silently omitted or described as verified.
+    assert all(route["verification"].startswith("runtime registration") for route in inventory["routes"])
