@@ -9,7 +9,7 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Caregiver, Person
-from app.models.caregiver_intelligence import CaregiverProfile, CaregiverObservation, CaregiverHandoff, CaregiverRole, CaregiverResponsibility
+from app.models.caregiver_intelligence import CaregiverProfile, CaregiverContext, CaregiverObservation, CaregiverHandoff, CaregiverRole, CaregiverResponsibility
 from app.core.caregiver_enums import InformationVisibility, CaregiverRoleType
 
 pytestmark = pytest.mark.session_security
@@ -73,6 +73,75 @@ def create_second_profile(person_id: str, *, name="Other caregiver", email=None)
         db.commit()
         db.refresh(profile)
         return profile.id, caregiver.id
+    finally:
+        db.close()
+
+
+def test_care_recipient_profile_persists_and_isolated_by_bearer_session():
+    client = TestClient(app)
+    first = create_session(client, "Initial recipient")
+    second = create_session(client, "Separate recipient")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    initial = client.get("/api/v1/care-profile", headers=first_headers)
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["name"] == "Initial recipient"
+
+    saved = client.put(
+        "/api/v1/care-profile",
+        headers=first_headers,
+        json={
+            "name": "Updated recipient",
+            "relationship": "Daughter",
+            "condition": "Dementia, caregiver-reported profile context",
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == {
+        "name": "Updated recipient",
+        "relationship": "Daughter",
+        "condition": "Dementia, caregiver-reported profile context",
+    }
+
+    # The second bearer cannot read or overwrite the first person's record.
+    second_read = client.get(
+        f"/api/v1/care-profile?person_id={first['person']['id']}",
+        headers=second_headers,
+    )
+    assert second_read.status_code == 200, second_read.text
+    assert second_read.json()["name"] == "Separate recipient"
+    second_write = client.put(
+        f"/api/v1/care-profile?person_id={first['person']['id']}",
+        headers=second_headers,
+        json={"name": "Attempted cross-record overwrite", "relationship": "Other", "condition": None},
+    )
+    assert second_write.status_code == 200, second_write.text
+    assert second_write.json()["name"] == "Attempted cross-record overwrite"
+
+    db = TestSessionLocal()
+    try:
+        first_person = db.query(Person).filter_by(id=first["person"]["id"]).one()
+        first_profile = db.query(CaregiverProfile).filter_by(id=first["caregiver"]["profile_id"]).one()
+        first_contexts = (
+            db.query(CaregiverContext)
+            .filter_by(person_id=first["person"]["id"], caregiver_id=first_profile.id)
+            .all()
+        )
+        assert first_person.name == "Updated recipient"
+        assert first_profile.relationship == "Daughter"
+        profile_versions = [
+            row for row in first_contexts
+            if isinstance(row.context_metadata, dict)
+            and row.context_metadata.get("record_type") == "care_recipient_profile"
+        ]
+        assert len(profile_versions) == 1
+        assert profile_versions[0].context_metadata["condition"] == "Dementia, caregiver-reported profile context"
+        assert profile_versions[0].context_metadata["epistemic_status"] == "caregiver_reported"
+        assert profile_versions[0].context_metadata["reported_by_session_caregiver_id"] == first["caregiver"]["id"]
+
+        second_person = db.query(Person).filter_by(id=second["person"]["id"]).one()
+        assert second_person.name == "Attempted cross-record overwrite"
     finally:
         db.close()
 
