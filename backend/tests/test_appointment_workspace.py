@@ -105,6 +105,17 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
     assert body["schema_status"] != "complete"
     assert "decisions" in body["missing_required_sources"]
 
+    source_retry = test_client.get(
+        "/api/v1/care-continuity/current-care?source=decisions",
+        headers=headers,
+    )
+    assert source_retry.status_code == 200, source_retry.text
+    retry_body = source_retry.json()
+    assert retry_body["requested_sources"] == ["decisions"]
+    assert set(retry_body["source_coverage"]) == {"decisions"}
+    assert retry_body["source_coverage"]["decisions"]["status"] == "unavailable_schema"
+    assert "decisions" in retry_body["failed_sources"]
+
 
 def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monkeypatch):
     import app.api.v1 as api_v1
