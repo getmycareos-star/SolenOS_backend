@@ -3460,6 +3460,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "baseline_id": change.baseline_id,
                 "baseline_coverage_status": change.baseline_coverage_status,
                 "current_coverage_status": change.current_coverage_status,
+                "baseline_is_stable": bool(baseline.is_stable) if baseline else False,
+                "baseline_history_completeness": (
+                    str(baseline.history_completeness or "unknown") if baseline else "unknown"
+                ),
+                "expected_source_record_count": len(change.evidence_ids or []),
                 "evidence_ids": list(change.evidence_ids or []),
                 "subject_type": change.subject_type,
                 "subject_id": change.subject_id,
