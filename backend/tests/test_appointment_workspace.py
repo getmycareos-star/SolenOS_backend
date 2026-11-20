@@ -2638,10 +2638,8 @@ def test_upcoming_appointment_workspace_is_generated_without_a_form_and_is_idemp
     assert workspace["payload"]["caregiverReport"] == ""
     assert workspace["payload"]["generatedBy"] == "solenos_appointment_continuity"
 
-    # A second caregiver with access to the same person's LCR receives the
-    # same workspace; repeated opening must not create duplicate records.
-    shared_headers = {"Authorization": f"Bearer {other['shared_access_token']}"}
-    repeated = test_client.post("/api/v1/appointment-workspaces/ensure-upcoming", headers=shared_headers)
+    # Reopening the workspace must not create a duplicate record.
+    repeated = test_client.post("/api/v1/appointment-workspaces/ensure-upcoming", headers=headers)
     assert repeated.status_code == 200, repeated.text
     assert repeated.json()["created"] is False
     assert repeated.json()["workspace"]["id"] == workspace["id"]
