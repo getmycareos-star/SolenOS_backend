@@ -238,7 +238,10 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
     db = sessions()
     job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
     assert job.status == "processing"
-    assert job.locked_at == refreshed_at
+    persisted_lock = job.locked_at
+    if persisted_lock.tzinfo is None:
+        persisted_lock = persisted_lock.replace(tzinfo=timezone.utc)
+    assert persisted_lock == refreshed_at
     db.close()
 
     # A cancelled job or a mismatched identity must never be resurrected.
