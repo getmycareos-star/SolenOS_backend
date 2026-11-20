@@ -1077,6 +1077,7 @@ def test_postgres_document_upload_compensates_external_binary_after_implicit_flu
 
 def test_postgres_invited_caregiver_can_retrieve_shared_document_and_respects_document_only_scope():
     suffix = uuid.uuid4().hex[:10]
+    owner_email = f"primary-shared-doc-{suffix}@example.test"
     invite_email = f"shared-doc-{suffix}@example.test"
     with TestClient(app) as client:
         owner = client.post(
@@ -1092,7 +1093,7 @@ def test_postgres_invited_caregiver_can_retrieve_shared_document_and_respects_do
         account = client.post(
             "/api/v1/accounts",
             headers=owner_headers,
-            json={"email": invite_email, "password": "primary-shared-doc-password-456"},
+            json={"email": owner_email, "password": "primary-shared-doc-password-456"},
         )
         assert account.status_code == 201, account.text
         invitation = client.post(
