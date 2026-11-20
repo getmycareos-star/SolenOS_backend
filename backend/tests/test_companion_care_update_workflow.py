@@ -95,6 +95,19 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
         assert body["written_to_lcr"] is False
         assert body["persistence"] == "conversation_only"
 
+        # Conversation discovery is server-backed, so a refreshed bearer or
+        # a new device does not depend on the old browser's session-ID cache.
+        listed = client.get("/api/v1/conversations?limit=10", headers=headers)
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["person_id"] == first["person"]["id"]
+        assert [item["session_id"] for item in listed.json()["items"]] == [body["session_id"]]
+        rotated = client.post("/api/v1/sessions/refresh", headers=headers)
+        assert rotated.status_code == 200, rotated.text
+        rotated_headers = {"Authorization": "Bearer " + rotated.json()["access_token"]}
+        restored_listing = client.get("/api/v1/conversations?limit=10", headers=rotated_headers)
+        assert restored_listing.status_code == 200, restored_listing.text
+        assert restored_listing.json()["items"][0]["session_id"] == body["session_id"]
+
         # A legacy pending proposal must not leak back into the conversation
         # response when an idempotent retry replays the saved assistant turn.
         db = TestingSessionLocal()
@@ -138,6 +151,9 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
             "person_id": second["person"]["id"], "text": "What is already saved about sleep?",
         })
         assert other.status_code == 200, other.text
+        second_list = client.get("/api/v1/conversations?limit=10", headers=second_headers)
+        assert second_list.status_code == 200, second_list.text
+        assert all(item["session_id"] != body["session_id"] for item in second_list.json()["items"])
         second_prompt = "\\n".join(str(item.get("content", "")) for item in captured[-1])
         assert source not in second_prompt
         db = TestingSessionLocal()
