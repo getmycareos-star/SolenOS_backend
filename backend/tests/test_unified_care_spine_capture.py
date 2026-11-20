@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import get_db
 from app.api.document_lifecycle import _verify_persisted_extraction
+from app.api.care_continuity import _build_situation_understanding_assessment
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
@@ -351,6 +352,18 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 context = build_unified_lcr_context(
                     db, person_id, caregiver_id, limit_per_source=50
                 )
+                situation = _build_situation_understanding_assessment(db, person_id)
+                situation_event = next(
+                    item for item in situation["current_care_reality"]["records"]
+                    if item.get("source") == "events" and item.get("id") == event_id
+                )
+                assert evidence_id in situation_event["evidence_ids"]
+                situation_timeline_entry = next(
+                    item for item in situation["situation_trajectory"]["entries"]
+                    if item.get("record_id") == event_id
+                )
+                assert evidence_id in situation_timeline_entry["evidence_ids"]
+                assert situation["assessment_method"] == "deterministic_composition_of_persisted_lcr_sources"
 
             event_rows = [
                 row for row in context["sources"]["events"]["items"]
