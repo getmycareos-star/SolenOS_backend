@@ -38,7 +38,7 @@ def upgrade() -> None:
     )
     for row in bind.execute(sa.select(grants.c.id, grants.c.access_scope, grants.c.permissions)).mappings():
         if row["permissions"] is None:
-            value = [] if row["access_scope"] == "documents_only" else DEFAULT_FAMILY_PERMISSIONS
+            value = DEFAULT_FAMILY_PERMISSIONS
             bind.execute(grants.update().where(grants.c.id == row["id"]).values(permissions=value))
 
     invitations = sa.table(
