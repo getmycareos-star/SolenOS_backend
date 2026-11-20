@@ -43,6 +43,7 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
         ).first()
         if grant is None:
             raise HTTPException(status_code=403, detail="Active full care-record access is required for handoffs")
+        require_caregiver_permission(db, str(person_id), str(caregiver_id), "view_lcr")
         return str(person_id), str(caregiver_id)
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
@@ -69,6 +70,7 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     ).first()
     if grant is None:
         raise HTTPException(status_code=403, detail="Active full care-record access is required for handoffs")
+    require_caregiver_permission(db, str(session.person_id), str(session.caregiver_id), "view_lcr")
     return str(session.person_id), str(session.caregiver_id)
 
 
