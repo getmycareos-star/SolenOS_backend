@@ -2133,6 +2133,90 @@ def test_situation_assessment_preserves_care_significance_and_exposes_evidence_d
 
 
 
+
+def test_situation_assessment_marks_history_complete_only_with_stable_covered_baseline_and_sources():
+    from datetime import timedelta
+    from app.api.care_continuity import _build_situation_understanding_assessment
+    from app.models.significance import SignificanceAssessment
+    from app.core.change_enums import EvidenceStatus, BaselineType, BaselineConfidence
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "attention-complete-history")
+        event = add_event(db, person, caregiver, "sleep", 1, "Caregiver recorded a usual sleep pattern.")
+        baseline_id = "baseline-complete-history"
+        change_id = "change-complete-history"
+        assessment_id = "assessment-complete-history"
+        db.add(Baseline(
+            id=baseline_id,
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            baseline_type=BaselineType.PERSONAL_HISTORICAL,
+            window_start=NOW - timedelta(days=30),
+            window_end=NOW,
+            event_count=1,
+            frequency_per_period=1.0,
+            confidence=BaselineConfidence.HIGH,
+            is_stable=True,
+            coverage_status="covered",
+            history_completeness="complete",
+            analysis_version="test-baseline-v1",
+            documentation_bias_flag=False,
+            evidence_ids=[event.id],
+            is_active=True,
+        ))
+        db.add(SignificanceAssessment(
+            id=assessment_id,
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            target_type="change",
+            target_id=change_id,
+            verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            evidence_status=EvidenceStatus.CONFIRMED,
+            evidence_confidence=0.9,
+            significance_confidence=0.8,
+            dimensions=[{"name": "frequency", "score": 0.8}],
+            attention_candidate=True,
+            follow_up_candidate=False,
+            explanation="A confirmed change against a stable personal baseline.",
+            evidence_ids=[event.id],
+            is_active=True,
+        ))
+        db.flush()
+        db.add(Change(
+            id=change_id,
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            baseline_id=baseline_id,
+            baseline_coverage_status="covered",
+            current_coverage_status="covered",
+            evidence_ids=[event.id],
+            explanation="A change was recorded against a complete baseline.",
+            significance_assessment_id=assessment_id,
+            significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            attention_candidate=True,
+            follow_up_candidate=False,
+            confirmation_status="detected",
+            is_active=True,
+        ))
+        db.flush()
+
+        assessment = _build_situation_understanding_assessment(db, person.id)
+        item = next(
+            item for item in assessment["care_attention"]["important_to_address"]
+            if item["record_id"] == change_id
+        )
+        assert item["history_completeness"] == "complete"
+        assert item["evidence_status"] == "confirmed"
+        assert item["baseline_coverage_status"] == "covered"
+        assert item["current_coverage_status"] == "covered"
+        assert item["source_record_ids"] == [event.id]
+        assert "available history is incomplete" not in item["reason"].casefold()
+
 def test_situation_assessment_does_not_borrow_mismatched_significance_link():
     from app.api.care_continuity import _build_situation_understanding_assessment
     from app.models.significance import SignificanceAssessment
