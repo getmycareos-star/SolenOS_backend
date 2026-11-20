@@ -252,7 +252,7 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
         second_proposal_id = second_created.json()["proposal"]["id"]
         rejected = review(first, second_proposal_id, {"decision": "reject"})
         assert rejected.status_code == 200, rejected.text
-        assert rejected.json()["status"] == "rejected"
+        assert rejected.json()["proposal"]["status"] == "rejected"
         assert rejected.json()["decision"] == "reject"
         assert rejected.json()["written_to_lcr"] is False
         rejected_replay = review(first, second_proposal_id, {"decision": "reject"})
