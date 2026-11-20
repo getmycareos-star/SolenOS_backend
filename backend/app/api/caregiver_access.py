@@ -19,7 +19,7 @@ from app.models.privacy_delivery import AuditLogEvent
 from app.core.caregiver_enums import ResponsibilityAcceptanceStatus, ResponsibilityStatus, HandoffAcceptanceStatus
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.api.accounts import _hash_password, _validate_email
-from app.services.caregiver_permissions import CAREGIVER_PERMISSION_KEYS, DEFAULT_FAMILY_PERMISSIONS, require_caregiver_permission
+from app.services.caregiver_permissions import CAREGIVER_PERMISSION_KEYS, DEFAULT_FAMILY_PERMISSIONS, caregiver_has_permission, require_caregiver_permission
 
 router = APIRouter(prefix="/caregiver-access", tags=["caregiver access"])
 SESSION_TTL_DAYS = 365
@@ -172,6 +172,7 @@ def list_assignable_members(request: Request, db: Session = Depends(get_db)):
         "caregiver_id": grant.caregiver_id,
         "name": profile.name if profile and profile.name else "Caregiver",
         "role": grant.role,
+        "can_complete_assigned_reminders": caregiver_has_permission(grant, "complete_assigned_reminders"),
     } for grant, profile in rows]
 
 
