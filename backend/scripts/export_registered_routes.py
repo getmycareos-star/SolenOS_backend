@@ -232,6 +232,8 @@ def _domain_match(path: str, mappings: list[tuple[str, Any]]) -> Any:
 def _authentication_disposition(path: str, method: str) -> str:
     if path in {"/health", "/ready"}:
         return "public health/readiness probe; no care-record access"
+    if path == "/api/extract":
+        return "server-issued bearer session validated by the document extraction handler"
     if path == "/api/v1/assistant/evaluate-production" and method == "POST":
         return "GitHub Actions bearer token plus live main-branch workflow verification"
     if (
