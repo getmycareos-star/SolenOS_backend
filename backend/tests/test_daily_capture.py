@@ -3637,9 +3637,9 @@ def test_structured_capture_preserves_multiple_details_and_unvalidated_vital_val
         assert systolic.epistemic_status == "reported"
         assert "yes" in systolic.context
         assert "not validated as a clinically usable measurement" in systolic.context
-        assert mood.observed_at == datetime(2026, 11, 11, 21, 10, tzinfo=timezone.utc)
-        assert mood.reported_at == datetime(2026, 11, 11, 22, 13, tzinfo=timezone.utc)
-        assert mood.recorded_at == datetime(2026, 11, 11, 22, 13, tzinfo=timezone.utc)
+        assert mood.observed_at.replace(tzinfo=timezone.utc) == datetime(2026, 11, 11, 21, 10, tzinfo=timezone.utc)
+        assert mood.reported_at.replace(tzinfo=timezone.utc) == datetime(2026, 11, 11, 22, 13, tzinfo=timezone.utc)
+        assert mood.recorded_at.replace(tzinfo=timezone.utc) == datetime(2026, 11, 11, 22, 13, tzinfo=timezone.utc)
         for row in rows:
             assert row.evidence_id == evidence.id
             assert source_text[row.source_span_start:row.source_span_end] == row.source_passage
