@@ -231,7 +231,7 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         assert projected["source_evidence_id"] == first_evidence_id
         assert projected["source_quote"] == quote
         assert projected["source_page"] == 1
-        assert projected["review_status"] == "accepted"
+        assert projected["review_status"] == "accepted_by_caregiver"
         assert projected["reviewer_caregiver_id"] == caregiver["caregiver"]["id"]
         assert projected["source_type"] == "document_intelligence"
         assert projected["temporal_context"] == "not_established"
