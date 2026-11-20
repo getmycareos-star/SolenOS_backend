@@ -460,3 +460,106 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
             db.close()
     finally:
         teardown()
+
+
+def test_corrected_companion_report_is_versioned_reviewable_and_audited(monkeypatch):
+    client = setup_client(monkeypatch, lambda text: {"observations": []})
+    try:
+        first = create_session(client, "Correction reviewer")
+        headers = {"Authorization": f"Bearer {first['access_token']}"}
+        source = "She had trouble sleeping for three nights."
+        sent = send(client, first, source)
+        assert sent.status_code == 200, sent.text
+        message_id = sent.json()["source_message_id"]
+
+        created = client.post(
+            f"/api/v1/companion/care-updates/from-message/{message_id}",
+            headers=headers,
+            json={"confirm_care_report": True},
+        )
+        assert created.status_code == 200, created.text
+        original = created.json()["proposal"]
+        original_id = original["id"]
+
+        corrected_text = "She had trouble sleeping for two nights."
+        correction_context = "Correction from caregiver: the duration was two nights, not three."
+        corrected = review(client, first, original_id, {
+            "decision": "correct",
+            "corrected_text": corrected_text,
+            "correction_context": correction_context,
+        })
+        assert corrected.status_code == 200, corrected.text
+        body = corrected.json()
+        assert body["decision"] == "correct"
+        assert body["proposal"]["status"] == "corrected"
+        assert body["corrected_proposal"]["status"] == "pending_authorization"
+        assert body["corrected_proposal"]["proposal_version"] == 2
+        corrected_id = body["corrected_proposal"]["id"]
+
+        # A correction creates a new pending version; it does not silently
+        # write the original or corrected wording into the canonical LCR.
+        pending_response = client.get("/api/v1/companion/care-updates", headers=headers)
+        assert pending_response.status_code == 200, pending_response.text
+        assert [item["id"] for item in pending_response.json()["items"]] == [corrected_id]
+        all_versions = client.get(
+            "/api/v1/companion/care-updates?include_reviewed=true",
+            headers=headers,
+        )
+        assert all_versions.status_code == 200, all_versions.text
+        versions = {item["id"]: item for item in all_versions.json()["items"]}
+        assert versions[original_id]["status"] == "corrected"
+        assert versions[corrected_id]["status"] == "pending_authorization"
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
+        finally:
+            db.close()
+
+        history = client.get(
+            f"/api/v1/companion/care-updates/{original_id}/history",
+            headers=headers,
+        )
+        assert history.status_code == 200, history.text
+        history_body = history.json()
+        assert history_body["append_only"] is True
+        assert len(history_body["items"]) == 1
+        assert history_body["items"][0]["decision"] == "corrected"
+        assert history_body["items"][0]["correction_context"] == correction_context
+
+        second = create_session(client, "Unrelated reviewer")
+        second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+        cross_record = client.get(
+            f"/api/v1/companion/care-updates?include_reviewed=true",
+            headers=second_headers,
+        )
+        assert cross_record.status_code == 200, cross_record.text
+        assert cross_record.json()["items"] == []
+        cross_history = client.get(
+            f"/api/v1/companion/care-updates/{original_id}/history",
+            headers=second_headers,
+        )
+        assert cross_history.status_code == 404
+
+        accepted = review(client, first, corrected_id, {"decision": "accept"})
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["written_to_lcr"] is True
+        db = TestingSessionLocal()
+        try:
+            assertion = db.query(CareAssertion).filter_by(
+                id=accepted.json()["assertion_id"],
+                person_id=first["person"]["id"],
+            ).one()
+            assert assertion.asserted_value == corrected_text
+            assert assertion.epistemic_state == "reported"
+            assert correction_context in assertion.source_text
+        finally:
+            db.close()
+
+        corrected_history = client.get(
+            f"/api/v1/companion/care-updates/{corrected_id}/history",
+            headers=headers,
+        )
+        assert corrected_history.status_code == 200, corrected_history.text
+        assert [item["decision"] for item in corrected_history.json()["items"]] == ["accepted"]
+    finally:
+        teardown()
