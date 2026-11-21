@@ -416,7 +416,6 @@ def review_question_answer(
     )
     execution = None
     try:
-        engine.db.add(event)
         if review.decision in {"rejected", "needs_clarification"}:
             # A rejected or incomplete answer is not a resolved care question.
             # Preserve the answer event and review event, but return the question
@@ -438,6 +437,10 @@ def review_question_answer(
                     status_code=503,
                     detail="Care-continuity reconciliation failed; the clarification review was not committed. Retry the review.",
                 ) from exc
+        # Reconciliation may flush pending ORM state. Add the immutable review
+        # event only after that work, then attach its receipt before its first
+        # INSERT so append-only guards never observe an update to a persisted row.
+        engine.db.add(event)
         if execution is not None:
             execution["stages"]["reconciliation"] = "committed"
             # Persist the execution receipt in the same transaction as the
