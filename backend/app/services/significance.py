@@ -94,12 +94,22 @@ def _contextual_associations(db: Session, person_id: str, events: List[CareEvent
                              now: datetime) -> List[Dict[str, Any]]:
     if not events:
         return []
-    start = min(_ensure_utc(e.occurred_at) for e in events)
-    end = max(_ensure_utc(e.occurred_at) for e in events)
-    window_start = (start - timedelta(days=14)) if start else None
-    window_end = (end + timedelta(days=14)) if end else None
-    if not window_start or not window_end:
+    # Events without an occurrence timestamp cannot establish a temporal
+    # association. Exclude them rather than passing None into min()/max(),
+    # which raises when legacy or partially captured evidence has no date.
+    dated_events = [
+        event for event in events
+        if _ensure_utc(event.occurred_at) is not None
+    ]
+    if not dated_events:
         return []
+    dated_occurrences = [
+        _ensure_utc(event.occurred_at) for event in dated_events
+    ]
+    start = min(dated_occurrences)
+    end = max(dated_occurrences)
+    window_start = start - timedelta(days=14)
+    window_end = end + timedelta(days=14)
     own_types = set(e.event_type for e in events)
     others = (
         db.query(CareEvent)
