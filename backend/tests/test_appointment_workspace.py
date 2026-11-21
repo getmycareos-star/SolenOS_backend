@@ -3471,3 +3471,30 @@ def test_appointment_outcome_without_recorded_visit_date_does_not_invent_observe
         assert assertion.event_time_text is None
         assert assertion.epistemic_state == "reported"
         assert assertion.assertion_status == "caregiver_reviewed"
+
+
+def test_appointment_preparation_change_window_uses_actual_completion_time(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    scheduled_at = datetime.now(timezone.utc) - timedelta(days=30)
+    completed_at = datetime.now(timezone.utc) - timedelta(days=4)
+    with TestSessionLocal() as db:
+        db.add(Appointment(
+            person_id=owner["person"]["id"],
+            created_by_caregiver_id=owner["caregiver"]["id"],
+            title="Previously completed clinic visit",
+            scheduled_at=scheduled_at,
+            completed_at=completed_at,
+            status="completed",
+        ))
+        db.commit()
+
+    brief = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers=headers,
+    )
+    assert brief.status_code == 200, brief.text
+    window = brief.json()["change_window"]
+    assert window["basis"] == "since_previous_recorded_appointment"
+    actual_anchor = datetime.fromisoformat(window["starts_at"])
+    assert actual_anchor.replace(tzinfo=None) == completed_at.replace(tzinfo=None)
