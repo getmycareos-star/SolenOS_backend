@@ -1797,8 +1797,10 @@ def test_medication_authoring_and_review_are_person_scoped():
             headers=foreign_headers,
             json={},
         )
-        # Authorization precedes resource lookup, preventing a cross-record ID oracle.
-        assert foreign_review.status_code == 403
+        # The lookup is constrained to the authenticated person's scope.
+        # A foreign record must be indistinguishable from a missing record.
+        assert foreign_review.status_code == 404
+        assert "Private medicine" not in foreign_review.text
         # The foreign caregiver is authorized only for their own record. Their
         # medication projection must remain empty; the owner's subject ID must
         # not cross the session boundary.
