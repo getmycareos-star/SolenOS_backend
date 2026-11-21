@@ -85,7 +85,7 @@ def test_feedback_persists_across_new_login_is_scoped_redacted_and_atomic(monkey
     saved = client.post(
         "/api/v1/feedback",
         headers=fresh_headers,
-        params={
+        json={
             "person_id": person_id,
             "caregiver_id": caregiver_id,
             "category": "help_improve",
@@ -132,7 +132,7 @@ def test_feedback_persists_across_new_login_is_scoped_redacted_and_atomic(monkey
     cross_person = client.post(
         "/api/v1/feedback",
         headers={"Authorization": f"Bearer {other['access_token']}"},
-        params={
+        json={
             "person_id": person_id,
             "caregiver_id": caregiver_id,
             "category": "help_improve",
@@ -151,7 +151,7 @@ def test_feedback_persists_across_new_login_is_scoped_redacted_and_atomic(monkey
     failed = client.post(
         "/api/v1/feedback",
         headers=fresh_headers,
-        params={
+        json={
             "person_id": person_id,
             "caregiver_id": caregiver_id,
             "category": "forced_failure",
