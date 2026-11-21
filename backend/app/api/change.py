@@ -467,7 +467,7 @@ def transition_change_confirmation(
         "confirmed": {"awaiting_confirmation", "resolved"},
         "resolved": {"awaiting_confirmation"},
         "rejected": {"awaiting_confirmation"},
-        "inconclusive": {"awaiting_confirmation"},
+        # A caregiver may later dispute an inconclusive interpretation.\n        # Preserve the transition history rather than forcing an artificial\n        # return to awaiting_confirmation before recording that disagreement.\n        "inconclusive": {"awaiting_confirmation", "rejected"},
     }
     if payload.status not in transitions.get(previous_status, set()):
         raise HTTPException(
