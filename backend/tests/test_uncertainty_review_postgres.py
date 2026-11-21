@@ -6,12 +6,6 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-pytestmark = pytest.mark.skipif(
-    not DATABASE_URL or not DATABASE_URL.startswith("postgresql"),
-    reason="requires migrated PostgreSQL DATABASE_URL",
-)
-
 from app.core.database import SessionLocal
 from app.main import app
 from app.models.care import Evidence
@@ -21,6 +15,12 @@ from app.models.care_continuity import (
     EvidenceClaimDependency,
 )
 from app.models.uncertainty import OpenQuestionReviewEvent
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+pytestmark = pytest.mark.skipif(
+    not DATABASE_URL or not DATABASE_URL.startswith("postgresql"),
+    reason="requires migrated PostgreSQL DATABASE_URL",
+)
 
 
 @pytest.mark.session_security
