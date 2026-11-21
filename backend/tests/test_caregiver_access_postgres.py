@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -28,6 +28,24 @@ from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurren
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
+
+
+def _redact_test_audit_events(db, person_id: str) -> None:
+    """Use the approved privacy-erasure path; audit history is never deleted by test cleanup."""
+    db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
+    db.execute(
+        text("""
+            UPDATE audit_log_events
+            SET actor_id = NULL,
+                subject_id = NULL,
+                person_id = NULL,
+                caregiver_id = NULL,
+                target_id = NULL,
+                metadata = json_build_object('redacted_for_privacy_erasure', true)
+            WHERE person_id = :person_id
+        """),
+        {"person_id": person_id},
+    )
 
 
 def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_existing_session():
@@ -315,7 +333,9 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
                 if foreign_person_id:
                     db.query(AnonymousSession).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
                     db.query(Caregiver).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
-                    db.query(Person).filter_by(id=foreign_person_id).delete(synchronize_session=False)
+                    # Keep the synthetic foreign person's append-only care-state history.
+                    # Deleting the parent would violate the history FK and would
+                    # undermine the immutability guarantee this test exercises.
                 if person_id:
                     db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
@@ -347,7 +367,7 @@ def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution
             account = client.post(
                 "/api/v1/accounts",
                 headers=primary_headers,
-                json={"email": invite_email, "password": "concurrent-primary-password-456"},
+                json={"email": f"primary-{suffix}@example.test", "password": "concurrent-primary-password-456"},
             )
             assert account.status_code == 201, account.text
             invitation = client.post(
@@ -427,7 +447,7 @@ def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution
             with Session() as db:
                 db.query(CareDeltaRun).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(AuditLogEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
+                _redact_test_audit_events(db, person_id)
                 db.query(EvidenceObservation).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(EvidenceSourceRelationship).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Evidence).filter_by(person_id=person_id).delete(synchronize_session=False)
@@ -461,7 +481,7 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
             account = client.post(
                 "/api/v1/accounts",
                 headers=primary_headers,
-                json={"email": invite_email, "password": "responsibility-primary-password-456"},
+                json={"email": f"primary-{suffix}@example.test", "password": "responsibility-primary-password-456"},
             )
             assert account.status_code == 201, account.text
             invitation = client.post(
@@ -591,7 +611,7 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
                 db.query(OpenLoopOccurrence).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(OpenLoopEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(OpenLoopRecord).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(AuditLogEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
+                _redact_test_audit_events(db, person_id)
                 db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
