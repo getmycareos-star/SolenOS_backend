@@ -1478,7 +1478,7 @@ def test_situation_reassessment_backfills_older_structured_daily_capture_details
             extraction_method="structured_daily_capture",
         ).all()
         assert {item.attribute for item in details} == {
-            "caregiver_note", "mood", "blood_pressure_systolic",
+            "caregiver_note", "mood", "blood_pressure_systolic", "reported_weight_change",
         }
         assert all(item.epistemic_status == "reported" for item in details)
         assert all(source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
@@ -1491,7 +1491,7 @@ def test_situation_reassessment_backfills_older_structured_daily_capture_details
             person_id=person_id,
             evidence_id=evidence_id,
             extraction_method="structured_daily_capture",
-        ).count() == 3
+        ).count() == 4
         db.close()
     finally:
         teardown_db()
