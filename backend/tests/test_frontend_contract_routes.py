@@ -245,8 +245,6 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert uploaded.json()["duplicate_detected"] is False
         assert uploaded.json()["source_integrity"]["binary_sha256_computed_at_ingest"] is True
         assert uploaded.json()["source_integrity"]["original_binary_persisted"] is True
-        assert uploaded.json()["scan_processing"]["client_declared_review_status"] == "not_provided"
-        assert uploaded.json()["scan_processing"]["client_submitted_scan_review_status"] == "caregiver_reviewed"
 
         duplicate_upload = client.post(
             "/api/v1/upload",
@@ -271,6 +269,10 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         ]
         assert len(listed_uploads) == 2
         assert all(isinstance(item.get("extra_metadata"), dict) for item in listed_uploads)
+        saved_original = next(item for item in listed_uploads if item["id"] == evidence_id)
+        scan_processing = saved_original["extra_metadata"]["scan_processing"]
+        assert scan_processing["client_declared_review_status"] == "not_provided"
+        assert scan_processing["client_submitted_scan_review_status"] == "caregiver_reviewed"
         assert any(item["extra_metadata"].get("duplicate_detected") is True for item in listed_uploads)
         assert all(
             item["extra_metadata"]["source_integrity"]["original_binary_available"] is True
