@@ -593,6 +593,53 @@ def main():
         require(status in {200, 201} and source_record.get("id"),
                 f"PostgreSQL source evidence creation failed: {status}: {source_record}")
         professional_source_id = source_record["id"]
+        # Evidence-review idempotency must hold on real PostgreSQL, including
+        # an independent history read and a changed-payload key conflict.
+        evidence_review_payload = {
+            "review_type": "reliability",
+            "outcome": "unverified",
+            "rationale": "Synthetic CI source is preserved; independent confirmation is not asserted.",
+            "policy_version": "evidence-review-v1",
+            "request_key": "postgres-evidence-review-retry-001",
+            "criteria": [
+                {"criterion": "source attribution", "result": "present", "rationale": "The fixture has an explicit caregiver author."},
+                {"criterion": "independent corroboration", "result": "none_linked", "rationale": "No independent source is linked in this fixture."},
+                {"criterion": "temporal context", "result": "specified", "rationale": "The source record has a persisted recorded time."},
+                {"criterion": "evidence freshness", "result": "undetermined", "rationale": "No freshness policy is applied in this fixture."},
+                {"criterion": "record completeness", "result": "partial", "rationale": "The synthetic source is intentionally minimal."},
+            ],
+        }
+        status, evidence_review_first = request(
+            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
+            token=token_a, body=evidence_review_payload,
+        )
+        require(status == 201 and evidence_review_first.get("id")
+                and evidence_review_first.get("idempotent_replay") is False,
+                f"PostgreSQL evidence review create failed: {status}: {evidence_review_first}")
+        evidence_review_id = evidence_review_first["id"]
+        status, evidence_review_retry = request(
+            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
+            token=token_a, body=evidence_review_payload,
+        )
+        require(status == 201 and evidence_review_retry.get("id") == evidence_review_id
+                and evidence_review_retry.get("idempotent_replay") is True,
+                f"PostgreSQL exact evidence-review retry created a duplicate: {status}: {evidence_review_retry}")
+        changed_review_payload = {
+            **evidence_review_payload,
+            "rationale": "Changed rationale must not reuse the original PostgreSQL retry key.",
+        }
+        status, changed_review = request(
+            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
+            token=token_a, body=changed_review_payload,
+        )
+        require(status == 409,
+                f"PostgreSQL evidence-review key reuse with changed content must conflict: {status}: {changed_review}")
+        status, evidence_review_history = request(
+            "GET", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
+            token=token_a,
+        )
+        require(status == 200 and [item.get("id") for item in evidence_review_history] == [evidence_review_id],
+                f"PostgreSQL evidence-review history must contain exactly one persisted row: {status}: {evidence_review_history}")
         status, professional_loop = request(
             "POST", "/api/v1/open-loops", token=token_a, body={
                 "loop_type": "professional_input",
