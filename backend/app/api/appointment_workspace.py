@@ -1150,7 +1150,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "returned_count": len(appointment_items),
             "has_more": appointments_has_more,
             "retrieval_complete": not appointments_has_more,
-            "record_limit": 15,
+            "record_limit": 30,
         },
         "open_loops": {
             "returned_count": len(open_loops),
