@@ -155,7 +155,7 @@ def test_care_recipient_profile_persists_and_isolated_by_bearer_session():
         assert set(audit.record_metadata["changed_fields"]) == {"recipient_name", "caregiver_relationship", "condition"}
 
         second_person = db.query(Person).filter_by(id=second["person"]["id"]).one()
-        assert second_person.name == "Attempted cross-record overwrite"
+        assert second_person.name == "Separate recipient"
     finally:
         db.close()
 
