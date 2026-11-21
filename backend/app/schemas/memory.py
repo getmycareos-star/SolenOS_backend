@@ -3,6 +3,14 @@ from datetime import datetime
 from typing import Optional, List, Any, Dict
 
 
+class CaregiverFeedbackCreate(BaseModel):
+    """Authenticated caregiver feedback; detail is sent in the POST body, not the URL."""
+    person_id: str = Field(min_length=1, max_length=160)
+    caregiver_id: str = Field(min_length=1, max_length=160)
+    category: str = Field(min_length=1, max_length=80)
+    detail: str = Field(min_length=1, max_length=12000)
+
+
 class ReasoningMemoryBase(BaseModel):
     person_id: str
     memory_type: str
