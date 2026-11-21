@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.models.action import Action, ActionLifecycleAudit
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence
+from app.models.care_continuity import CareActionOutcome
 from app.models.reminder import CareReminder
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.privacy_delivery import AuditLogEvent
@@ -481,6 +482,19 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
             linked_reminder.due_at = payload.deferred_until.astimezone(timezone.utc)
     _audit(db, action, caregiver_id, old_status, payload.status,
            payload.completion_outcome.strip() if payload.status == "completed" else (payload.reason.strip() if payload.reason else None))
+    if payload.status == "completed":
+        # Keep the action transition, append-only audit and canonical LCR outcome
+        # in one transaction. The outcome is a caregiver report, not proof of
+        # clinical improvement or independent verification.
+        db.add(CareActionOutcome(
+            person_id=person_id,
+            action_id=action.id,
+            action_type=action.action_type,
+            outcome_status="completed",
+            notes=payload.completion_outcome.strip(),
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        ))
     try:
         # Keep action state, its source-grounded question lifecycle transition,
         # and audit history in one transaction. This also recovers/reassesses
