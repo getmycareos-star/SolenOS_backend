@@ -149,5 +149,6 @@ def test_notification_preferences_and_read_receipts_survive_new_session_and_enfo
         app.dependency_overrides.clear()
         if Session is not None and created_ids:
             with Session() as db:
+                db.query(NotificationReadReceipt).filter(NotificationReadReceipt.notification_id.in_(created_ids)).delete(synchronize_session=False)
                 db.query(CareNotification).filter(CareNotification.id.in_(created_ids)).delete(synchronize_session=False)
                 db.commit()
