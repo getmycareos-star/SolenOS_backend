@@ -7,7 +7,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -51,6 +51,16 @@ def _valid_vapid_settings(secret_key: str):
 
 
 def test_web_push_failure_retry_and_provider_acceptance_are_durable_and_idempotent(monkeypatch):
+    notification_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("notification_delivery_attempts")
+    }
+    notification_id_length = getattr(notification_columns["notification_id"]["type"], "length", None)
+    assert notification_id_length is None or notification_id_length >= 255, (
+        "notification_delivery_attempts.notification_id must preserve opaque "
+        "notification identifiers up to the 255-character model contract"
+    )
+
     settings = _valid_vapid_settings("postgres-delivery-test-secret")
     monkeypatch.setattr(push_api, "get_settings", lambda: settings)
     monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
