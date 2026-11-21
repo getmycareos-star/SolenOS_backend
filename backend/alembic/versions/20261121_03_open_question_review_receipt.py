@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261121_03_open_question_review_receipt"
-down_revision = "20261121_02_evidence_review_idempotency"
+down_revision = "20261121_02_evidence_review_idem"
 branch_labels = None
 depends_on = None
 
@@ -30,6 +30,20 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Review receipts are part of the append-only clarification decision record.
-    # Dropping them would destroy evidence of the reconciliation performed.
-    raise RuntimeError("Refusing to drop persisted clarification reconciliation receipts.")
+    # Preserve any durable reconciliation receipts. If none have been written,
+    # the nullable column may be removed safely; if receipts exist, leave the
+    # column in place rather than destroy append-only decision evidence.
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    table = "open_question_review_events"
+    if not inspector.has_table(table):
+        return
+    columns = {column["name"] for column in inspector.get_columns(table)}
+    if "care_continuity_execution" not in columns:
+        return
+    receipt_count = bind.execute(
+        sa.text(f"SELECT COUNT(*) FROM {table} WHERE care_continuity_execution IS NOT NULL")
+    ).scalar_one()
+    if receipt_count:
+        return
+    op.drop_column(table, "care_continuity_execution")
