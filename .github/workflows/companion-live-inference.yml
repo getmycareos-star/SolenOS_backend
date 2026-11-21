@@ -58,7 +58,7 @@ concurrency:
 jobs:
   live-qwen-evaluation:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     services:
       postgres:
         image: postgres:17
