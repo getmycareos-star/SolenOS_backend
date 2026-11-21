@@ -2402,7 +2402,7 @@ def test_situation_assessment_uses_linked_significance_and_person_scoped_follow_
         assert response.status_code == 200, response.text
         care_attention = response.json()["assessment"]["care_attention"]
         item = next(
-            item for item in care_attention["important_to_address"]
+            item for item in care_attention["needs_clarification"]
             if item["record_id"] == change_id
         )
         assert item["significance_assessment_id"] == assessment_id
