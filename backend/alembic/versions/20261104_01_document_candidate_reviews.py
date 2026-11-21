@@ -1,13 +1,13 @@
 """Create immutable document candidate review decisions.
 
 Revision ID: 20261104_01_doc_review
-Revises: 20261102_02_workflow_integrity_merge
+Revises: 20261102_02_wf_integrity_merge
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "20261104_01_doc_review"
-down_revision = "20261102_02_workflow_integrity_merge"
+down_revision = "20261102_02_wf_integrity_merge"
 branch_labels = None
 depends_on = None
 
