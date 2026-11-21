@@ -31,6 +31,7 @@ def test_notification_preferences_read_receipts_and_push_subscriptions_survive_n
     suffix = uuid.uuid4().hex[:12]
     client = TestClient(app)
     created_ids = []
+    subscription_ids = []
 
     def override_db():
         db = Session()
@@ -121,6 +122,7 @@ def test_notification_preferences_read_receipts_and_push_subscriptions_survive_n
                 caregiver_id=first_session["caregiver"]["id"],
             ).one()
             subscription_id = subscription.id
+            subscription_ids.append(subscription_id)
             assert subscription.revoked_at is None
             assert subscription.last_seen_at is not None
             assert push_payload["endpoint"] not in subscription.encrypted_subscription
@@ -216,4 +218,6 @@ def test_notification_preferences_read_receipts_and_push_subscriptions_survive_n
             with Session() as db:
                 db.query(NotificationReadReceipt).filter(NotificationReadReceipt.notification_id.in_(created_ids)).delete(synchronize_session=False)
                 db.query(CareNotification).filter(CareNotification.id.in_(created_ids)).delete(synchronize_session=False)
+                if subscription_ids:
+                    db.query(CarePushSubscription).filter(CarePushSubscription.id.in_(subscription_ids)).delete(synchronize_session=False)
                 db.commit()
