@@ -3175,10 +3175,18 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         })
         assert missing_review_window.status_code == 422, missing_review_window.text
 
+        # Reuse an already-recorded review interval on the source claim. The
+        # caregiver should not have to re-enter it when accepting the answer.
+        db = TestingSessionLocal()
+        try:
+            source_claim = db.query(CareAssertion).filter_by(id="review-source-claim-1").one()
+            source_claim.review_after_days = 30
+            db.commit()
+        finally:
+            db.close()
+
         accepted = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
             "decision": "accepted",
-            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
-            "review_after_days": 30,
         })
         assert accepted.status_code == 200, accepted.text
         review = accepted.json()
@@ -3187,10 +3195,9 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         assert review["resulting_claim_id"]
         assert review["claim_assessment_id"]
 
+        assert review["rationale"] == "Accepted as a caregiver-reported account after review; not independently verified."
         repeated = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
             "decision": "accepted",
-            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
-            "review_after_days": 30,
         })
         assert repeated.status_code == 200
         assert repeated.json()["id"] == review["id"]
