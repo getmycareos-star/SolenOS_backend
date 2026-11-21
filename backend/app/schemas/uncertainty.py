@@ -104,7 +104,7 @@ class OpenQuestion(OpenQuestionBase):
 
 class OpenQuestionReviewCreate(BaseModel):
     decision: Literal["accepted", "rejected", "needs_clarification"]
-    rationale: str = Field(..., min_length=3, max_length=4000)
+    rationale: Optional[str] = Field(default=None, max_length=4000)
     review_after_days: Optional[int] = Field(default=None, ge=1, le=3650)
 
 
