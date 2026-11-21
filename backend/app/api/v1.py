@@ -2179,8 +2179,9 @@ def record_feedback(
             caregiver_id=session.caregiver_id,
         )
         db.add(event)
-        db.commit()
+        db.flush()
         db.refresh(event)
+        db.commit()
         return event
     except Exception as exc:
         db.rollback()
