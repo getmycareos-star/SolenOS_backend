@@ -3194,6 +3194,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         assert review["reviewer_caregiver_id"] == "review-caregiver-1"
         assert review["resulting_claim_id"]
         assert review["claim_assessment_id"]
+        assert review["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
 
         assert review["rationale"] == "Accepted as a caregiver-reported account after review; not independently verified."
         repeated = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
@@ -3205,6 +3206,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         history = client.get(f"/api/v1/uncertainty/questions/{question_id}/review-history")
         assert history.status_code == 200
         assert len(history.json()) == 1
+        assert history.json()[0]["care_continuity_execution"] == review["care_continuity_execution"]
         assert other_client.get(f"/api/v1/uncertainty/questions/{question_id}/review-history").status_code == 404
 
         # The accepted clarification must be retrievable through the existing
@@ -3243,6 +3245,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
             assert dependency.created_by_caregiver_id == "review-caregiver-1"
 
             review_event = db.query(OpenQuestionReviewEvent).filter(OpenQuestionReviewEvent.id == review["id"]).one()
+            assert review_event.care_continuity_execution["stages"]["reconciliation"] == "committed"
             with pytest.raises(ValueError, match="append-only"):
                 review_event.rationale = "Attempted review history rewrite"
                 db.commit()
