@@ -5,6 +5,7 @@ SQLite, mocked database session, or external push-provider call is involved.
 """
 import os
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,14 +20,14 @@ pytestmark = pytest.mark.skipif(
 
 from app.core.database import get_db
 from app.main import app
-from app.models.notifications import CareNotification
+from app.models.notifications import CareNotification, CarePushSubscription
 from app.models.privacy_delivery import NotificationReadReceipt
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
 
 
-def test_notification_preferences_and_read_receipts_survive_new_session_and_enforce_scope():
+def test_notification_preferences_read_receipts_and_push_subscriptions_survive_new_session_and_enforce_scope(monkeypatch):
     suffix = uuid.uuid4().hex[:12]
     client = TestClient(app)
     created_ids = []
@@ -93,6 +94,51 @@ def test_notification_preferences_and_read_receipts_survive_new_session_and_enfo
         assert restored.json()["timezone_name"] == "Africa/Lagos"
         assert restored.json()["reminders_enabled"] is False
 
+        # Exercise durable encrypted subscription ownership without calling an
+        # external push provider. The provider is deliberately not part of this
+        # database persistence test.
+        import app.api.push_notifications as push_api
+        monkeypatch.setattr(push_api, "vapid_configuration_error", lambda _settings: None)
+        monkeypatch.setattr(
+            push_api,
+            "get_settings",
+            lambda: SimpleNamespace(secret_key=f"postgres-push-test-secret-{suffix}"),
+        )
+        push_payload = {
+            "endpoint": f"https://fcm.googleapis.com/fcm/send/solenos-test-{suffix}",
+            "keys": {"p256dh": f"p256dh-{suffix}", "auth": f"auth-{suffix}"},
+        }
+        registered = client.post(
+            "/api/v1/notifications/push/subscriptions",
+            headers=restored_headers,
+            json=push_payload,
+        )
+        assert registered.status_code == 201, registered.text
+        assert registered.json()["registered"] is True
+        with Session() as db:
+            subscription = db.query(CarePushSubscription).filter_by(
+                person_id=first_session["person"]["id"],
+                caregiver_id=first_session["caregiver"]["id"],
+            ).one()
+            subscription_id = subscription.id
+            assert subscription.revoked_at is None
+            assert subscription.last_seen_at is not None
+            assert push_payload["endpoint"] not in subscription.encrypted_subscription
+            assert push_payload["keys"]["p256dh"] not in subscription.encrypted_subscription
+            assert push_payload["keys"]["auth"] not in subscription.encrypted_subscription
+
+        # Replaying the same endpoint under a new session updates one row.
+        replayed = client.post(
+            "/api/v1/notifications/push/subscriptions",
+            headers=restored_headers,
+            json=push_payload,
+        )
+        assert replayed.status_code == 201, replayed.text
+        with Session() as db:
+            assert db.query(CarePushSubscription).filter_by(
+                endpoint_hash=push_api._endpoint_hash(push_payload["endpoint"])
+            ).count() == 1
+
         notification = CareNotification(
             person_id=first_session["person"]["id"],
             caregiver_id=first_session["caregiver"]["id"],
@@ -145,6 +191,25 @@ def test_notification_preferences_and_read_receipts_survive_new_session_and_enfo
             json={},
         )
         assert denied.status_code == 404, denied.text
+
+        foreign_subscription = client.post(
+            "/api/v1/notifications/push/subscriptions",
+            headers=second_headers,
+            json=push_payload,
+        )
+        assert foreign_subscription.status_code == 409, foreign_subscription.text
+
+        revoked = client.request(
+            "DELETE",
+            "/api/v1/notifications/push/subscriptions",
+            headers=restored_headers,
+            json={"endpoint": push_payload["endpoint"]},
+        )
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json()["revoked"] is True
+        with Session() as db:
+            subscription = db.query(CarePushSubscription).filter_by(id=subscription_id).one()
+            assert subscription.revoked_at is not None
     finally:
         app.dependency_overrides.clear()
         if Session is not None and created_ids:
