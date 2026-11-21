@@ -239,7 +239,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
                 "observation": "loosing weight",
                 "source_quote": json.dumps("she's loosing weight", ensure_ascii=False),
             }]},
-            reported_at=evidence.reported_at or evidence.uploaded_at,
+            reported_at=evidence.reported_at or evidence.uploaded_at or evidence.ingested_at,
         )
         assert duplicate_projection == 0
         assert db.query(EvidenceObservation).filter_by(
