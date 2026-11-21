@@ -197,13 +197,26 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
 def revoke_anonymous_session(request: Request, db: Session = Depends(get_db)):
     """Revoke the current bearer capability without deleting its care record."""
     session_id = getattr(request.state, "anonymous_session_id", None)
-    if not session_id:
-        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
-    session = (
-        db.query(AnonymousSession)
-        .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
-        .first()
-    )
+    if session_id:
+        session = (
+            db.query(AnonymousSession)
+            .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
+            .first()
+        )
+    else:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+        token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+        session = (
+            db.query(AnonymousSession)
+            .filter(
+                AnonymousSession.token_hash == token_hash,
+                AnonymousSession.revoked_at.is_(None),
+            )
+            .first()
+        )
     if not session:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid")
     revoked_at = datetime.now(timezone.utc)
