@@ -23,6 +23,7 @@ from app.models.care_continuity import (
 from app.models.uncertainty import OpenQuestionReviewEvent
 
 
+@pytest.mark.session_security
 def test_accepted_clarification_review_persists_immutable_receipt_on_postgres():
     suffix = uuid.uuid4().hex
     person_id = None
