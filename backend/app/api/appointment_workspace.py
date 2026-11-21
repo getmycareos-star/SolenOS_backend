@@ -492,7 +492,13 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         Appointment.scheduled_at.is_not(None),
         Appointment.scheduled_at <= now,
     ).order_by(Appointment.scheduled_at.desc()).first()
-    change_window_start = previous_appointment_row.scheduled_at if previous_appointment_row else cutoff
+    # Compare from the actual recorded completion time when available.
+    # A scheduled date is only a fallback; it is not proof the visit happened
+    # at that time.
+    change_window_start = (
+        (previous_appointment_row.completed_at or previous_appointment_row.scheduled_at)
+        if previous_appointment_row else cutoff
+    )
     change_window_basis = "since_previous_recorded_appointment" if previous_appointment_row else "bounded_recent_fallback"
     fetched_events = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
