@@ -168,10 +168,16 @@ class ContradictionResolutionEvent(Base):
 
 @event.listens_for(Session, "before_flush")
 def prevent_question_answer_history_mutation(session, flush_context, instances):
-    if any(
-        isinstance(item, (OpenQuestionAnswerEvent, OpenQuestionReviewEvent))
-        for item in list(session.dirty) + list(session.deleted)
-    ):
+    # A newly-created review event may receive its same-transaction execution
+    # receipt after session.add(). SQLAlchemy can then include that pending row
+    # in session.dirty. Append-only applies to rows already committed, not to
+    # construction of a new immutable event before its first INSERT.
+    mutable_persisted = [
+        item for item in list(session.dirty) + list(session.deleted)
+        if item not in session.new
+        and isinstance(item, (OpenQuestionAnswerEvent, OpenQuestionReviewEvent))
+    ]
+    if mutable_persisted:
         raise ValueError("Question answer and review history is append-only and cannot be updated or deleted")
 
 
