@@ -2250,6 +2250,12 @@ def main():
             duplicate_status == 200 and downloaded_duplicate == duplicate_blob,
             f"Duplicate binary evidence must remain separately persisted and accessible after restart: status={duplicate_status}, body={downloaded_duplicate!r}",
         )
+        status, evidence_review_history_after_restart = request(
+            "GET", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
+            token=token_a,
+        )
+        require(status == 200 and [item.get("id") for item in evidence_review_history_after_restart] == [evidence_review_id],
+                f"Evidence-review history did not survive application restart: {status}: {evidence_review_history_after_restart}")
 
         status, hydration_after_restart = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration after application restart expected 200, got {status}: {hydration_after_restart}")
