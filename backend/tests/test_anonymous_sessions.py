@@ -656,15 +656,15 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
         "detail": "Deliberately submitted feedback for the opt-in route. Contact caregiver@example.com on 2026-05-31."
     }
 
-    no_session = client.post("/api/v1/feedback", params=query)
+    no_session = client.post("/api/v1/feedback", json=query)
     assert no_session.status_code == 401, no_session.text
 
     headers = {"Authorization": f"Bearer {created['access_token']}"}
-    opt_out = client.post("/api/v1/feedback", params=query, headers=headers)
+    opt_out = client.post("/api/v1/feedback", json=query, headers=headers)
     assert opt_out.status_code == 403, opt_out.text
 
     _accept_required_privacy_terms(client, created, improvement=False)
-    still_opted_out = client.post("/api/v1/feedback", params=query, headers=headers)
+    still_opted_out = client.post("/api/v1/feedback", json=query, headers=headers)
     assert still_opted_out.status_code == 403, still_opted_out.text
 
     enabled = client.post(
@@ -679,7 +679,7 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     )
     assert enabled.status_code == 200, enabled.text
 
-    recorded = client.post("/api/v1/feedback", params=query, headers=headers)
+    recorded = client.post("/api/v1/feedback", json=query, headers=headers)
     assert recorded.status_code == 200, recorded.text
     assert recorded.json()["event_type"] == "feedback"
     assert recorded.json()["source_type"] == "feedback"
