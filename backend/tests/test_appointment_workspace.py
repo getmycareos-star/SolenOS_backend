@@ -1434,7 +1434,7 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
     assert len(body["appointment_needs"]) == 1
     need = body["appointment_needs"][0]
     assert need["source_id"] == "appointment-need-question"
-    assert need["question"] == question.question
+    assert need["question"] == question_text
     assert need["priority"] == "high"
     assert "not mean a visit has been booked or confirmed" in need["interpretation_limit"]
 
