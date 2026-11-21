@@ -120,6 +120,7 @@ class ActionStatusChange(BaseModel):
     status: Literal["in_progress", "completed", "cancelled", "deferred", "needs_clarification", "approved"]
     expected_version: int = Field(ge=1)
     explicit_completion_confirmation: bool = False
+    completion_outcome: Optional[str] = Field(default=None, min_length=3, max_length=2000)
     reason: Optional[str] = Field(default=None, max_length=2000)
     deferred_until: Optional[datetime] = None
 
@@ -441,6 +442,10 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
         raise HTTPException(status_code=409, detail=f"Transition from {old_status} to {payload.status} is not allowed")
     if payload.status == "completed" and not payload.explicit_completion_confirmation:
         raise HTTPException(status_code=422, detail="Explicit caregiver completion confirmation is required")
+    if payload.status == "completed" and not (payload.completion_outcome and payload.completion_outcome.strip()):
+        raise HTTPException(status_code=422, detail="Record what happened before completing this follow-up")
+    if payload.status != "completed" and payload.completion_outcome is not None:
+        raise HTTPException(status_code=422, detail="completion_outcome is only valid when completing an action")
     if payload.status in {"cancelled", "deferred", "needs_clarification"} and not (payload.reason and payload.reason.strip()):
         raise HTTPException(status_code=422, detail="A reason is required for this status change")
     if payload.deferred_until is not None and payload.status != "deferred":
@@ -475,9 +480,7 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
         elif payload.status == "deferred":
             linked_reminder.due_at = payload.deferred_until.astimezone(timezone.utc)
     _audit(db, action, caregiver_id, old_status, payload.status,
-           payload.reason.strip() if payload.reason else (
-               "Caregiver explicitly confirmed completion" if payload.status == "completed" else None
-           ))
+           payload.completion_outcome.strip() if payload.status == "completed" else (payload.reason.strip() if payload.reason else None))
     try:
         # Keep action state, its source-grounded question lifecycle transition,
         # and audit history in one transaction. This also recovers/reassesses
