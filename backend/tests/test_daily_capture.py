@@ -322,7 +322,7 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
         monkeypatch.setattr(
             care_continuity_api,
             "build_lcr_context",
-            lambda session, person_id, limit_per_source: {
+            lambda session, person_id, limit_per_source, only_sources=None: {
                 "person_id": person_id,
                 "as_of": "2026-11-03T09:01:00+00:00",
                 "history_coverage": "bounded_subset",
@@ -953,7 +953,7 @@ def test_quick_daily_checkin_is_visible_as_caregiver_report_in_lcr_projection(mo
         monkeypatch.setattr(
             care_continuity_api,
             "build_lcr_context",
-            lambda session, person_id, limit_per_source: {
+            lambda session, person_id, limit_per_source, only_sources=None: {
                 "person_id": person_id,
                 "as_of": report_time,
                 "history_coverage": "bounded_subset",
