@@ -17,7 +17,8 @@ from sqlalchemy.orm import sessionmaker
 DATABASE_URL = os.getenv("DATABASE_URL")
 DATABASE_NAME = urlparse(DATABASE_URL).path.rsplit("/", 1)[-1].lower() if DATABASE_URL else ""
 pytestmark = pytest.mark.skipif(
-    not DATABASE_URL or "test" not in DATABASE_NAME,
+    not DATABASE_URL
+    or not any(token in DATABASE_NAME for token in ("test", "benchmark")),
     reason="requires a disposable migrated PostgreSQL test database",
 )
 
