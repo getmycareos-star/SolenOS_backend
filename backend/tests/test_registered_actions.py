@@ -260,7 +260,7 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
         outcome_db.close()
 
     projected_outcomes = client.get(
-        f"/api/v1/outcomes/{session['person']['id']}",
+        f"/api/v1/care-continuity/outcomes/{session['person']['id']}",
         headers=headers(session),
     )
     assert projected_outcomes.status_code == 200, projected_outcomes.text
@@ -270,7 +270,7 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
         and row.get("notes") == "Caregiver recorded that the clinic visit took place and documented the next steps."
         for row in projected_outcomes.json()
     )
-    current_care = client.get("/api/v1/current-care", headers=headers(session))
+    current_care = client.get("/api/v1/care-continuity/current-care", headers=headers(session))
     assert current_care.status_code == 200, current_care.text
     projected = next(
         row for row in current_care.json()["items"]
