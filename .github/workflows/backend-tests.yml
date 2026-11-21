@@ -348,6 +348,9 @@ jobs:
       - name: Verify care profile persistence across a new account session and record isolation on PostgreSQL
         run: python -m pytest backend/tests/test_care_profile_postgres.py -q -vv
 
+      - name: Verify notification preferences and read receipts across sessions on PostgreSQL
+        run: python -m pytest backend/tests/test_notifications_postgres.py -q -vv
+
       - name: Verify decision and outcome continuity against PostgreSQL
         run: python -m pytest backend/tests/test_decision_outcome_continuity_postgres.py -q -vv
 
