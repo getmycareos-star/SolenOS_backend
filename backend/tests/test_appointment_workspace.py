@@ -1417,6 +1417,7 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
         context=context,
         created_by_caregiver_id=owner["caregiver"]["id"],
     )
+    question_text = question.question
     db = TestSessionLocal()
     try:
         db.add(evidence)
