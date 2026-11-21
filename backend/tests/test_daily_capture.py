@@ -3621,15 +3621,23 @@ def test_structured_capture_preserves_multiple_details_and_unvalidated_vital_val
             EvidenceObservation.evidence_id == evidence.id,
         ).all()
 
-        assert created == 3
-        assert retried == 3
-        assert len(rows) == 3
+        assert created == 4
+        assert retried == 4
+        assert len(rows) == 4
         assert {row.attribute for row in rows} == {
-            "caregiver_note", "mood", "blood_pressure_systolic",
+            "caregiver_note", "mood", "blood_pressure_systolic", "reported_weight_change",
         }
         note = next(row for row in rows if row.attribute == "caregiver_note")
         mood = next(row for row in rows if row.attribute == "mood")
         systolic = next(row for row in rows if row.attribute == "blood_pressure_systolic")
+        weight = next(row for row in rows if row.attribute == "reported_weight_change")
+        assert weight.value_text == "she's loosing weight"
+        assert weight.normalized_value == "possible weight loss"
+        assert weight.epistemic_status == "reported"
+        assert "not independently confirmed" in weight.context
+        assert "amount" in weight.ambiguity_note
+        assert "timeframe" in weight.ambiguity_note
+        assert "previous weight measurement" in weight.ambiguity_note
 
         assert note.value_text == "she's loosing weight"
         assert mood.value_text == "5"
