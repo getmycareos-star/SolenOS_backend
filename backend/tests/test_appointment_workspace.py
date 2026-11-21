@@ -2993,6 +2993,9 @@ def test_current_care_projection_exposes_persisted_outcomes_outside_attention_li
               (:action_outcome_id, :owner_id, 'owner-action', 'care_action', 'outcome_attested', 'Family caregiver recorded what happened', NULL, '[]', :caregiver_id, CURRENT_TIMESTAMP)
         """), {"owner_id": owner["person"]["id"], "caregiver_id": owner["caregiver"]["id"], "action_outcome_id": action_outcome_id})
 
+    from app.services.lcr_context import _load_source_schema
+    _load_source_schema.cache_clear()
+
     response = test_client.get(
         "/api/v1/care-continuity/current-care?limit_per_source=1",
         headers={"Authorization": f"Bearer {owner['access_token']}"},
