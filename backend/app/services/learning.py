@@ -229,7 +229,16 @@ class LearningEngine:
             else:
                 self.db.flush()
 
-    def record_feedback(self, person_id: str, category: str, detail: str, caregiver_id: str):
+    def record_feedback(
+        self,
+        person_id: str,
+        category: str,
+        detail: str,
+        caregiver_id: str,
+        *,
+        commit: bool = True,
+    ):
+        """Record scoped caregiver feedback; callers may include it in a larger transaction."""
         memory = ReasoningMemoryModel(
             person_id=person_id,
             memory_type="feedback",
@@ -245,7 +254,11 @@ class LearningEngine:
             source_evidence_ids=[],
         )
         self.db.add(memory)
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
+        return memory
 
     def get_reasoning_summary(self, person_id: str) -> dict[str, Any]:
         memories = (
