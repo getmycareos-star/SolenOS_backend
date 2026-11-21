@@ -341,6 +341,7 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
                     db.query(Caregiver).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
                     db.query(Person).filter_by(id=foreign_person_id).delete(synchronize_session=False)
                 if person_id:
+                    db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
                     db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
         if engine:
@@ -622,6 +623,7 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
                 db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
+                db.query(LearningEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
