@@ -1388,6 +1388,19 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
         lifecycle_status=GapLifecycleStatus.OPEN,
         evidence_ids=[evidence.id],
     )
+    context = [{
+        "source_kind": "information_gap",
+        "source_id": gap.id,
+        "necessity": "necessary",
+        "necessity_rationale": rationale,
+        "decision_dependency": "Transport planning depends on the confirmed appointment date.",
+        "necessity_assessment": {
+            "necessity": "necessary",
+            "necessity_rationale": rationale,
+            "decision_dependency": "Transport planning depends on the confirmed appointment date.",
+            "evidence_ids": [evidence.id],
+        },
+    }]
     question = OpenQuestion(
         id="appointment-need-question",
         person_id=owner["person"]["id"],
