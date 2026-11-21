@@ -270,6 +270,14 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
         and row.get("notes") == "Caregiver recorded that the clinic visit took place and documented the next steps."
         for row in projected_outcomes.json()
     )
+    current_care = client.get("/api/v1/current-care", headers=headers(session))
+    assert current_care.status_code == 200, current_care.text
+    projected = next(
+        row for row in current_care.json()["items"]
+        if row.get("source_collection") == "action_outcomes" and row.get("related_record_id") == action_id
+    )
+    assert projected["epistemic_status"] == "reported"
+    assert projected["source_label"] == "Caregiver report"
 
     history = client.get(
         f"/api/v1/registered-actions/{action_id}/history",
