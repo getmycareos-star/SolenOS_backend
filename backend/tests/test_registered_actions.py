@@ -252,6 +252,7 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
     assert history.status_code == 200, history.text
     events = history.json()
     assert [event["new_status"] for event in events] == ["approved", "in_progress", "completed"]
+    assert events[-1]["reason"] == "Caregiver recorded that the clinic visit took place and documented the next steps."
     assert all(event["actor_caregiver_id"] == session["caregiver"]["id"] for event in events)
 
     from app.models.action import ActionLifecycleAudit
