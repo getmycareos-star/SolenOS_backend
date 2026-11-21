@@ -308,6 +308,13 @@ class EvidenceReviewRecord(Base):
         Index("ix_evidence_review_records_evidence", "evidence_id"),
         Index("ix_evidence_review_records_person", "person_id"),
         Index("ix_evidence_review_records_type", "review_type"),
+        Index(
+            "uq_evidence_review_person_actor_request",
+            "person_id",
+            "reviewed_by_caregiver_id",
+            "request_key",
+            unique=True,
+        ),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -320,6 +327,8 @@ class EvidenceReviewRecord(Base):
     policy_version = Column(String(64), nullable=False)
     source_attribution_snapshot = Column(Text, nullable=False)
     reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    request_key = Column(String(128), nullable=True)
+    request_fingerprint = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
