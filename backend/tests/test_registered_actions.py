@@ -226,7 +226,6 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
             "status": "completed",
             "expected_version": started.json()["version"],
             "explicit_completion_confirmation": True,
-            "completion_outcome": "Caregiver recorded the action outcome and next step.",
         },
     )
     assert missing_outcome.status_code == 422, missing_outcome.text
@@ -360,6 +359,7 @@ def test_reminder_is_created_only_when_explicitly_requested_and_linked_once():
             "status": "completed",
             "expected_version": created.json()["version"],
             "explicit_completion_confirmation": True,
+            "completion_outcome": "Caregiver recorded the action outcome and next step.",
         },
     )
     assert completed.status_code == 200, completed.text
