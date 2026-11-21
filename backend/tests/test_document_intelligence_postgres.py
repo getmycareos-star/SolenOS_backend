@@ -529,6 +529,8 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert uploaded.status_code == 201, uploaded.text
         upload_receipt = uploaded.json()
         evidence_id = upload_receipt["evidence_id"]
+        processing_job_id = upload_receipt["document_processing_job_id"]
+        assert processing_job_id, "document upload must return its durable processing job ID"
         with Session() as db:
             processing_job = db.query(QwenBackgroundJob).filter_by(
                 person_id=person_id,
