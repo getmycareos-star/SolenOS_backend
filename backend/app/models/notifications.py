@@ -97,7 +97,7 @@ class NotificationDeliveryAttempt(Base):
     subject_id = Column(String(255), nullable=True, index=True)
     person_id = Column(String(255), nullable=True, index=True)
     caregiver_id = Column(String(255), nullable=True, index=True)
-    notification_id = Column(String(36), ForeignKey("care_notifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    notification_id = Column(String(255), ForeignKey("care_notifications.id", ondelete="CASCADE"), nullable=False, index=True)
     attempt_number = Column(Integer, nullable=False)
     channel = Column(Text, nullable=False)
     attempted_at = Column(DateTime(timezone=True), nullable=False, index=True)
