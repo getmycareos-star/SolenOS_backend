@@ -259,6 +259,18 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
     finally:
         outcome_db.close()
 
+    projected_outcomes = client.get(
+        f"/api/v1/outcomes/{session['person']['id']}",
+        headers=headers(session),
+    )
+    assert projected_outcomes.status_code == 200, projected_outcomes.text
+    assert any(
+        row.get("action_id") == action_id
+        and row.get("outcome_status") == "completed"
+        and row.get("notes") == "Caregiver recorded that the clinic visit took place and documented the next steps."
+        for row in projected_outcomes.json()
+    )
+
     history = client.get(
         f"/api/v1/registered-actions/{action_id}/history",
         headers=headers(session),
