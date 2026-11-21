@@ -29,7 +29,10 @@ def test_accepted_clarification_review_persists_immutable_receipt_on_postgres():
     with TestClient(app) as client:
         session_response = client.post(
             "/api/v1/sessions/anonymous",
-            json={"caregiver_name": f"Review caregiver {suffix}"},
+            json={
+                "name": f"Review recipient {suffix}",
+                "caregiver_name": f"Review caregiver {suffix}",
+            },
         )
         assert session_response.status_code == 201, session_response.text
         session = session_response.json()
