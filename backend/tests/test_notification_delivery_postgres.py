@@ -82,7 +82,7 @@ def test_web_push_failure_retry_and_provider_acceptance_are_durable_and_idempote
     assert created.status_code == 201, created.text
     session = created.json()
     headers = {"Authorization": f"Bearer {session['access_token']}"}
-    endpoint = f"https://push.example.test/subscription/{uuid.uuid4().hex}"
+    endpoint = f"https://fcm.googleapis.com/fcm/send/{uuid.uuid4().hex}"
     registered = client.post(
         "/api/v1/notifications/push/subscriptions",
         headers=headers,
