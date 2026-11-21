@@ -744,7 +744,7 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     )
     assert disabled.status_code == 200, disabled.text
     assert disabled.json()["profile"]["data_improvement_consent"] is False
-    blocked = client.post("/api/v1/feedback", params=query, headers=headers)
+    blocked = client.post("/api/v1/feedback", json=query, headers=headers)
     assert blocked.status_code == 403, blocked.text
 
     db = TestSessionLocal()
