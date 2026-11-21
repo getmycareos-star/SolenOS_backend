@@ -255,7 +255,7 @@ def normalize_source_grounded_care_detail(
         (
             "A previous weight measurement was mentioned in this report."
             if previous_measurement_recorded
-            else "A previous weight measurement was not included in this report."
+            else "No previous weight measurement was found in this report."
         ),
         "Clinical interpretation has not been established.",
     ]
