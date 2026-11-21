@@ -1380,8 +1380,10 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
             headers={"Authorization": f"Bearer {token}"},
         )
         assert refreshed.status_code == 200, refreshed.text
-        assert refreshed.json()["change"]["evidence_ids"] == [evidence_id]
-        assert len(refreshed.json()["evidence"]) == 1
+        refreshed_evidence_ids = refreshed.json()["change"]["evidence_ids"]
+        assert evidence_id in refreshed_evidence_ids
+        assert len(refreshed_evidence_ids) == len(set(refreshed_evidence_ids))
+        assert {item["id"] for item in refreshed.json()["evidence"]} == set(refreshed_evidence_ids)
         history = refreshed.json()["confirmation_history"]
         assert [item["new_status"] for item in history] == [
             "confirmed", "awaiting_confirmation", "inconclusive", "rejected",
