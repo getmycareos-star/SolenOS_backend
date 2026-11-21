@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.action import Action as ActionModel, ActionStatus
 from app.models.care import Evidence as EvidenceModel, Caregiver as CaregiverModel
+from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.schemas.action import (
     ActionCreate,
     Action as ActionSchema,
@@ -18,7 +21,66 @@ from app.services.action_extraction import ActionExtractionEngine
 from app.services.action_normalization import ActionNormalizationService
 from app.services.action_lifecycle import ActionLifecycleService, ActionIdentityService
 
-router = APIRouter()
+async def _require_action_scope(request: Request, db: Session = Depends(get_db)) -> tuple[str, str]:
+    """Require a live server-issued caregiver session for legacy action routes."""
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS caregiver session is required")
+    digest = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == digest,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Caregiver session is invalid or expired")
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.id == session.caregiver_id,
+        CaregiverModel.person_id == session.person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+    grant = db.query(CaregiverAccessGrant.id).filter(
+        CaregiverAccessGrant.person_id == session.person_id,
+        CaregiverAccessGrant.caregiver_id == session.caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+        CaregiverAccessGrant.access_scope == "full_record",
+    ).first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="Active full care-record access is required")
+
+    params = request.path_params
+    if params.get("person_id") and str(params["person_id"]) != str(session.person_id):
+        raise HTTPException(status_code=404, detail="Action not found")
+    action_id = params.get("action_id")
+    if action_id:
+        action = db.query(ActionModel).filter(ActionModel.id == action_id).first()
+        if action is None or str(action.person_id) != str(session.person_id):
+            raise HTTPException(status_code=404, detail="Action not found")
+    document_id = params.get("document_id")
+    if document_id:
+        evidence = db.query(EvidenceModel).filter(EvidenceModel.id == document_id).first()
+        if evidence is None or str(evidence.person_id) != str(session.person_id):
+            raise HTTPException(status_code=404, detail="Source evidence not found")
+    if request.method == "POST" and request.url.path.rstrip("/").endswith("/actions"):
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid action request") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Invalid action request")
+        if str(payload.get("person_id") or "") != str(session.person_id):
+            raise HTTPException(status_code=404, detail="Action not found")
+        if str(payload.get("created_by_caregiver_id") or "") != str(session.caregiver_id):
+            raise HTTPException(status_code=403, detail="Action creator must match the signed-in caregiver")
+    requested_caregiver = params.get("caregiver_id") or request.query_params.get("caregiver_id")
+    if requested_caregiver and str(requested_caregiver) != str(session.caregiver_id):
+        raise HTTPException(status_code=403, detail="Caregiver identity must match the signed-in session")
+    return str(session.person_id), str(session.caregiver_id)
+
+
+router = APIRouter(dependencies=[Depends(_require_action_scope)])
 
 extraction_engine = ActionExtractionEngine()
 normalization_service = ActionNormalizationService()
