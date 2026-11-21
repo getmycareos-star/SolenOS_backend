@@ -110,15 +110,16 @@ def test_care_recipient_profile_persists_and_isolated_by_bearer_session():
         f"/api/v1/care-profile?person_id={first['person']['id']}",
         headers=second_headers,
     )
-    assert second_read.status_code == 200, second_read.text
-    assert second_read.json()["name"] == "Separate recipient"
+    assert second_read.status_code == 403, second_read.text
     second_write = client.put(
         f"/api/v1/care-profile?person_id={first['person']['id']}",
         headers=second_headers,
         json={"name": "Attempted cross-record overwrite", "relationship": "Other", "condition": None},
     )
-    assert second_write.status_code == 200, second_write.text
-    assert second_write.json()["name"] == "Attempted cross-record overwrite"
+    assert second_write.status_code == 403, second_write.text
+    second_own_read = client.get("/api/v1/care-profile", headers=second_headers)
+    assert second_own_read.status_code == 200, second_own_read.text
+    assert second_own_read.json()["name"] == "Separate recipient"
 
     db = TestSessionLocal()
     try:
