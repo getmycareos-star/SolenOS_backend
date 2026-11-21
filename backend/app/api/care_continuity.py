@@ -2030,7 +2030,7 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
 def current_care_projection(
     request: Request,
     limit_per_source: int = Query(default=10, ge=1, le=50),
-    source: str | None = Query(default=None),
+    source: str | None = None,
     db: Session = Depends(get_db),
 ):
     """Return a bounded caregiver-facing projection from existing scoped LCR sources.
