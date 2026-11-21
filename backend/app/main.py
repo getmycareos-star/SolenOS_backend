@@ -556,6 +556,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/duplicate-actions")
             # These summaries derive the person scope from the authenticated session.
             # The UI intentionally does not send a caller-selected person_id.
+            # Care-profile routes derive their person from the bearer session;
+            # requiring a client-supplied person_id here would block the
+            # session-scoped endpoint before its own authorization checks run.
+            or path == "/api/v1/care-profile"
+            or path == "/api/v1/caregiver-profiles/current"
             or path == "/api/v1/multi-caregiver-summary"
             or path.startswith("/api/v1/multi-caregiver-summary/")
             or path == "/api/v1/care-network-state"
