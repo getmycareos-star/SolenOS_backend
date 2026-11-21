@@ -1829,7 +1829,7 @@ def review_appointment_outcome_proposal(
                     event_time_text=original.get("event_time_text"),
                     evidence_ids=[source_evidence.id],
                     review_after_days=30,
-                    observed_at=_parse_appointment_event_time(original.get("event_time_text")) or datetime.now(timezone.utc),
+                    observed_at=_parse_appointment_event_time(original.get("event_time_text")),
                     created_by_caregiver_id=caregiver_id,
                     updated_by_caregiver_id=caregiver_id,
                 ),
