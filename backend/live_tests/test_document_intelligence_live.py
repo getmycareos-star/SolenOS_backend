@@ -317,6 +317,34 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         finally:
             db.close()
 
+        # The authenticated review-history API must expose each duplicate upload's
+        # own immutable decision event, while both events point to the one reused
+        # canonical assertion.
+        first_history = client.get(
+            f"/api/v1/documents/intelligence/{analysis_id}/review-history",
+            headers=headers,
+        )
+        duplicate_history = client.get(
+            f"/api/v1/documents/intelligence/{duplicate_analysis_id}/review-history",
+            headers=headers,
+        )
+        assert first_history.status_code == 200, first_history.text
+        assert duplicate_history.status_code == 200, duplicate_history.text
+        first_events = [
+            item for item in first_history.json()["items"]
+            if item["decision"] == "accept"
+            and item["resulting_assertion_id"] == assertion_id
+        ]
+        duplicate_events = [
+            item for item in duplicate_history.json()["items"]
+            if item["decision"] == "accept"
+            and item["resulting_assertion_id"] == assertion_id
+        ]
+        assert len(first_events) == 1, first_history.json()
+        assert len(duplicate_events) == 1, duplicate_history.json()
+        assert first_events[0]["source_evidence_id"] == evidence_id
+        assert duplicate_events[0]["source_evidence_id"] == duplicate_evidence_id
+
         # The accepted document assertion must be available to the same caregiver's
         # real-Qwen Companion response, with the original upload retained as source.
         companion = client.post(
