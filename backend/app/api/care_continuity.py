@@ -188,9 +188,11 @@ REVIEW_CRITERIA = {
 
 @router.post("/evidence/{evidence_id}/reviews", status_code=201)
 def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
-    """Append a versioned, evidence-linked review without overwriting source evidence."""
+    """Append a versioned, evidence-linked review; exact client retries return the same row."""
     person_id, caregiver_id = _scoped_identity(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to review saved information")
     if not inspect(db.connection()).has_table("evidence_review_records"):
         raise HTTPException(status_code=503, detail="Evidence review storage is not available until schema migration completes")
     evidence = db.query(Evidence).filter(
@@ -204,7 +206,12 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
     outcome = str(payload.get("outcome", "")).strip()
     rationale = str(payload.get("rationale", "")).strip()
     policy_version = str(payload.get("policy_version", "")).strip()
+    request_key = payload.get("request_key")
     criteria = payload.get("criteria")
+    if request_key is not None and (
+        not isinstance(request_key, str) or not 8 <= len(request_key) <= 128
+    ):
+        raise HTTPException(status_code=422, detail="request_key must contain 8 to 128 characters")
     if review_type not in REVIEW_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported evidence review type")
     if outcome not in REVIEW_TYPES[review_type]:
@@ -234,6 +241,58 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
     if seen_criteria != set(REVIEW_CRITERIA):
         raise HTTPException(status_code=422, detail="All versioned evidence review criteria must be supplied")
 
+    request_fingerprint = None
+    if request_key:
+        fingerprint_payload = {
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "evidence_id": evidence.id,
+            "review_type": review_type,
+            "outcome": outcome,
+            "rationale": rationale,
+            "policy_version": policy_version,
+            "criteria": sorted(criteria, key=lambda item: item["criterion"]),
+        }
+        request_fingerprint = hashlib.sha256(
+            json.dumps(
+                fingerprint_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        if db.get_bind().dialect.name == "postgresql":
+            lock_identity = f"solenos-evidence-review:{person_id}:{caregiver_id}:{request_key}"
+            lock_key = int.from_bytes(
+                hashlib.sha256(lock_identity.encode("utf-8")).digest()[:8],
+                byteorder="big",
+                signed=True,
+            )
+            db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        existing = db.query(EvidenceReviewRecord).filter(
+            EvidenceReviewRecord.person_id == person_id,
+            EvidenceReviewRecord.reviewed_by_caregiver_id == caregiver_id,
+            EvidenceReviewRecord.request_key == request_key,
+        ).with_for_update().first()
+        if existing is not None:
+            if existing.request_fingerprint != request_fingerprint or existing.evidence_id != evidence.id:
+                raise HTTPException(status_code=409, detail="This review retry key was already used for different information")
+            return {
+                "id": existing.id,
+                "evidence_id": existing.evidence_id,
+                "person_id": existing.person_id,
+                "review_type": existing.review_type,
+                "outcome": existing.outcome,
+                "rationale": existing.rationale,
+                "criteria": existing.criteria,
+                "policy_version": existing.policy_version,
+                "source_attribution": json.loads(existing.source_attribution_snapshot),
+                "reviewed_by_caregiver_id": existing.reviewed_by_caregiver_id,
+                "created_at": existing.created_at,
+                "care_continuity_execution": {"stages": {"reconciliation": "committed"}},
+                "idempotent_replay": True,
+            }
+
     attribution = {
         "evidence_id": evidence.id,
         "person_id": evidence.person_id,
@@ -257,6 +316,8 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
         policy_version=policy_version,
         source_attribution_snapshot=json.dumps(attribution, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
         reviewed_by_caregiver_id=caregiver_id,
+        request_key=request_key,
+        request_fingerprint=request_fingerprint,
     )
     try:
         db.add(row)
@@ -269,6 +330,34 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
         db.commit()
         execution["stages"]["reconciliation"] = "committed"
         db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        if request_key:
+            existing = db.query(EvidenceReviewRecord).filter(
+                EvidenceReviewRecord.person_id == person_id,
+                EvidenceReviewRecord.reviewed_by_caregiver_id == caregiver_id,
+                EvidenceReviewRecord.request_key == request_key,
+            ).first()
+            if existing is not None:
+                if existing.request_fingerprint != request_fingerprint or existing.evidence_id != evidence.id:
+                    raise HTTPException(status_code=409, detail="This review retry key was already used for different information") from exc
+                return {
+                    "id": existing.id,
+                    "evidence_id": existing.evidence_id,
+                    "person_id": existing.person_id,
+                    "review_type": existing.review_type,
+                    "outcome": existing.outcome,
+                    "rationale": existing.rationale,
+                    "criteria": existing.criteria,
+                    "policy_version": existing.policy_version,
+                    "source_attribution": json.loads(existing.source_attribution_snapshot),
+                    "reviewed_by_caregiver_id": existing.reviewed_by_caregiver_id,
+                    "created_at": existing.created_at,
+                    "care_continuity_execution": {"stages": {"reconciliation": "committed"}},
+                    "idempotent_replay": True,
+                }
+        logger.exception("Evidence review uniqueness constraint rejected a write")
+        raise HTTPException(status_code=503, detail="Evidence review could not be saved. Retry with the same request key.") from exc
     except Exception as exc:
         db.rollback()
         logger.exception("Evidence review and care reassessment could not be persisted")
@@ -286,8 +375,8 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
         "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id,
         "created_at": row.created_at,
         "care_continuity_execution": execution,
+        "idempotent_replay": False,
     }
-
 
 @router.get("/evidence/{evidence_id}/reviews")
 def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depends(get_db)):
