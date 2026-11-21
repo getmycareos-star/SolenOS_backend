@@ -379,7 +379,7 @@ def persist_source_grounded_daily_observations(
             value_text=observation_text[:2000],
             normalized_value=normalized_detail["normalized_value"] if normalized_detail else None,
             context=" ".join(context_parts),
-            ambiguity_note=normalized_detail["ambiguity_note"] if normalized_detail else None,
+            ambiguity_note=(\n                normalized_detail["ambiguity_note"]\n                if normalized_detail and normalized_detail["ambiguity_note"]\n                else (\n                    "The caregiver wording is uncertain; this is not a diagnosis or a causal conclusion."\n                    if hedge else None\n                )\n            ),
             hedge_marker=normalized_detail["hedge_marker"] if normalized_detail else (hedge.group(0) if hedge else None),
             negated=normalized_detail["negated"] if normalized_detail else None,
             reported_at=reported_at,
