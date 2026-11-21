@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Query
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -78,6 +78,7 @@ from app.schemas.memory import (
     ObservationCreate,
     Observation as ObservationSchema,
     LearningEvent as LearningEventSchema,
+    CaregiverFeedbackCreate,
     ReasoningSummary,
     ObservationTrend,
 )
@@ -2117,13 +2118,14 @@ def list_learning_events(person_id: str, request: Request, limit: int = 50, db: 
 
 @router.post("/feedback", response_model=LearningEventSchema)
 def record_feedback(
+    payload: CaregiverFeedbackCreate,
     request: Request,
-    person_id: str,
-    category: str,
-    detail: str,
-    caregiver_id: str,
     db: Session = Depends(get_db),
 ):
+    person_id = payload.person_id
+    caregiver_id = payload.caregiver_id
+    category = payload.category
+    detail = payload.detail
     # Feedback is an optional improvement route, not a general unauthenticated
     # write endpoint. Resolve identity from the bearer session and require the
     # caregiver's persisted opt-in before recording or learning from any detail.
