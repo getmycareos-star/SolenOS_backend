@@ -97,7 +97,7 @@ def test_web_push_failure_retry_and_provider_acceptance_are_durable_and_idempote
         ).one()
         notification_time = subscription.created_at + timedelta(seconds=2)
         notification = CareNotification(
-            id=f"postgres-push-retry-{uuid.uuid4().hex}",
+            id=str(uuid.uuid4()),
             person_id=session["person"]["id"],
             caregiver_id=session["caregiver"]["id"],
             title="Private care reminder title",
