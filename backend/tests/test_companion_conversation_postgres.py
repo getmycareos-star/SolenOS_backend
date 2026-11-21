@@ -114,6 +114,30 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
     assert message["ai_generated"] is False
     assert message["response_mode"] == "record_retrieval"
 
+    invited_email = f"companion-invited-{suffix}@example.test"
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=fresh_headers,
+        json={"email": invited_email, "expires_in_days": 7},
+    )
+    assert invitation.status_code == 201, invitation.text
+    invited = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": invited_email,
+            "password": f"invited-companion-password-{suffix}",
+            "name": f"Invited caregiver {suffix}",
+        },
+    )
+    assert invited.status_code == 201, invited.text
+    invited_headers = {"Authorization": f"Bearer {invited.json()['access_token']}"}
+    invited_list = client.get("/api/v1/conversations", headers=invited_headers)
+    assert invited_list.status_code == 200, invited_list.text
+    assert all(row["session_id"] != session_id for row in invited_list.json()["items"])
+    invited_history = client.get(f"/api/v1/conversation/{session_id}", headers=invited_headers)
+    assert invited_history.status_code == 404, invited_history.text
+
     other = _new_anonymous(client, f"Separate Companion recipient {suffix}")
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
     other_list = client.get("/api/v1/conversations", headers=other_headers)
