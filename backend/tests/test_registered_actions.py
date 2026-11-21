@@ -219,6 +219,19 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
     )
     assert not_confirmed.status_code == 422, not_confirmed.text
 
+    missing_outcome = client.patch(
+        f"/api/v1/registered-actions/{action_id}/status",
+        headers=headers(session),
+        json={
+            "status": "completed",
+            "expected_version": started.json()["version"],
+            "explicit_completion_confirmation": True,
+            "completion_outcome": "Caregiver recorded the action outcome and next step.",
+        },
+    )
+    assert missing_outcome.status_code == 422, missing_outcome.text
+    assert "Record what happened" in missing_outcome.text
+
     completed = client.patch(
         f"/api/v1/registered-actions/{action_id}/status",
         headers=headers(session),
@@ -226,6 +239,7 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
             "status": "completed",
             "expected_version": started.json()["version"],
             "explicit_completion_confirmation": True,
+            "completion_outcome": "Caregiver recorded that the clinic visit took place and documented the next steps.",
         },
     )
     assert completed.status_code == 200, completed.text
