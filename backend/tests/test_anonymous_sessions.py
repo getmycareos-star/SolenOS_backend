@@ -679,6 +679,9 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     )
     assert enabled.status_code == 200, enabled.text
 
+    legacy_query_only = client.post("/api/v1/feedback", params=query, headers=headers)
+    assert legacy_query_only.status_code == 422, legacy_query_only.text
+
     recorded = client.post("/api/v1/feedback", json=query, headers=headers)
     assert recorded.status_code == 200, recorded.text
     assert recorded.json()["event_type"] == "feedback"
