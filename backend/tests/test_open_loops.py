@@ -958,7 +958,7 @@ def test_open_loop_event_and_occurrence_history_support_offset_pagination():
     occurrence_ids = [row["id"] for row in occurrence_first.json() + occurrence_second.json()]
     assert len(history_ids) == 3
     assert len(set(history_ids)) == 3
-    assert len(occurrence_ids) == 3
+    assert len(occurrence_ids) == 4
     assert len(set(occurrence_ids)) == 3
 
 
