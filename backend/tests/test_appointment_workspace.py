@@ -1376,19 +1376,6 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
         source_type="caregiver_report",
     )
     rationale = "The family must confirm the visit date before arranging transport."
-    context = [{
-        "source_kind": "information_gap",
-        "source_id": gap.id,
-        "necessity": "necessary",
-        "necessity_rationale": rationale,
-        "decision_dependency": "Transport planning depends on the confirmed appointment date.",
-        "necessity_assessment": {
-            "necessity": "necessary",
-            "necessity_rationale": rationale,
-            "decision_dependency": "Transport planning depends on the confirmed appointment date.",
-            "evidence_ids": [evidence.id],
-        },
-    }]
     gap = InformationGap(
         id="appointment-need-gap",
         person_id=owner["person"]["id"],
