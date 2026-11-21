@@ -24,6 +24,7 @@ from app.models.caregiver_account import CaregiverAccount
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation, EvidenceSourceRelationship
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility, CaregiverHandoff
+from app.models.memory import LearningEvent
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
@@ -332,11 +333,15 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
                 db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
                 if foreign_person_id:
                     db.query(CareStateRevision).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
+                    db.query(CaregiverProfile).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
+                    db.query(LearningEvent).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
                     _redact_test_audit_events(db, foreign_person_id)
                     db.query(AnonymousSession).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
                     db.query(Caregiver).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
                     db.query(Person).filter_by(id=foreign_person_id).delete(synchronize_session=False)
                 if person_id:
+                    db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
+                    db.query(LearningEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
                     db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
         if engine:
