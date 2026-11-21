@@ -1390,7 +1390,7 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
     )
     context = [{
         "source_kind": "information_gap",
-        "source_id": gap.id,
+        "source_id": "appointment-need-gap",
         "necessity": "necessary",
         "necessity_rationale": rationale,
         "decision_dependency": "Transport planning depends on the confirmed appointment date.",
