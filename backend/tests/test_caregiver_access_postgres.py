@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -20,33 +20,11 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence, Person
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
-from app.models.caregiver_account import CaregiverAccount
 from app.models.privacy_delivery import AuditLogEvent
-from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation, EvidenceSourceRelationship
-from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility, CaregiverHandoff
-from app.models.memory import LearningEvent
-from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
+from app.models.caregiver_intelligence import CaregiverResponsibility, CaregiverHandoff
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
-
-
-def _redact_test_audit_events(db, person_id: str) -> None:
-    """Use the approved privacy-erasure path; audit history is never deleted by test cleanup."""
-    db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
-    db.execute(
-        text("""
-            UPDATE audit_log_events
-            SET actor_id = NULL,
-                subject_id = NULL,
-                person_id = NULL,
-                caregiver_id = NULL,
-                target_id = NULL,
-                metadata = json_build_object('redacted_for_privacy_erasure', true)
-            WHERE person_id = :person_id
-        """),
-        {"person_id": person_id},
-    )
 
 
 def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_existing_session():
