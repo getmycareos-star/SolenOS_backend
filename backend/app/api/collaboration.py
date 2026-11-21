@@ -993,9 +993,13 @@ async def upload_evidence(
 
     # Scan controls are client-reported processing metadata, not proof that a human
     # reviewed the image or that OCR is accurate. Preserve the original bytes below.
-    review_status = (scan_review_status or "not_provided").strip().lower()
-    if review_status not in {"caregiver_reviewed", "not_reviewed", "not_provided"}:
+    client_review_status = (scan_review_status or "not_provided").strip().lower()
+    if client_review_status not in {"caregiver_reviewed", "not_reviewed", "not_provided"}:
         raise HTTPException(status_code=422, detail="Unsupported scan review status")
+    # A client-supplied flag is not a review event and must never be promoted
+    # into a server-declared caregiver review state. Keep it as unverified
+    # input for audit, while the authoritative declaration remains not_provided.
+    review_status = "not_provided"
     try:
         rotation_degrees = float(scan_rotation_degrees or "0")
     except (TypeError, ValueError) as exc:
@@ -1079,6 +1083,7 @@ async def upload_evidence(
         "evidence_type": evidence_type,
         "capture_method": capture_method,
         "scan_review_status": review_status,
+        "client_submitted_scan_review_status": client_review_status,
         "scan_text_prepared": text_prepared,
         "capture_timestamp": capture_timestamp_value,
         "capture_page_number": capture_page_number,
@@ -1243,6 +1248,7 @@ async def upload_evidence(
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
+                "client_submitted_scan_review_status": client_review_status,
                 "rotation_degrees": rotation_degrees,
                 "crop_insets_percent": crop_insets,
                 "text_prepared_by_client": text_prepared,
