@@ -1363,8 +1363,8 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
 
 
 def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need(client):
-    from app.core.uncertainty_enums import Priority
-    from app.models.uncertainty import OpenQuestion
+    from app.core.uncertainty_enums import EpistemicState, GapLifecycleStatus, GapReason, Priority
+    from app.models.uncertainty import InformationGap, OpenQuestion
 
     test_client, owner, other = client
     evidence = Evidence(
@@ -1377,8 +1377,8 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
     )
     rationale = "The family must confirm the visit date before arranging transport."
     context = [{
-        "source_kind": "caregiver_report",
-        "source_id": evidence.id,
+        "source_kind": "information_gap",
+        "source_id": gap.id,
         "necessity": "necessary",
         "necessity_rationale": rationale,
         "decision_dependency": "Transport planning depends on the confirmed appointment date.",
@@ -1389,6 +1389,18 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
             "evidence_ids": [evidence.id],
         },
     }]
+    gap = InformationGap(
+        id="appointment-need-gap",
+        person_id=owner["person"]["id"],
+        subject_type="appointment",
+        subject_id="follow-up-visit",
+        field="appointment_date",
+        epistemic_state=EpistemicState.UNKNOWN,
+        gap_reason=GapReason.NOT_DOCUMENTED,
+        priority=Priority.HIGH,
+        lifecycle_status=GapLifecycleStatus.OPEN,
+        evidence_ids=[evidence.id],
+    )
     question = OpenQuestion(
         id="appointment-need-question",
         person_id=owner["person"]["id"],
@@ -1408,6 +1420,7 @@ def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need
     db = TestSessionLocal()
     try:
         db.add(evidence)
+        db.add(gap)
         db.add(question)
         db.commit()
     finally:
