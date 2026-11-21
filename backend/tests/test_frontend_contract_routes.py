@@ -349,7 +349,8 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         saved_evidence = db.query(Evidence).filter_by(id=evidence_id).first()
         assert saved_evidence is not None
         scan_metadata = json.loads(saved_evidence.extra_metadata)["scan_processing"]
-        assert scan_metadata["client_declared_review_status"] == "caregiver_reviewed"
+        assert scan_metadata["client_declared_review_status"] == "not_provided"
+        assert scan_metadata["client_submitted_review_status"] == "caregiver_reviewed"
         assert scan_metadata["rotation_degrees"] == 1.5
         assert scan_metadata["crop_insets_percent"] == {"top": 2.0, "right": 3.0, "bottom": 4.0, "left": 5.0}
         assert scan_metadata["text_prepared_by_client"] is True
