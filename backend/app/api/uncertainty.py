@@ -332,9 +332,10 @@ def review_question_answer(
         if source_claim is None:
             raise HTTPException(status_code=409, detail="The linked care claim is no longer available in this care record")
         if review_interval is None:
+            # Reuse an existing review window when one is already recorded.
+            # Do not invent a new date or force a caregiver to set one during
+            # routine review; a missing interval remains explicitly missing.
             review_interval = source_claim.review_after_days
-        if source_claim.assertion_kind == "current_state" and review_interval is None:
-            raise HTTPException(status_code=422, detail="Accepting a current-state clarification requires an existing or caregiver-selected review interval")
         if source_claim.assertion_kind == "time_bound_observation" and source_claim.observed_at is None:
             raise HTTPException(status_code=422, detail="The linked time-bound claim has no actual event time; this clarification cannot inherit an invented timestamp")
         evidence_ids = list(answer_event.evidence_ids or [])
